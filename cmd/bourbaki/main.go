@@ -22,6 +22,7 @@ commands:
   books            add, list and verify the source PDFs in manifests/books.yaml
   pagemap          map PDF pages to the page numbers Bourbaki printed
   toc              read each volume's table of contents into manifests/toc.yaml
+  render           rasterise a scanned volume to the page images OCR reads
   extract          read the pages of a volume into Markdown
   label            parse a statement label, or a running head, and print what it means
   fleet            probe the hosts, and run the ssh tunnels that reach them
@@ -52,6 +53,8 @@ func main() {
 		err = runPagemap(args[1:])
 	case "toc":
 		err = runTOC(args[1:])
+	case "render":
+		err = runRender(args[1:])
 	case "extract":
 		err = runExtract(args[1:])
 	case "label":
