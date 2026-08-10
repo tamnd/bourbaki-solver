@@ -309,16 +309,42 @@ func join(lines []Line) string {
 			cur.WriteString(text)
 			continue
 		}
-		s := cur.String()
-		if strings.HasSuffix(s, "-") {
+		if joined, ok := runOn(cur.String(), text); ok {
 			cur.Reset()
-			cur.WriteString(strings.TrimSuffix(s, "-") + strings.TrimLeft(text, " "))
+			cur.WriteString(joined)
 			continue
 		}
 		cur.WriteString(" " + strings.TrimLeft(text, " "))
 	}
 	flush()
 	return strings.Join(out, "\n\n")
+}
+
+// runOn joins a line that runs on into the next one, and says whether it did.
+//
+// A hyphen at a line break usually means a word was broken across it, and
+// putting the word back means dropping the hyphen: "commu-" and "tative" are
+// one word.
+//
+// A hyphen inside the mathematics at the end of a line is the other case. It is
+// the hyphen of A_M-module, where the typesetter set the A_M in mathematics and
+// broke the line after the hyphen, and it comes back on the mathematics side of
+// that boundary. Left there it prints as $A_M-$ module, which is wrong twice
+// over: the hyphen is typeset as a minus sign and the compound word is broken by
+// a space that is not on the page. So it moves outside the dollars and the word
+// joins on to it.
+//
+// What tells that from a subtraction broken across a line is the word after it,
+// under the same reading emit uses on a hyphen in the middle of a line.
+func runOn(s, next string) (string, bool) {
+	next = strings.TrimLeft(next, " ")
+	switch {
+	case strings.HasSuffix(s, "-$") && compoundWord(next):
+		return strings.TrimSuffix(s, "-$") + "$-" + next, true
+	case strings.HasSuffix(s, "-"):
+		return strings.TrimSuffix(s, "-") + next, true
+	}
+	return "", false
 }
 
 // displayRE is a line that is nothing but one formula, with the number the
@@ -438,10 +464,9 @@ func footnotes(lines []Line) string {
 		if text == "" {
 			continue
 		}
-		s := strings.TrimRight(cur.String(), " ")
-		if strings.HasSuffix(s, "-") {
+		if joined, ok := runOn(strings.TrimRight(cur.String(), " "), text); ok {
 			cur.Reset()
-			cur.WriteString(strings.TrimSuffix(s, "-") + text)
+			cur.WriteString(joined)
 			continue
 		}
 		cur.WriteString(" " + text)

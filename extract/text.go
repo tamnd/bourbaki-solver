@@ -483,7 +483,10 @@ func emit(toks []token) string {
 			open, at = open[:len(open)-1], at[:len(at)-1]
 		}
 	}
-	closeMath := func() {
+	// hyphenated says the formula just closed ended in the hyphen of a compound
+	// word, so the word that follows joins on to it without a space.
+	hyphenated := false
+	closeMath := func(compound bool) {
 		if !inMath {
 			return
 		}
@@ -496,6 +499,19 @@ func emit(toks []token) string {
 			tail = out[len(out)-1:] + tail
 			out = out[:len(out)-1]
 		}
+		// A hyphen at the end of a formula is not a minus sign, it is the
+		// hyphen of a compound word. Bourbaki sets the A_M of "A_M-module" in
+		// the mathematics font and the word after it in roman, and the hyphen
+		// comes back on the mathematics side of that boundary. Left there the
+		// page reads $A_M-$ module, which is wrong twice over: the hyphen is
+		// typeset as a minus sign, and the compound word is broken by a space
+		// that is not on the page. Measured on Algebra VIII before this: 64 of
+		// them across 50 of its 505 pages.
+		if compound && strings.HasSuffix(out, "-") {
+			out = strings.TrimRight(out[:len(out)-1], " ")
+			tail = "-" + tail
+			hyphenated = true
+		}
 		out = strings.TrimRight(out, " ") + "$" + tail
 		inMath = false
 	}
@@ -504,8 +520,12 @@ func emit(toks []token) string {
 		text := t.text
 		gap := prev.right >= 0 && t.left-prev.right >= 3
 		if !t.math {
-			closeMath()
-			if gap {
+			closeMath(!gap && compoundWord(text))
+			switch {
+			case hyphenated:
+				text = strings.TrimLeft(text, " ")
+				hyphenated = false
+			case gap:
 				text = " " + strings.TrimLeft(text, " ")
 			}
 			out += text
@@ -549,8 +569,43 @@ func emit(toks []token) string {
 		out += text
 		prev = t
 	}
-	closeMath()
+	// Nothing is known about what follows the end of a line, so a hyphen there
+	// stays where it is and join decides, where the next line is in hand.
+	closeMath(false)
 	return strings.TrimRight(out, " ")
+}
+
+// compoundWord reports whether the run after a hyphen at the end of a formula
+// is the second half of a compound word rather than the operand of a
+// subtraction. It is what tells the hyphen of A_M-module from the minus of
+// R = P-XQ, and both shapes are common in this volume.
+//
+// The word has to be lower case, and it has to end where a word ends. Bourbaki
+// writes A_M-module, A_M-linear, (A,B)_k-bimodule, k-algebra, and every one of
+// them is a whole word of prose with a space or a full stop after it. The
+// operand of a subtraction is either capital, as in P-XQ, or it is the name of
+// a function with its argument after it, as in cl(E)-cl(E'), and the bracket
+// is what gives that one away: no word of the book has a bracket welded to it.
+// A second hyphen is a word too, since the book writes (D,A)-sub-bimodule, and
+// so is a closing bracket, since the word can be the last thing in an aside.
+func compoundWord(s string) bool {
+	s = strings.TrimLeft(s, " ")
+	n := 0
+	for _, r := range s {
+		if !unicode.IsLower(r) {
+			break
+		}
+		n += utf8.RuneLen(r)
+	}
+	if n == 0 {
+		return false
+	}
+	rest := s[n:]
+	if rest == "" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(rest)
+	return r == ' ' || strings.ContainsRune(",.;:-)", r)
 }
 
 // mark is how a level is written in LaTeX.
