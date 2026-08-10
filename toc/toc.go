@@ -320,7 +320,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		return nil, fmt.Errorf("toc: %s has no pages outside its chapters, so no contents to read", opt.Book)
 	}
 
-	g := Grammar{}
+	var g Grammar
 	if opt.Grammar != nil {
 		g = *opt.Grammar
 	} else {

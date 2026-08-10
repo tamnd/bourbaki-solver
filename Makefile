@@ -3,7 +3,9 @@ LDFLAGS := -X github.com/tamnd/bourbaki-solver.Version=$(VERSION)
 
 .PHONY: all build test cover lint fmt vet install clean
 
-all: fmt vet test build
+# all is what CI runs, in the order CI runs it. Anything CI checks and this does
+# not is a red build nobody saw coming.
+all: fmt vet lint test build
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/bourbaki ./cmd/bourbaki
