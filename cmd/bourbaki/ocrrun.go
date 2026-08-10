@@ -169,6 +169,10 @@ func ocrFill(args []string) error {
 func ocrRun(args []string) error {
 	fs := flag.NewFlagSet("ocr run", flag.ExitOnError)
 	book, hostList, routeFile, queueRoot, first, last, batch, limit, keep, dry := ocrFlags(fs)
+	// On by default, and this is the way to turn it off. A run that is
+	// measuring how well the model reads a page wants the raw rate, not the
+	// rate after the pages that nearly worked were mended.
+	noRepair := fs.Bool("no-repair", false, "reject a failed page instead of asking about it in its own thread")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -198,6 +202,13 @@ func ocrRun(args []string) error {
 		Expect: state.expect, RetryDPI: render.RetryDPI,
 		Rerender: rerender(state),
 		Logf:     logf,
+	}
+	// A page that fails on a delimiter is asked about in its own thread before
+	// it is sent back to the queue for another full reading. The queue is the
+	// fallback, not the first move: a follow up costs one turn and a re-read
+	// costs a page.
+	if !*noRepair {
+		runner.Repair = mender(state.root, hosts, state.expect, logf)
 	}
 
 	added, err := runner.Fill(state.sources(*first, *last))

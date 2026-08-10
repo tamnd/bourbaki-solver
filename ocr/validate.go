@@ -190,11 +190,17 @@ func OK(text string, expect Expect, options Options) bool {
 // checkMath is rule 2. It counts the delimiters over the page and then again
 // paragraph by paragraph, because the first count on its own is too weak to
 // catch what the fleet actually returns.
+// The paragraph check runs first even though the page count is the cruder and
+// more obvious of the two. Both fire on a single unclosed formula, and only one
+// of them can say which line it is on. That matters beyond the report: the
+// repair prompt names the line so the model is not sent looking through five
+// hundred words for something it cannot be told the shape of, and a problem
+// with no line in it turns a targeted fix into a re-read.
 func checkMath(text string) (Problem, bool) {
-	if problem, ok := checkMathTotals(text); !ok {
+	if problem, ok := checkInlineRuns(text); !ok {
 		return problem, ok
 	}
-	return checkInlineRuns(text)
+	return checkMathTotals(text)
 }
 
 // checkMathTotals counts the delimiters over the whole page.

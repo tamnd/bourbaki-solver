@@ -648,3 +648,109 @@ func TestOnlyTheToolsHeaderIsStripped(t *testing.T) {
 		}
 	}
 }
+
+// broken is the same page with one inline formula opened and never closed,
+// which is what a real answer looked like on page 50 of Algebra I. Everything
+// else about it is right, and reading it again costs a full page.
+func broken(label string) string {
+	return strings.Replace(page(label), "prime subring of $B$", "prime subring of $B", 1)
+}
+
+func TestAPageThatFailsOnADelimiterIsAskedAboutRatherThanReadAgain(t *testing.T) {
+	w := newWorld(t, 2)
+	machine := newFleet(func(image string) string {
+		if strings.HasSuffix(image, "0001.png") {
+			return "---\nsource: /root/x.png\nmodel: gpt-5\ngenerated: now\nelapsed: 63s\n" +
+				"conversation: https://chatgpt.com/c/abc-1\nprofile: /root/.config/chatgpt-profile-3\n---\n\n" + broken("A IV.1")
+		}
+		return page("A IV.2")
+	})
+	runner := w.runner(t, machine)
+
+	var asked Thread
+	runner.Repair = func(ctx context.Context, thread Thread, page int, text string, problems []Problem) (string, bool) {
+		asked = thread
+		return strings.Replace(text, "prime subring of $B", "prime subring of $B$", 1), true
+	}
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Accepted != 2 || report.Rejected != 0 {
+		t.Fatalf("accepted %d rejected %d: %s", report.Accepted, report.Rejected, report.Summary())
+	}
+	if report.Repaired != 1 {
+		t.Errorf("the report says %d pages were repaired, want 1", report.Repaired)
+	}
+	// The follow up has to go to the conversation that read the page and to the
+	// box that conversation lives on, or it goes nowhere.
+	if asked.Conversation != "https://chatgpt.com/c/abc-1" || asked.Host != "server3" {
+		t.Errorf("the repair was offered %+v", asked)
+	}
+	file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(w.root, "alg-iv-vii", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(file.Body, "prime subring of $B$") {
+		t.Errorf("the repaired text is not what was written:\n%s", file.Body)
+	}
+	// A mended page passes every rule now, so nothing else in the corpus would
+	// ever say it was not the transcription the model first gave.
+	if len(file.Meta.Flags) == 0 || !strings.Contains(file.Meta.Flags[0], "repaired in its own thread") {
+		t.Errorf("the page does not record that it was repaired: %v", file.Meta.Flags)
+	}
+}
+
+func TestARepairThatIsRefusedLeavesThePageForTheQueue(t *testing.T) {
+	w := newWorld(t, 1)
+	machine := newFleet(func(image string) string {
+		return "---\nsource: /root/x.png\nmodel: gpt-5\ngenerated: now\nelapsed: 63s\n" +
+			"conversation: https://chatgpt.com/c/abc-1\nprofile: /root/.config/chatgpt-profile-3\n---\n\n" + broken("A IV.1")
+	})
+	runner := w.runner(t, machine)
+	runner.Repair = func(context.Context, Thread, int, string, []Problem) (string, bool) { return "", false }
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Back to the queue, which tries it twice more at a higher resolution and
+	// then gives up on it. That is what a page with no provable repair costs,
+	// and it is the price of not writing a guess into the corpus.
+	if report.Accepted != 0 || report.Repaired != 0 || report.Dead != 1 {
+		t.Fatalf("a refused repair did not send the page back: %s", report.Summary())
+	}
+	if _, err := os.Stat(corpus.PagePath(w.root, "alg-iv-vii", 1)); !os.IsNotExist(err) {
+		t.Error("a page whose repair was refused was written anyway")
+	}
+}
+
+// A page read before the tool reported conversation urls has nothing to ask in,
+// and asking in the wrong thread is worse than reading the page again.
+func TestAPageWithNoThreadIsNotOfferedForRepair(t *testing.T) {
+	w := newWorld(t, 1)
+	machine := newFleet(func(image string) string { return broken("A IV.1") })
+	runner := w.runner(t, machine)
+	var offered int
+	runner.Repair = func(context.Context, Thread, int, string, []Problem) (string, bool) {
+		offered++
+		return "", false
+	}
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Do(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if offered != 0 {
+		t.Errorf("a page with no conversation was offered for repair %d times", offered)
+	}
+	if _, err := ReadThread(w.root, "alg-iv-vii", 1); err == nil {
+		t.Error("a thread was recorded for a page whose answer carried no conversation")
+	}
+}

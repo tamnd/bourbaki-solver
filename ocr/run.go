@@ -65,6 +65,15 @@ type Runner struct {
 	// Expect says what is already known about a page, which is what rules 4 and
 	// 6 compare the answer against.
 	Expect func(page int) Expect
+	// Repair is offered a page that failed validation, in the conversation that
+	// produced it, and returns the corrected page and true when it fixed it.
+	//
+	// A function rather than a dependency, because the package that decides
+	// whether an answer is a repair has to validate its result, so it imports
+	// this one and this one cannot import it back. Nil means no repair is
+	// attempted and every failed page goes back to the image, which is what
+	// happened before there was a repair pass and is always the safe answer.
+	Repair func(ctx context.Context, thread Thread, page int, text string, problems []Problem) (string, bool)
 	// Rerender puts a fresh image on disk at a higher resolution before a retry.
 	// It is a function rather than a dependency on the render package, because
 	// this package has no business knowing about pdftoppm.
@@ -183,6 +192,7 @@ type Report struct {
 	Finished  time.Time           `json:"finished"`
 	Batches   []Result            `json:"batches"`
 	Accepted  int                 `json:"accepted"`
+	Repaired  int                 `json:"repaired,omitempty"`
 	Rejected  int                 `json:"rejected"`
 	Dead      int                 `json:"dead"`
 	Rules     map[Rule]int        `json:"rules,omitempty"`
@@ -208,6 +218,9 @@ func (r Report) Summary() string {
 	elapsed := r.Finished.Sub(r.Started).Round(time.Second)
 	fmt.Fprintf(&out, "%s: %d accepted, %d rejected, %d dead in %s, %.1f %% accepted\n",
 		r.Book, r.Accepted, r.Rejected, r.Dead, elapsed, r.Rate())
+	if r.Repaired > 0 {
+		fmt.Fprintf(&out, "  %d of the accepted pages were repaired in their own thread rather than read again\n", r.Repaired)
+	}
 	hosts := make([]string, 0, len(r.PerHost))
 	for host := range r.PerHost {
 		hosts = append(hosts, host)
@@ -313,6 +326,7 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				lock.Lock()
 				report.Batches = append(report.Batches, result)
 				report.Accepted += outcome.accepted
+				report.Repaired += outcome.repaired
 				report.Rejected += outcome.rejected
 				report.Dead += outcome.dead
 				report.Failures = append(report.Failures, outcome.failures...)
@@ -362,6 +376,11 @@ type task struct {
 	// job's input hash once a retry has re-rendered the page at 600 dpi.
 	sha string
 	dpi int
+	// repaired is what was wrong with the page before a follow up fixed it,
+	// empty when the model got it right the first time. It goes in the front
+	// matter, because a page that was mended is a page a reader should be told
+	// about even though it passes every rule now.
+	repaired string
 }
 
 // lease claims up to n pages for a host.
@@ -409,8 +428,12 @@ func pageOf(target string) (int, error) {
 // outcome is what one batch did to the queue.
 type outcome struct {
 	accepted, rejected, dead int
-	rules                    map[Rule]int
-	failures                 []Failure
+	// repaired is how many of the accepted pages needed a follow up first. They
+	// are counted apart because a run where a third of the pages had to be
+	// repaired is not a healthy run, and the accepted count alone hides that.
+	repaired int
+	rules    map[Rule]int
+	failures []Failure
 }
 
 // one runs a single batch and files everything it produced.
@@ -451,7 +474,7 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 	}
 
 	for _, value := range tasks {
-		r.file(work.Dest, value, &out)
+		r.file(ctx, host, work.Dest, value, &out)
 	}
 	return result, out
 }
@@ -503,20 +526,27 @@ func StripToolHeader(text string) string {
 }
 
 // file decides what happened to one page and tells the queue.
-func (r *Runner) file(dest string, value task, out *outcome) {
+func (r *Runner) file(ctx context.Context, host Host, dest string, value task, out *outcome) {
 	raw, err := os.ReadFile(filepath.Join(dest, OutputName(filepath.Base(value.image))))
 	if err != nil {
 		r.reject(value, out, nil, "no answer came back for this page")
 		return
 	}
+	thread := r.record(host, value.page, string(raw))
 	text := textguard.Normalise(textguard.Strip(StripToolHeader(string(raw))))
 	expect := Expect{Book: r.Book, PDFPage: value.page}
 	if r.Expect != nil {
 		expect = r.Expect(value.page)
 	}
 	if problems := Validate(text, expect, r.Options); len(problems) > 0 {
-		r.reject(value, out, Rules(problems), Reasons(problems))
-		return
+		fixed, ok := r.mend(ctx, thread, value.page, text, problems)
+		if !ok {
+			r.reject(value, out, Rules(problems), Reasons(problems))
+			return
+		}
+		text = fixed
+		out.repaired++
+		value.repaired = Reasons(problems)
 	}
 	if err := r.write(value, text); err != nil {
 		r.reject(value, out, nil, "could not write the page: "+err.Error())
@@ -526,6 +556,49 @@ func (r *Runner) file(dest string, value task, out *outcome) {
 		r.logf("page %d: could not mark the job done: %v", value.page, err)
 	}
 	out.accepted++
+}
+
+// record keeps the conversation a page was read in, and returns it.
+//
+// It runs before validation, so a page that is about to be rejected is recorded
+// too. That page is the one a repair is for, and the record is the only thing
+// that makes a repair possible at all.
+func (r *Runner) record(host Host, page int, raw string) Thread {
+	fields := HeaderFields(raw)
+	thread := Thread{
+		Book: r.Book, Page: page, Host: host.Name,
+		Conversation: fields["conversation"], Profile: fields["profile"],
+		Model: fields["model"], Read: r.now().Format(time.RFC3339),
+	}
+	if thread.Conversation == "" {
+		// An older chatgpt-tool does not report it. Worth saying once per page
+		// rather than silently producing a corpus no page of which can be
+		// repaired without being read again.
+		r.logf("page %d: the answer carries no conversation url, so it cannot be repaired in its own thread", page)
+		return thread
+	}
+	if err := WriteThread(r.Root, thread); err != nil {
+		r.logf("page %d: could not record the conversation: %v", page, err)
+	}
+	return thread
+}
+
+// mend offers a failed page to the repair pass, and reports whether it came
+// back fixed.
+//
+// Everything about whether an answer is a repair is decided by the caller's
+// function. What is decided here is only that a repair is attempted at all, and
+// that a page with no conversation to ask in is not.
+func (r *Runner) mend(ctx context.Context, thread Thread, page int, text string, problems []Problem) (string, bool) {
+	if r.Repair == nil || thread.Conversation == "" {
+		return "", false
+	}
+	fixed, ok := r.Repair(ctx, thread, page, text, problems)
+	if !ok {
+		return "", false
+	}
+	r.logf("page %d: repaired in its own thread, %s", page, Reasons(problems))
+	return fixed, true
 }
 
 func (r *Runner) reject(value task, out *outcome, rules []Rule, reason string) {
@@ -561,6 +634,9 @@ func (r *Runner) write(value task, text string) error {
 	}
 	if value.dpi > 0 {
 		meta.Flags = append(meta.Flags, fmt.Sprintf("rendered at %d dpi on attempt %d", value.dpi, value.job.Attempts))
+	}
+	if value.repaired != "" {
+		meta.Flags = append(meta.Flags, "repaired in its own thread: "+value.repaired)
 	}
 	path := corpus.PagePath(r.Root, r.Book, value.page)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
