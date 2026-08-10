@@ -161,7 +161,13 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 }
 
 // accepted says whether a page is already on disk, read from this image with
-// this prompt.
+// this prompt, and passing the rules.
+//
+// The last of those is not pedantry. Pages 50 and 53 of Algebra I have been
+// sitting in the corpus failing the math rule since the pilot, and no run would
+// touch them, because a file existed with the right hashes on it. Written is
+// not the same as read: the word for a page nobody would accept is rejected,
+// and a rejected page is work still to do.
 func (r *Runner) accepted(source Source, promptSHA string) bool {
 	file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(r.Root, r.Book, source.Page))
 	if err != nil {
@@ -173,7 +179,15 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 	// The image hash is compared as well as the prompt. A page re-rendered at
 	// 600 dpi is a different image and deserves a fresh reading, and comparing
 	// only the prompt would keep the old answer.
-	return file.Meta.PromptSHA256 == promptSHA && file.Meta.InputSHA256 == source.SHA256
+	if file.Meta.PromptSHA256 != promptSHA || file.Meta.InputSHA256 != source.SHA256 {
+		return false
+	}
+	expect := Expect{Book: r.Book, PDFPage: source.Page}
+	if r.Expect != nil {
+		expect = r.Expect(source.Page)
+	}
+	text := textguard.Normalise(textguard.Strip(file.Body))
+	return len(Validate(text, expect, r.Options)) == 0
 }
 
 // Failure is a page that did not come back clean, kept so the audit can name it

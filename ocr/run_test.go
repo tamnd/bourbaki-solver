@@ -192,18 +192,8 @@ func TestFillSkipsBlanksAndWorkAlreadyDone(t *testing.T) {
 func TestFillSkipsAPageAlreadyRead(t *testing.T) {
 	w := newWorld(t, 3)
 	runner := w.runner(t, newFleet(nil))
-	// Page 2 is on disk, read from this image with this prompt.
-	file := corpus.PageFile{Meta: corpus.PageFrontMatter{
-		Book: "alg-iv-vii", PDFPage: 2, Method: corpus.MethodOCR,
-		InputSHA256: w.pages[1].SHA256, PromptSHA256: sha256Hex(runner.Prompt),
-	}, Body: "already read"}
-	path := corpus.PagePath(w.root, "alg-iv-vii", 2)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Write(path); err != nil {
-		t.Fatal(err)
-	}
+	// Page 2 is on disk, read from this image with this prompt, and good.
+	writePage(t, w.root, 2, w.pages[1].SHA256, sha256Hex(runner.Prompt), page("A IV.2"))
 
 	added, err := runner.Fill(w.pages)
 	if err != nil {
@@ -211,6 +201,41 @@ func TestFillSkipsAPageAlreadyRead(t *testing.T) {
 	}
 	if added != 2 {
 		t.Fatalf("filled %d jobs, want 2 with page 2 already read", added)
+	}
+}
+
+// Written is not the same as read. Pages 50 and 53 of Algebra I sat in the
+// corpus failing the math rule from the pilot onwards and no run would touch
+// them, because a file existed with the right hashes on it. A page nobody would
+// accept is work still to do.
+func TestFillReadsARejectedPageAgain(t *testing.T) {
+	w := newWorld(t, 3)
+	runner := w.runner(t, newFleet(nil))
+	// The right image, the right prompt, and a formula nobody closed.
+	writePage(t, w.root, 2, w.pages[1].SHA256, sha256Hex(runner.Prompt),
+		page("A IV.2")+"\n\nand so $x \\in E, which is where the dollar was lost.\n")
+
+	added, err := runner.Fill(w.pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 3 {
+		t.Fatalf("filled %d jobs, want all 3 with page 2 rejected", added)
+	}
+}
+
+func writePage(t *testing.T, root string, number int, imageSHA, promptSHA, body string) {
+	t.Helper()
+	file := corpus.PageFile{Meta: corpus.PageFrontMatter{
+		Book: "alg-iv-vii", PDFPage: number, Method: corpus.MethodOCR,
+		InputSHA256: imageSHA, PromptSHA256: promptSHA,
+	}, Body: body}
+	path := corpus.PagePath(root, "alg-iv-vii", number)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Write(path); err != nil {
+		t.Fatal(err)
 	}
 }
 
