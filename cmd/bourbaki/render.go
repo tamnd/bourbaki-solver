@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/extract"
 	"github.com/tamnd/bourbaki-solver/render"
 )
 
@@ -23,6 +24,9 @@ flags:
   -dpi N         resolution, default 300, use 600 on a retry
   -gray          render gray rather than colour (default true)
   -f N -l N      first and last pdf page, default the whole volume
+  -flagged       only the pages the native extraction could not read, from
+                 reports/extract-<book>.json, and the one way to render a
+                 born-digital volume
   -batch N       pages per pdftoppm call, default 25
   -overwrite     re-render pages whose image is already on disk
   -blanks        write a method: blank page file for every blank page (default true)
@@ -41,6 +45,7 @@ func runRender(args []string) error {
 	gray := fs.Bool("gray", true, "render gray")
 	first := fs.Int("f", 0, "first pdf page")
 	last := fs.Int("l", 0, "last pdf page")
+	flagged := fs.Bool("flagged", false, "only the pages the extraction flagged")
 	batch := fs.Int("batch", 25, "pages per pdftoppm call")
 	overwrite := fs.Bool("overwrite", false, "re-render pages already on disk")
 	blanks := fs.Bool("blanks", true, "write a page file for every blank page")
@@ -80,13 +85,33 @@ func runRender(args []string) error {
 	// A born-digital volume has a text layer and goes through extract, not
 	// here. Rendering one would work and would cost 151 seconds a page to read
 	// back something poppler already has, so say no rather than let it run.
-	if entry.Extraction != "ocr" {
-		return fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract", entry.ID, entry.Nature, entry.Extraction)
+	//
+	// The exception is the pages poppler could not read. Fifty six pages of
+	// Algebra VIII carry a commutative diagram, a glyph the text layer dropped
+	// or a delimiter it lost, and the only way to read those is to look at
+	// them. That is what -flagged asks for and it is the whole door: no page
+	// gets rendered out of a born-digital volume without the extraction having
+	// said, in a report on disk, that it could not read it.
+	var only []int
+	if *flagged {
+		pages, err := flaggedPages(root, entry.ID)
+		if err != nil {
+			return err
+		}
+		if len(pages) == 0 {
+			fmt.Printf("%s: the extraction flagged nothing, nothing to render\n", entry.ID)
+			return nil
+		}
+		only = pages
+	}
+	if entry.Extraction != "ocr" && !*flagged {
+		return fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract, or -flagged for the pages it could not read",
+			entry.ID, entry.Nature, entry.Extraction)
 	}
 
 	options := render.Options{
 		Book: entry.ID, PDF: filepath.Join(root, entry.PDF), Corpus: root,
-		DPI: *dpi, Gray: *gray, First: *first, Last: *last, Batch: *batch,
+		DPI: *dpi, Gray: *gray, First: *first, Last: *last, Only: only, Batch: *batch,
 		Overwrite: *overwrite, WriteBlanks: *blanks,
 	}
 	if !*quiet {
@@ -103,6 +128,31 @@ func runRender(args []string) error {
 		return err
 	}
 	return printManifest(manifest, *asJSON)
+}
+
+// flaggedPages is the work list the extraction left behind: every page it could
+// not read, in page order, empty ones included. An empty page in a born-digital
+// volume is not a blank page, it is a page with no text layer at all, which is
+// what a full page diagram looks like from here.
+func flaggedPages(root, book string) ([]int, error) {
+	path := corpus.ExtractReportPath(root, book)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%s has no extraction report, run bourbaki extract first", book)
+		}
+		return nil, err
+	}
+	var result extract.Result
+	if err := json.Unmarshal(raw, &result); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	pages := make([]int, 0, len(result.Flags))
+	for _, page := range result.Flags {
+		pages = append(pages, page.PDFPage)
+	}
+	sort.Ints(pages)
+	return pages, nil
 }
 
 func printManifest(manifest render.Manifest, asJSON bool) error {

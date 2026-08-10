@@ -523,3 +523,37 @@ func TestSummaryReportsWhatTheRunCost(t *testing.T) {
 		t.Fatal("an empty manifest should still say something")
 	}
 }
+
+func TestARangeIsChunkedAndAListIsGrouped(t *testing.T) {
+	for _, c := range []struct {
+		name             string
+		options          Options
+		first, last, all int
+		want             [][2]int
+	}{
+		{"a plain range", Options{Batch: 25}, 1, 60, 505, [][2]int{{1, 25}, {26, 50}, {51, 60}}},
+		// The pages the extraction of Algebra VIII could not read, at the start
+		// of the list: scattered singles, one pair, and one run of three. Asking
+		// pdftoppm for 41 to 77 would render thirty five pages nobody wants.
+		{"the flagged pages", Options{Batch: 25, Only: []int{76, 41, 77, 61, 310, 311, 312}}, 0, 0, 505,
+			[][2]int{{41, 41}, {61, 61}, {76, 77}, {310, 312}}},
+		{"a page that is not in the volume", Options{Only: []int{3, 900}}, 0, 0, 505, [][2]int{{3, 3}}},
+		{"the same page twice", Options{Only: []int{7, 7}}, 0, 0, 505, [][2]int{{7, 7}}},
+		// A long run still breaks at the batch size, so one pdftoppm call is
+		// never the whole volume.
+		{"a run longer than a batch", Options{Batch: 2, Only: []int{4, 5, 6, 7}}, 0, 0, 505,
+			[][2]int{{4, 5}, {6, 7}}},
+	} {
+		got := spans(c.options, c.first, c.last, c.all)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: spans = %v, want %v", c.name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: spans = %v, want %v", c.name, got, c.want)
+				break
+			}
+		}
+	}
+}

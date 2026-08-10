@@ -122,6 +122,12 @@ type Options struct {
 	// First and Last bound the run, one based, inclusive. Zero means the whole
 	// volume.
 	First, Last int
+	// Only is an explicit list of pages, which wins over First and Last. It is
+	// for the pages a native extraction could not read: fifty six of Algebra
+	// VIII carry a commutative diagram, a dropped glyph or a delimiter poppler
+	// lost, and they are scattered from page 41 to page 477. Rendering the span
+	// between them would be four hundred images nobody wants.
+	Only []int
 	// Batch is how many pages one pdftoppm call renders. Bigger is faster
 	// because the PDF is opened once per call, and smaller means less work
 	// thrown away when somebody stops the run.
@@ -210,11 +216,11 @@ func Render(ctx context.Context, options Options) (Manifest, error) {
 		DPI: options.dpi(), Gray: options.Gray, Generated: time.Now().UTC(),
 	}
 
-	for start := first; start <= last; start += options.batch() {
+	for _, span := range spans(options, first, last, info.Pages) {
 		if err := ctx.Err(); err != nil {
 			return manifest, err
 		}
-		end := min(start+options.batch()-1, last)
+		start, end := span[0], span[1]
 		want := missing(options, start, end)
 		if len(want) > 0 {
 			if err := renderRange(ctx, source, options, want[0], want[len(want)-1]); err != nil {
@@ -242,6 +248,44 @@ func Render(ctx context.Context, options Options) (Manifest, error) {
 		}
 	}
 	return manifest, nil
+}
+
+// spans is the work as contiguous stretches of pages, each one a pdftoppm call.
+//
+// A range is chunked by the batch size. An explicit page list is grouped into
+// its own runs instead, because pdftoppm renders a span, and fifty six scattered
+// pages asked for as one span is the whole volume.
+func spans(options Options, first, last, pages int) [][2]int {
+	if len(options.Only) == 0 {
+		var out [][2]int
+		for start := first; start <= last; start += options.batch() {
+			out = append(out, [2]int{start, min(start+options.batch()-1, last)})
+		}
+		return out
+	}
+
+	wanted := make([]int, 0, len(options.Only))
+	seen := map[int]bool{}
+	for _, page := range options.Only {
+		if page < 1 || page > pages || seen[page] {
+			continue
+		}
+		seen[page] = true
+		wanted = append(wanted, page)
+	}
+	sort.Ints(wanted)
+
+	var out [][2]int
+	for index := 0; index < len(wanted); {
+		start, end := wanted[index], wanted[index]
+		index++
+		for index < len(wanted) && wanted[index] == end+1 && end-start+1 < options.batch() {
+			end = wanted[index]
+			index++
+		}
+		out = append(out, [2]int{start, end})
+	}
+	return out
 }
 
 // missing is the pages of a batch that are not on disk yet. An interrupted run
