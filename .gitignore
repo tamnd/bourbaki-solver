@@ -1,0 +1,26 @@
+# Specs and design notes live outside this repo, they carry host names and keys
+docs/
+notes/
+
+# Build artifacts
+bin/
+dist/
+coverage.out
+*.test
+
+# Local config, route files, credentials
+routes.json
+config.toml
+*.pem
+.env
+
+# Scratch
+work/
+images/
+*.log
+
+# OS / editor
+.DS_Store
+*.swp
+.vscode/
+.idea/
