@@ -17,12 +17,17 @@ import (
 // rather than assumed; serve decides whether the tunnel is worth starting; and
 // a host missing rsync or xvfb-run cannot take OCR work at all.
 type Facts struct {
-	Name       string `json:"name"`
-	Hostname   string `json:"hostname"`
-	Cores      int    `json:"cores"`
-	MemTotalMB int    `json:"mem_total_mb"`
-	MemFreeMB  int    `json:"mem_free_mb"`
-	DiskFreeMB int    `json:"disk_free_mb"`
+	Name     string `json:"name"`
+	Hostname string `json:"hostname"`
+	Cores    int    `json:"cores"`
+	// LoadX100 is the one minute load average times a hundred, because these
+	// boxes are rented and shared and the cores are not all ours. server3 has
+	// eight of them and sat at a load of eight all evening running somebody
+	// else's work, which is not a thing a count of cores can tell you.
+	LoadX100   int `json:"load_x100"`
+	MemTotalMB int `json:"mem_total_mb"`
+	MemFreeMB  int `json:"mem_free_mb"`
+	DiskFreeMB int `json:"disk_free_mb"`
 	// Tool is the absolute path of chatgpt-tool, which is under /home/tam on
 	// server1 and /root on server2 and server3.
 	Tool string `json:"tool"`
@@ -42,6 +47,7 @@ type Facts struct {
 const probeScript = `
 echo "host=$(hostname)"
 echo "cores=$(nproc)"
+echo "load_x100=$(awk '{print int($1*100)}' /proc/loadavg)"
 echo "mem_total_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)"
 echo "mem_free_mb=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)"
 echo "disk_free_mb=$(df -Pm "$HOME" | awk 'NR==2{print $4}')"
@@ -86,6 +92,8 @@ func Probe(ctx context.Context, runner Runner, target Target) Facts {
 			facts.Hostname = value
 		case "cores":
 			facts.Cores = number(value)
+		case "load_x100":
+			facts.LoadX100 = number(value)
 		case "mem_total_mb":
 			facts.MemTotalMB = number(value)
 		case "mem_free_mb":
@@ -160,23 +168,46 @@ func (f Facts) CanOCR() (bool, string) {
 	return true, ""
 }
 
-// Lanes is how many OCR workers this host can carry: one per profile that fits
-// in free memory, never more than half the cores, because each one is a browser
-// and a browser is not a single thread.
+// CoresPerLane is how much of a machine one lane wants. A lane is a headed
+// Chrome drawing chatgpt.com through swiftshader, because none of these boxes
+// has a GPU, and software rasterising a page like that is not a single thread.
+const CoresPerLane = 2
+
+// Lanes is how many OCR workers this host can carry.
+//
+// It counts the cores nobody else is using, not the cores the box has. These
+// are rented boxes with other work on them: server3 has eight cores and spent
+// an evening at a load average of eight serving somebody else, and every page
+// sent to it came back with no composer on it, because a Chrome that cannot get
+// the CPU to finish rendering looks from here exactly like a Chrome whose
+// selectors have gone stale. server2, six cores at a load of half of one,
+// rendered the same page in five seconds.
+//
+// Memory is in here too but it has never been the thing that runs out: a lane
+// measured on server2 peaks around 275 MB against the 1500 this reserves.
 func (f Facts) Lanes() int {
 	if ok, _ := f.CanOCR(); !ok {
 		return 0
 	}
 	byMemory := f.MemFreeMB / OCRMemoryMB
-	byCPU := max(1, f.Cores/2)
+	// Hundredths the whole way, so half a core of somebody else's work costs
+	// half a core and not a whole one. A load above the core count comes out
+	// negative here, which floors to nothing, which is the right answer.
+	freeX100 := f.Cores*100 - f.LoadX100
+	byCPU := freeX100 / (CoresPerLane * 100)
+	if byCPU < 1 {
+		// Not max(1, ...). A box with nothing spare is a box that should be
+		// given nothing, and saying so is the whole point of measuring.
+		return 0
+	}
 	return max(1, min(byMemory, byCPU))
 }
 
 // Table renders probe results the way fleet probe prints them.
 func Table(rows []Facts) string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "%-8s  %-12s  %5s  %10s  %10s  %6s  %5s  %5s  %s\n",
-		"host", "hostname", "cores", "free RAM", "free disk", "serve", "ocr", "lanes", "tool")
+	fmt.Fprintf(&out, "%-8s  %-12s  %5s  %5s  %10s  %10s  %6s  %5s  %5s  %s\n",
+		"host", "hostname", "cores", "load", "free RAM", "free disk", "serve", "ocr", "lanes", "tool")
 	for _, row := range rows {
 		if row.Err != "" && row.Hostname == "" {
 			fmt.Fprintf(&out, "%-8s  %s\n", row.Name, row.Err)
@@ -187,8 +218,13 @@ func Table(rows []Facts) string {
 		if !ocr && why != "" {
 			tool = tool + "  (" + why + ")"
 		}
-		fmt.Fprintf(&out, "%-8s  %-12s  %5d  %7d MB  %7d MB  %6t  %5t  %5d  %s\n",
-			row.Name, row.Hostname, row.Cores, row.MemFreeMB, row.DiskFreeMB,
+		// A capable box with no lanes is the confusing row on this table, so it
+		// gets told why: somebody else is already using the machine.
+		if ocr && row.Lanes() == 0 {
+			tool = tool + "  (busy, nothing spare to draw a page with)"
+		}
+		fmt.Fprintf(&out, "%-8s  %-12s  %5d  %5.2f  %7d MB  %7d MB  %6t  %5t  %5d  %s\n",
+			row.Name, row.Hostname, row.Cores, float64(row.LoadX100)/100, row.MemFreeMB, row.DiskFreeMB,
 			row.Serving, ocr, row.Lanes(), tool)
 	}
 	return out.String()

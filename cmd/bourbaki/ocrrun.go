@@ -354,7 +354,16 @@ func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 	// Never more than the box itself says it can carry, whatever the route
 	// file asks for. The route file is written by hand and the facts are
 	// measured, so when they disagree the measurement wins.
-	if capacity := facts.Lanes(); capacity > 0 {
+	//
+	// Cores is the marker of a box that was actually measured. A route with no
+	// facts behind it is taken at its word, because refusing a host on the
+	// strength of a struct nobody filled in helps nobody.
+	if facts.Cores > 0 {
+		capacity := facts.Lanes()
+		if capacity <= 0 {
+			return 0, fmt.Sprintf("load average %.1f across %d cores, nothing spare to draw a page with",
+				float64(facts.LoadX100)/100, facts.Cores)
+		}
 		lanes = min(lanes, capacity)
 	}
 	return lanes, ""

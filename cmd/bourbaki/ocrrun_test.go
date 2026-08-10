@@ -36,6 +36,12 @@ func TestLanesFollowWhatTheBoxCanCarry(t *testing.T) {
 		// Six cores carry three browsers. A route file asking for sixteen is
 		// asking for a load average of forty and sixteen blank pages.
 		{"the box caps an optimistic route file", route.Route{Concurrency: 16}, server2, 3, ""},
+		// These are rented boxes and the cores are not all ours. server3 spent an
+		// evening at a load of 8.27 across its eight cores on somebody else's
+		// work and returned a blank page every time, so a host in that state has
+		// to be refused by name rather than handed four lanes.
+		{"a box somebody else is already using", route.Route{Concurrency: 4},
+			fleet.Facts{Name: "server3", Cores: 8, LoadX100: 827, MemFreeMB: 15378, Xvfb: true, Rsync: true, Tool: "t"}, 0, "load average 8.3"},
 		{"no xvfb is no browser", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Rsync: true}, 0, "xvfb"},
 		{"no rsync is no images", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Xvfb: true}, 0, "rsync"},
 		{"an unmeasured box is taken at its word", route.Route{Concurrency: 2}, fleet.Facts{Xvfb: true, Rsync: true}, 2, ""},

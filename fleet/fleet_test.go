@@ -17,6 +17,7 @@ import (
 // script is caught by a test rather than by a batch that fails at page one.
 const server3Probe = `host=server3
 cores=8
+load_x100=82
 mem_total_mb=15997
 mem_free_mb=13217
 disk_free_mb=381992
@@ -68,6 +69,11 @@ func TestProbeReadsRealOutput(t *testing.T) {
 	if facts.Hostname != "server3" || facts.Cores != 8 || facts.MemFreeMB != 13217 {
 		t.Errorf("facts = %+v", facts)
 	}
+	// The load comes back as hundredths so the probe can stay integers all the
+	// way through. 0.82 of eight cores is a quiet box.
+	if facts.LoadX100 != 82 {
+		t.Errorf("LoadX100 = %d, want 82", facts.LoadX100)
+	}
 	if facts.Tool != "/root/chatgpt-tool/.venv/bin/chatgpt-tool" {
 		t.Errorf("Tool = %q", facts.Tool)
 	}
@@ -106,12 +112,23 @@ func TestLanes(t *testing.T) {
 		facts Facts
 		want  int
 	}{
-		// Memory is the binding constraint on server3 as measured: eight cores
-		// would allow four, and 13217 MB allows eight, so four wins.
-		{"server3", Facts{Cores: 8, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 4},
+		// The CPU is the binding constraint on an idle server3: eight cores
+		// carry four lanes and 13217 MB would carry eight, so four wins.
+		{"server3 idle", Facts{Cores: 8, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 4},
 		{"two cores plenty of ram", Facts{Cores: 2, MemFreeMB: 16000, Tool: "t", Xvfb: true, Rsync: true}, 1},
 		{"just enough ram", Facts{Cores: 8, MemFreeMB: 1600, Tool: "t", Xvfb: true, Rsync: true}, 1},
 		{"no xvfb", Facts{Cores: 8, MemFreeMB: 16000, Tool: "t", Rsync: true}, 0},
+
+		// The evening this was written server3 sat at 8.27 across its eight
+		// cores running another tenant's work. Every page sent to it came back
+		// with no composer drawn on it, so the honest answer is no lanes at
+		// all, not the four the core count on its own would promise.
+		{"server3 as it really was", Facts{Cores: 8, LoadX100: 827, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 0},
+		// Half the box spoken for is half the lanes.
+		{"half spoken for", Facts{Cores: 8, LoadX100: 400, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 2},
+		// server2 on the same evening: six cores at 0.55, which rounds up to
+		// one spoken for, leaving five and so two lanes.
+		{"server2 as it really was", Facts{Cores: 6, LoadX100: 55, MemFreeMB: 7363, Tool: "t", Xvfb: true, Rsync: true}, 2},
 	} {
 		if got := c.facts.Lanes(); got != c.want {
 			t.Errorf("%s: Lanes = %d, want %d", c.name, got, c.want)
