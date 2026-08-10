@@ -17,7 +17,7 @@ import (
 
 // Leak is one thing found in an answer that should not be there.
 type Leak struct {
-	// Kind is refusal, meta, prompt or empty.
+	// Kind is refusal, no-image, meta, prompt or empty.
 	Kind string
 	// Detail is the phrase that was found, as it appeared.
 	Detail string
@@ -51,6 +51,41 @@ var refusals = []string{
 	"violates our",
 	"violates my",
 	"violates the content",
+}
+
+// noImage is the model answering politely to a message that arrived without its
+// attachment.
+//
+// This is not a refusal and not narration. It is the upload having failed: the
+// prompt got through, the page did not, and the model says so and asks for it.
+// It is worth its own kind because the answer is not to ask a model again more
+// loudly, it is that a browser upload did not finish, and the failures report
+// should say which of the two happened.
+//
+// It cost three pages of the first live run. The answer is about a hundred and
+// thirty characters, which is under the length rule, but the tool writes four
+// lines of its own header above it, and with that on top it cleared the
+// minimum and "I don't see an image attached" was written to the corpus as
+// page 42 of Algebra I.
+// The first person is load bearing. "we do not see" is ordinary mathematical
+// prose and "the image is not attached to any choice of basis" is a sentence
+// Bourbaki could print; both were rejected by a looser version of this list
+// before it ever ran on a page.
+var noImage = []string{
+	"i don't see an image",
+	"i don't see the image",
+	"i don't see any image",
+	"i do not see an image",
+	"i do not see the image",
+	"i didn't receive an image",
+	"i did not receive an image",
+	"no image was attached",
+	"there is no image attached",
+	"please upload the",
+	"please upload an image",
+	"please attach the image",
+	"upload the page image",
+	"you want transcribed",
 }
 
 // metas are the model narrating. These are worse than refusals because the
@@ -111,17 +146,30 @@ func Check(text string) []Leak {
 		phrases []string
 	}{
 		{"refusal", refusals},
+		{"no-image", noImage},
 		{"prompt", prompts},
 		{"meta", metas},
 	}
 	for i, line := range strings.Split(text, "\n") {
-		lower := strings.ToLower(line)
+		lower := straighten(strings.ToLower(line))
 		if found, kind, ok := first(lower, kinds); ok {
 			leaks = append(leaks, Leak{Kind: kind, Detail: found, Line: i + 1})
 		}
 	}
 	return leaks
 }
+
+// straighten turns the typographic apostrophe into the ASCII one for matching
+// only.
+//
+// A model writes I don’t and I’m sorry with U+2019, and every phrase above is
+// spelled with U+0027, so none of them matched. That is not a hypothetical
+// either: it is why "I don’t see an image attached" reached the corpus with no
+// leak reported at all. The answer itself is untouched, because the apostrophe
+// a page prints is the page's business.
+var straightener = strings.NewReplacer("’", "'", "‘", "'", "＇", "'")
+
+func straighten(text string) string { return straightener.Replace(text) }
 
 func first(lower string, kinds []struct {
 	kind    string
@@ -163,6 +211,13 @@ func Strip(text string) string {
 // Only substitutions that are unambiguously wrong in this corpus are made. The
 // minus sign, the two dash lengths and the quotation marks all carry meaning in
 // mathematics and are left alone.
+// bareBlackboard is the same substitution without the braces. A single letter
+// argument does not need them and a model does not always write them: the first
+// live page came back with $\mathbb Z$ and $\mathbb N$, which the list below
+// spells with braces and therefore missed. The following character must not be
+// a letter, or \mathbb Zeta would lose its tail.
+var bareBlackboard = regexp.MustCompile(`\\mathbb\s+([ZQRCNFP])(?:\{\})?\b`)
+
 var normalise = strings.NewReplacer(
 	// A model that was told to write bold sets sometimes writes blackboard
 	// bold anyway. Bourbaki prints bold, and a corpus that mixes the two makes
@@ -173,6 +228,7 @@ var normalise = strings.NewReplacer(
 	`\mathbb{C}`, `\mathbf{C}`,
 	`\mathbb{N}`, `\mathbf{N}`,
 	`\mathbb{F}`, `\mathbf{F}`,
+	`\mathbb{P}`, `\mathbf{P}`,
 	// The dangerous bend comes back as several near misses.
 	"⚠", "☡",
 	"⛰", "☡",
@@ -192,6 +248,7 @@ var normalise = strings.NewReplacer(
 // Normalise applies those substitutions and trims trailing space from every
 // line, which is invisible in review and shows up in every later diff.
 func Normalise(text string) string {
+	text = bareBlackboard.ReplaceAllString(text, `\mathbf{$1}`)
 	text = normalise.Replace(text)
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {

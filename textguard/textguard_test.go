@@ -149,3 +149,83 @@ func TestCleanAgreesWithCheck(t *testing.T) {
 		t.Error("a refusal is clean")
 	}
 }
+
+// The three answers below are verbatim from the first live batch on server3, 10
+// August 2026. Every one of them was written into the corpus as a page of
+// Algebra I, because the apostrophe was the typographic one and no phrase here
+// was spelled with it.
+func TestAnAnswerFromAModelThatNeverGotThePage(t *testing.T) {
+	answers := []string{
+		"I don’t see an image attached to this message. Please upload the page image, and I’ll transcribe it exactly according to your specifications.",
+		"I don’t see the image attached. Please upload the page image, and I’ll transcribe it exactly according to your specifications.",
+		"Please upload the image page you want transcribed.",
+	}
+	for _, answer := range answers {
+		leaks := Check(answer)
+		if len(leaks) == 0 {
+			t.Fatalf("no leak found in:\n%s", answer)
+		}
+		if leaks[0].Kind != "no-image" {
+			t.Errorf("kind = %q, want no-image, in:\n%s", leaks[0].Kind, answer)
+		}
+	}
+}
+
+// The apostrophe fix is not only about the new phrases. Every refusal in the
+// list was spelled with the ASCII one and a model writes the other.
+func TestARefusalWithATypographicApostropheIsStillARefusal(t *testing.T) {
+	for _, answer := range []string{
+		"I’m sorry, I can’t transcribe this page.",
+		"I’m unable to help with that.",
+		"I can’t help with copyrighted material.",
+	} {
+		leaks := Check(answer)
+		if len(leaks) == 0 || leaks[0].Kind != "refusal" {
+			t.Errorf("no refusal found in %q: %+v", answer, leaks)
+		}
+	}
+}
+
+// Mathematics that talks about images must survive. Bourbaki does: the image of
+// a homomorphism is on most pages of chapter I.
+func TestTheWordImageInMathematicsIsNotALeak(t *testing.T) {
+	for _, page := range []string{
+		"A I.24  ALGEBRAIC STRUCTURES\n\nThe image of $f$ is a subgroup of $H$.",
+		"Let $N$ be the inverse image of the identity element under $f$.",
+		"We do not see any reason to distinguish the two images here.",
+		"The image is not attached to any particular choice of basis, as we show below.",
+	} {
+		if leaks := Check(page); len(leaks) > 0 && leaks[0].Kind == "no-image" {
+			t.Errorf("mathematics read as a failed upload: %q in %q", leaks[0].Detail, page)
+		}
+	}
+}
+
+// A single letter argument needs no braces and a model does not always write
+// them. The first live page of Algebra I came back with both forms in it.
+func TestBlackboardBoldWithoutBracesIsNormalisedToo(t *testing.T) {
+	cases := map[string]string{
+		`In $\mathbb Z$ (and more generally, in any totally ordered set)`: `In $\mathbf{Z}$ (and more generally, in any totally ordered set)`,
+		`$\mathbb{Z}$ and $\mathbb N$ and $\mathbb  Q$`:                   `$\mathbf{Z}$ and $\mathbf{N}$ and $\mathbf{Q}$`,
+		`the set $\mathbb R^n$`:                                           `the set $\mathbf{R}^n$`,
+	}
+	for text, want := range cases {
+		if got := Normalise(text); got != want {
+			t.Errorf("normalise(%q)\n got %q\nwant %q", text, got, want)
+		}
+	}
+}
+
+// Only the single letters this corpus uses for its number sets. A macro whose
+// name merely starts with one of them keeps its tail.
+func TestNormaliseDoesNotEatALongerMacroName(t *testing.T) {
+	for _, text := range []string{
+		`$\mathbb Zeta$`,
+		`$\mathbb{Zeta}$`,
+		`$\mathbb X$`,
+	} {
+		if got := Normalise(text); got != text {
+			t.Errorf("normalise(%q) = %q, want it left alone", text, got)
+		}
+	}
+}
