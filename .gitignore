@@ -19,6 +19,17 @@ work/
 images/
 *.log
 
+# Source books and rendered pages. Neither repo carries them: the PDFs are not
+# ours to publish and a page image is a megabyte that the Markdown replaces.
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.tif
+*.tiff
+*.ppm
+*.pgm
+
 # OS / editor
 .DS_Store
 *.swp
