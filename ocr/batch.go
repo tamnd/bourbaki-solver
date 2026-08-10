@@ -414,6 +414,9 @@ func (b Batch) Run(ctx context.Context) (result Result, err error) {
 
 	wrote, pollErr := b.wait(ctx, out, pid, started)
 	result.Wrote = wrote
+	if pollErr != nil {
+		b.stop(ctx, pid)
+	}
 
 	// The output is pulled whether or not the run finished. A batch that died
 	// two thirds of the way through still read two thirds of a chapter, and
@@ -537,6 +540,44 @@ func (b Batch) wait(ctx context.Context, out string, pid int, started time.Time)
 				b.ID, b.Host.Name, count, len(b.Images), elapsed.Round(time.Second))
 		}
 	}
+}
+
+// StopGrace is how long the tool is given to close its browser contexts before
+// the group is killed outright.
+const StopGrace = 5 * time.Second
+
+// stop kills a batch the driver has given up on, and everything it started.
+//
+// The batch is detached on purpose, so if this does not kill it nothing will.
+// Leaving it running is neither free nor neutral. The pilot abandoned a batch
+// on server2 at 22m56s and found it still going twenty seven minutes later with
+// two Chrome instances under it, on a six core box already at load 11. The next
+// batch sent there was slower, was abandoned in its turn, and left another
+// behind it. Measured over the pilot, server3 went 63 seconds a page, then 100,
+// then 428, then 1381, then returned nothing at all. That decay is not the
+// model getting tired, it is the box filling up with work nobody is waiting for
+// any more, and it is self inflicted.
+//
+// The negative pid is the whole point. start uses setsid, so the pid is a
+// process group leader and -pid reaches the tool, Chrome, and Chrome's
+// renderers together. Killing the leader alone reparents the browsers to init
+// and leaves them exactly where they were.
+//
+// Failure here is logged and not returned. The caller is already reporting a
+// batch that did not finish, and a second error about the cleanup would replace
+// the reason the pages are missing with a footnote about it.
+func (b Batch) stop(ctx context.Context, pid int) {
+	// A caller that gave up because its own context was cancelled still has to
+	// clean up after itself, so the kill runs on a context that outlives it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), StopGrace+30*time.Second)
+	defer cancel()
+	command := fmt.Sprintf("kill -TERM -%d 2>/dev/null; sleep %d; kill -KILL -%d 2>/dev/null; true",
+		pid, int(StopGrace.Seconds()), pid)
+	if _, err := b.Shell.Run(ctx, b.Host.Name, command); err != nil {
+		b.logf("%s: could not stop batch %s at pid %d, it may still be running: %v", b.Host.Name, b.ID, pid, err)
+		return
+	}
+	b.logf("%s: stopped batch %s at pid %d and everything under it", b.Host.Name, b.ID, pid)
 }
 
 // parsePoll reads the two lines the poll command prints. Anything it cannot

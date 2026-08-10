@@ -36,6 +36,9 @@ type box struct {
 	// noDisplay is a box with no Xvfb running, which is a box where every page
 	// fails in a second and the account pool pays for it.
 	noDisplay bool
+	// killed is the stop command, if one arrived. A batch the driver walked
+	// away from has to be killed on the host or it goes on eating the box.
+	killed string
 }
 
 func (b *box) Run(ctx context.Context, host, command string) (string, error) {
@@ -65,6 +68,9 @@ func (b *box) Run(ctx context.Context, host, command string) (string, error) {
 			alive = "gone"
 		}
 		return fmt.Sprintf("%d\n%s\n", b.done, alive), nil
+	case strings.HasPrefix(command, "kill -TERM"):
+		b.killed = command
+		return "", nil
 	case strings.HasPrefix(command, "tail"):
 		return b.log, nil
 	case strings.HasPrefix(command, "rm -rf"):
@@ -394,6 +400,59 @@ func TestPollingGivesUpAtTheDeadline(t *testing.T) {
 	work.Deadline = time.Nanosecond
 	if _, err := work.Run(context.Background()); err == nil {
 		t.Fatal("a batch that made no progress ran forever")
+	}
+}
+
+// Giving up on a batch and leaving it running is what turned a slow fleet into
+// a dead one over the pilot. server3 went 63 seconds a page, then 100, then
+// 428, then 1381, then returned nothing, and an abandoned batch was found still
+// running on server2 twenty seven minutes after the driver had written it off.
+func TestABatchTheDriverGivesUpOnIsKilledOnTheHost(t *testing.T) {
+	machine := &box{pid: 4242, perPoll: 0}
+	work := batch(t, machine, 4)
+	work.Deadline = time.Nanosecond
+	if _, err := work.Run(context.Background()); err == nil {
+		t.Fatal("a batch that made no progress reported success")
+	}
+	if machine.killed == "" {
+		t.Fatal("the driver walked away and left the batch running on the host")
+	}
+	// The negative pid is what reaches Chrome. start uses setsid, so the pid is
+	// a process group leader; killing it alone reparents the browsers to init
+	// and leaves them exactly where they were, which is the whole problem.
+	for _, want := range []string{"kill -TERM -4242", "kill -KILL -4242"} {
+		if !strings.Contains(machine.killed, want) {
+			t.Errorf("the stop command does not kill the process group:\n%s\nwant %q", machine.killed, want)
+		}
+	}
+}
+
+func TestABatchThatFinishedIsNotKilled(t *testing.T) {
+	machine := &box{pid: 9, perPoll: 5}
+	work := batch(t, machine, 5)
+	if _, err := work.Run(context.Background()); err != nil {
+		t.Fatalf("a healthy batch failed: %v", err)
+	}
+	if machine.killed != "" {
+		t.Errorf("a batch that read every page was killed anyway: %s", machine.killed)
+	}
+}
+
+// A batch the caller cancelled is still burning a rented box, and the cancelled
+// context is exactly the one that would stop the kill from being sent.
+func TestCancellingTheRunStillStopsTheBatch(t *testing.T) {
+	machine := &box{pid: 77, perPoll: 1}
+	work := batch(t, machine, 4)
+	ctx, cancel := context.WithCancel(context.Background())
+	work.Sleep = func(context.Context, time.Duration) error {
+		cancel()
+		return ctx.Err()
+	}
+	if _, err := work.Run(ctx); err == nil {
+		t.Fatal("a cancelled run reported success")
+	}
+	if machine.killed == "" {
+		t.Error("a cancelled run left the batch running on the host")
 	}
 }
 
