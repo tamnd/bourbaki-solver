@@ -32,6 +32,12 @@ type Book struct {
 	Extraction string   `yaml:"extraction"`
 	PageWidth  float64  `yaml:"page_width_pt,omitempty"`
 	PageHeight float64  `yaml:"page_height_pt,omitempty"`
+	// Grammar is how the volume prints its page number, "head-label" or
+	// "foot-number", and Pagination is what that number counts, "per-chapter"
+	// or "continuous". Both are filled in by pagemap build, which detects them
+	// and records what it found rather than asking anyone to remember.
+	Grammar    string `yaml:"grammar,omitempty"`
+	Pagination string `yaml:"pagination,omitempty"`
 }
 
 // Scan describes the page images of a scanned volume.
