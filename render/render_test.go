@@ -308,6 +308,85 @@ func TestPageRangeIsRespected(t *testing.T) {
 	}
 }
 
+// The OCR retry escalates a failed page to 600 dpi, one page at a time. That
+// used to write a manifest with one page in it and the other 733 were gone.
+// The pilot did exactly this to Algebra I: afterwards the manifest held a
+// single entry for page 45, `ocr fill` answered "0 pages in range" for every
+// range because it reads this file to know what exists, and the blank flags for
+// the whole volume went with it.
+func TestARetryAtSixHundredDoesNotEraseTheRestOfTheBook(t *testing.T) {
+	run := &poppler{pages: 20, pad: 4, ink: map[int]float64{}}
+	for page := 1; page <= 20; page++ {
+		run.ink[page] = 0.05
+	}
+	run.ink[7] = 0.0 // a blank, so the merge can be checked to keep one
+
+	opts := options(t, run)
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+
+	retry := opts
+	retry.DPI, retry.First, retry.Last, retry.Batch, retry.Overwrite = RetryDPI, 12, 12, 1, true
+	manifest, err := Render(context.Background(), retry)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(manifest.Pages) != 20 {
+		t.Fatalf("the manifest has %d pages after one page was re-rendered, want 20", len(manifest.Pages))
+	}
+	// It has to survive the round trip to disk, because that is the copy every
+	// later command reads.
+	onDisk, err := ReadManifest(opts.Corpus, opts.Book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(onDisk.Pages) != 20 {
+		t.Fatalf("the manifest on disk has %d pages, want 20", len(onDisk.Pages))
+	}
+	page, ok := onDisk.Find(12)
+	if !ok || page.DPI != RetryDPI {
+		t.Errorf("page 12 came back as %+v, want the re-rendered one at %d dpi", page, RetryDPI)
+	}
+	if page, ok := onDisk.Find(3); !ok || page.DPI != DefaultDPI {
+		t.Errorf("page 3 came back as %+v, want the original at %d dpi", page, DefaultDPI)
+	}
+	if onDisk.Blanks() != 1 {
+		t.Errorf("%d blanks after the merge, want the 1 that was there before", onDisk.Blanks())
+	}
+	// The top level dpi describes the run that covered the book, not the one
+	// page retry that came after it.
+	if onDisk.DPI != DefaultDPI {
+		t.Errorf("the manifest says %d dpi, want %d", onDisk.DPI, DefaultDPI)
+	}
+}
+
+// A merge is only safe while the entries describe the same file. Replace the
+// PDF and every page that was not re-rendered is a page that no longer exists.
+func TestADifferentPDFReplacesTheManifestRatherThanMerging(t *testing.T) {
+	run := &poppler{pages: 20, pad: 4, ink: map[int]float64{}}
+	for page := 1; page <= 20; page++ {
+		run.ink[page] = 0.05
+	}
+	opts := options(t, run)
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(opts.PDF, []byte("%PDF-1.4\na different book\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second := opts
+	second.First, second.Last, second.Batch, second.Overwrite = 1, 5, 1, true
+	manifest, err := Render(context.Background(), second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Pages) != 5 {
+		t.Fatalf("the manifest has %d pages, want only the 5 that were rendered from the new file", len(manifest.Pages))
+	}
+}
+
 func TestEmptyRangeIsAnError(t *testing.T) {
 	run := &poppler{pages: 10, pad: 2, ink: map[int]float64{}}
 	opts := options(t, run)

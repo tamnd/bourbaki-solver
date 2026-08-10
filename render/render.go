@@ -231,6 +231,7 @@ func Render(ctx context.Context, options Options) (Manifest, error) {
 		options.logf("rendered %d to %d of %d", start, end, last)
 	}
 
+	manifest = merge(options, manifest)
 	sort.Slice(manifest.Pages, func(i, j int) bool { return manifest.Pages[i].Page < manifest.Pages[j].Page })
 	if err := WriteManifest(options.Corpus, options.Book, manifest); err != nil {
 		return manifest, err
@@ -365,6 +366,49 @@ func Ink(img image.Image) float64 {
 		}
 	}
 	return float64(dark) / float64(total)
+}
+
+// merge folds a partial render into the manifest that is already there.
+//
+// A render of one page used to write a manifest with one page in it, and the
+// record of the other 733 was gone. That is not hypothetical: the OCR retry
+// escalates a failed page to 600 dpi, the pilot escalated page 45, and
+// afterwards the manifest of Algebra I held a single entry. Nothing downstream
+// could see the book any more. `ocr fill` reads this file to know which pages
+// exist and which are blank, so it answered "0 pages in range" for every range,
+// and the blank detection for the whole volume was gone with it.
+//
+// Pages this run measured win, because it just measured them. Pages it did not
+// touch are kept as they were. Each entry carries its own dpi, so a book at 300
+// with one page at 600 is described exactly.
+//
+// A different PDF is not a merge. If the source file has been replaced then
+// every old entry describes a page that no longer exists, and keeping them
+// would be worse than losing them.
+func merge(options Options, fresh Manifest) Manifest {
+	old, err := ReadManifest(options.Corpus, options.Book)
+	if err != nil || old.PDFSHA256 != fresh.PDFSHA256 {
+		return fresh
+	}
+	rendered := make(map[int]bool, len(fresh.Pages))
+	for _, page := range fresh.Pages {
+		rendered[page.Page] = true
+	}
+	var kept int
+	for _, page := range old.Pages {
+		if !rendered[page.Page] {
+			fresh.Pages = append(fresh.Pages, page)
+			kept++
+		}
+	}
+	if kept > 0 {
+		// The top level dpi describes a run, and once two runs are in one file
+		// it cannot describe both. The first one covered the book, so it is the
+		// more useful answer, and the per page dpi is the exact one.
+		fresh.DPI = old.DPI
+		options.logf("kept %d pages of the previous manifest, replaced %d", kept, len(rendered))
+	}
+	return fresh
 }
 
 // WriteManifest saves the manifest atomically.
