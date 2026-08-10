@@ -1,0 +1,171 @@
+package corpus
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const sectionFile = `---
+book: alg
+book_title: Algebra
+chapter: VIII
+chapter_title: Semisimple Modules and Rings
+section: 1
+section_title: Simple Modules
+lang: en
+source: alg-viii
+book_pages: 1-6
+pdf_pages: 18-23
+statements: 7
+exercises: 12
+content_sha256: 0000000000000000000000000000000000000000000000000000000000000000
+---
+
+Let A be a ring.
+`
+
+func TestParseFile(t *testing.T) {
+	f, err := ParseFile[SectionFrontMatter]([]byte(sectionFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Meta.Chapter != "VIII" || f.Meta.Section != 1 || f.Meta.Statements != 7 {
+		t.Errorf("meta = %+v", f.Meta)
+	}
+	if f.Body != "Let A be a ring.\n" {
+		t.Errorf("body = %q", f.Body)
+	}
+}
+
+// A field the schema does not know about is a mistake nobody would otherwise
+// notice, so the decoder is strict.
+func TestParseFileRejectsUnknownField(t *testing.T) {
+	bad := strings.Replace(sectionFile, "statements: 7", "statements: 7\ndifficulty: 42", 1)
+	if _, err := ParseFile[SectionFrontMatter]([]byte(bad)); err == nil {
+		t.Fatal("an unknown front matter field was accepted")
+	}
+}
+
+func TestParseFileNeedsFence(t *testing.T) {
+	if _, err := ParseFile[SectionFrontMatter]([]byte("book: alg\n\nLet A be a ring.\n")); err == nil {
+		t.Fatal("a file with no front matter was accepted")
+	}
+}
+
+// The hash has to survive the things an editor does on its own, or every
+// translation in the corpus goes stale the first time somebody opens a file.
+func TestContentSHA256IgnoresWhitespace(t *testing.T) {
+	want := ContentSHA256("Let A be a ring.\n")
+	for _, body := range []string{
+		"Let A be a ring.\r\n",
+		"Let A be a ring.   \n",
+		"Let A be a ring.\n\n\n",
+		"Let A be a ring.",
+	} {
+		if got := ContentSHA256(body); got != want {
+			t.Errorf("ContentSHA256(%q) = %s, want %s", body, got[:8], want[:8])
+		}
+	}
+	if ContentSHA256("Let B be a ring.\n") == want {
+		t.Error("two different bodies hash the same")
+	}
+}
+
+func TestBytesRecomputesHash(t *testing.T) {
+	f, err := ParseFile[SectionFrontMatter]([]byte(sectionFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Body = "Let A be a ring and M an A-module.\n"
+	b, err := f.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	back, err := ParseFile[SectionFrontMatter](b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Meta.ContentSHA256 != ContentSHA256(f.Body) {
+		t.Errorf("content_sha256 = %s, want %s", back.Meta.ContentSHA256, ContentSHA256(f.Body))
+	}
+	if back.Body != f.Body {
+		t.Errorf("body round trip = %q", back.Body)
+	}
+}
+
+func TestWriteAndRead(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "content", "en", "alg", "VIII", "01_s1_simple_modules.md")
+	f, err := ParseFile[SectionFrontMatter]([]byte(sectionFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	if got := SectionPath(dir, "en", f.Meta); got != path {
+		t.Errorf("SectionPath = %s, want %s", got, path)
+	}
+	back, err := ReadFile[SectionFrontMatter](path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Meta.SectionTitle != f.Meta.SectionTitle || back.Body != f.Body {
+		t.Errorf("round trip = %+v %q", back.Meta, back.Body)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestStale(t *testing.T) {
+	english := ContentSHA256("Let A be a ring.\n")
+	var m SectionFrontMatter
+	if m.Stale(english) {
+		t.Error("a file that is not a translation was called stale")
+	}
+	m.TranslatedFrom = "content/en/alg/VIII/01_s1_simple_modules.md"
+	m.SourceSHA256 = english
+	if m.Stale(english) {
+		t.Error("a translation of the committed English was called stale")
+	}
+	if !m.Stale(ContentSHA256("Let A be a ring and M an A-module.\n")) {
+		t.Error("a translation of an older English was not called stale")
+	}
+}
+
+func TestSlug(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"Simple Modules", "simple_modules"},
+		{"Laws of composition; associativity; commutativity", "laws_of_composition_associativity"},
+		{"Applications: I. Rational integers", "applications_i_rational_integers"},
+		{"  ", ""},
+	}
+	for _, tt := range tests {
+		if got := Slug(tt.in, SlugLen); got != tt.want {
+			t.Errorf("Slug(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+		if len(Slug(tt.in, SlugLen)) > SlugLen {
+			t.Errorf("Slug(%q) is longer than %d", tt.in, SlugLen)
+		}
+	}
+}
+
+func TestPaths(t *testing.T) {
+	ex := ExerciseFrontMatter{Book: "alg", Chapter: "VIII", Section: 1, Exercise: 7}
+	if got, want := ExercisePath("/c", "vi", ex), "/c/content/vi/alg/VIII/exercises/s1/07.md"; got != want {
+		t.Errorf("ExercisePath = %s, want %s", got, want)
+	}
+	got, err := SolutionPath("/c", "en", "alg-viii-s1-ex-7")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "/c/content/solutions/en/alg/VIII/s1/07.md"; got != want {
+		t.Errorf("SolutionPath = %s, want %s", got, want)
+	}
+	if _, err := SolutionPath("/c", "en", "not a label"); err == nil {
+		t.Error("a bad label made a path")
+	}
+}
