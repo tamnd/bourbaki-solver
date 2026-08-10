@@ -198,3 +198,132 @@ func TestThePromptSaysTheThingsThatMakeTheAuditPass(t *testing.T) {
 		}
 	}
 }
+
+// page51 is the real defect this kind was written for, cut down to the
+// paragraph it is on. The scan reads i in [1, n], an interval of integers. The
+// transcription has a set with two elements in it. Every rule passes.
+const page51 = `DISTRIBUTIVITY
+
+**Definition 5.** Let $E_1,\ldots,E_n$ and $F$ be sets and $u$ a mapping of $E_1\times\cdots\times E_n$ into $F$. Let $i\in\{1,n\}$. Suppose $E_i$ and $F$ are given the structures of magmas. $u$ is said to be distributive relative to the index variable $i$ if the partial mapping
+
+$$
+x_i\longmapsto u(a_1,\ldots,a_{i-1},x_i,a_{i+1},\ldots,a_n)
+$$
+
+is a homomorphism of $E_i$ into $F$ for all fixed $a_j$ in $E_j$ and $j\ne i$. We leave to the reader the statement and proof of the analogues of Propositions 6, 7 and 8 of the previous paragraph, which are proved the same way and are used in the same places later on.`
+
+func suspect() *Suspect {
+	line := strings.Split(page51, "\n")[2]
+	return &Suspect{Line: 3, Text: line, Span: `\{1,n\}`,
+		Why: "braces here may be an interval printed [1, n] rather than a set with two elements in it"}
+}
+
+func glyphRequest() Request {
+	return Request{Book: "alg-i-iii", Page: 51, Text: page51, Suspect: suspect()}
+}
+
+func glyphExpect() ocr.Expect {
+	return ocr.Expect{Book: "alg-i-iii", PDFPage: 51, Grammar: pagemap.FootNumber, HasHead: true, Confidence: pagemap.Unknown}
+}
+
+// The expected answer. Most of what a checker flags is right, and confirming
+// has to leave the page alone rather than counting as a failed repair.
+func TestAConfirmedSpanLeavesThePageAsItIs(t *testing.T) {
+	for _, answer := range []string{Unchanged, "unchanged.", "**UNCHANGED**", " UNCHANGED\n"} {
+		result := Audit(glyphRequest(), answer, glyphExpect())
+		if !result.Confirmed {
+			t.Errorf("%q did not read as a confirmation: %s", answer, result.Reason)
+		}
+		if result.Accepted || result.Text != "" {
+			t.Errorf("%q changed the page", answer)
+		}
+	}
+}
+
+func TestACorrectionInsideTheSpanIsAcceptedAndOnlyThatLineMoves(t *testing.T) {
+	answer := strings.Replace(suspect().Text, `\{1,n\}`, `[1,n]`, 1)
+	result := Audit(glyphRequest(), answer, glyphExpect())
+	if !result.Accepted {
+		t.Fatalf("the correction was rejected: %s", result.Reason)
+	}
+	want := strings.Replace(page51, `\{1,n\}`, `[1,n]`, 1)
+	if result.Text != want {
+		t.Errorf("the page came back as\n%s\nwant\n%s", result.Text, want)
+	}
+}
+
+// A model asked about one span will happily improve the rest of the line while
+// it is there, and the page it hands back reads perfectly well. Each of these
+// is an answer that has to be thrown away.
+func TestEveryWayAModelWandersOffTheSpanIsCaught(t *testing.T) {
+	line := suspect().Text
+	cases := []struct {
+		name   string
+		answer string
+	}{
+		{"a word tidied elsewhere on the line",
+			strings.Replace(strings.Replace(line, `\{1,n\}`, `[1,n]`, 1), "magmas", "magmas (see above)", 1)},
+		{"the span rewritten into different mathematics",
+			strings.Replace(line, `\{1,n\}`, `\{1,2,\ldots,n\}`, 1)},
+		{"the whole page handed back", strings.Replace(page51, `\{1,n\}`, `[1,n]`, 1)},
+		{"the span unchanged, dressed as a correction", line},
+		{"a narrated correction", "I changed the braces to brackets:\n" + strings.Replace(line, `\{1,n\}`, `[1,n]`, 1)},
+		{"an empty answer", "   "},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			result := Audit(glyphRequest(), c.answer, glyphExpect())
+			if result.Accepted {
+				t.Fatalf("accepted: %q", result.Text)
+			}
+			if result.Reason == "" {
+				t.Error("rejected without saying why")
+			}
+		})
+	}
+}
+
+// The page on disk can have been rewritten between the audit that raised the
+// suspect and the answer coming back, by a re-read of the same page. Writing
+// the answer into it then would put a line back that a later read replaced.
+func TestASuspectThatNoLongerMatchesThePageIsThrownAway(t *testing.T) {
+	request := glyphRequest()
+	request.Text = strings.Replace(page51, "Definition 5", "Definition 6", 1)
+	answer := strings.Replace(suspect().Text, `\{1,n\}`, `[1,n]`, 1)
+	if result := Audit(request, answer, glyphExpect()); result.Accepted {
+		t.Fatal("an answer was written into a page that had moved under it")
+	}
+}
+
+// A page with a defect on it is not a page to ask a delicate question about,
+// and a span that is not on its line once has nothing to prove an answer
+// against.
+func TestWhatIsNotWorthOneQuestion(t *testing.T) {
+	withProblem := glyphRequest()
+	withProblem.Problems = ocr.Validate(page50, expect(), ocr.Options{})
+	if kind, ok := withProblem.Kind(); ok {
+		t.Errorf("a page with a real defect was offered as %s", kind)
+	}
+
+	twice := glyphRequest()
+	twice.Suspect = &Suspect{Line: 3, Text: "a $x$ and a $x$ again", Span: "$x$"}
+	if _, ok := twice.Kind(); ok {
+		t.Error("a span that is on its line twice was accepted as a suspect")
+	}
+}
+
+// The prompt has to make confirming the cheap answer. If the only way to reply
+// is to hand back a line, a model told the line is suspect will find something
+// on it to change.
+func TestThePromptOffersTheConfirmingAnswerFirst(t *testing.T) {
+	prompt := glyphRequest().Prompt()
+	if !strings.Contains(prompt, Unchanged) || !strings.Contains(prompt, Refusal) {
+		t.Fatal("the prompt does not give both ways out")
+	}
+	if strings.Index(prompt, Unchanged) > strings.Index(prompt, "reply with that one line") {
+		t.Error("the correcting answer is offered before the confirming one")
+	}
+	if !strings.Contains(prompt, `\{1,n\}`) {
+		t.Error("the prompt does not say which span is in question")
+	}
+}
