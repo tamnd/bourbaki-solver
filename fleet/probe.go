@@ -185,22 +185,45 @@ const CoresPerLane = 2
 //
 // Memory is in here too but it has never been the thing that runs out: a lane
 // measured on server2 peaks around 275 MB against the 1500 this reserves.
+//
+// A box with no spare cores still gets one lane as long as it is not thrashing,
+// and that is not a fudge, it is what the usage log says. server3 read 98 pages
+// at a load between seven and eight on its eight cores. The first version of
+// this refused exactly that box in exactly that state, which would have thrown
+// away every page the fleet has read. A lane is mostly a Chrome waiting for an
+// answer, so a crowded box is slow rather than useless. A thrashing box is
+// useless, and that is what ThrashingLoad is for.
 func (f Facts) Lanes() int {
 	if ok, _ := f.CanOCR(); !ok {
 		return 0
 	}
 	byMemory := f.MemFreeMB / OCRMemoryMB
 	// Hundredths the whole way, so half a core of somebody else's work costs
-	// half a core and not a whole one. A load above the core count comes out
-	// negative here, which floors to nothing, which is the right answer.
+	// half a core and not a whole one.
 	freeX100 := f.Cores*100 - f.LoadX100
 	byCPU := freeX100 / (CoresPerLane * 100)
 	if byCPU < 1 {
-		// Not max(1, ...). A box with nothing spare is a box that should be
-		// given nothing, and saying so is the whole point of measuring.
-		return 0
+		if f.Thrashing() {
+			return 0
+		}
+		byCPU = 1
 	}
 	return max(1, min(byMemory, byCPU))
+}
+
+// ThrashingLoadX100 is the load per core, times a hundred, past which a box is
+// not slow but stuck. Two runnable things per core is a box with a queue on it;
+// server1 sits at eight and a half and cannot finish an ssh login inside thirty
+// seconds, let alone rasterise a page.
+const ThrashingLoadX100 = 200
+
+// Thrashing says whether the box is past that. A host with no core count behind
+// it has not been measured and is given the benefit of the doubt.
+func (f Facts) Thrashing() bool {
+	if f.Cores <= 0 {
+		return false
+	}
+	return f.LoadX100 >= ThrashingLoadX100*f.Cores
 }
 
 // Table renders probe results the way fleet probe prints them.
@@ -219,9 +242,9 @@ func Table(rows []Facts) string {
 			tool = tool + "  (" + why + ")"
 		}
 		// A capable box with no lanes is the confusing row on this table, so it
-		// gets told why: somebody else is already using the machine.
+		// gets told why: somebody else has the machine, and not by a little.
 		if ocr && row.Lanes() == 0 {
-			tool = tool + "  (busy, nothing spare to draw a page with)"
+			tool = tool + "  (thrashing, another tenant has the box)"
 		}
 		fmt.Fprintf(&out, "%-8s  %-12s  %5d  %5.2f  %7d MB  %7d MB  %6t  %5t  %5d  %s\n",
 			row.Name, row.Hostname, row.Cores, float64(row.LoadX100)/100, row.MemFreeMB, row.DiskFreeMB,

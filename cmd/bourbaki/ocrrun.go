@@ -469,7 +469,7 @@ func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 	if facts.Cores > 0 {
 		capacity := facts.Lanes()
 		if capacity <= 0 {
-			return 0, fmt.Sprintf("load average %.1f across %d cores, nothing spare to draw a page with",
+			return 0, fmt.Sprintf("load average %.1f across %d cores, thrashing, not slow",
 				float64(facts.LoadX100)/100, facts.Cores)
 		}
 		lanes = min(lanes, capacity)

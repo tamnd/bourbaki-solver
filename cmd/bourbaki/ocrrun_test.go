@@ -40,10 +40,15 @@ func TestLanesFollowWhatTheBoxCanCarry(t *testing.T) {
 		{"the box caps an optimistic route file", route.Route{Concurrency: 16}, server2, 3, ""},
 		// These are rented boxes and the cores are not all ours. server3 spent an
 		// evening at a load of 8.27 across its eight cores on somebody else's
-		// work and returned a blank page every time, so a host in that state has
-		// to be refused by name rather than handed four lanes.
+		// work, and it read pages the whole time, slowly. One lane, not the four
+		// the route file asks for.
 		{"a box somebody else is already using", route.Route{Concurrency: 4},
-			fleet.Facts{Name: "server3", Cores: 8, LoadX100: 827, MemFreeMB: 15378, Xvfb: true, Rsync: true, Tool: "t"}, 0, "load average 8.3"},
+			fleet.Facts{Name: "server3", Cores: 8, LoadX100: 827, MemFreeMB: 15378, Xvfb: true, Rsync: true, Tool: "t"}, 1, ""},
+		// server1 on the morning of the eleventh: four cores at 39, running
+		// another tenant's Kubernetes and a Harbor registry. Two runnable things
+		// per core is crowded, nine is stuck, and a stuck box is refused by name.
+		{"a box that is thrashing", route.Route{Concurrency: 4},
+			fleet.Facts{Name: "server1", Cores: 4, LoadX100: 3914, MemFreeMB: 15378, Xvfb: true, Rsync: true, Tool: "t"}, 0, "load average 39.1"},
 		{"no xvfb is no browser", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Rsync: true}, 0, "xvfb"},
 		{"no rsync is no images", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Xvfb: true}, 0, "rsync"},
 		{"an unmeasured box is taken at its word", route.Route{Concurrency: 2}, fleet.Facts{Xvfb: true, Rsync: true}, 2, ""},

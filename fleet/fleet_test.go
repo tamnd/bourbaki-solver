@@ -120,10 +120,17 @@ func TestLanes(t *testing.T) {
 		{"no xvfb", Facts{Cores: 8, MemFreeMB: 16000, Tool: "t", Rsync: true}, 0},
 
 		// The evening this was written server3 sat at 8.27 across its eight
-		// cores running another tenant's work. Every page sent to it came back
-		// with no composer drawn on it, so the honest answer is no lanes at
-		// all, not the four the core count on its own would promise.
-		{"server3 as it really was", Facts{Cores: 8, LoadX100: 827, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 0},
+		// cores running another tenant's work, and it still read 98 pages in
+		// that state. One lane, not the four the core count would promise and
+		// not the nothing the free cores would.
+		{"server3 as it really was", Facts{Cores: 8, LoadX100: 827, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 1},
+		// server1 the same morning: four cores at 39, a Kubernetes control
+		// plane and a registry belonging to somebody else. That is not a slow
+		// box, it is a stuck one, and it gets nothing.
+		{"a box that is thrashing", Facts{Cores: 4, LoadX100: 3914, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 0},
+		// The line between the two, drawn at two runnable things per core.
+		{"right on the line", Facts{Cores: 4, LoadX100: 800, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 0},
+		{"just inside it", Facts{Cores: 4, LoadX100: 799, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 1},
 		// Half the box spoken for is half the lanes.
 		{"half spoken for", Facts{Cores: 8, LoadX100: 400, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 2},
 		// server2 on the same evening: six cores at 0.55, which rounds up to
