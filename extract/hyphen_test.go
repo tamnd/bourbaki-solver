@@ -110,8 +110,11 @@ func TestWhatRunsOnAtTheEndOfALine(t *testing.T) {
 		{"a module", `Let P be an $(A,B)_k-$`, "bimodule and let", `Let P be an $(A,B)_k$-bimodule and let`},
 		{"a word already carrying a hyphen", `Prove that $V'$ is a $(D,A)-$`, "sub-bimodule of", `Prove that $V'$ is a $(D,A)$-sub-bimodule of`},
 		{"a module at the end of an aside", `$M/\mathfrak{R}(A)M$ is an $A/\mathfrak{R}(A)-$`, "module). b) Deduce", `$M/\mathfrak{R}(A)M$ is an $A/\mathfrak{R}(A)$-module). b) Deduce`},
+		{"a space left where the formula ended", `is a $\tau -$`, "extension; we call it", `is a $\tau$-extension; we call it`},
 		{"an operand in capitals", `Set $R = P-$`, "XQ. Because of", ""},
 		{"a function applied to something", `the element cl(E) $-$ cl(E$')-$`, "cl(E$'')$ of the group", ""},
+		{"a module whose ring is a plain letter", "Let M be a left A-", "module. The countermodule", "Let M be a left A-module. The countermodule"},
+		{"an algebra over a field", "There exists a K-", "algebra homomorphism", "There exists a K-algebra homomorphism"},
 		{"a line that does not run on", "the center of A", "is the set of", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {

@@ -340,11 +340,36 @@ func runOn(s, next string) (string, bool) {
 	next = strings.TrimLeft(next, " ")
 	switch {
 	case strings.HasSuffix(s, "-$") && compoundWord(next):
-		return strings.TrimSuffix(s, "-$") + "$-" + next, true
+		return strings.TrimRight(strings.TrimSuffix(s, "-$"), " ") + "$-" + next, true
+	case strings.HasSuffix(s, "-") && oneLetter(s):
+		return s + next, true
 	case strings.HasSuffix(s, "-"):
 		return strings.TrimSuffix(s, "-") + next, true
 	}
 	return "", false
+}
+
+// oneLetter reports whether the hyphen a line ends on comes straight after a
+// letter standing on its own, which is the other half of the compound word:
+// the A of A-module, the K of K-algebra, the B of B-linear. Bourbaki sets these
+// in roman when the letter is a plain one, so no dollar is anywhere near them
+// and the line simply ends in "A-".
+//
+// The hyphen has to stay. TeX will not break a word after its first letter, so
+// a one letter fragment before a hyphen is never a word cut in two, and
+// dropping the hyphen the way the ordinary case does gives Amodule. Measured on
+// Algebra VIII before this: 47 of them, Amodule, Kalgebra, Bmodule, Lalgebra,
+// Alinear.
+func oneLetter(s string) bool {
+	s = strings.TrimSuffix(s, "-")
+	if s == "" || !isLetter(rune(s[len(s)-1])) {
+		return false
+	}
+	if len(s) == 1 {
+		return true
+	}
+	c := rune(s[len(s)-2])
+	return !isLetter(c) && (c < '0' || c > '9')
 }
 
 // displayRE is a line that is nothing but one formula, with the number the
