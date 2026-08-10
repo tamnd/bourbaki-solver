@@ -19,15 +19,19 @@ import (
 
 // Line is one batch as writeOCRReport recorded it.
 type Line struct {
-	Book    string    `json:"book"`
-	When    time.Time `json:"when"`
-	Host    string    `json:"host"`
-	ID      string    `json:"id"`
-	Pages   int       `json:"pages"`
-	Wrote   int       `json:"wrote"`
-	Missing []string  `json:"missing,omitempty"`
-	Elapsed string    `json:"elapsed"`
-	Log     string    `json:"log,omitempty"`
+	Book  string    `json:"book"`
+	When  time.Time `json:"when"`
+	Host  string    `json:"host"`
+	ID    string    `json:"id"`
+	Pages int       `json:"pages"`
+	Wrote int       `json:"wrote"`
+	// Lanes is how many pages the host was reading at once. Batches from
+	// before that was written down have nothing here, which is not the same
+	// as one lane and must not be read as it.
+	Lanes   int      `json:"lanes,omitempty"`
+	Missing []string `json:"missing,omitempty"`
+	Elapsed string   `json:"elapsed"`
+	Log     string   `json:"log,omitempty"`
 }
 
 // Took is the elapsed time as a duration. It is written as a string, "22m8s",
@@ -223,4 +227,90 @@ func sorted(counts map[string]int) []string {
 		return keys[i] < keys[j]
 	})
 	return keys
+}
+
+// Rate is what one host delivered at one lane count.
+//
+// The lane count is the whole point of grouping this way. A box reading two
+// pages at once is not twice as fast as one reading a single page, and on these
+// shared boxes it can easily be slower, so the only way to set the number in
+// the route file honestly is to look at what each setting actually delivered.
+type Rate struct {
+	Host    string
+	Lanes   int
+	Batches int
+	Pages   int
+	Wrote   int
+	Took    time.Duration
+}
+
+// PagesPerHour counts the pages that came back over the wall clock the host
+// spent, failures included. It is what a schedule is made of.
+func (r Rate) PagesPerHour() float64 {
+	if r.Took <= 0 {
+		return 0
+	}
+	return float64(r.Wrote) / r.Took.Hours()
+}
+
+// Rates groups the log by host and lane count, best first.
+//
+// Batches recorded before the lane count was written down come back under
+// lanes 0, which is a thing the caller has to say out loud rather than treat
+// as a measurement of one lane.
+func Rates(lines []Line, book string, since time.Time) []Rate {
+	type key struct {
+		host  string
+		lanes int
+	}
+	byKey := map[key]*Rate{}
+	for _, line := range lines {
+		if book != "" && line.Book != book {
+			continue
+		}
+		if !since.IsZero() && line.When.Before(since) {
+			continue
+		}
+		id := key{line.Host, line.Lanes}
+		rate := byKey[id]
+		if rate == nil {
+			rate = &Rate{Host: line.Host, Lanes: line.Lanes}
+			byKey[id] = rate
+		}
+		rate.Batches++
+		rate.Pages += line.Pages
+		rate.Wrote += line.Wrote
+		rate.Took += line.Took()
+	}
+
+	out := make([]Rate, 0, len(byKey))
+	for _, rate := range byKey {
+		out = append(out, *rate)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Host != out[j].Host {
+			return out[i].Host < out[j].Host
+		}
+		return out[i].Lanes < out[j].Lanes
+	})
+	return out
+}
+
+// Best is the lane count that delivered the most pages an hour on this host,
+// and how many batches say so. It ignores lanes 0, which is not a measurement
+// but a batch from before the lane count was recorded, and it ignores a lane
+// count with only one batch behind it, because one batch on a shared box is a
+// measurement of what the other tenants were doing.
+func Best(rates []Rate, host string, minBatches int) (Rate, bool) {
+	var best Rate
+	var found bool
+	for _, rate := range rates {
+		if rate.Host != host || rate.Lanes == 0 || rate.Batches < minBatches || rate.Wrote == 0 {
+			continue
+		}
+		if !found || rate.PagesPerHour() > best.PagesPerHour() {
+			best, found = rate, true
+		}
+	}
+	return best, found
 }

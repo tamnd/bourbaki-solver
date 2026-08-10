@@ -160,6 +160,12 @@ func TestABatchGoesOutRunsAndComesBack(t *testing.T) {
 	if result.PID != 4242 {
 		t.Errorf("pid came back as %d", result.PID)
 	}
+	// The lane count goes in the report so that a week of these lines can say
+	// what a second lane was worth. A result without it is a run nobody can
+	// learn a concurrency from afterwards.
+	if result.Lanes != 4 {
+		t.Errorf("the batch reported %d lanes, want the 4 it ran at", result.Lanes)
+	}
 	// Elapsed is stamped in a defer, and a defer that writes to a local rather
 	// than to the named return leaves this at zero.
 	if result.Elapsed <= 0 {

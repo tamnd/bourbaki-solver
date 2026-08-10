@@ -182,8 +182,12 @@ type Result struct {
 	ID   string `json:"id"`
 	// Pages is how many images went out, Wrote how many Markdown files came
 	// back, and Missing which pages did not.
-	Pages   int      `json:"pages"`
-	Wrote   int      `json:"wrote"`
+	Pages int `json:"pages"`
+	Wrote int `json:"wrote"`
+	// Lanes is how many pages the host was reading at once. Without it the
+	// usage log cannot answer what a second lane bought, which is the whole
+	// question fleet bench exists to settle.
+	Lanes   int      `json:"lanes,omitempty"`
 	Missing []string `json:"missing,omitempty"`
 	PID     int      `json:"pid"`
 	Elapsed Duration `json:"elapsed"`
@@ -362,7 +366,7 @@ func (b Batch) Run(ctx context.Context) (result Result, err error) {
 	if err := b.Validate(); err != nil {
 		return Result{}, err
 	}
-	result = Result{Host: b.Host.Name, ID: b.ID, Pages: len(b.Images)}
+	result = Result{Host: b.Host.Name, ID: b.ID, Pages: len(b.Images), Lanes: b.Host.Lanes}
 	started := time.Now()
 	defer func() { result.Elapsed = Duration(time.Since(started)) }()
 

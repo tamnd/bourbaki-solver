@@ -137,3 +137,64 @@ func TestTheTableNamesTheHostsAndTheReasons(t *testing.T) {
 		}
 	}
 }
+
+// What a second lane buys is the question the route file's concurrency is an
+// answer to, so the rate is grouped by the lane count the batch actually ran
+// at rather than averaged over all of them.
+const lanelog = `{"book":"alg-i-iii","when":"2026-08-11T01:00:00Z","host":"server2","id":"a","pages":2,"wrote":2,"lanes":1,"elapsed":"20m"}
+{"book":"alg-i-iii","when":"2026-08-11T02:00:00Z","host":"server2","id":"b","pages":2,"wrote":2,"lanes":1,"elapsed":"20m"}
+{"book":"alg-i-iii","when":"2026-08-11T03:00:00Z","host":"server2","id":"c","pages":4,"wrote":4,"lanes":2,"elapsed":"30m"}
+{"book":"alg-i-iii","when":"2026-08-11T04:00:00Z","host":"server2","id":"d","pages":4,"wrote":4,"lanes":2,"elapsed":"30m"}
+{"book":"alg-i-iii","when":"2026-08-11T05:00:00Z","host":"server2","id":"e","pages":4,"wrote":4,"lanes":3,"elapsed":"20m"}
+{"book":"alg-i-iii","when":"2026-08-11T06:00:00Z","host":"server3","id":"f","pages":2,"wrote":0,"elapsed":"40m"}
+`
+
+func TestRatesAreGroupedByLaneCount(t *testing.T) {
+	rates := Rates(read(t, lanelog), "", time.Time{})
+	if len(rates) != 4 {
+		t.Fatalf("rates = %+v", rates)
+	}
+	// server3 first by name, then server2 by lane count.
+	one := rates[0]
+	if one.Host != "server2" || one.Lanes != 1 || one.Batches != 2 || one.Wrote != 4 {
+		t.Fatalf("one lane = %+v", one)
+	}
+	if got := one.PagesPerHour(); got != 6 {
+		t.Errorf("one lane did %.1f pages an hour, want 6", got)
+	}
+	two := rates[1]
+	if got := two.PagesPerHour(); got != 8 {
+		t.Errorf("two lanes did %.1f pages an hour, want 8", got)
+	}
+}
+
+func TestTheBestLaneCountNeedsMoreThanOneBatchBehindIt(t *testing.T) {
+	rates := Rates(read(t, lanelog), "", time.Time{})
+
+	// Three lanes did twelve pages an hour on one batch, which is the fastest
+	// number in the log and not a measurement of anything.
+	best, ok := Best(rates, "server2", 2)
+	if !ok {
+		t.Fatal("no rate came back for server2")
+	}
+	if best.Lanes != 2 {
+		t.Errorf("best = %d lanes at %.1f an hour, want the two lanes with two batches behind it",
+			best.Lanes, best.PagesPerHour())
+	}
+
+	// With the bar at one batch the single fast run wins, which is what that
+	// flag is for.
+	if best, _ := Best(rates, "server2", 1); best.Lanes != 3 {
+		t.Errorf("best at min 1 = %d lanes, want 3", best.Lanes)
+	}
+}
+
+// Batches from before the lane count was recorded are not one lane. There are
+// twenty five of them in the real log and reading them as one lane would set
+// the whole fleet's concurrency from a number nobody wrote down.
+func TestBatchesWithNoLaneCountAreNotAMeasurement(t *testing.T) {
+	rates := Rates(read(t, lanelog), "", time.Time{})
+	if _, ok := Best(rates, "server3", 1); ok {
+		t.Error("a host whose only batches predate the lane count came back with a recommendation")
+	}
+}
