@@ -24,6 +24,8 @@ commands:
   toc              read each volume's table of contents into manifests/toc.yaml
   extract          read the pages of a volume into Markdown
   label            parse a statement label, or a running head, and print what it means
+  fleet            probe the hosts, and run the ssh tunnels that reach them
+  doctor           check that at least one route can take work, for use in cron
 
 Set BOURBAKI_CORPUS to the checkout of tamnd/bourbaki.
 Run bourbaki <command> -h for the flags of a command.
@@ -53,6 +55,10 @@ func main() {
 		err = runExtract(args[1:])
 	case "label":
 		err = runLabel(args[1:])
+	case "fleet":
+		err = runFleet(args[1:])
+	case "doctor":
+		err = runDoctor(args[1:])
 	case "help", "-h", "--help":
 		flag.Usage()
 	default:
