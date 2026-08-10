@@ -147,10 +147,31 @@ func Load(root, book string) (*Map, error) {
 		}
 		m.Entries = append(m.Entries, e)
 	}
+	// The TSV holds one row per page and nothing else, because that is what
+	// diffs well. The chapter spans are a fact about those rows rather than a
+	// second source of truth, so they are worked out again on the way back in.
+	m.PDFPages = len(m.Entries)
+	m.Chapters = chapterSpans(m.Entries, chaptersOf(m.Entries))
+
 	if err := sc.Err(); err != nil {
 		return nil, err
 	}
 	m.PDFPages = len(m.Entries)
 	m.Gaps = findGaps(m.Entries)
 	return m, nil
+}
+
+// chaptersOf lists the chapters the entries mention, in the order they appear,
+// which is the order the volume prints them.
+func chaptersOf(entries []Entry) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, e := range entries {
+		if e.Chapter == "" || seen[e.Chapter] {
+			continue
+		}
+		seen[e.Chapter] = true
+		out = append(out, e.Chapter)
+	}
+	return out
 }

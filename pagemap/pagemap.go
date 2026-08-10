@@ -552,14 +552,36 @@ func coverPerChapter(as []anchor, opt Options) []cover {
 		}
 	}
 	sort.Slice(covers, func(i, j int) bool { return covers[i].from < covers[j].from })
-	// A chapter's last stretch runs up to the page before the next chapter
-	// starts, which is where its exercises, historical note and index sit.
-	for i := range covers {
-		if i+1 < len(covers) {
-			if covers[i].to < covers[i+1].from-1 {
-				covers[i].to = covers[i+1].from - 1
-			}
+	return closeCracks(covers)
+}
+
+// closeCracks hands out the pages that fall between two fitted stretches. None
+// of them carries a number, or it would have been an anchor, so the only
+// question is which side of the crack they belong to.
+//
+// A chapter's last stretch runs up to the page before the next chapter starts,
+// because that is where its exercises and its historical note sit, so a crack
+// between two chapters goes to the left.
+//
+// Inside a chapter the direction of the step decides. When the offset drops the
+// file is missing a page the book printed, and what the book drops is the blank
+// verso in front of a division opener: the opener itself is in the file and is
+// the first page of the new offset. Chapter VIII is the case in hand, where pdf
+// 485 opens the historical note at printed 469 and the blank 468 is not in the
+// file at all, so the crack goes to the right. When the offset rises the file
+// carries pages the book never numbered, and those belong to the end of what
+// came before, so the crack goes to the left.
+func closeCracks(covers []cover) []cover {
+	for i := 0; i+1 < len(covers); i++ {
+		cur, next := &covers[i], &covers[i+1]
+		if cur.to >= next.from-1 {
+			continue
 		}
+		if cur.chapter == next.chapter && next.offset < cur.offset {
+			next.from = cur.to + 1
+			continue
+		}
+		cur.to = next.from - 1
 	}
 	return covers
 }
@@ -611,7 +633,7 @@ func coverContinuous(as []anchor, pages []string, opt Options) []cover {
 			covers = append(covers, cover{from: c, to: end, offset: s.offset, chapter: chapterAt(c)})
 		}
 	}
-	return covers
+	return closeCracks(covers)
 }
 
 func findCover(covers []cover, p int) (cover, bool) {
