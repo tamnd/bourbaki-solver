@@ -2,6 +2,7 @@ package ocr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -752,5 +753,33 @@ func TestAPageWithNoThreadIsNotOfferedForRepair(t *testing.T) {
 	}
 	if _, err := ReadThread(w.root, "alg-iv-vii", 1); err == nil {
 		t.Error("a thread was recorded for a page whose answer carried no conversation")
+	}
+}
+
+// A batch that fails on the way out, before chatgpt-tool ever runs, still has
+// to say which box it was and how many pages it was carrying. Two lines in the
+// real usage log have none of that on them, which makes them unreadable a week
+// later.
+func TestAFailedBatchStillNamesTheBox(t *testing.T) {
+	result := named(Result{}, "server2", "alg-i-iii-0050-ab12cd", 4, errors.New("ssh: connect to host server2 port 22: connection refused"))
+	if result.Host != "server2" || result.ID != "alg-i-iii-0050-ab12cd" {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Pages != 4 {
+		t.Errorf("Pages = %d, want the 4 it was carrying", result.Pages)
+	}
+	if !strings.Contains(result.Log, "connection refused") {
+		t.Errorf("Log = %q, want the error that stopped it", result.Log)
+	}
+	if result.Wrote != 0 {
+		t.Errorf("Wrote = %d, want none", result.Wrote)
+	}
+}
+
+// What the tool reported is never overwritten by the fallback.
+func TestAFinishedBatchKeepsWhatItReported(t *testing.T) {
+	result := named(Result{Host: "server3", ID: "real", Pages: 6, Wrote: 6, Log: "kept"}, "server2", "guess", 4, nil)
+	if result.Host != "server3" || result.ID != "real" || result.Pages != 6 || result.Log != "kept" {
+		t.Fatalf("result = %+v", result)
 	}
 }

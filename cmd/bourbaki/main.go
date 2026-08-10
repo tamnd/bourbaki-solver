@@ -28,6 +28,7 @@ commands:
   label            parse a statement label, or a running head, and print what it means
   fleet            probe the hosts, and run the ssh tunnels that reach them
   queue            the durable work list: stats, reap, retry, drain, list
+  report           what the fleet did: pages, wall clock, and why batches failed
   doctor           check that at least one route can take work, for use in cron
 
 Set BOURBAKI_CORPUS to the checkout of tamnd/bourbaki.
@@ -66,6 +67,8 @@ func main() {
 		err = runFleet(args[1:])
 	case "queue":
 		err = runQueue(args[1:])
+	case "report":
+		err = runReport(args[1:])
 	case "doctor":
 		err = runDoctor(args[1:])
 	case "help", "-h", "--help":

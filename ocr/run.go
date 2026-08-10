@@ -472,11 +472,35 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 	if err != nil {
 		r.logf("%s: batch %s: %v", host.Name, id, err)
 	}
+	result = named(result, host.Name, id, len(work.Images), err)
 
 	for _, value := range tasks {
 		r.file(ctx, host, work.Dest, value, &out)
 	}
 	return result, out
+}
+
+// named fills in what a batch that died before it started cannot report.
+//
+// A failure on the way out, an ssh that would not connect or an rsync that
+// could not write, comes back as a zero Result, and that went into the usage
+// log as a line with no host, no id and no page count on it. Two of those are
+// in the log already. The point of that file is which box did what, so a batch
+// that failed says so under its own name.
+func named(result Result, host, id string, pages int, err error) Result {
+	if result.Host == "" {
+		result.Host = host
+	}
+	if result.ID == "" {
+		result.ID = id
+	}
+	if result.Pages == 0 {
+		result.Pages = pages
+	}
+	if err != nil && result.Log == "" {
+		result.Log = err.Error()
+	}
+	return result
 }
 
 // batchID names a batch on the host.
