@@ -446,9 +446,16 @@ func ReadManifest(root, book string) (Manifest, error) {
 // A blank page still gets a file, because the page contract is one file per
 // page and a gap in the sequence is indistinguishable from a page that was
 // missed. It says method: blank and it costs nothing.
+//
+// One that is already on disk from the same image is left where it is. Nothing
+// about it can have changed, and rewriting it only to move the generated stamp
+// puts five files with no ink on them into a pull request somebody has to read.
 func writeBlanks(options Options, manifest Manifest) error {
 	for _, page := range manifest.Pages {
 		if !page.Blank {
+			continue
+		}
+		if blankAlreadyWritten(corpus.PagePath(options.Corpus, options.Book, page.Page), page.SHA256) {
 			continue
 		}
 		file := corpus.PageFile{
@@ -467,6 +474,17 @@ func writeBlanks(options Options, manifest Manifest) error {
 		}
 	}
 	return nil
+}
+
+// blankAlreadyWritten says whether this page is on disk as a blank read from
+// this same image. The image hash is what makes it safe: a page re-rendered at
+// another dpi is a different image and is written again.
+func blankAlreadyWritten(path, sha string) bool {
+	old, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+	if err != nil {
+		return false
+	}
+	return old.Meta.Method == corpus.MethodBlank && old.Meta.InputSHA256 == sha && sha != ""
 }
 
 // Summary is what a run prints when it finishes.

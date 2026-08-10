@@ -198,6 +198,49 @@ func TestBlankPagesAreFoundAndKeptOutOfTheQueue(t *testing.T) {
 	}
 }
 
+// A second render must not touch the blank pages it already wrote. Nothing
+// about a page with no ink on it can have changed, and a fresh generated stamp
+// on five empty files is five files somebody has to read past in a pull
+// request to find the pages that were actually read.
+func TestRenderingAgainLeavesTheBlankPagesAlone(t *testing.T) {
+	run := &poppler{pages: 4, pad: 1, ink: map[int]float64{1: 0, 2: 0.06, 3: 0.06, 4: 0}}
+	opts := options(t, run)
+	opts.WriteBlanks = true
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+
+	blank := corpus.PagePath(opts.Corpus, opts.Book, 1)
+	first, err := os.ReadFile(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts.Overwrite = true
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Errorf("the blank page was rewritten:\n%s\nbecame\n%s", first, second)
+	}
+	after, err := os.Stat(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("the blank page was written again at %s, having been written at %s",
+			after.ModTime(), before.ModTime())
+	}
+}
+
 func TestInterruptedRunsResume(t *testing.T) {
 	run := &poppler{pages: 8, pad: 1, ink: map[int]float64{
 		1: 0.05, 2: 0.05, 3: 0.05, 4: 0.05, 5: 0.05, 6: 0.05, 7: 0.05, 8: 0.05,
