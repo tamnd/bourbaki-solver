@@ -389,6 +389,56 @@ func hostOf(job Job) string {
 // the call site than a bare false.
 func (q *Queue) Fail(job Job, reason string) (State, error) { return q.Finish(job, false, reason) }
 
+// Release hands a leased job back without spending the attempt.
+//
+// Fail is for a page that was read and came back wrong. This is for a batch
+// that never went out at all: an ssh that would not connect, an rsync with
+// nowhere to write, a batch this program refused to assemble. Twenty one pages
+// of Algebra I went from pending to dead in forty one seconds one morning, three
+// attempts each, without a single image leaving the laptop, because the only
+// way to give a job back was to fail it. Attempts are for the model's mistakes.
+//
+// The attempt is given back too, since Lease spent it, and the handing back is
+// still written into the history: a job that quietly loses attempts is a job
+// that can loop forever with nothing to read afterwards.
+func (q *Queue) Release(job Job, reason string) error {
+	host := hostOf(job)
+	job.Lease = nil
+	if job.Attempts > 0 {
+		job.Attempts--
+	}
+	job.History = append(job.History, Event{TS: q.now(), Host: host, OK: false,
+		Reason: "handed back without an attempt: " + reason})
+	if err := q.write(Pending, job); err != nil {
+		return err
+	}
+	if err := os.Remove(q.path(job.Stage, Leased, job.ID)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// Outstanding is every target with a job still to run, and where that job is.
+//
+// It exists because the id is content addressed on the input hash and a page
+// image is not immutable: a retry re-renders page 70 at 600 dpi, the hash
+// changes, and the next Add sees work it has never seen before and queues the
+// same page twice. Both then land in one batch, pointing at one file, and the
+// batch is refused. Targets, not hashes, are what one page means.
+func (q *Queue) Outstanding(stage Stage) (map[string]State, error) {
+	out := map[string]State{}
+	for _, state := range []State{Dead, Pending, Leased} {
+		jobs, err := q.List(stage, state)
+		if err != nil {
+			return nil, err
+		}
+		for _, job := range jobs {
+			out[job.Target] = state
+		}
+	}
+	return out, nil
+}
+
 // Reap returns jobs whose lease has expired.
 //
 // This is the whole crash recovery story. A worker that is killed, or a laptop

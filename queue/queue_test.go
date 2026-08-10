@@ -531,3 +531,125 @@ func TestMetaSurvives(t *testing.T) {
 		t.Errorf("the escalated dpi was lost: %v", again.Meta)
 	}
 }
+
+func TestReleaseGivesTheAttemptBackAndSaysWhy(t *testing.T) {
+	q := open(t)
+	job := New(StageOCR, "alg-i-iii/0070", "sha", "prompt")
+	if _, err := q.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	leased, err := q.Lease(StageOCR, "server3", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leased.Attempts != 1 {
+		t.Fatalf("attempts = %d after leasing, want 1", leased.Attempts)
+	}
+
+	if err := q.Release(leased, "ssh: no route to host"); err != nil {
+		t.Fatal(err)
+	}
+	back, state, err := q.Find(StageOCR, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != Pending {
+		t.Errorf("state = %s, want pending", state)
+	}
+	if back.Attempts != 0 {
+		t.Errorf("attempts = %d, want the attempt given back", back.Attempts)
+	}
+	if back.Lease != nil {
+		t.Error("the lease is still on a job that was handed back")
+	}
+	// Silence would make a job that loops look like a job that never ran.
+	if len(back.History) != 1 || !strings.Contains(back.History[0].Reason, "no route to host") {
+		t.Errorf("history = %+v, want the reason it came back", back.History)
+	}
+	if back.History[0].Host != "server3" {
+		t.Errorf("history says host %q, want server3", back.History[0].Host)
+	}
+}
+
+// Three releases in a row must not drive the count below zero, or the job
+// becomes one that can never die.
+func TestReleasingAJobThatWasNeverLeasedIsHarmless(t *testing.T) {
+	q := open(t)
+	job := New(StageOCR, "alg-i-iii/0070", "sha", "prompt")
+	if _, err := q.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Release(job, "never mind"); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := q.Find(StageOCR, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Attempts != 0 {
+		t.Errorf("attempts = %d, want 0", back.Attempts)
+	}
+}
+
+// Outstanding is what stops one page being queued twice. Done is not in it: a
+// page read at the old prompt is work again when the prompt changes.
+func TestOutstandingIsEveryTargetStillToRun(t *testing.T) {
+	q := open(t)
+	pending := New(StageOCR, "alg-i-iii/0061", "a", "p")
+	leased := New(StageOCR, "alg-i-iii/0062", "b", "p")
+	dead := New(StageOCR, "alg-i-iii/0063", "c", "p")
+	done := New(StageOCR, "alg-i-iii/0064", "d", "p")
+	for _, job := range []Job{pending, leased, dead, done} {
+		if _, err := q.Add(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Lease hands out the lowest id first, so they all come out and the ones
+	// this test is not using go back. Releasing inside the loop would put a job
+	// back where the next Lease finds it, and the loop would never end.
+	held := map[string]Job{}
+	for range 4 {
+		job, err := q.Lease(StageOCR, "server3", time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held[job.ID] = job
+	}
+	take := func(id string) Job {
+		t.Helper()
+		job, ok := held[id]
+		if !ok {
+			t.Fatalf("job %s never came out of the queue", id)
+		}
+		return job
+	}
+	if _, err := q.Finish(take(done.ID), true, ""); err != nil {
+		t.Fatal(err)
+	}
+	out := take(dead.ID)
+	out.Attempts = DefaultMaxAttempts
+	if _, err := q.Fail(out, "no answer came back"); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Release(take(pending.ID), "putting this one back"); err != nil {
+		t.Fatal(err)
+	}
+
+	outstanding, err := q.Outstanding(StageOCR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]State{
+		"alg-i-iii/0061": Pending,
+		"alg-i-iii/0062": Leased,
+		"alg-i-iii/0063": Dead,
+	}
+	if len(outstanding) != len(want) {
+		t.Fatalf("outstanding = %+v, want %+v", outstanding, want)
+	}
+	for target, state := range want {
+		if outstanding[target] != state {
+			t.Errorf("%s = %q, want %q", target, outstanding[target], state)
+		}
+	}
+}

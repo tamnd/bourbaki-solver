@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/queue"
 )
 
@@ -21,7 +22,8 @@ commands:
   list     print the jobs in one state, with the reason each one failed
 
 flags:
-  -root PATH    queue directory (default $BOURBAKI_WORK/queue, else work/queue)
+  -root PATH    queue directory (default $BOURBAKI_WORK/queue, else work/queue
+                under the corpus named by $BOURBAKI_CORPUS)
   -stage NAME   ocr, repair, translate, solve or judge (default every stage)
 
 The queue is on disk because at 151 seconds a call nothing finishes in one
@@ -29,12 +31,23 @@ process lifetime. It lives under work/, which is not committed: job state is
 local and disposable, and the outputs are the durable thing.
 `
 
-// DefaultQueueRoot is where the work list lives.
+// defaultQueueRoot is where the work list lives.
+//
+// It follows the corpus rather than the working directory. It used to be the
+// plain relative path work/queue, and that made two queues: one under the
+// corpus checkout from the runs started there, one under this repo from the
+// runs started here. A page read into the corpus by one of them was still
+// pending in the other, and the second queue is where ten pages ended up
+// enqueued twice. The queue is state about a corpus, so it belongs beside it.
 func defaultQueueRoot() string {
 	if value := strings.TrimSpace(os.Getenv("BOURBAKI_WORK")); value != "" {
 		return filepath.Join(value, "queue")
 	}
-	return filepath.Join("work", "queue")
+	root, err := corpus.Root()
+	if err != nil {
+		return filepath.Join("work", "queue")
+	}
+	return filepath.Join(root, "work", "queue")
 }
 
 func runQueue(args []string) error {

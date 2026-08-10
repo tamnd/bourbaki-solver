@@ -138,11 +138,25 @@ func Target(book string, page int) string { return fmt.Sprintf("%s/%04d", book, 
 // of the image and the prompt and the queue refuses to add a job it has already
 // done. A page accepted under an older prompt gets a new id and is read again,
 // which is the intended cost of changing the prompt.
+//
+// A page that already has a job waiting is skipped whatever its hash says. The
+// hash is of the image and the image is not fixed: attempt two re-renders the
+// page at 600 dpi over the top of the old file, so the same page comes back as
+// unseen work and is queued a second time. Ten pages of Algebra I were sitting
+// in the queue twice by the time that showed up, as a batch holding page 70 and
+// page 70.
 func (r *Runner) Fill(sources []Source) (int, error) {
 	promptSHA := sha256Hex(r.Prompt)
+	waiting, err := r.Queue.Outstanding(queue.StageOCR)
+	if err != nil {
+		return 0, err
+	}
 	var added int
 	for _, source := range sources {
 		if source.Blank {
+			continue
+		}
+		if _, ok := waiting[Target(r.Book, source.Page)]; ok {
 			continue
 		}
 		if r.accepted(source, promptSHA) {
@@ -201,17 +215,22 @@ type Failure struct {
 
 // Report is what a run did.
 type Report struct {
-	Book      string              `json:"book"`
-	Started   time.Time           `json:"started"`
-	Finished  time.Time           `json:"finished"`
-	Batches   []Result            `json:"batches"`
-	Accepted  int                 `json:"accepted"`
-	Repaired  int                 `json:"repaired,omitempty"`
-	Rejected  int                 `json:"rejected"`
-	Dead      int                 `json:"dead"`
-	Rules     map[Rule]int        `json:"rules,omitempty"`
-	Failures  []Failure           `json:"failures,omitempty"`
-	Reaped    int                 `json:"reaped,omitempty"`
+	Book     string       `json:"book"`
+	Started  time.Time    `json:"started"`
+	Finished time.Time    `json:"finished"`
+	Batches  []Result     `json:"batches"`
+	Accepted int          `json:"accepted"`
+	Repaired int          `json:"repaired,omitempty"`
+	Rejected int          `json:"rejected"`
+	Dead     int          `json:"dead"`
+	Rules    map[Rule]int `json:"rules,omitempty"`
+	Failures []Failure    `json:"failures,omitempty"`
+	Reaped   int          `json:"reaped,omitempty"`
+	// Released is pages handed back with their attempts intact because a batch
+	// never reached a host. They are not rejections and are reported apart from
+	// them, since a run that released fifty pages did nothing wrong to any of
+	// them and a run that rejected fifty has fifty bad readings to explain.
+	Released  int                 `json:"released,omitempty"`
 	PerHost   map[string]int      `json:"per_host,omitempty"`
 	HostTimes map[string]Duration `json:"host_times,omitempty"`
 }
@@ -234,6 +253,9 @@ func (r Report) Summary() string {
 		r.Book, r.Accepted, r.Rejected, r.Dead, elapsed, r.Rate())
 	if r.Repaired > 0 {
 		fmt.Fprintf(&out, "  %d of the accepted pages were repaired in their own thread rather than read again\n", r.Repaired)
+	}
+	if r.Released > 0 {
+		fmt.Fprintf(&out, "  %d pages went back to the queue untouched, their batch never reached a host\n", r.Released)
 	}
 	hosts := make([]string, 0, len(r.PerHost))
 	for host := range r.PerHost {
@@ -349,8 +371,17 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				}
 				report.PerHost[host.Name] += outcome.accepted
 				report.HostTimes[host.Name] += result.Elapsed
+				report.Released += outcome.released
+				// The pages went back, so they are not read and the next host
+				// may still get them.
+				read -= outcome.released
 				lock.Unlock()
 				r.logf("%s", result.Summary())
+
+				if outcome.released == len(tasks) {
+					r.logf("%s: the batch never left this laptop, so %s is out of this run", host.Name, host.Name)
+					return
+				}
 			}
 		}(host)
 	}
@@ -407,6 +438,18 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 	// another host while this one is still reading them.
 	expected := time.Duration(n) * host.pageTimeout() / time.Duration(host.lanes())
 	var out []task
+	held := map[int]bool{}
+	// Duplicates are held until the leasing is over and given back together.
+	// Handing one back inside the loop puts it straight into pending, where the
+	// next Lease finds it again, and the loop never ends.
+	var duplicates []queue.Job
+	defer func() {
+		for _, job := range duplicates {
+			if err := r.Queue.Release(job, "another job for this page is already in the batch"); err != nil {
+				r.logf("could not hand back the duplicate job for %s: %v", job.Target, err)
+			}
+		}
+	}()
 	for len(out) < n {
 		job, err := r.Queue.Lease(queue.StageOCR, host.Name, expected)
 		if errors.Is(err, queue.ErrEmpty) {
@@ -422,6 +465,18 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 			}
 			continue
 		}
+		// One page cannot be in a batch twice. The output is matched back to the
+		// input by file name, so two jobs for page 70 are two jobs pointing at
+		// one file and one answer, and Batch.Validate refuses the whole batch
+		// rather than guess. That refusal cost twenty one pages three attempts
+		// each. Fill no longer makes the duplicates and this no longer passes
+		// one on if something else does.
+		if held[page] {
+			duplicates = append(duplicates, job)
+			r.logf("page %d is in the queue twice, one of them handed back", page)
+			continue
+		}
+		held[page] = true
 		out = append(out, task{job: job, page: page, image: ImagePath(r.Root, r.Book, page)})
 	}
 	return out, nil
@@ -442,6 +497,10 @@ func pageOf(target string) (int, error) {
 // outcome is what one batch did to the queue.
 type outcome struct {
 	accepted, rejected, dead int
+	// released is pages handed back untouched because the batch never went out.
+	// They are not rejections and must not be counted as any, but the run does
+	// have to notice: a host that hands everything back is a host to stop using.
+	released int
 	// repaired is how many of the accepted pages needed a follow up first. They
 	// are counted apart because a run where a third of the pages had to be
 	// repaired is not a healthy run, and the accepted count alone hides that.
@@ -487,6 +546,21 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 		r.logf("%s: batch %s: %v", host.Name, id, err)
 	}
 	result = named(result, host.Name, id, len(work.Images), err)
+
+	// A batch that never reached the host has read nothing, so there is nothing
+	// to file and nothing the model got wrong. The pages go back with their
+	// attempts intact and the run stops sending work to this box, because
+	// leasing them again in the next turn of the loop would spend the same three
+	// attempts on the same failure at the speed of a local error.
+	if err != nil && result.PID == 0 {
+		out.released = len(tasks)
+		for _, value := range tasks {
+			if relErr := r.Queue.Release(value.job, err.Error()); relErr != nil {
+				r.logf("could not hand page %d back: %v", value.page, relErr)
+			}
+		}
+		return result, out
+	}
 
 	for _, value := range tasks {
 		r.file(ctx, host, work.Dest, value, &out)
