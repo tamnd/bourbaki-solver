@@ -21,6 +21,7 @@ commands:
   version          print the version and exit
   books            add, list and verify the source PDFs in manifests/books.yaml
   pagemap          map PDF pages to the page numbers Bourbaki printed
+  toc              read each volume's table of contents into manifests/toc.yaml
   label            parse a statement label, or a running head, and print what it means
 
 Set BOURBAKI_CORPUS to the checkout of tamnd/bourbaki.
@@ -45,6 +46,8 @@ func main() {
 		err = runBooks(args[1:])
 	case "pagemap":
 		err = runPagemap(args[1:])
+	case "toc":
+		err = runTOC(args[1:])
 	case "label":
 		err = runLabel(args[1:])
 	case "help", "-h", "--help":

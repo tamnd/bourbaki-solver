@@ -1,0 +1,248 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/pdfsrc"
+	"github.com/tamnd/bourbaki-solver/toc"
+)
+
+func runTOC(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("toc: want one of build, show, verify")
+	}
+	switch args[0] {
+	case "build":
+		return tocBuild(args[1:])
+	case "show":
+		return tocShow(args[1:])
+	case "verify":
+		return tocVerify(args[1:])
+	default:
+		return fmt.Errorf("toc: unknown subcommand %q", args[0])
+	}
+}
+
+func tocBuild(args []string) error {
+	fs := flag.NewFlagSet("toc build", flag.ExitOnError)
+	book := fs.String("book", "", "book id, or empty for every book in the manifest")
+	dry := fs.Bool("n", false, "print the result without writing anything")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: bourbaki toc build [-book <id>] [flags]\n\nReads each volume's table of contents into manifests/toc.yaml.\n\n")
+		fs.PrintDefaults()
+	}
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		return err
+	}
+	man, err := corpus.LoadTOC(root)
+	if err != nil {
+		return err
+	}
+	list := books.Books
+	if *book != "" {
+		b, ok := books.Get(*book)
+		if !ok {
+			return fmt.Errorf("no book %q in %s", *book, corpus.BooksPath(root))
+		}
+		list = []corpus.Book{*b}
+	}
+	if len(list) == 0 {
+		return fmt.Errorf("no books registered in %s", corpus.BooksPath(root))
+	}
+
+	ctx := context.Background()
+	failed := 0
+	for _, b := range list {
+		pm, err := pagemap.Load(root, b.ID)
+		if err != nil {
+			return fmt.Errorf("%s: %w (run bourbaki pagemap build first)", b.ID, err)
+		}
+		src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+		if err != nil {
+			return err
+		}
+		text, err := src.Text(ctx, 0, 0, true)
+		if err != nil {
+			return err
+		}
+		res, err := toc.Parse(pagemap.SplitPages(text), pm, toc.Options{
+			Book: b.ID, Chapters: b.Chapters})
+		if err != nil {
+			return err
+		}
+		printTOC(res)
+		if len(res.Problems) > 0 {
+			failed++
+		}
+		if *dry {
+			continue
+		}
+		man.Upsert(corpus.BookTOC{ID: b.ID, Grammar: res.Grammar.String(), Chapters: res.Chapters})
+	}
+	if !*dry {
+		if err := man.Save(root); err != nil {
+			return err
+		}
+		fmt.Printf("written to %s\n", corpus.TOCPath(root))
+	}
+	if failed > 0 {
+		return fmt.Errorf("%d volumes have contents problems", failed)
+	}
+	return nil
+}
+
+func printTOC(r *toc.Result) {
+	ch, sec, sub, ex := r.Counts()
+	fmt.Printf("%s  %s\n", r.Book, r.Grammar)
+	fmt.Printf("  %d chapters, %d §, %d no., %d exercise runs\n", ch, sec, sub, ex)
+	for _, c := range r.Chapters {
+		fmt.Printf("  chapter %-4s %-46s printed %d, pdf %d, %d §\n",
+			c.Numeral, trim(c.Title, 46), c.Page, c.PDFPage, len(c.Sections))
+	}
+	if n := len(r.Problems); n > 0 {
+		fmt.Printf("  %d problems:\n", n)
+		for _, p := range r.Problems {
+			fmt.Printf("    %s\n", p)
+		}
+	}
+}
+
+func trim(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
+}
+
+func tocShow(args []string) error {
+	fs := flag.NewFlagSet("toc show", flag.ExitOnError)
+	chapter := fs.String("chapter", "", "chapter numeral, for example VIII")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: bourbaki toc show [-chapter <numeral>]\n")
+	}
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	man, err := corpus.LoadTOC(root)
+	if err != nil {
+		return err
+	}
+	if *chapter != "" {
+		c, ok := man.Chapter(*chapter)
+		if !ok {
+			return fmt.Errorf("no chapter %q in %s", *chapter, corpus.TOCPath(root))
+		}
+		printChapter(*c)
+		return nil
+	}
+	for _, b := range man.Books {
+		fmt.Printf("%s  %s\n", b.ID, b.Grammar)
+		for _, c := range b.Chapters {
+			printChapter(c)
+		}
+	}
+	return nil
+}
+
+func printChapter(c corpus.Chapter) {
+	fmt.Printf("chapter %s. %s  printed %d, pdf %d\n", c.Numeral, c.Title, c.Page, c.PDFPage)
+	for _, s := range c.Sections {
+		head := fmt.Sprintf("§ %d", s.Number)
+		if s.Appendix {
+			head = "appendix"
+			if s.Number > 0 {
+				head = fmt.Sprintf("appendix %d", s.Number)
+			}
+		}
+		fmt.Printf("  %-5s %-52s printed %4d, pdf %4d\n", head, trim(s.Title, 52), s.Page, s.PDFPage)
+		for _, sub := range s.Subsections {
+			fmt.Printf("      %-3d %-52s printed %4d, pdf %4d\n", sub.Number, trim(sub.Title, 52), sub.Page, sub.PDFPage)
+		}
+		if s.Exercises != nil {
+			fmt.Printf("      exercises %52s printed %4d, pdf %4d\n", "", s.Exercises.Page, s.Exercises.PDFPage)
+		}
+	}
+	if c.Historical != nil {
+		fmt.Printf("  historical note %49s printed %4d, pdf %4d\n", "", c.Historical.Page, c.Historical.PDFPage)
+	}
+}
+
+func tocVerify(args []string) error {
+	fs := flag.NewFlagSet("toc verify", flag.ExitOnError)
+	book := fs.String("book", "", "book id, or empty for every book in the manifest")
+	all := fs.Bool("a", false, "list every miss, not only the ones found on another page")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: bourbaki toc verify [-book <id>] [-a]\n\nOpens every page manifests/toc.yaml points at and looks for the heading\nthat is supposed to be printed there.\n\n")
+		fs.PrintDefaults()
+	}
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		return err
+	}
+	man, err := corpus.LoadTOC(root)
+	if err != nil {
+		return err
+	}
+
+	ctx := context.Background()
+	moved := 0
+	for _, bt := range man.Books {
+		if *book != "" && bt.ID != *book {
+			continue
+		}
+		b, ok := books.Get(bt.ID)
+		if !ok {
+			return fmt.Errorf("%s is in %s but not in %s", bt.ID, corpus.TOCPath(root), corpus.BooksPath(root))
+		}
+		src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+		if err != nil {
+			return err
+		}
+		text, err := src.Text(ctx, 0, 0, true)
+		if err != nil {
+			return err
+		}
+		r := toc.Verify(pagemap.SplitPages(text), bt)
+		fmt.Printf("%s  %d of %d headings on the page the contents names, %.1f%%\n",
+			r.Book, r.Matched, r.Checked, r.Rate())
+		list := r.Moved()
+		if *all {
+			list = r.Misses
+		}
+		fmt.Printf("  %d missed, %d of those printed on another page\n", len(r.Misses), len(r.Moved()))
+		for _, c := range list {
+			fmt.Printf("    %s\n", c)
+		}
+		moved += len(r.Moved())
+	}
+	if moved > 0 {
+		return fmt.Errorf("%d headings are printed on a page the contents does not name", moved)
+	}
+	return nil
+}
