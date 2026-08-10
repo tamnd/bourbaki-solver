@@ -1,0 +1,15 @@
+FROM alpine:3.22
+
+ARG TARGETPLATFORM
+
+# poppler is not optional. Reading a born-digital volume is pdftohtml,
+# rendering a scan is pdftoppm, and classifying either is pdfinfo and
+# pdfimages. Without them the binary starts and can do nothing.
+RUN apk add --no-cache ca-certificates poppler-utils \
+ && adduser -D -u 10001 bourbaki
+
+COPY $TARGETPLATFORM/bourbaki /usr/bin/bourbaki
+
+USER bourbaki
+
+ENTRYPOINT ["/usr/bin/bourbaki"]
