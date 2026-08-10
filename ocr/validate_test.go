@@ -97,6 +97,63 @@ func TestRule2MathDelimiters(t *testing.T) {
 	}
 }
 
+// The page that made rule 2 count paragraphs. This is page 53 of Algebra I as
+// the fleet returned it, cut to the two paragraphs that matter. Each one ends a
+// formula without closing it, and five plus five is ten, so parity over the
+// page said the mathematics was balanced and the page went into the corpus with
+// no flag on it.
+const page53 = `DISTRIBUTIVITY OF ONE INTERNAL LAW WITH RESPECT TO ANOTHER
+
+for every ordered sequence $(\alpha_\lambda)_{\lambda\in L}$ of elements of $\Omega$ and all $x\in E.
+
+(4) In $\mathbf N$ addition and multiplication are distributive with respect to the laws $\sup$ and $\inf.
+`
+
+func TestAnEvenNumberOfDollarsIsNotABalancedPage(t *testing.T) {
+	problems := Validate(page53, alg4(7), Options{})
+	if !has(problems, RuleMath) {
+		t.Fatalf("page 53 was accepted with two unclosed formulae: %s", Reasons(problems))
+	}
+	// The line is the point of doing it this way. Parity can only say the page
+	// is wrong; the repair pass needs to know where.
+	var line int
+	for _, problem := range problems {
+		if problem.Rule == RuleMath {
+			line = problem.Line
+		}
+	}
+	if line != 3 {
+		t.Errorf("the unclosed dollar was reported on line %d, want 3: %s", line, Reasons(problems))
+	}
+}
+
+func TestRule2ReadsParagraphByParagraph(t *testing.T) {
+	head := "A IV.7  POLYNOMIALS  § 1\n\n"
+	filler := strings.Repeat(" filler text to clear the length rule.", 8)
+	cases := []struct {
+		name string
+		body string
+		bad  bool
+	}{
+		// An inline formula wrapped across a line is ordinary and stays legal.
+		// Only a blank line ends the run.
+		{"inline across a line break", "Let $G\nbe$ a group." + filler, false},
+		{"unclosed then closed in the next paragraph", "Let $G be a group.\n\nand $H$ too." + filler, true},
+		// A display block with a blank line inside it is legal LaTeX and the
+		// dollars inside it are not inline delimiters. The rule stands down for
+		// as long as the block is open, or every aligned equation on a page
+		// costs three calls at 151 seconds and lands in the report as a defect.
+		{"display block spanning a blank line", "$$\n\\begin{aligned}\na &= b\n\n&= c\n\\end{aligned}\n$$" + filler, false},
+		{"a run left open at the end of the page", "Let $G$ be a group and $H \\subset G." + filler, true},
+	}
+	for _, test := range cases {
+		problems := Validate(head+test.body, alg4(7), Options{})
+		if got := has(problems, RuleMath); got != test.bad {
+			t.Errorf("%s: math rule fired %t, want %t: %s", test.name, got, test.bad, Reasons(problems))
+		}
+	}
+}
+
 func TestRule3Leaks(t *testing.T) {
 	text := "Here is the transcription of the image:\n\n" + goodPage
 	problems := Validate(text, alg4(7), Options{})
