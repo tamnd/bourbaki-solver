@@ -1,0 +1,275 @@
+package ocr
+
+import (
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/tamnd/bourbaki-solver/pagemap"
+)
+
+// goodPage is what an accepted page of alg-iv-vii looks like: a head label, a
+// statement, display mathematics, a cross-reference. Long enough to clear rule
+// 1 and shaped like the real thing.
+const goodPage = `A IV.7  POLYNOMIALS AND RATIONAL FRACTIONS  § 1
+
+**Proposition 4.** — Let $A$ be a commutative ring and $B$ an $A$-algebra. For
+every family $(b_\lambda)_{\lambda \in L}$ of elements of $B$ there exists a
+unique homomorphism $\varphi$ of $A[(X_\lambda)_{\lambda \in L}]$ into $B$ such
+that $\varphi(X_\lambda) = b_\lambda$ for all $\lambda \in L$.
+
+$$\varphi\left(\sum_{\nu} a_\nu X^\nu\right) = \sum_{\nu} a_\nu b^\nu.$$
+
+The image of $\mathbf{Z}$ under $\varphi$ is the prime subring of $B$
+(I, p. 23, Proposition 4). This applies in particular when $A = \mathbf{Q}$.
+
+☡ The homomorphism $\varphi$ is not in general injective.`
+
+func alg4(page int) Expect {
+	return Expect{
+		Book: "alg-iv-vii", PDFPage: page + 10, Grammar: pagemap.HeadLabel,
+		Chapter: "IV", Page: page, Confidence: pagemap.FromHead, HasHead: true,
+	}
+}
+
+func TestARealPageIsAccepted(t *testing.T) {
+	if problems := Validate(goodPage, alg4(7), Options{}); len(problems) != 0 {
+		t.Fatalf("a good page was rejected: %s", Reasons(problems))
+	}
+	if !OK(goodPage, alg4(7), Options{}) {
+		t.Fatal("OK disagrees with Validate")
+	}
+}
+
+func TestRule1ShortPages(t *testing.T) {
+	short := "A IV.7  POLYNOMIALS AND RATIONAL FRACTIONS  § 1\n\nThe rest of this page is blank."
+	problems := Validate(short, alg4(7), Options{})
+	if !has(problems, RuleShort) {
+		t.Fatalf("a short page was accepted: %s", Reasons(problems))
+	}
+	// A blank page is short on purpose and must not be rejected for it.
+	expect := alg4(7)
+	expect.Blank, expect.HasHead = true, false
+	if has(Validate("", expect, Options{}), RuleShort) {
+		t.Error("a blank page was rejected for being short")
+	}
+	// Nor is a page that is short because the book is short there. alg-iv-vii
+	// page 3 is the Springer knight and nothing else, and alg-viii pages 1 to 3
+	// are title pages of under fifty characters. Rejecting those costs three
+	// calls each and then files a title page as a defect.
+	expect = alg4(7)
+	expect.Sparse, expect.HasHead, expect.Confidence = true, false, pagemap.Unknown
+	if has(Validate("Algebra\n\nChapters 4 to 7", expect, Options{}), RuleShort) {
+		t.Error("a title page was rejected for being short")
+	}
+	// A sparse page is still held to the other rules. A refusal on one is a
+	// refusal.
+	if !has(Validate("I'm sorry, I can't help with that.", expect, Options{}), RuleLeak) {
+		t.Error("a refusal on a sparse page was accepted")
+	}
+}
+
+func TestRule2MathDelimiters(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		bad  bool
+	}{
+		{"balanced inline", `Let $G$ be a group and $H \subset G$.`, false},
+		{"one dollar left open", `Let $G$ be a group and $H \subset G.`, true},
+		{"balanced display", `The sum is $$\sum_{i} a_i = 0.$$`, false},
+		{"one display left open", `The sum is $$\sum_{i} a_i = 0.`, true},
+		{"display and inline together", `For $x$ we have $$x^2 = 1$$ and $y$ follows.`, false},
+		// A naive count of dollars calls this unbalanced, because $$ is two of
+		// them. Every display page in both volumes looks like this.
+		{"display only, no inline", `$$a + b = c$$ and $$d + e = f$$`, false},
+		// Bourbaki's historical notes quote prices, and a literal dollar is
+		// escaped. Counting it would reject the page.
+		{"escaped dollar", `The prize was \$100 and the ring $\mathbf{Z}$ is free.`, false},
+		{"two escaped dollars", `From \$5 to \$10, with $x$ fixed.`, false},
+	}
+	for _, test := range cases {
+		body := "A IV.7  POLYNOMIALS  § 1\n\n" + test.body + strings.Repeat(" filler text to clear the length rule.", 8)
+		problems := Validate(body, alg4(7), Options{})
+		if got := has(problems, RuleMath); got != test.bad {
+			t.Errorf("%s: math rule fired %t, want %t: %s", test.name, got, test.bad, Reasons(problems))
+		}
+	}
+}
+
+func TestRule3Leaks(t *testing.T) {
+	text := "Here is the transcription of the image:\n\n" + goodPage
+	problems := Validate(text, alg4(7), Options{})
+	if !has(problems, RuleLeak) {
+		t.Fatalf("narration was accepted: %s", Reasons(problems))
+	}
+	// A leak is reported on its own. A refusal is short and headless and has no
+	// mathematics, and listing those as three more problems would say the page
+	// failed four rules when it failed one.
+	refusal := Validate("I'm sorry, I can't transcribe this image.", alg4(7), Options{})
+	if len(Rules(refusal)) != 1 || Rules(refusal)[0] != RuleLeak {
+		t.Fatalf("a refusal reported as %v, want leak alone", Rules(refusal))
+	}
+}
+
+func TestRule4RunningHead(t *testing.T) {
+	// A volume that prints a page label has to show one.
+	noHead := "**Proposition 4.** — Let $A$ be a commutative ring." + strings.Repeat(" More text follows here.", 12)
+	if !has(Validate(noHead, alg4(7), Options{}), RuleHead) {
+		t.Error("a page with no running head was accepted for a head-label volume")
+	}
+	// Pages that print no head at all are not asked for one. A chapter opener
+	// is the common case, and rejecting those would fail one page per chapter.
+	expect := alg4(7)
+	expect.HasHead, expect.Confidence = false, pagemap.Unknown
+	if has(Validate(noHead, expect, Options{}), RuleHead) {
+		t.Error("a chapter opener was asked for a running head")
+	}
+}
+
+func TestRule4ForTheVolumeThatPrintsItsNumberAtTheFoot(t *testing.T) {
+	// alg-i-iii prints no page label. The head carries the chapter title in
+	// capitals on one side and the section locator on the other, so the rule
+	// can only ask that the line is a head and not the opening of a paragraph.
+	foot := func(head string) []Problem {
+		body := head + "\n\n**Theorem 1.** — Every group is isomorphic to a group of permutations." +
+			strings.Repeat(" The proof follows from the preceding remarks.", 6)
+		return Validate(body, Expect{
+			Book: "alg-i-iii", Grammar: pagemap.FootNumber, Chapter: "I",
+			Page: 24, Confidence: pagemap.FromFoot, HasHead: true,
+		}, Options{})
+	}
+	for _, head := range []string{
+		"ALGEBRAIC STRUCTURES",
+		"§ 4.5",
+		"§ 4",
+		"24",
+		"MONOIDS, GROUPS",
+	} {
+		if problems := foot(head); has(problems, RuleHead) {
+			t.Errorf("a real running head was rejected: %q: %s", head, Reasons(problems))
+		}
+	}
+	for _, head := range []string{
+		"Let $G$ be a group whose law of composition is written multiplicatively.",
+		"In this section we develop the theory of groups acting on sets, following.",
+	} {
+		if problems := foot(head); !has(problems, RuleHead) {
+			t.Errorf("a line of prose passed as a running head: %q", head)
+		}
+	}
+}
+
+func TestRule5Illegible(t *testing.T) {
+	body := func(n int) string {
+		return "A IV.7  POLYNOMIALS  § 1\n\nThe element " +
+			strings.Repeat("x "+Illegible+" is not readable here. ", n) +
+			strings.Repeat("Ordinary text of the page continues. ", 8)
+	}
+	// A damaged scan with one or two bad spots is still the best reading of
+	// that page, and asking for it again gets the same answer.
+	for _, n := range []int{0, 1, 2} {
+		if has(Validate(body(n), alg4(7), Options{}), RuleIllegible) {
+			t.Errorf("%d unreadable spots was rejected", n)
+		}
+	}
+	for _, n := range []int{3, 6} {
+		if !has(Validate(body(n), alg4(7), Options{}), RuleIllegible) {
+			t.Errorf("%d unreadable spots was accepted", n)
+		}
+	}
+}
+
+func TestRule6PageLabelAgainstThePageMap(t *testing.T) {
+	page := func(label string) []Problem {
+		return Validate(strings.Replace(goodPage, "A IV.7", label, 1), alg4(7), Options{})
+	}
+	// One page of slack: a verso head and the facing recto differ by one, and
+	// these scans are known to be off by a page in places.
+	for _, label := range []string{"A IV.6", "A IV.7", "A IV.8"} {
+		if problems := page(label); has(problems, RuleLabel) {
+			t.Errorf("%s was rejected against a page map that says A IV.7: %s", label, Reasons(problems))
+		}
+	}
+	for _, label := range []string{"A IV.9", "A IV.70", "A IV.5"} {
+		if !has(page(label), RuleLabel) {
+			t.Errorf("%s was accepted against a page map that says A IV.7", label)
+		}
+	}
+	// The wrong chapter is always wrong, however close the number.
+	if !has(page("A V.7"), RuleLabel) {
+		t.Error("a page from the wrong chapter was accepted")
+	}
+}
+
+func TestRule6DoesNotRunOnAGuess(t *testing.T) {
+	// The page map interpolates a number where the page did not print a legible
+	// one. Rejecting a page because a guess disagrees with it would throw away
+	// the only reading that was actually made.
+	expect := alg4(7)
+	expect.Confidence = pagemap.Interpolated
+	body := strings.Replace(goodPage, "A IV.7", "A IV.40", 1)
+	if has(Validate(body, expect, Options{}), RuleLabel) {
+		t.Error("an interpolated page number rejected a page")
+	}
+	// Nor where the volume prints no label at all.
+	expect = Expect{Book: "alg-i-iii", Grammar: pagemap.FootNumber, Page: 3, Confidence: pagemap.FromFoot, HasHead: true}
+	if has(Validate(body, expect, Options{}), RuleLabel) {
+		t.Error("the label rule ran on a volume that prints no label")
+	}
+}
+
+type texFails struct{ err error }
+
+func (t texFails) Check(string) error { return t.err }
+
+func TestRule7IsOptIn(t *testing.T) {
+	if has(Validate(goodPage, alg4(7), Options{}), RuleLaTeX) {
+		t.Fatal("the LaTeX rule ran without being asked for")
+	}
+	problems := Validate(goodPage, alg4(7), Options{LaTeX: texFails{errors.New("undefined control sequence \\varphi")}})
+	if !has(problems, RuleLaTeX) {
+		t.Fatalf("the LaTeX rule did not fire: %s", Reasons(problems))
+	}
+	if !strings.Contains(Reasons(problems), "undefined control sequence") {
+		t.Fatalf("the compiler's message was lost: %s", Reasons(problems))
+	}
+	if has(Validate(goodPage, alg4(7), Options{LaTeX: texFails{nil}}), RuleLaTeX) {
+		t.Error("the LaTeX rule fired on a fragment that compiled")
+	}
+}
+
+func TestEveryFailingRuleIsReportedNotJustTheFirst(t *testing.T) {
+	// Short, unbalanced, and no running head. The retry differs depending on
+	// which of those it is, so all three have to come back.
+	body := "Let $G$ be a group and let $H \\subset G."
+	problems := Validate(body, alg4(7), Options{})
+	rules := Rules(problems)
+	for _, want := range []Rule{RuleShort, RuleMath, RuleHead} {
+		if !has(problems, want) {
+			t.Errorf("rule %s was not reported: %v", want, rules)
+		}
+	}
+}
+
+func TestReasonsReadsAsOneLine(t *testing.T) {
+	if Reasons(nil) != "" {
+		t.Error("no problems should read as nothing")
+	}
+	got := Reasons(Validate("Let $G$ be a group.", alg4(7), Options{}))
+	if !strings.Contains(got, "short:") || !strings.Contains(got, "head:") {
+		t.Fatalf("the reason line does not name its rules: %s", got)
+	}
+	if strings.Contains(got, "\n") {
+		t.Fatalf("the reason line has a newline in it: %q", got)
+	}
+}
+
+func has(problems []Problem, rule Rule) bool {
+	for _, problem := range problems {
+		if problem.Rule == rule {
+			return true
+		}
+	}
+	return false
+}
