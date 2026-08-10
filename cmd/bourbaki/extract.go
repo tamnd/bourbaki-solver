@@ -139,7 +139,7 @@ func extractFonts(args []string) error {
 }
 
 // extractRun reads a whole born-digital volume and writes one page file per
-// page under work/pages/<book>, plus a report of how the run went under
+// page under pages/<book>, plus a report of how the run went under
 // reports/.
 //
 // The page files are scratch and work/ is not committed. The report is, because

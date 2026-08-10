@@ -12,8 +12,7 @@ import (
 // audit compares the two paths against each other because they produce the
 // same shape.
 //
-// Page files live under work/, which is not committed. The corpus keeps the
-// assembled sections, not the scratch the assembler was built from.
+// Page files are committed. See PagesDir for why they moved out of work/.
 
 // PageMethod is how a page was read.
 type PageMethod string
@@ -38,7 +37,7 @@ type PageLocator struct {
 	Subsec  int `yaml:"subsec,omitempty"`
 }
 
-// PageFrontMatter is the head of work/pages/<book>/NNNN.md.
+// PageFrontMatter is the head of pages/<book>/NNNN.md.
 type PageFrontMatter struct {
 	Book        string       `yaml:"book"`
 	PDFPage     int          `yaml:"pdf_page"`
@@ -72,8 +71,20 @@ type PageFrontMatter struct {
 type PageFile = File[PageFrontMatter]
 
 // PagesDir is where the pages of one volume are written.
+//
+// Committed, not scratch. These were under work/ at first, on the reasoning
+// that the assembled chapters are the product and a per page file is an
+// intermediate. That was wrong twice over. A page that cost three minutes of a
+// rented box to read is not an intermediate, it is the expensive thing, and
+// work/ is gitignored, so five hundred pages of Algebra VIII sat on one laptop
+// and the repository looked empty to anyone who opened it. Assembly reads these
+// and writes content/; both are worth keeping and only one of them can be
+// rebuilt in an afternoon.
+//
+// This is Markdown, so it is fine to commit. The PDFs and the page images stay
+// out, and .gitignore keeps them out.
 func PagesDir(root, book string) string {
-	return filepath.Join(root, "work", "pages", book)
+	return filepath.Join(root, "pages", book)
 }
 
 // PagePath is the file one page is written to. The name is the PDF page padded
@@ -82,9 +93,8 @@ func PagePath(root, book string, pdfPage int) string {
 	return filepath.Join(PagesDir(root, book), fmt.Sprintf("%04d.md", pdfPage))
 }
 
-// ExtractReportPath is where the count of a run is published. The pages
-// themselves are scratch and are not committed, but what came of reading them
-// is the claim the milestone is judged on, so it is.
+// ExtractReportPath is where the count of a run is published, next to the pages
+// it counts.
 func ExtractReportPath(root, book string) string {
 	return filepath.Join(root, "reports", "extract-"+book+".json")
 }

@@ -187,13 +187,23 @@ func OK(text string, expect Expect, options Options) bool {
 	return len(Validate(text, expect, options)) == 0
 }
 
-// checkMath counts the delimiters.
+// checkMath is rule 2. It counts the delimiters over the page and then again
+// paragraph by paragraph, because the first count on its own is too weak to
+// catch what the fleet actually returns.
+func checkMath(text string) (Problem, bool) {
+	if problem, ok := checkMathTotals(text); !ok {
+		return problem, ok
+	}
+	return checkInlineRuns(text)
+}
+
+// checkMathTotals counts the delimiters over the whole page.
 //
 // The two forms have to be counted together and in one pass, because $$ is two
 // dollars and a naive count of $ says every display page is unbalanced. Escaped
 // dollars are literal and do not count, and Bourbaki uses them: the volumes
 // print prices in the historical notes.
-func checkMath(text string) (Problem, bool) {
+func checkMathTotals(text string) (Problem, bool) {
 	var inline, display int
 	runes := []rune(text)
 	for i := 0; i < len(runes); i++ {
@@ -218,6 +228,69 @@ func checkMath(text string) (Problem, bool) {
 		return Problem{Rule: RuleMath, Detail: fmt.Sprintf("%d inline delimiters, an odd number", inline)}, false
 	}
 	return Problem{}, true
+}
+
+// checkInlineRuns takes the same count paragraph by paragraph.
+//
+// Parity over the whole page passes a page with two unclosed dollars as readily
+// as one with none, and that is not a corner case. Page 53 of Algebra I came
+// back with "and all $x\in E." at the end of one paragraph and "$\sup$ and
+// $\inf." at the end of another, both missing their closing dollar, and the two
+// odd counts added to an even one. The page was accepted with two broken
+// formulae on it and no flag.
+//
+// An inline formula does not run across a blank line anywhere in these volumes,
+// so a dollar still open when a paragraph ends is an unclosed one. That is a
+// stronger rule than parity and it can name the line, which parity cannot.
+//
+// Dollars inside a display block are not inline delimiters and are not counted,
+// which is what the display parity is tracked for here: a $$ block that spans a
+// blank line leaves the count odd, and while it is odd the rule stands down.
+func checkInlineRuns(text string) (Problem, bool) {
+	openLine, display := 0, 0
+	for i, raw := range strings.Split(text, "\n") {
+		if strings.TrimSpace(raw) == "" {
+			if openLine > 0 && display%2 == 0 {
+				return unclosed(openLine), false
+			}
+			continue
+		}
+		runes := []rune(raw)
+		for j := 0; j < len(runes); j++ {
+			if runes[j] == '\\' {
+				j++
+				continue
+			}
+			if runes[j] != '$' {
+				continue
+			}
+			if j+1 < len(runes) && runes[j+1] == '$' {
+				display++
+				j++
+				continue
+			}
+			if display%2 != 0 {
+				continue // inside a display block, not an inline delimiter
+			}
+			if openLine > 0 {
+				openLine = 0
+			} else {
+				openLine = i + 1
+			}
+		}
+	}
+	if openLine > 0 && display%2 == 0 {
+		return unclosed(openLine), false
+	}
+	return Problem{}, true
+}
+
+func unclosed(line int) Problem {
+	return Problem{
+		Rule:   RuleMath,
+		Detail: "an inline $ opened on this line is never closed before the paragraph ends",
+		Line:   line,
+	}
 }
 
 // checkHead is rule 4.

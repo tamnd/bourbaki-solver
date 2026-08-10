@@ -18,18 +18,35 @@ import (
 const ocrUsage = `usage: bourbaki ocr <command> [flags]
 
 commands:
+  fill     put a job in the queue for every page of a volume that has to be read
+  run      lease pages, read them on the fleet, validate what comes back
   check    run the seven validation rules over the page files already on disk
 
-flags:
-  -book ID     book id from manifests/books.yaml
-  -f N -l N    first and last pdf page, default the whole volume
-  -rule NAME   only report this rule: short, math, leak, head, illegible, label, latex
-  -v           print every problem, not just the counts
-  -json        print one JSON object per rejected page
+flags for fill and run:
+  -book ID       book id from manifests/books.yaml
+  -f N -l N      first and last pdf page, default the whole volume
+  -batch N       pages per batch, default 25
+  -limit N       stop after this many pages, for a pilot
+  -hosts LIST    comma separated route names, default every route that does OCR
+  -routes PATH   route file, default ~/.config/bourbaki/routes.json
+  -queue PATH    queue directory
+  -keep          leave the page images on the hosts, for debugging
+  -dry           say what would be read and stop
 
-check is the same code that decides whether to accept a page as it comes back
-from a model, run against what is already written. It is how a change to the
-rules is measured before it is turned loose on 1194 pages at 151 seconds each.
+flags for check:
+  -rule NAME     only report this rule: short, math, leak, head, illegible, label, latex
+  -v             print every problem, not just the counts
+  -json          print one JSON object per rejected page
+
+run is the expensive command in this repo. It sends page images to rented boxes
+over ssh, reads them with chatgpt-tool ocr-batch, pulls the Markdown back and
+accepts or rejects each page against the seven rules. A page costs minutes, so
+nothing is read twice: the queue is content addressed on the image and the
+prompt, and a run that is interrupted picks up where it stopped.
+
+check is the same code that decides whether to accept a page, run against what
+is already written. It is how a change to the rules is measured before it is
+turned loose on 1194 pages.
 `
 
 func runOCR(args []string) error {
@@ -38,6 +55,10 @@ func runOCR(args []string) error {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "fill":
+		return ocrFill(args[1:])
+	case "run":
+		return ocrRun(args[1:])
 	case "check":
 		return ocrCheck(args[1:])
 	case "help", "-h", "--help":
@@ -119,24 +140,7 @@ func ocrCheck(args []string) error {
 		}
 		checked++
 
-		expect := ocr.Expect{Book: entry.ID, PDFPage: page, Grammar: pagemap.Grammar(entry.Grammar)}
-		if value, ok := manifest.Find(page); ok {
-			expect.Blank = value.Blank
-			expect.Sparse = value.Ink < ocr.SparseInk
-		}
-		if pmap != nil {
-			if pageEntry, ok := pmap.Lookup(page); ok {
-				expect.Chapter, expect.Page = pageEntry.Chapter, pageEntry.Page
-				expect.Confidence = pageEntry.Confidence
-				// A page whose number was read off its own running head has
-				// one by definition. Anywhere else the page map cannot say,
-				// and asking for a head that a chapter opener does not print
-				// would fail one page per chapter.
-				expect.HasHead = pageEntry.Confidence == pagemap.FromHead
-			}
-		}
-
-		problems := ocr.Validate(checkText(file), expect, ocr.Options{})
+		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{})
 		if *only != "" {
 			problems = filterRule(problems, ocr.Rule(*only))
 		}
