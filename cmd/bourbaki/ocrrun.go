@@ -44,9 +44,20 @@ type setup struct {
 	pmap     *pagemap.Map
 	manifest render.Manifest
 	queue    *queue.Queue
+	// only, when set, is the pages a run may touch whatever else is rendered.
+	// It is how the flagged pages of a born-digital volume are read without the
+	// other four hundred and forty nine going anywhere near a model.
+	only map[int]bool
 }
 
-func ocrSetup(book, queueRoot string) (setup, error) {
+// ocrSetup finds the book, its render manifest and the queue.
+//
+// flagged is the door for a born-digital volume. Algebra VIII extracts from its
+// text layer and has no business here, except for the pages the text layer
+// could not carry: a commutative diagram is not in the text layer at all. Those
+// pages are named in the extraction report, rendered by render -flagged, and
+// read here, and nothing else of that volume is.
+func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
 	var out setup
 	root, err := corpus.Root()
 	if err != nil {
@@ -60,8 +71,20 @@ func ocrSetup(book, queueRoot string) (setup, error) {
 	if !ok {
 		return out, fmt.Errorf("no book %q in %s", book, corpus.BooksPath(root))
 	}
-	if entry.Extraction != "ocr" {
-		return out, fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract", entry.ID, entry.Nature, entry.Extraction)
+	if entry.Extraction != "ocr" && !flagged {
+		return out, fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract, or -flagged for the pages it could not read",
+			entry.ID, entry.Nature, entry.Extraction)
+	}
+	var only map[int]bool
+	if flagged {
+		pages, err := flaggedPages(root, entry.ID)
+		if err != nil {
+			return out, err
+		}
+		only = map[int]bool{}
+		for _, page := range pages {
+			only[page] = true
+		}
 	}
 	manifest, err := render.ReadManifest(root, entry.ID)
 	if err != nil {
@@ -75,7 +98,7 @@ func ocrSetup(book, queueRoot string) (setup, error) {
 	if mapErr != nil {
 		fmt.Fprintf(os.Stderr, "no page map for %s, so the running head and page label rules are skipped: %v\n", entry.ID, mapErr)
 	}
-	return setup{root: root, entry: entry, pmap: pmap, manifest: manifest, queue: q}, nil
+	return setup{root: root, entry: entry, pmap: pmap, manifest: manifest, queue: q, only: only}, nil
 }
 
 func (s setup) expect(page int) ocr.Expect {
@@ -112,6 +135,9 @@ func expectFor(entry *corpus.Book, pmap *pagemap.Map, manifest render.Manifest, 
 func (s setup) sources(first, last int) []ocr.Source {
 	var out []ocr.Source
 	for _, page := range s.manifest.Pages {
+		if s.only != nil && !s.only[page.Page] {
+			continue
+		}
 		if first > 0 && page.Page < first {
 			continue
 		}
@@ -141,6 +167,7 @@ func ocrFlags(fs *flag.FlagSet) (book, hosts, routes, queueRoot *string, first, 
 func ocrFill(args []string) error {
 	fs := flag.NewFlagSet("ocr fill", flag.ExitOnError)
 	book, _, _, queueRoot, first, last, _, _, _, _ := ocrFlags(fs)
+	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -148,7 +175,7 @@ func ocrFill(args []string) error {
 		fs.Usage()
 		os.Exit(2)
 	}
-	state, err := ocrSetup(*book, *queueRoot)
+	state, err := ocrSetup(*book, *queueRoot, *flagged)
 	if err != nil {
 		return err
 	}
@@ -188,6 +215,10 @@ func ocrRun(args []string) error {
 	// because somebody else's build is on the machine right now, sit and ask
 	// again. Zero keeps the old behaviour of failing straight away.
 	wait := fs.Duration("wait", 0, "how long to wait for a host with a spare core before giving up")
+	// The same door as render -flagged, and it has to be asked for twice on
+	// purpose: rendering the pages of a born-digital volume is cheap and local,
+	// reading them costs rationed uploads.
+	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -195,7 +226,7 @@ func ocrRun(args []string) error {
 		fs.Usage()
 		os.Exit(2)
 	}
-	state, err := ocrSetup(*book, *queueRoot)
+	state, err := ocrSetup(*book, *queueRoot, *flagged)
 	if err != nil {
 		return err
 	}

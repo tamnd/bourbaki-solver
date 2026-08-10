@@ -165,7 +165,7 @@ func ocrRepair(args []string) error {
 		os.Exit(2)
 	}
 
-	state, err := ocrSetup(*book, defaultQueueRoot())
+	state, err := ocrSetup(*book, defaultQueueRoot(), false)
 	if err != nil {
 		return err
 	}

@@ -10,9 +10,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/extract"
 	"github.com/tamnd/bourbaki-solver/fleet"
 	"github.com/tamnd/bourbaki-solver/ocr"
+	"github.com/tamnd/bourbaki-solver/render"
 	"github.com/tamnd/bourbaki-solver/route"
+	"gopkg.in/yaml.v3"
 )
 
 // The three boxes as fleet doctor measured them. server1 is the interesting
@@ -327,4 +331,91 @@ func countLines(t *testing.T, path string) int {
 		return 0
 	}
 	return strings.Count(body, "\n") + 1
+}
+
+// setupCorpus is a corpus with one book in it, enough for ocrSetup to run
+// against without a checkout.
+func setupCorpus(t *testing.T, book corpus.Book, manifest render.Manifest, flags []extract.PageFlags) string {
+	t.Helper()
+	root := t.TempDir()
+	for _, dir := range []string{"manifests", "reports"} {
+		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw, err := yaml.Marshal(corpus.BooksManifest{Books: []corpus.Book{book}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corpus.BooksPath(root), raw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := render.WriteManifest(root, book.ID, manifest); err != nil {
+		t.Fatal(err)
+	}
+	report, err := json.Marshal(extract.Result{Book: book.ID, Flags: flags})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corpus.ExtractReportPath(root, book.ID), report, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOURBAKI_CORPUS", root)
+	return root
+}
+
+// Algebra VIII has a text layer and reading all 505 of its pages through a model
+// would spend a day of upload quota on pages that are already perfect. The
+// repair pass is the exception, and it is the flagged pages only: the door has
+// to open exactly that far and no further.
+func TestFlaggedIsTheOnlyWayIntoABornDigitalVolume(t *testing.T) {
+	book := corpus.Book{ID: "alg-viii", Nature: "born-digital", Extraction: "native"}
+	manifest := render.Manifest{Book: "alg-viii", Pages: []render.Page{
+		{Page: 41, SHA256: "a"}, {Page: 76, SHA256: "b"}, {Page: 77, SHA256: "c"}, {Page: 78, SHA256: "d"},
+	}}
+	flags := []extract.PageFlags{
+		{PDFPage: 76, Flags: []string{"diagram"}},
+		{PDFPage: 77, Flags: []string{"diagram"}},
+	}
+	setupCorpus(t, book, manifest, flags)
+	queueRoot := filepath.Join(t.TempDir(), "queue")
+
+	if _, err := ocrSetup("alg-viii", queueRoot, false); err == nil {
+		t.Fatal("a born-digital volume was let in without -flagged")
+	} else if !strings.Contains(err.Error(), "-flagged") {
+		t.Errorf("the refusal does not say what to do instead: %v", err)
+	}
+
+	s, err := ocrSetup("alg-viii", queueRoot, true)
+	if err != nil {
+		t.Fatalf("ocrSetup with -flagged: %v", err)
+	}
+	sources := s.sources(0, 0)
+	if len(sources) != 2 || sources[0].Page != 76 || sources[1].Page != 77 {
+		t.Fatalf("sources = %v, want only the flagged pages 76 and 77", sources)
+	}
+
+	// The range still applies on top of the flag list, because a repair pass of
+	// forty five pages is still something you want to try ten of first.
+	if got := s.sources(77, 0); len(got) != 1 || got[0].Page != 77 {
+		t.Errorf("sources(77, 0) = %v, want page 77 alone", got)
+	}
+}
+
+// A scanned volume reads every page it rendered, and nothing about the repair
+// door may change that.
+func TestWithoutFlaggedAScannedVolumeReadsEveryRenderedPage(t *testing.T) {
+	book := corpus.Book{ID: "alg-i-iii", Nature: "scan", Extraction: "ocr"}
+	manifest := render.Manifest{Book: "alg-i-iii", Pages: []render.Page{
+		{Page: 50, SHA256: "a"}, {Page: 51, SHA256: "b"},
+	}}
+	setupCorpus(t, book, manifest, nil)
+
+	s, err := ocrSetup("alg-i-iii", filepath.Join(t.TempDir(), "queue"), false)
+	if err != nil {
+		t.Fatalf("ocrSetup: %v", err)
+	}
+	if got := s.sources(0, 0); len(got) != 2 {
+		t.Errorf("sources = %v, want both rendered pages", got)
+	}
 }

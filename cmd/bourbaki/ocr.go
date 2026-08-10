@@ -34,6 +34,9 @@ flags for fill and run:
   -keep          leave the page images on the hosts, for debugging
   -no-repair     reject a failed page instead of asking about it in its thread
   -lanes N       override how many pages a host reads at once
+  -wait DUR      wait this long for a box with a spare core rather than fail
+  -flagged       only the pages a native extraction could not read, which is the
+                 one way a born-digital volume is read through a model
   -dry           say what would be read and stop
 
 flags for check:

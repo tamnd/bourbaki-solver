@@ -451,7 +451,7 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 		}
 	}()
 	for len(out) < n {
-		job, err := r.Queue.Lease(queue.StageOCR, host.Name, expected)
+		job, err := r.Queue.Lease(queue.StageOCR, host.Name, r.Book, expected)
 		if errors.Is(err, queue.ErrEmpty) {
 			break
 		}

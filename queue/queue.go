@@ -303,14 +303,22 @@ func (q *Queue) ids(stage Stage, state State) ([]string, error) {
 	return out, nil
 }
 
-// Lease claims the next pending job for a host.
+// Lease claims the next pending job for a host, out of one group.
 //
 // The claim is the rename itself. Two workers that pick the same job both call
 // rename, the loser gets ENOENT because the file is already gone, and it moves
 // on to the next one. That is the whole mutual exclusion, and it works between
 // processes and between machines sharing a directory, which a mutex in this
 // program would not.
-func (q *Queue) Lease(stage Stage, host string, expected time.Duration) (Job, error) {
+//
+// The group is the part of the target before the slash, which for OCR is the
+// book. It is a parameter and not an option because a caller that leases across
+// books is a caller that has already gone wrong: an OCR run knows the page
+// number from the target and resolves the image against the book it was started
+// with, so a job from another book reads the wrong file and writes a real page
+// of one volume over a real page of another. An empty group takes anything, and
+// only a caller that owns the whole stage should pass it.
+func (q *Queue) Lease(stage Stage, host, group string, expected time.Duration) (Job, error) {
 	ids, err := q.ids(stage, Pending)
 	if err != nil {
 		return Job{}, err
@@ -322,6 +330,9 @@ func (q *Queue) Lease(stage Stage, host string, expected time.Duration) (Job, er
 				continue // somebody else took it between the listing and here
 			}
 			return Job{}, err
+		}
+		if group != "" && GroupOf(job.Target) != group {
+			continue
 		}
 		from, to := q.path(stage, Pending, id), q.path(stage, Leased, id)
 		if err := os.Rename(from, to); err != nil {
@@ -338,6 +349,16 @@ func (q *Queue) Lease(stage Stage, host string, expected time.Duration) (Job, er
 		return job, nil
 	}
 	return Job{}, ErrEmpty
+}
+
+// GroupOf is the part of a target before the slash, or the whole target when
+// there is no slash in it.
+func GroupOf(target string) string {
+	group, _, ok := strings.Cut(target, "/")
+	if !ok {
+		return target
+	}
+	return group
 }
 
 // Finish records the result of a leased job.
