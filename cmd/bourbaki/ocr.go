@@ -33,6 +33,7 @@ flags for fill and run:
   -queue PATH    queue directory
   -keep          leave the page images on the hosts, for debugging
   -no-repair     reject a failed page instead of asking about it in its thread
+  -lanes N       override how many pages a host reads at once
   -dry           say what would be read and stop
 
 flags for check:

@@ -173,6 +173,12 @@ func ocrRun(args []string) error {
 	// measuring how well the model reads a page wants the raw rate, not the
 	// rate after the pages that nearly worked were mended.
 	noRepair := fs.Bool("no-repair", false, "reject a failed page instead of asking about it in its own thread")
+	// Half the cores is a rule of thumb, not a measurement of this page. A
+	// browser rendering chatgpt.com in software wants more than one core and
+	// less than two, and where it falls between them depends on the box. The
+	// number is worth overriding by somebody who has watched a run and read the
+	// load average, which is cheaper than making the probe guess.
+	lanes := fs.Int("lanes", 0, "override how many pages a host reads at once")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -187,6 +193,11 @@ func ocrRun(args []string) error {
 	hosts, err := ocrHosts(*routeFile, *hostList)
 	if err != nil {
 		return err
+	}
+	if *lanes > 0 {
+		for i := range hosts {
+			hosts[i].Lanes = *lanes
+		}
 	}
 
 	start := time.Now()
@@ -318,8 +329,15 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 // none, why.
 //
 // A route's concurrency is model calls over HTTP, which cost a socket. A lane
-// here is a Chrome profile under Xvfb, which costs a gigabyte. A box can have
-// the room for the first and not the second, and server1 does.
+// here is a Chrome profile under Xvfb, which costs a core and a half. A box can
+// have the room for the first and not the second, and server1 does.
+//
+// Memory is not what runs out. A lane measured on server2 peaks at 275 MB, and
+// the box sat at 10 GB free through a page that took six minutes. What runs out
+// is CPU: the browser draws through swiftshader, because these boxes have no
+// GPU, and four of them on six cores took the load average to ten and left every
+// page blank. So the ceiling here is Facts.Lanes, which counts cores, and the
+// memory floor below is kept only to refuse a box that has nothing left at all.
 func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 	switch {
 	case !facts.Xvfb:
@@ -333,11 +351,11 @@ func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 	if lanes <= 0 {
 		lanes = 1
 	}
-	if facts.MemFreeMB > 0 {
-		// Never more lanes than the memory measured on the box will hold,
-		// whatever the route file says. Swapping a browser is slower than not
-		// starting it.
-		lanes = min(lanes, facts.MemFreeMB/ocrLaneMemoryMB)
+	// Never more than the box itself says it can carry, whatever the route
+	// file asks for. The route file is written by hand and the facts are
+	// measured, so when they disagree the measurement wins.
+	if capacity := facts.Lanes(); capacity > 0 {
+		lanes = min(lanes, capacity)
 	}
 	return lanes, ""
 }

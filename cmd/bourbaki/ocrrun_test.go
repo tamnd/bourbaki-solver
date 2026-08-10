@@ -22,7 +22,7 @@ var (
 	server1 = fleet.Facts{Name: "server1", Cores: 4, MemFreeMB: 1334, Xvfb: true, Rsync: true, Tool: "/home/tam/chatgpt-tool/.venv/bin/chatgpt-tool"}
 )
 
-func TestLanesFollowTheMemoryOnTheBox(t *testing.T) {
+func TestLanesFollowWhatTheBoxCanCarry(t *testing.T) {
 	cases := []struct {
 		name  string
 		route route.Route
@@ -33,7 +33,9 @@ func TestLanesFollowTheMemoryOnTheBox(t *testing.T) {
 		{"the big box takes what the route asks for", route.Route{Concurrency: 4}, server3, 4, ""},
 		{"the middle box too", route.Route{Concurrency: 3}, server2, 3, ""},
 		{"the small box reads nothing", route.Route{Concurrency: 1}, server1, 0, "1334 MB free"},
-		{"memory caps an optimistic route file", route.Route{Concurrency: 16}, server2, 4, ""},
+		// Six cores carry three browsers. A route file asking for sixteen is
+		// asking for a load average of forty and sixteen blank pages.
+		{"the box caps an optimistic route file", route.Route{Concurrency: 16}, server2, 3, ""},
 		{"no xvfb is no browser", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Rsync: true}, 0, "xvfb"},
 		{"no rsync is no images", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Xvfb: true}, 0, "rsync"},
 		{"an unmeasured box is taken at its word", route.Route{Concurrency: 2}, fleet.Facts{Xvfb: true, Rsync: true}, 2, ""},
@@ -55,13 +57,13 @@ func TestLanesFollowTheMemoryOnTheBox(t *testing.T) {
 	}
 }
 
-// A host that reads three pages at once must never be handed a fourth by the
-// arithmetic that caps it. 7363/1500 is 4 by integer division and the route
-// file says 3, and the smaller of the two is the answer.
+// The cap only ever takes lanes away. A box with room for four that is asked
+// for three reads three, because the route file is also allowed to be the
+// cautious one.
 func TestTheCapNeverRaisesTheLaneCount(t *testing.T) {
-	lanes, _ := ocrLanes(route.Route{Concurrency: 3}, server2)
+	lanes, _ := ocrLanes(route.Route{Concurrency: 3}, server3)
 	if lanes != 3 {
-		t.Fatalf("lanes = %d, want the route file's 3 and not the memory's 4", lanes)
+		t.Fatalf("lanes = %d, want the route file's 3 and not the box's 4", lanes)
 	}
 }
 
