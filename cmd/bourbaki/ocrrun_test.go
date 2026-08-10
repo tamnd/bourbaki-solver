@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -70,6 +72,96 @@ func TestTheCapNeverRaisesTheLaneCount(t *testing.T) {
 	lanes, _ := ocrLanes(route.Route{Concurrency: 3}, server3)
 	if lanes != 3 {
 		t.Fatalf("lanes = %d, want the route file's 3 and not the box's 4", lanes)
+	}
+}
+
+// A busy fleet is a wait, not a failure, when the caller asked to wait. The
+// boxes are shared and the load moves: server2 read 0.55 one evening and 7.67
+// an hour later on somebody else's rust build, so a run left overnight should
+// sit through that rather than give up on it.
+func TestARunCanWaitForABoxToComeFree(t *testing.T) {
+	tries := 0
+	var slept []time.Duration
+	sleep := func(_ context.Context, pause time.Duration) error {
+		slept = append(slept, pause)
+		return nil
+	}
+	pick := func() ([]ocr.Host, error) {
+		tries++
+		if tries < 3 {
+			return nil, errors.New("no host can read page images")
+		}
+		return []ocr.Host{{Name: "server2", Tool: "t", Lanes: 2}}, nil
+	}
+
+	hosts, err := hostsWithin(context.Background(), time.Hour, func(string, ...any) {}, sleep, pick)
+	if err != nil {
+		t.Fatalf("the loop gave up on a fleet that came free: %v", err)
+	}
+	if len(hosts) != 1 || hosts[0].Name != "server2" {
+		t.Fatalf("hosts = %+v", hosts)
+	}
+	if tries != 3 || len(slept) != 2 {
+		t.Fatalf("asked %d times and slept %d times, want 3 and 2", tries, len(slept))
+	}
+	for _, pause := range slept {
+		if pause != ocrFleetRecheck {
+			t.Errorf("slept %s between tries, want %s", pause, ocrFleetRecheck)
+		}
+	}
+}
+
+// Without -wait the old behaviour stands: say so at once rather than sit on a
+// fleet that is not coming back.
+func TestARunWithNoWaitFailsAtOnce(t *testing.T) {
+	tries := 0
+	pick := func() ([]ocr.Host, error) {
+		tries++
+		return nil, errors.New("no host can read page images")
+	}
+	sleep := func(context.Context, time.Duration) error {
+		t.Fatal("a run with no wait should not sleep")
+		return nil
+	}
+	if _, err := hostsWithin(context.Background(), 0, func(string, ...any) {}, sleep, pick); err == nil {
+		t.Fatal("a busy fleet with no wait should be an error")
+	}
+	if tries != 1 {
+		t.Fatalf("asked %d times, want once", tries)
+	}
+}
+
+// The pause never runs past the deadline. Asking to wait thirty seconds and
+// being kept two minutes is worse than not waiting at all.
+func TestTheLastWaitStopsAtTheDeadline(t *testing.T) {
+	var slept []time.Duration
+	sleep := func(_ context.Context, pause time.Duration) error {
+		slept = append(slept, pause)
+		// The sleep is what spends the wait, so it has to really spend it.
+		time.Sleep(pause)
+		return nil
+	}
+	pick := func() ([]ocr.Host, error) { return nil, errors.New("busy") }
+
+	if _, err := hostsWithin(context.Background(), 30*time.Millisecond, func(string, ...any) {}, sleep, pick); err == nil {
+		t.Fatal("a fleet that stays busy past the deadline should be an error")
+	}
+	if len(slept) != 1 {
+		t.Fatalf("slept %d times, want once", len(slept))
+	}
+	if slept[0] > 30*time.Millisecond {
+		t.Errorf("slept %s, which is past the deadline the caller gave", slept[0])
+	}
+}
+
+// Ctrl-C during a wait stops the run then and there.
+func TestAWaitCanBeInterrupted(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	pick := func() ([]ocr.Host, error) { return nil, errors.New("busy") }
+	_, err := hostsWithin(ctx, time.Hour, func(string, ...any) {}, sleepFor, pick)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cancellation", err)
 	}
 }
 

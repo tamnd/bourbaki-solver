@@ -24,13 +24,18 @@ import (
 
 // ocrLaneMemoryMB is how much free memory a host needs per OCR lane.
 //
-// A lane is a Chrome profile under Xvfb, which is about a gigabyte resident on
-// these boxes. Half a gigabyte on top is the tool itself and the page images it
-// is holding. Measured on the fleet: server3 has 15378 MB free and runs four
-// lanes comfortably, server2 has 7363 MB and runs three, and server1 has 1334
-// MB, which is not enough for one, so it takes model calls over HTTP and no
-// page images at all.
+// It is a floor and not a measurement. A lane sampled per process on server2
+// peaked at 275 MB, so memory is not what runs out here, the CPU is. What this
+// number is for is refusing a box that has nothing left at all: server1 sat at
+// 736 MB free the day this was written, which will start a browser and then be
+// killed by the OOM reaper halfway through a batch.
 const ocrLaneMemoryMB = 1500
+
+// ocrFleetRecheck is how long to wait before asking a busy fleet again.
+//
+// Long enough that three ssh round trips are noise against it, short enough
+// that a box which frees up is picked up in the same coffee break.
+const ocrFleetRecheck = 2 * time.Minute
 
 // setup is everything the two OCR commands both need.
 type setup struct {
@@ -179,6 +184,10 @@ func ocrRun(args []string) error {
 	// number is worth overriding by somebody who has watched a run and read the
 	// load average, which is cheaper than making the probe guess.
 	lanes := fs.Int("lanes", 0, "override how many pages a host reads at once")
+	// These boxes are shared and the load moves. Rather than refuse a run
+	// because somebody else's build is on the machine right now, sit and ask
+	// again. Zero keeps the old behaviour of failing straight away.
+	wait := fs.Duration("wait", 0, "how long to wait for a host with a spare core before giving up")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -190,7 +199,20 @@ func ocrRun(args []string) error {
 	if err != nil {
 		return err
 	}
-	hosts, err := ocrHosts(*routeFile, *hostList)
+
+	start := time.Now()
+	logf := func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "["+time.Since(start).Round(time.Second).String()+"] "+format+"\n", args...)
+	}
+
+	// Ctrl-C stops the run without losing the pages that are in flight. The
+	// leases expire on their own and the next run reaps them, which is the
+	// whole point of putting the work list on disk. It is set up before the
+	// fleet is measured so that a wait can be interrupted too.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	hosts, err := ocrHostsNow(ctx, *routeFile, *hostList, *wait, logf)
 	if err != nil {
 		return err
 	}
@@ -198,11 +220,6 @@ func ocrRun(args []string) error {
 		for i := range hosts {
 			hosts[i].Lanes = *lanes
 		}
-	}
-
-	start := time.Now()
-	logf := func(format string, args ...any) {
-		fmt.Fprintf(os.Stderr, "["+time.Since(start).Round(time.Second).String()+"] "+format+"\n", args...)
 	}
 
 	runner := &ocr.Runner{
@@ -241,12 +258,6 @@ func ocrRun(args []string) error {
 		fmt.Println("nothing to do")
 		return nil
 	}
-
-	// Ctrl-C stops the run without losing the pages that are in flight. The
-	// leases expire on their own and the next run reaps them, which is the
-	// whole point of putting the work list on disk.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	report, runErr := runner.Do(ctx)
 	fmt.Print(report.Summary())
@@ -323,6 +334,103 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 		return nil, fmt.Errorf("no host can read page images, run bourbaki doctor")
 	}
 	return out, nil
+}
+
+// refreshFleet re-measures the boxes named in the route file before a run.
+//
+// Load average is the one fact in there with a short shelf life. server2 read
+// 0.55 one evening and 7.67 an hour later, compiling somebody else's rust, so a
+// run that schedules against the state file as it was left by the last doctor
+// is scheduling against a number that has already moved. Three ssh trips in
+// parallel cost about a second, which is nothing against a batch.
+func refreshFleet(ctx context.Context, routeFile, names string) error {
+	registry, _, err := route.LoadOrDefault(routeFile)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(names) != "" {
+		if registry, err = registry.Select(strings.Split(names, ",")); err != nil {
+			return err
+		}
+	}
+	var targets []fleet.Target
+	for _, value := range registry.Enabled() {
+		if strings.TrimSpace(value.Host) == "" {
+			continue
+		}
+		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	rows := fleet.ProbeAll(ctx, fleet.SSH{Timeout: 30 * time.Second}, targets)
+	path := fleet.StatePath()
+	state, err := fleet.LoadState(path)
+	if err != nil {
+		return err
+	}
+	for index, target := range targets {
+		// A host that did not answer keeps the facts it had. One refused ssh
+		// connection is not a reason to forget where chatgpt-tool lives.
+		if rows[index].Err != "" && rows[index].Hostname == "" {
+			continue
+		}
+		state.Hosts[target.Host] = rows[index]
+	}
+	state.Written = time.Now().UTC()
+	return state.Save(path)
+}
+
+// ocrHostsNow measures the fleet and then picks the hosts that can read pages,
+// waiting for one if the whole fleet is busy and the caller said to wait.
+//
+// Waiting is the useful behaviour on rented boxes. The fleet had no spare core
+// at all one evening, all of it other tenants, and the honest choices are to
+// refuse the run or to sit until a core comes back. A run left overnight should
+// sit.
+func ocrHostsNow(ctx context.Context, routeFile, names string, wait time.Duration, logf func(string, ...any)) ([]ocr.Host, error) {
+	return hostsWithin(ctx, wait, logf, sleepFor, func() ([]ocr.Host, error) {
+		if err := refreshFleet(ctx, routeFile, names); err != nil {
+			logf("could not re-measure the fleet, going on what the state file says: %v", err)
+		}
+		return ocrHosts(routeFile, names)
+	})
+}
+
+// sleepFor is the wait a run really does, interruptible by Ctrl-C.
+func sleepFor(ctx context.Context, pause time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(pause):
+		return nil
+	}
+}
+
+// hostsWithin is the loop on its own, with the measuring and the sleeping
+// handed in, so a test can run it without an ssh key or a two minute pause.
+func hostsWithin(ctx context.Context, wait time.Duration, logf func(string, ...any),
+	sleep func(context.Context, time.Duration) error, pick func() ([]ocr.Host, error)) ([]ocr.Host, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		hosts, err := pick()
+		if err == nil {
+			return hosts, nil
+		}
+		left := time.Until(deadline)
+		if wait <= 0 || left <= 0 {
+			return nil, err
+		}
+		// Never sleep past the deadline the caller gave. A -wait of thirty
+		// seconds should come back in thirty seconds, not in two minutes.
+		pause := min(ocrFleetRecheck, left)
+		logf("%v, asking again in %s, giving up at %s",
+			err, pause.Round(time.Second), deadline.Format(time.Kitchen))
+		if err := sleep(ctx, pause); err != nil {
+			return nil, err
+		}
+	}
 }
 
 // ocrLanes is how many page images a host reads at once, and when the answer is
