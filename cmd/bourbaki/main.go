@@ -19,6 +19,7 @@ usage: bourbaki <command> [arguments]
 
 commands:
   version          print the version and exit
+  books            add, list and verify the source PDFs in manifests/books.yaml
   label            parse a statement label, or a running head, and print what it means
 
 Set BOURBAKI_CORPUS to the checkout of tamnd/bourbaki.
@@ -39,6 +40,8 @@ func main() {
 	switch args[0] {
 	case "version":
 		err = runVersion()
+	case "books":
+		err = runBooks(args[1:])
 	case "label":
 		err = runLabel(args[1:])
 	case "help", "-h", "--help":
@@ -51,6 +54,25 @@ func main() {
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "bourbaki:", err)
 		os.Exit(1)
+	}
+}
+
+// parseFlags parses args allowing flags and positional arguments to be mixed,
+// which the flag package does not do on its own: it stops at the first thing
+// that is not a flag. Writing the PDF path before the flags is the natural way
+// to type these commands, so the parser has to cope with it.
+func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
+	var positional []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			return nil, err
+		}
+		if fs.NArg() == 0 {
+			return positional, nil
+		}
+		positional = append(positional, fs.Arg(0))
+		rest = fs.Args()[1:]
 	}
 }
 
@@ -82,14 +104,15 @@ Page labels and section locators are recognised anywhere in the string, so a
 whole running head can be passed in as it came out of pdftotext.
 `)
 	}
-	if err := fs.Parse(args); err != nil {
+	pos, err := parseFlags(fs, args)
+	if err != nil {
 		return err
 	}
-	if fs.NArg() != 1 {
+	if len(pos) != 1 {
 		fs.Usage()
 		os.Exit(2)
 	}
-	in := fs.Arg(0)
+	in := pos[0]
 
 	if ref, err := corpus.ParseLabel(in); err == nil {
 		fmt.Printf("statement  book=%s chapter=%s section=%d kind=%s",
