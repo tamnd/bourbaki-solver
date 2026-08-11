@@ -12,7 +12,6 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/crosscheck"
 	"github.com/tamnd/bourbaki-solver/pagemap"
-	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
 
 const extractAuditUsage = `usage: bourbaki extract audit -book ID [flags]
@@ -63,7 +62,7 @@ func extractAudit(args []string) error {
 	if !ok {
 		return fmt.Errorf("no book %q in %s", *book, corpus.BooksPath(root))
 	}
-	src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+	src, err := openPDF(root, b)
 	if err != nil {
 		return err
 	}

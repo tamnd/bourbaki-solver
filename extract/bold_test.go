@@ -35,7 +35,7 @@ func TestAHeadingWithMathematicsInItIsAHeading(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	got, ok := heading(lines[0])
+	got, ok := heading(lines[0], 0)
 	if !ok {
 		t.Fatalf("the title of page 213 was not read as a heading, it rendered as %s", Render(lines[0]))
 	}
@@ -90,7 +90,7 @@ const boldTurnoverXML = `<?xml version="1.0" encoding="UTF-8"?>
 `
 
 func TestAnEntryThatTurnsOverOntoItsVolumeNumberStaysOneParagraph(t *testing.T) {
-	got := blocks(parse(t, boldTurnoverXML), nil)
+	got := blocks(parse(t, boldTurnoverXML), Volume{})
 	want := strings.Join([]string{
 		`[27] C. Hopkins – “Rings with minimal conditions for left ideals”, Ann. of Math. **40** (1939), p. 712–730.`,
 		`[28] W. Krull – “Über verallgemeinerte endliche Abelsche Gruppen”, Math. Zeitschr. **23** (1925), p. 161–196; Gesammelte Abhandlungen, vol. 1, Berlin (de Gruyter), 1999, p. 263–298.`,

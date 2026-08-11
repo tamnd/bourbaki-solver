@@ -46,9 +46,13 @@ type Run struct {
 type Line struct {
 	Runs []Run
 
-	// Top and Bottom are the band of the tallest run, which is the body of
-	// the line. Left and Right are the extent of everything in it.
+	// Top and Bottom are the band of the body type of the line. Left and
+	// Right are the extent of everything in it.
 	Top, Bottom, Left, Right int
+
+	// band is the font size the band was taken from. It is what says whether
+	// the next run to arrive is body type or something hanging off it.
+	band int
 }
 
 // Height of the line's band.
@@ -70,6 +74,7 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 	runs := make([]Run, 0, len(p.Spans))
 	for _, s := range p.Spans {
 		spec := l.Font(s)
+		s.Text = unligature(s.Text)
 		runs = append(runs, Run{Span: s, Spec: spec, Class: Classify(spec, s)})
 	}
 	lines := rows(runs)
@@ -86,6 +91,29 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 		}
 	}
 	return append(rows(left), rows(right)...), true
+}
+
+// ligatures are the single characters a font uses for two or three letters set
+// together. The 2012 French printing carries them and the 2023 English one does
+// not, so a French page arrives with suﬃt, ﬁni and déﬁnir in it, which reads
+// correctly on screen and matches nothing anybody searches for.
+var ligatures = strings.NewReplacer(
+	"ﬀ", "ff", "ﬁ", "fi", "ﬂ", "fl",
+	"ﬃ", "ffi", "ﬄ", "ffl", "ﬅ", "st", "ﬆ", "st",
+)
+
+// unligature writes the letters a ligature stands for.
+//
+// The æ and œ of French are not here. They are letters of the alphabet the
+// volume is set in rather than two letters drawn as one, and the volume spells
+// œuvre and cæsius with them on purpose.
+func unligature(s string) string {
+	for _, c := range s {
+		if c >= 'ﬀ' && c <= 'ﬆ' {
+			return ligatures.Replace(s)
+		}
+	}
+	return s
 }
 
 // gutter finds the strip between two columns of type, and reports where it is.
@@ -191,7 +219,8 @@ func rows(runs []Run) []Line {
 		if cur != nil {
 			lines = append(lines, *cur)
 		}
-		cur = &Line{Runs: []Run{r}, Top: r.Top, Bottom: r.Bottom(), Left: r.Left, Right: r.Right()}
+		cur = &Line{Runs: []Run{r}, Top: r.Top, Bottom: r.Bottom(),
+			Left: r.Left, Right: r.Right(), band: bandSize(r)}
 	}
 	if cur != nil {
 		lines = append(lines, *cur)
@@ -248,7 +277,7 @@ func gather(lines []Line) []Line {
 // arrives as a line of its own.
 func accented(l Line) bool {
 	for _, r := range l.Runs {
-		if _, acc := cmexText(r); !acc {
+		if _, ok := Accent(r.Spec, r.Text); !ok {
 			return false
 		}
 	}
@@ -311,7 +340,7 @@ var wordRE = regexp.MustCompile(`[A-Za-z]{3,}`)
 func piece(l, other Line) bool {
 	body := 0
 	for _, r := range other.Runs {
-		if !tall(r) {
+		if !offband(r) {
 			body = max(body, r.Spec.Size)
 		}
 	}
@@ -409,15 +438,35 @@ func joins(l Line, r Run) bool {
 	return overlap*2 >= shorter
 }
 
-// widen grows a line to hold a run. The band follows the tallest run rather
-// than the union of them all, so that a large operator, which is drawn far
-// above and below the baseline, does not swallow the line above.
+// widen grows a line to hold a run. The band follows the body type of the line
+// rather than the union of everything on it, so that a large operator, which is
+// drawn far above and below the baseline, does not swallow the line above.
+//
+// Which run is the body is read off the font size and not off the box, because
+// the boxes of the mathematics fonts are not to scale: the prime of the eight
+// point symbol font is reported 12 units high, the same as the twelve point
+// roman it hangs off, so a line that happens to begin with a prime kept the
+// prime's band and everything else on the line then sat below it. That is how
+// "N′ et donc isomorphes à M/N′" came out of the French chapter as "$N_'$ et
+// donc isomorphes à $M/N_'$", with both primes read as indices.
 func widen(l *Line, r Run) {
 	l.Left = min(l.Left, r.Left)
 	l.Right = max(l.Right, r.Right())
-	if !tall(r) && r.Height > l.Height() {
-		l.Top, l.Bottom = r.Top, r.Bottom()
+	if offband(r) || r.Spec.Size < l.band {
+		return
 	}
+	if r.Spec.Size > l.band || r.Height > l.Height() {
+		l.Top, l.Bottom, l.band = r.Top, r.Bottom(), r.Spec.Size
+	}
+}
+
+// bandSize is the size a run offers a line as its body. A sign drawn out of
+// proportion to the type beside it offers nothing.
+func bandSize(r Run) int {
+	if offband(r) {
+		return 0
+	}
+	return r.Spec.Size
 }
 
 // tall reports whether a run is one of the glyphs that is drawn out of
@@ -425,6 +474,27 @@ func widen(l *Line, r Run) {
 // delimiter spanning several lines. pdftohtml reports a height of 7 for all of
 // them whatever their real size, so they are recognised by their font.
 func tall(r Run) bool { return family(r.Spec) == "CMEX" }
+
+// bend reports whether a run is the dangerous bend, the sign Bourbaki sets in
+// the margin against a passage the reader is to take slowly.
+//
+// The French printing draws it from its own font at twice the size of the body,
+// and the only other thing that font sets is the brackets of a citation, which
+// are drawn at the size of the type around them. The 2023 English printing
+// carries no such character at all: its text layer has the brackets and nothing
+// else, so the sign is drawn there rather than set.
+func bend(r Run) bool { return family(r.Spec) == "BOUR" && strings.TrimSpace(r.Text) == "Z" }
+
+// offband reports whether a run is drawn out of proportion to the line it
+// stands on and so can say nothing about where that line sits or how deep
+// anything beside it is nested.
+//
+// The dangerous bend of French page 19 is set at 29 against a body of 14 and
+// stands in the margin beside a remark in small type. It came first on the
+// line, so the two lines of the remark were gathered into its band and read as
+// its indices, and the page shipped the remark as "$Z_{artinien) (VIII,
+// p.}^{L\u2019anneau de polyn\u00f4mes}...$".
+func offband(r Run) bool { return tall(r) || bend(r) }
 
 // finish orders a line left to right and works out how deep each run is nested
 // and which side of its parent it sits on.
@@ -439,12 +509,13 @@ func tall(r Run) bool { return family(r.Spec) == "CMEX" }
 // position reads M_{i+1} as Mi+1 whenever they do.
 func finish(l *Line) {
 	sort.SliceStable(l.Runs, func(i, j int) bool { return l.Runs[i].Left < l.Runs[j].Left })
+	margin(l)
 	depths := depths(l.Runs)
 	base := Run{Span: pdfsrc.Span{Top: l.Top, Height: l.Height()}}
 	parent := []Run{base}
 	for i := range l.Runs {
 		r := &l.Runs[i]
-		if tall(*r) {
+		if offband(*r) {
 			continue
 		}
 		r.Depth = depths[r.Spec.Size]
@@ -462,7 +533,7 @@ func finish(l *Line) {
 		// sets its headings in large bold capitals and its entries in small
 		// type beside them in the other column, and reading those entries as
 		// exponents of the headings puts half the index inside dollar signs.
-		if i > 0 && !tall(l.Runs[i-1]) && r.Left > l.Runs[i-1].Right()+4*r.Spec.Size {
+		if i > 0 && !offband(l.Runs[i-1]) && r.Left > l.Runs[i-1].Right()+4*r.Spec.Size {
 			r.Depth = 0
 			parent = append(parent[:1], *r)
 			continue
@@ -479,30 +550,95 @@ func finish(l *Line) {
 	}
 }
 
-// depths reads the sizes on a line as levels. The largest is the line itself.
-// A size no more than four fifths of the one above it is a level below it, and
-// a size close to it is the same level: the volume sets a line of small type at
-// 13 where the text around it is 15, and that is a change of type and not an
-// index.
+// margin takes the dangerous bend out of the extent of a line.
+//
+// The sign is set in the margin, which is where the reader is meant to catch
+// sight of it and is a good half inch left of the type it marks. Counting it
+// puts the left edge of the line out there with it, and the rest of the remark
+// then reads as indented past a margin nothing else on the page is set to: the
+// remark of French page 19 came out as three paragraphs of one line each.
+func margin(l *Line) {
+	left, right, n := 0, 0, 0
+	for _, r := range l.Runs {
+		if bend(r) {
+			continue
+		}
+		if n == 0 {
+			left, right = r.Left, r.Right()
+		}
+		left, right, n = min(left, r.Left), max(right, r.Right()), n+1
+	}
+	if n > 0 {
+		l.Left, l.Right = left, right
+	}
+}
+
+// depths reads the sizes on a line as levels. The size the line is set in is the
+// line itself. A size no more than four fifths of the one above it is a level
+// below it, and a size close to it is the same level: the volume sets a line of
+// small type at 13 where the text around it is 15, and that is a change of type
+// and not an index.
+//
+// Nothing above the size of the line is nested at all. A sign is often drawn
+// larger than the type it is set among, and reading the type as hanging off the
+// sign turns a sentence into an index: the French exercises set the exterior
+// power of page 333 at 20 in a body of 14, and the lemma beside it shipped as
+// "$_{Lemme1. \u2014Soitpun entier tel que0\leqslant p\leqslant m ...}$".
 func depths(runs []Run) map[int]int {
 	sizes := make([]int, 0, 4)
 	for _, r := range runs {
-		if !tall(r) && !slices.Contains(sizes, r.Spec.Size) {
+		if !offband(r) && !slices.Contains(sizes, r.Spec.Size) {
 			sizes = append(sizes, r.Spec.Size)
 		}
 	}
 	sort.Sort(sort.Reverse(sort.IntSlice(sizes)))
+	body := bodySize(runs)
 	out := map[int]int{}
-	depth, step := 0, 0
-	for i, s := range sizes {
-		if i > 0 && s*5 <= step*4 {
-			depth++
-			step = s
+	depth, step := 0, body
+	for _, s := range sizes {
+		if s >= body {
+			out[s] = 0
+			continue
 		}
-		if i == 0 {
+		if s*5 <= step*4 {
+			depth++
 			step = s
 		}
 		out[s] = depth
 	}
 	return out
+}
+
+// bodySize is the size a line is set in.
+//
+// It is the largest size carrying a fair share of the characters on the line,
+// counted by character and not by run, because a display breaks into a run per
+// symbol where a sentence arrives in two or three pieces. A size a single
+// character wide is a sign drawn out of proportion rather than the type the
+// line is set in, and the commonest size alone is not the answer either: a line
+// of d^i_{n-1} \circ d^j_n carries more characters in its indices than on its
+// baseline, and reading it at the size of its indices flattens them.
+func bodySize(runs []Run) int {
+	count := map[int]int{}
+	for _, r := range runs {
+		if offband(r) {
+			continue
+		}
+		count[r.Spec.Size] += len([]rune(strings.TrimSpace(r.Text)))
+	}
+	most := 0
+	for _, chars := range count {
+		most = max(most, chars)
+	}
+	best := 0
+	for size, chars := range count {
+		// share is how much of the commonest size a size has to carry to
+		// pass for type. A quarter keeps the baseline of a line of indices
+		// and drops a sign standing alone beside a sentence.
+		const share = 4
+		if chars*share >= most && size > best {
+			best = size
+		}
+	}
+	return best
 }

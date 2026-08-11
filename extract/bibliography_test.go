@@ -43,7 +43,7 @@ const bibliographyXML = `<?xml version="1.0" encoding="UTF-8"?>
 `
 
 func TestAnEntryOfTheBibliographyIsOneParagraph(t *testing.T) {
-	got := blocks(parse(t, bibliographyXML), nil)
+	got := blocks(parse(t, bibliographyXML), Volume{})
 	want := strings.Join([]string{
 		`[2] R. Brauer – “Über Systeme hypercomplexer Zahlen”, Math. Zeitschr. **30** (1929), p. 79–107; Collected papers, vol. I, Cambridge, Massachusetts (The MIT Press), 1980, p. 40–68.`,
 		`[3] W. Burnside – “On the condition of reducibility of any group of linear substitutions”, Proc. Lond. Math. Soc. **3** (1905), p. 430–434.`,
