@@ -330,7 +330,7 @@ func runTagsVerify(args []string) error {
 	diff, gitErr := tagsDiff(root, *base)
 	switch {
 	case gitErr != nil:
-		fmt.Printf("tags verify: T5 not checked, %v\n", gitErr)
+		fmt.Printf("tags verify: T05 not checked, %v\n", gitErr)
 	default:
 		bad = append(bad, tags.AppendOnly(diff, set.Aliases)...)
 	}
@@ -342,13 +342,28 @@ func runTagsVerify(args []string) error {
 		return fmt.Errorf("tags verify: %d failures\n\t%s", len(bad), strings.Join(lines, "\n\t"))
 	}
 	n, seen := 0, make([]string, 0, len(found))
+	var soft []tags.Failure
 	for lang, items := range found {
 		n += len(items)
 		seen = append(seen, lang)
+		soft = append(soft, tags.Order(items)...)
 	}
 	sort.Strings(seen)
 	fmt.Printf("tags verify: %d tags over %d tagged units in %s, %d retired, all invariants hold\n",
 		len(set.Tags)+len(set.New), n, strings.Join(seen, " "), len(set.Inactive))
+	// T10 is a note and not a gate. A statement added to the middle of a § takes
+	// the next free tag and its file stops climbing, which is correct and which
+	// no build should be failed for.
+	if len(soft) > 0 {
+		where := "places"
+		if len(soft) == 1 {
+			where = "place"
+		}
+		fmt.Printf("tags verify: %s, %d %s where a file's tags do not climb\n", tags.T10, len(soft), where)
+		for _, f := range soft[:min(len(soft), 5)] {
+			fmt.Printf("\t%s\n", f.Msg)
+		}
+	}
 	return nil
 }
 

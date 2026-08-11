@@ -16,14 +16,22 @@ import (
 //
 //	#### Proposition 6 {#alg-viii-s1-prop-6 .statement}
 //	#### Proposition 6 {#alg-viii-s1-prop-6 .statement tag=0A3F}
-var HeadingRE = regexp.MustCompile(`^#{3,4} .*\{#([a-z0-9-]+) \.statement(?: tag=([0-9A-Z]{4}))?\}$`)
+//
+// What the tag may look like is deliberately loose here. A heading somebody
+// hand-edited into tag=0a3f is a thing that has to be found and named, and a
+// pattern that only matches the correct form would not find it: the heading
+// would read as one carrying no tag at all, and the report would say something
+// true but unhelpful. Parse is what decides, and the malformed text is kept so
+// the message can quote it.
+var HeadingRE = regexp.MustCompile(`^#{3,4} .*\{#([a-z0-9-]+) \.statement(?: tag=([^} ]*))?\}$`)
 
 // Item is one thing in the corpus that carries a tag.
 type Item struct {
 	Path  string // the file it is in, relative to the corpus root
 	Line  int    // the line of that file, 0 for an exercise, whose tag is in the front matter
 	Label string
-	Tag   Tag // empty when nothing has been assigned yet
+	Tag   Tag    // empty when nothing has been assigned yet
+	Bad   string // the tag text as written, when it is not a tag at all
 }
 
 // Walk lists everything in one language of the corpus that carries a tag, in
@@ -102,7 +110,7 @@ func statements(root, path, body string) []Item {
 		if m == nil {
 			continue
 		}
-		out = append(out, Item{Path: rel(root, path), Line: offset + i + 1, Label: m[1], Tag: Tag(m[2])})
+		out = append(out, item(rel(root, path), offset+i+1, m[1], m[2]))
 	}
 	return out
 }
@@ -128,9 +136,24 @@ func exercises(root, dir string, m corpus.SectionFrontMatter) ([]Item, error) {
 		if f.Meta.Label == "" {
 			return nil, fmt.Errorf("%s: no label in the front matter", rel(root, name))
 		}
-		out = append(out, Item{Path: rel(root, name), Label: f.Meta.Label, Tag: Tag(f.Meta.Tag)})
+		out = append(out, item(rel(root, name), 0, f.Meta.Label, f.Meta.Tag))
 	}
 	return out, nil
+}
+
+// item sorts the tag text into a tag or into the thing that was written where
+// one should have been. Empty is neither: it is a statement waiting for its
+// first assign run, and T03 has something to say about it later on.
+func item(path string, line int, label, text string) Item {
+	it := Item{Path: path, Line: line, Label: label}
+	switch t, err := Parse(text); {
+	case text == "":
+	case err != nil:
+		it.Bad = text
+	default:
+		it.Tag = t
+	}
+	return it
 }
 
 // Labels is the list Assign takes.

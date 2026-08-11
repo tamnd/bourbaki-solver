@@ -36,49 +36,62 @@ func TestVerifyCatchesEachInvariant(t *testing.T) {
 		found map[string][]Item
 		want  string
 	}{{
-		name: "T1 the same tag on two lines",
+		name: "T01 the same tag on two lines",
 		set:  &Set{Tags: []Entry{{Tag: "0001", Label: "a"}, {Tag: "0001", Label: "b"}}},
-		want: "T1",
+		want: "T01",
 	}, {
-		name: "T2 the same label twice",
+		name: "T02 the same label twice",
 		set:  &Set{Tags: []Entry{{Tag: "0001", Label: "a"}, {Tag: "0002", Label: "a"}}},
-		want: "T2",
+		want: "T02",
 	}, {
-		name:  "T3 a statement with no tag",
+		name:  "T03 a statement with no tag",
 		set:   &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}},
 		found: map[string][]Item{"en": {{Path: "f.md", Line: 3, Label: "a"}}},
-		want:  "T3",
+		want:  "T03",
 	}, {
-		name:  "T3 a statement whose tag is in no file",
+		name:  "T03 a statement whose tag is in no file",
 		set:   &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}},
 		found: map[string][]Item{"en": {{Path: "f.md", Line: 3, Label: "a", Tag: "0009"}}},
-		want:  "T3",
+		want:  "T03",
 	}, {
-		name:  "T4 a tag whose statement is gone",
+		name:  "T04 a tag whose statement is gone",
 		set:   &Set{Tags: []Entry{{Tag: "0001", Label: "a"}, {Tag: "0002", Label: "b"}}},
 		found: map[string][]Item{"en": {{Path: "f.md", Line: 3, Label: "a", Tag: "0001"}}},
-		want:  "T4",
+		want:  "T04",
 	}, {
-		name: "T6 live and retired at once",
+		name: "T06 live and retired at once",
 		set: &Set{Tags: []Entry{{Tag: "0001", Label: "a"}},
 			Inactive: []Retired{{Tag: "0001", Label: "a"}}},
-		want: "T2 T6",
+		want: "T02 T06",
 	}, {
-		name: "T7 a translation with a tag of its own",
+		name: "T07 a translation with a tag of its own",
 		set:  &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}},
 		found: map[string][]Item{
 			"en": {{Path: "en.md", Line: 3, Label: "a", Tag: "0001"}},
 			"vi": {{Path: "vi.md", Line: 3, Label: "a", Tag: "0002"}},
 		},
-		want: "T7",
+		want: "T07",
 	}, {
-		name: "T7 a translation of nothing",
+		name: "T07 a translation of nothing",
 		set:  &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}},
 		found: map[string][]Item{
 			"en": {{Path: "en.md", Line: 3, Label: "a", Tag: "0001"}},
 			"vi": {{Path: "vi.md", Line: 3, Label: "b", Tag: "0001"}},
 		},
-		want: "T7",
+		want: "T07",
+	}, {
+		name:  "T09 a hand-written tag in the wrong case",
+		set:   &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}},
+		found: map[string][]Item{"en": {{Path: "f.md", Line: 3, Label: "a", Bad: "000a"}}},
+		want:  "T09",
+	}, {
+		name: "T09 in a translation",
+		set:  &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}},
+		found: map[string][]Item{
+			"en": {{Path: "en.md", Line: 3, Label: "a", Tag: "0001"}},
+			"vi": {{Path: "vi.md", Line: 3, Label: "a", Bad: "0O1"}},
+		},
+		want: "T09",
 	}}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -86,6 +99,44 @@ func TestVerifyCatchesEachInvariant(t *testing.T) {
 				t.Errorf("Verify reported %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+// T10 is the soft one. It has to hold on the run that assigns the tags, since
+// they are handed out in reading order, and it stops holding the first time a
+// statement is added to the middle of a §, which is why it reports and does
+// not fail.
+func TestOrder(t *testing.T) {
+	climbing := []Item{
+		{Path: "s1.md", Line: 10, Tag: "0001"},
+		{Path: "s1.md", Line: 20, Tag: "0002"},
+		{Path: "s2.md", Line: 10, Tag: "0003"},
+	}
+	if bad := Order(climbing); len(bad) != 0 {
+		t.Errorf("a file whose tags climb was reported: %v", bad)
+	}
+	// A tag from an earlier run sitting below a later one, which is what a
+	// heading edited by hand with somebody else's tag looks like.
+	swapped := []Item{
+		{Path: "s1.md", Line: 10, Tag: "0009"},
+		{Path: "s1.md", Line: 20, Tag: "0002"},
+	}
+	if bad := Order(swapped); len(bad) != 1 || bad[0].Rule != T10 {
+		t.Errorf("a file whose tags fall was reported as %v", bad)
+	}
+	// Two files are not compared with each other. Section 2 being assigned
+	// before section 1 in some later run is nobody's business but the record's.
+	across := []Item{
+		{Path: "s1.md", Line: 10, Tag: "0009"},
+		{Path: "s2.md", Line: 10, Tag: "0002"},
+	}
+	if bad := Order(across); len(bad) != 0 {
+		t.Errorf("two different files were compared: %v", bad)
+	}
+	// A statement with no tag yet is not out of order, it is unassigned.
+	none := []Item{{Path: "s1.md", Line: 10, Tag: "0009"}, {Path: "s1.md", Line: 20}}
+	if bad := Order(none); len(bad) != 0 {
+		t.Errorf("an unassigned statement was reported: %v", bad)
 	}
 }
 
@@ -98,7 +149,7 @@ func TestAppendOnly(t *testing.T) {
 		t.Errorf("an append was reported: %v", bad)
 	}
 	del := add + "-0001,alg-viii-s1-def-1\n"
-	if bad := AppendOnly(del, nil); len(bad) != 1 || bad[0].Rule != T5 {
+	if bad := AppendOnly(del, nil); len(bad) != 1 || bad[0].Rule != T05 {
 		t.Errorf("a removal was not reported: %v", bad)
 	}
 	rename := "--- a/tags/tags\n+++ b/tags/tags\n-0001,alg-viii-s1-rem-1\n+0001,alg-viii-s1-n1-rem-1\n"
