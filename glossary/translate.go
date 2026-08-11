@@ -33,18 +33,11 @@ import (
 
 // Language is the name of a language as a model should be told it.
 //
-// Spelled out rather than the code, because a code is a thing to guess at.
-func Language(lang string) string {
-	switch lang {
-	case "vi":
-		return "Vietnamese"
-	case "zh":
-		return "Chinese, written in simplified characters"
-	case "ja":
-		return "Japanese"
-	}
-	return lang
-}
+// Spelled out rather than the code, because a code is a thing to guess at. It
+// lives in the prompt package, which is where the other thing that has to say
+// "Vietnamese" to a model lives, and this is the alias so that the two never
+// come to disagree about what zh means.
+func Language(lang string) string { return prompt.Language(lang) }
 
 // DefaultBatch is how many terms go in one question.
 //
@@ -237,6 +230,22 @@ func badRendering(lang, term, tr string) string {
 	if leaks := textguard.Check(tr); len(leaks) > 0 {
 		return "the rendering is not a rendering: " + leaks[0].Kind
 	}
+	// Operators come first, before anything looks at the rendering, because
+	// what is wrong with them is the question and not the answer. "end" was
+	// answered "kết thúc", which is the right Vietnamese for the word and the
+	// wrong thing entirely for $\operatorname{End}$. See Operators.
+	if Operators[strings.ToLower(strings.TrimSpace(term))] {
+		return "is one of Bourbaki's operators and belongs inside the mathematics, not in the glossary"
+	}
+	// Mathematics the English term does not have. The second Vietnamese run
+	// answered "b-algebra" with "$b$-đại số" and "bx" with "$bx$": the term was
+	// mined out of prose that had lost its delimiters, and the model put them
+	// back where it thought they went. A glossary row carrying a formula the
+	// term does not carry would put that formula into a translation prompt as a
+	// thing to write, and invariant 1 says the formulae come from the English.
+	if len(mathParts(tr)) > len(mathParts(term)) {
+		return "the rendering has mathematics in it that the term does not"
+	}
 	if n := len(strings.Fields(tr)); n > maxWords {
 		return fmt.Sprintf("%d words, which is an explanation and not a term", n)
 	}
@@ -355,6 +364,70 @@ func clean(text string) string {
 // either curated by a person or accepted by an earlier run, and a later run
 // silently overwriting it would make the file depend on the order the batches
 // happened to finish in.
+// Tidy applies the rules to the rows already in the file.
+//
+// It exists because the rules arrived after the rows did. The first two
+// Vietnamese runs put 879 terms in the glossary and then reading them found two
+// kinds of thing that should never have got in: Bourbaki's operators, which are
+// notation and not vocabulary, and renderings carrying a formula their term
+// does not have. Both were mined, both were rendered correctly as words, and
+// both would do damage in a translation prompt. Writing the rules and leaving
+// the rows would be writing a rule that only applies to what has not happened
+// yet.
+//
+// A row whose English is refused goes entirely. A row whose English is fine and
+// whose rendering in one language is refused loses that rendering and keeps the
+// others, and goes only when it has none left. Nothing is corrected: this
+// removes and it never writes terminology, because writing terminology is the
+// thing this program is not allowed to do.
+func (g *Glossary) Tidy() (dropped []Reject) {
+	var keep []Term
+	for _, t := range g.Terms {
+		if why := badTerm(t.EN); why != "" {
+			dropped = append(dropped, Reject{EN: t.EN, Reason: why})
+			continue
+		}
+		any := false
+		for _, lang := range Langs {
+			v := t.In(lang)
+			if v == "" {
+				continue
+			}
+			switch why := badRendering(lang, t.EN, v); why {
+			case "", unknown, suspect:
+				any = true
+			default:
+				dropped = append(dropped, Reject{EN: t.EN, Line: lang + ": " + v, Reason: why})
+				t.Set(lang, "")
+			}
+		}
+		if !any {
+			continue
+		}
+		keep = append(keep, t)
+	}
+	g.Terms = keep
+	return dropped
+}
+
+// badTerm is what is wrong with the English side of a row, if anything.
+//
+// Only the two things that have actually been measured coming out of the miner.
+// A rule here that guessed at what a term looks like would throw away real
+// vocabulary, and the miner's output is already a list for a person to read.
+func badTerm(en string) string {
+	term := strings.ToLower(strings.TrimSpace(en))
+	switch {
+	case term == "":
+		return "an empty term"
+	case Operators[term]:
+		return "is one of Bourbaki's operators and belongs inside the mathematics, not in the glossary"
+	case stop[term] || notTerms[term]:
+		return "is an ordinary English word and not a term"
+	}
+	return ""
+}
+
 func (g *Glossary) Merge(lang string, rows []Row) (added, kept int) {
 	at := map[string]int{}
 	for i, t := range g.Terms {

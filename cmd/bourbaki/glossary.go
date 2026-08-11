@@ -27,6 +27,7 @@ The terminology contract between English and the three translations.
 commands:
   extract     mine candidate terms out of the English corpus
   translate   ask the fleet for the rendering of the terms that have none
+  tidy        remove the rows the rules would not accept today
   status      what manifests/glossary.yaml holds, per language
 
 Run bourbaki glossary <command> -h for the flags of a command.
@@ -42,6 +43,8 @@ func runGlossary(args []string) error {
 		return glossaryExtract(args[1:])
 	case "translate":
 		return glossaryTranslate(args[1:])
+	case "tidy":
+		return glossaryTidy(args[1:])
 	case "status":
 		return glossaryStatus(args[1:])
 	}

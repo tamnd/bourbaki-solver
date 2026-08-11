@@ -144,6 +144,16 @@ func ProbeAll(ctx context.Context, runner Runner, targets []Target) []Facts {
 // not a published number, and fleet bench is what replaces it.
 const OCRMemoryMB = 1500
 
+// OCRDiskMB is what one lane needs free on the disk that holds $HOME.
+//
+// Measured on server3: the working directory under bourbaki-ocr is 8 MB, and
+// the browser profiles it drives run from about 200 MB to 887 MB, 8,581 MB
+// across the 29 of them. A lane reuses a profile rather than making one, but
+// Chrome grows the cache in it every session, so the figure that matters is
+// the room for the largest profile to grow rather than the room for a new one.
+// A thousand is that number rounded up.
+const OCRDiskMB = 1000
+
 // CanOCR reports whether a host can run chatgpt-tool ocr-batch.
 //
 // OCR is a headed Chrome under xvfb-run driving the ChatGPT page. A host
@@ -152,6 +162,13 @@ const OCRMemoryMB = 1500
 // this was written, will start it and then be killed by the OOM reaper halfway
 // through a batch. Reporting that up front is the difference between a host
 // marked incapable and a batch that dies at page eleven.
+//
+// Disk is in here for the same reason, and it was added after the fact. server2
+// filled its disk, and because nothing here looked at disk it kept its lane and
+// took work: every chunk of the first Vietnamese translation went to it and
+// came back "mkdir: cannot create directory 'bourbaki-ocr/chat': No space left
+// on device". The probe had the number in hand the whole time and only printed
+// it.
 func (f Facts) CanOCR() (bool, string) {
 	switch {
 	case f.Err != "":
@@ -164,6 +181,8 @@ func (f Facts) CanOCR() (bool, string) {
 		return false, "no rsync, so the page images cannot be sent"
 	case f.MemFreeMB < OCRMemoryMB:
 		return false, fmt.Sprintf("%d MB free, and one profile needs about %d", f.MemFreeMB, OCRMemoryMB)
+	case f.DiskFreeMB < OCRDiskMB:
+		return false, fmt.Sprintf("%d MB free on disk, and one lane needs about %d", f.DiskFreeMB, OCRDiskMB)
 	}
 	return true, ""
 }
@@ -184,7 +203,8 @@ const CoresPerLane = 2
 // rendered the same page in five seconds.
 //
 // Memory is in here too but it has never been the thing that runs out: a lane
-// measured on server2 peaks around 275 MB against the 1500 this reserves.
+// measured on server2 peaks around 275 MB against the 1500 this reserves. Disk
+// is the thing that ran out, on that same box, and it is in here now.
 //
 // A box with no spare cores still gets one lane as long as it is not thrashing,
 // and that is not a fudge, it is what the usage log says. server3 read 98 pages
@@ -198,6 +218,10 @@ func (f Facts) Lanes() int {
 		return 0
 	}
 	byMemory := f.MemFreeMB / OCRMemoryMB
+	// Each lane drives its own profile and each profile grows, so disk divides
+	// the same way memory does. CanOCR has already refused anything under one
+	// lane's worth, so this only ever takes lanes off a box that is filling up.
+	byDisk := f.DiskFreeMB / OCRDiskMB
 	// Hundredths the whole way, so half a core of somebody else's work costs
 	// half a core and not a whole one.
 	freeX100 := f.Cores*100 - f.LoadX100
@@ -208,7 +232,7 @@ func (f Facts) Lanes() int {
 		}
 		byCPU = 1
 	}
-	return max(1, min(byMemory, byCPU))
+	return max(1, min(byMemory, byCPU, byDisk))
 }
 
 // ThrashingLoadX100 is the load per core, times a hundred, past which a box is

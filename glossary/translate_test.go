@@ -286,3 +286,77 @@ func TestMergeFillsTheOtherLanguageInPlace(t *testing.T) {
 		t.Errorf("got %+v", g.Terms)
 	}
 }
+
+// The rules that arrived after the rows did. Every case here is a real row out
+// of the second Vietnamese run, on 11 August 2026, with the rendering the model
+// actually gave.
+
+func TestAnOperatorIsNotVocabulary(t *testing.T) {
+	// "ker" came back "hạt nhân", which is the right Vietnamese for kernel and
+	// the wrong thing to hand a model that is about to meet \operatorname{Ker}.
+	b := Batch{Lang: "vi", Terms: []string{"ker", "ring"}}
+	reply := b.Audit("1 | ker | hạt nhân\n2 | ring | vành")
+	if len(reply.Rows) != 1 || reply.Rows[0].EN != "ring" {
+		t.Fatalf("wanted only ring, got %v", reply.Rows)
+	}
+	if len(reply.Rejects) != 1 || !strings.Contains(reply.Rejects[0].Reason, "operators") {
+		t.Fatalf("wanted ker refused as an operator, got %v", reply.Rejects)
+	}
+}
+
+func TestARenderingMayNotBringItsOwnMathematics(t *testing.T) {
+	// "bx" came back "$bx$": the term was cut out of a line that had lost its
+	// delimiters and the model put them back where it thought they went.
+	b := Batch{Lang: "vi", Terms: []string{"bx"}}
+	reply := b.Audit("1 | bx | $bx$")
+	if len(reply.Rows) != 0 {
+		t.Fatalf("a rendering with invented mathematics was accepted: %v", reply.Rows)
+	}
+	if !strings.Contains(reply.Rejects[0].Reason, "mathematics in it that the term does not") {
+		t.Fatalf("wrong reason: %v", reply.Rejects[0])
+	}
+}
+
+func TestTheMathematicsATermAlreadyHasIsStillRequired(t *testing.T) {
+	b := Batch{Lang: "vi", Terms: []string{"$A$-module"}}
+	reply := b.Audit("1 | $A$-module | $A$-môđun")
+	if len(reply.Rows) != 1 {
+		t.Fatalf("a term keeping its own mathematics was refused: %v", reply.Rejects)
+	}
+}
+
+func TestTidyTakesOutWhatTheRulesWouldNotAcceptToday(t *testing.T) {
+	g := &Glossary{Terms: []Term{
+		{EN: "ring", VI: "vành"},
+		{EN: "end", VI: "kết thúc"},     // an operator
+		{EN: "prove", VI: "chứng minh"}, // an ordinary word, correctly rendered
+		{EN: "bx", VI: "$bx$"},          // mathematics the term does not have
+	}}
+	dropped := g.Tidy()
+	if len(g.Terms) != 1 || g.Terms[0].EN != "ring" {
+		t.Fatalf("wanted ring left standing, got %v", g.Terms)
+	}
+	if len(dropped) != 3 {
+		t.Fatalf("wanted three removals, got %v", dropped)
+	}
+}
+
+func TestTidyClearsOneLanguageAndKeepsTheOthers(t *testing.T) {
+	g := &Glossary{Terms: []Term{{EN: "module", VI: "$module$", ZH: "模"}}}
+	dropped := g.Tidy()
+	if len(g.Terms) != 1 || g.Terms[0].VI != "" || g.Terms[0].ZH != "模" {
+		t.Fatalf("wanted the Vietnamese cleared and the Chinese kept, got %v", g.Terms)
+	}
+	if len(dropped) != 1 || dropped[0].Line != "vi: $module$" {
+		t.Fatalf("did not name what went: %v", dropped)
+	}
+}
+
+func TestTidyLeavesADiacriticFreeVietnameseRowAlone(t *testing.T) {
+	// The measured case. "generated" is "sinh", it carries no tone mark, and a
+	// tidy that threw it away would be throwing away correct terminology.
+	g := &Glossary{Terms: []Term{{EN: "generated", VI: "sinh"}}}
+	if dropped := g.Tidy(); len(dropped) != 0 || len(g.Terms) != 1 {
+		t.Fatalf("a correct diacritic-free rendering was removed: %v", dropped)
+	}
+}

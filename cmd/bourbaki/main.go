@@ -29,6 +29,7 @@ commands:
   tags             the permanent identifiers: assign, merge, retire, migrate, verify
   refs             the cross-reference graph over the tags
   glossary         the terminology contract the translations are held to
+  translate        turn English sections into Vietnamese, Chinese or Japanese
   audit            every quality rule in spec 08, run over the committed corpus
   repo             the checkout itself: point git at the hooks the corpus keeps
   ocr              read the pages of a scanned volume through a model, and check them
@@ -76,6 +77,8 @@ func main() {
 		err = runTags(args[1:])
 	case "glossary":
 		err = runGlossary(args[1:])
+	case "translate":
+		err = runTranslate(args[1:])
 	case "audit":
 		err = runAudit(args[1:])
 	case "repo":

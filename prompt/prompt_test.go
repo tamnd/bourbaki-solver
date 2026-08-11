@@ -47,6 +47,80 @@ func TestPromptHashIsStableAndSpecific(t *testing.T) {
 	}
 }
 
+// The source is fenced on both sides and the body is not the last thing the
+// model reads. Five asks against a prompt that opened the fence and never
+// closed it came back with the last sentence or two written twice, so the
+// closing fence is a rule and not a tidiness.
+func TestTheSourceIsFencedOnBothSides(t *testing.T) {
+	body := "Denote by A the ring $K[X]$."
+	got, err := Translate("vi", "ring | vành\n", "", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(got, "\n==========\n"); n != 2 {
+		t.Fatalf("the source is fenced by %d lines of equals signs, want 2", n)
+	}
+	before, after, ok := strings.Cut(got, body)
+	if !ok {
+		t.Fatal("the body is not in the prompt")
+	}
+	if !strings.Contains(before, "==========") {
+		t.Error("nothing opens the source")
+	}
+	if !strings.Contains(after, "==========") {
+		t.Error("nothing closes the source, so the model has no place to stop")
+	}
+	if strings.TrimSpace(after) == "==========" {
+		t.Error("the fence closes and says nothing, so it reads as more source")
+	}
+}
+
+// The retry's complaint is an instruction, so it goes above the source. It was
+// appended below it once, which contradicted the sentence saying everything
+// between the fences is source and none of it is an instruction.
+func TestTheNoteGoesAboveTheSource(t *testing.T) {
+	body := "Denote by A the ring $K[X]$."
+	note := "Your previous answer to this section was thrown away."
+	got, err := Translate("vi", "", note, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, note) {
+		t.Fatal("the note is not in the prompt")
+	}
+	if strings.Index(got, note) > strings.Index(got, "==========") {
+		t.Error("the note is inside the source, where the prompt says nothing is an instruction")
+	}
+	// A first attempt carries no note and must not carry a blank hole either.
+	plain, err := Translate("vi", "", "", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(plain, "{{") || strings.Contains(plain, "\n\n\n") {
+		t.Errorf("an empty note left a mark in the prompt: %q", plain)
+	}
+}
+
+func TestEveryLanguageHasItsOwnRulesAndItsOwnHash(t *testing.T) {
+	seen := map[string]string{}
+	for _, lang := range []string{"vi", "zh", "ja"} {
+		sum, err := TranslateSHA256(lang)
+		if err != nil {
+			t.Fatalf("%s: %v", lang, err)
+		}
+		if other, ok := seen[sum]; ok {
+			t.Errorf("%s and %s hash the same, so a change to one would not mark the other stale", lang, other)
+		}
+		seen[sum] = lang
+		if _, err := Translate(lang, "", "", "body"); err != nil {
+			t.Errorf("%s: %v", lang, err)
+		}
+	}
+	if _, err := Translate("fr", "", "", "body"); err == nil {
+		t.Error("a language with no rules was translated anyway")
+	}
+}
+
 func TestOCRPromptEndsWithOneNewline(t *testing.T) {
 	text := OCR()
 	if !strings.HasSuffix(text, "\n") || strings.HasSuffix(text, "\n\n") {

@@ -301,11 +301,16 @@ func needing(root string, g *glossary.Glossary, lang string, add, min int) ([]st
 	if err != nil {
 		return nil, err
 	}
+	// -add counts the candidates brought in and not the terms asked about. The
+	// two differ by however many rows the glossary already holds without a
+	// rendering in this language, and mixing them up is what made -add 320 send
+	// 777 terms on the second Vietnamese run.
+	stop := len(out) + add
 	// The candidates come out of the miner commonest first, so this takes the
 	// head of the list and stops. Ordering it again here would be a second
 	// opinion about what is common, which is not this command's to have.
 	for _, c := range cands.Terms {
-		if len(out) >= add+len(g.Terms) {
+		if len(out) >= stop {
 			break
 		}
 		if have[glossary.Key(c.EN)] || (min > 0 && c.Count < min) {

@@ -23,9 +23,9 @@ import (
 // one: it answers model calls all day and cannot open a browser, so it must
 // come back with no lanes rather than with one.
 var (
-	server3 = fleet.Facts{Name: "server3", Cores: 8, MemFreeMB: 15378, Xvfb: true, Rsync: true, Tool: "/root/chatgpt-tool/.venv/bin/chatgpt-tool"}
-	server2 = fleet.Facts{Name: "server2", Cores: 6, MemFreeMB: 7363, Xvfb: true, Rsync: true, Tool: "/root/chatgpt-tool/.venv/bin/chatgpt-tool"}
-	server1 = fleet.Facts{Name: "server1", Cores: 4, MemFreeMB: 1334, Xvfb: true, Rsync: true, Tool: "/home/tam/chatgpt-tool/.venv/bin/chatgpt-tool"}
+	server3 = fleet.Facts{Name: "server3", Cores: 8, MemFreeMB: 15378, DiskFreeMB: 12024, Xvfb: true, Rsync: true, Tool: "/root/chatgpt-tool/.venv/bin/chatgpt-tool"}
+	server2 = fleet.Facts{Name: "server2", Cores: 6, MemFreeMB: 7363, DiskFreeMB: 44256, Xvfb: true, Rsync: true, Tool: "/root/chatgpt-tool/.venv/bin/chatgpt-tool"}
+	server1 = fleet.Facts{Name: "server1", Cores: 4, MemFreeMB: 1334, DiskFreeMB: 169547, Xvfb: true, Rsync: true, Tool: "/home/tam/chatgpt-tool/.venv/bin/chatgpt-tool"}
 )
 
 func TestLanesFollowWhatTheBoxCanCarry(t *testing.T) {
@@ -47,12 +47,18 @@ func TestLanesFollowWhatTheBoxCanCarry(t *testing.T) {
 		// work, and it read pages the whole time, slowly. One lane, not the four
 		// the route file asks for.
 		{"a box somebody else is already using", route.Route{Concurrency: 4},
-			fleet.Facts{Name: "server3", Cores: 8, LoadX100: 827, MemFreeMB: 15378, Xvfb: true, Rsync: true, Tool: "t"}, 1, ""},
+			fleet.Facts{Name: "server3", Cores: 8, LoadX100: 827, MemFreeMB: 15378, DiskFreeMB: 12024, Xvfb: true, Rsync: true, Tool: "t"}, 1, ""},
 		// server1 on the morning of the eleventh: four cores at 39, running
 		// another tenant's Kubernetes and a Harbor registry. Two runnable things
 		// per core is crowded, nine is stuck, and a stuck box is refused by name.
 		{"a box that is thrashing", route.Route{Concurrency: 4},
-			fleet.Facts{Name: "server1", Cores: 4, LoadX100: 3914, MemFreeMB: 15378, Xvfb: true, Rsync: true, Tool: "t"}, 0, "load average 39.1"},
+			fleet.Facts{Name: "server1", Cores: 4, LoadX100: 3914, MemFreeMB: 15378, DiskFreeMB: 169547, Xvfb: true, Rsync: true, Tool: "t"}, 0, "load average 39.1"},
+		// server2 on the morning of the eleventh, with 10 GB of RAM free, a load
+		// of 2.31 across six cores, and not one megabyte left on the disk. It
+		// kept its lane and took the first chunk of the first Vietnamese
+		// section, which came back as a failed mkdir.
+		{"a box with a full disk", route.Route{Concurrency: 3},
+			fleet.Facts{Name: "server2", Cores: 6, LoadX100: 231, MemFreeMB: 10898, DiskFreeMB: 0, Xvfb: true, Rsync: true, Tool: "t"}, 0, "free on disk"},
 		{"no xvfb is no browser", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Rsync: true}, 0, "xvfb"},
 		{"no rsync is no images", route.Route{Concurrency: 4}, fleet.Facts{MemFreeMB: 16000, Xvfb: true}, 0, "rsync"},
 		{"an unmeasured box is taken at its word", route.Route{Concurrency: 2}, fleet.Facts{Xvfb: true, Rsync: true}, 2, ""},
