@@ -101,55 +101,162 @@ func RomanOrder(s string) (int, error) {
 	return total, nil
 }
 
-// Ref locates a statement in the corpus. Subsec and Occurrence are only used
-// for statements Bourbaki leaves unnumbered, such as a bare "Corollary".
+// Scope is what a statement's number is counted within. Bourbaki does not
+// number everything the same way, and a label that assumed it did would put two
+// different statements at the same address.
+type Scope int
+
+const (
+	// ScopeSection is numbered straight through the §. A Proposition 6 is the
+	// sixth Proposition of its §, whatever no. it stands in.
+	ScopeSection Scope = iota
+	// ScopeSubsec is numbered within the no. and starts again at the next one.
+	ScopeSubsec
+	// ScopeParent is numbered under the statement it follows and starts again
+	// at the next one.
+	ScopeParent
+)
+
+// Scope of a Kind, measured on the 505 pages of Algebra chapter VIII.
+//
+// Definitions, Propositions, Theorems, Lemmas and the one Scholium run straight
+// through their §: no § of the chapter numbers two of any of them alike.
+//
+// Corollaries do not. § 5 no. 3 prints Corollary 1 to Corollary 5 and then a
+// Corollary 1 again, because a Corollary is numbered under the statement it
+// hangs from and the second run hangs from a different Proposition. Counting
+// them within the no. instead leaves that pair on one address, and counting
+// them within the § leaves twelve of the twenty-five sections with a clash.
+// Under the statement they follow, all 112 numbered Corollaries of the chapter
+// are distinct and none is left without a parent.
+//
+// Remarks and Examples are numbered within the no.: § 1 prints an Example 5 in
+// no. 1 and another in no. 2, and § 20 a Remark 3 in no. 3 and a Remark 1 in
+// no. 8.
+func (k Kind) Scope() Scope {
+	switch k {
+	case KindCorollary:
+		return ScopeParent
+	case KindRemark, KindExample:
+		return ScopeSubsec
+	}
+	return ScopeSection
+}
+
+// Ref locates a statement in the corpus.
+//
+// Which of the fields under Kind are set follows the Kind's Scope, and a
+// statement Bourbaki leaves unnumbered is located by the no. it stands in and
+// its place in that no. whatever its Kind.
 type Ref struct {
-	Book       string // "alg"
-	Chapter    string // "VIII"
-	Section    int    // 1
-	Kind       Kind
-	Number     int // 0 when the statement is unnumbered
-	Subsec     int // the "no." it sits in, only meaningful when Number is 0
-	Occurrence int // 1-based ordinal within Subsec, only when Number is 0
+	Book    string // "alg"
+	Chapter string // "VIII"
+	Section int    // 1
+
+	// Appendix says the section is an Appendix rather than a §. The two are
+	// numbered separately and both from one, so Appendix 1 of chapter VIII and
+	// its § 1 are different sections with the same number, and without this
+	// their statements would share a label.
+	Appendix bool
+
+	Kind   Kind
+	Number int // 0 when the statement is unnumbered
+
+	// ParentKind and ParentNumber are the statement this one is numbered
+	// under, set for a numbered Corollary: Corollary 2 of Theorem 1.
+	ParentKind   Kind
+	ParentNumber int
+
+	Subsec     int // the no. it stands in, set when the Kind is counted within one and for every unnumbered statement
+	Occurrence int // 1-based place within Subsec, only when Number is 0
 }
 
 // Label builds the permanent full label for a statement, the string that
 // tags/tags maps a tag to.
 //
-//	alg-viii-s1-prop-6      a numbered Proposition
-//	alg-viii-s1-n3-cor-1    the first unnumbered Corollary in no. 3
+//	alg-viii-s1-prop-6        a numbered Proposition
+//	alg-viii-s5-thm-1-cor-2   Corollary 2 of Theorem 1
+//	alg-viii-s1-n2-exa-5      Example 5 of no. 2
+//	alg-viii-s1-n3-cor-1      the first unnumbered Corollary in no. 3
+//	alg-viii-a2-prop-3        a numbered Proposition of Appendix 2
+//
+// The label says where the book puts the statement and nothing about where the
+// file puts it, so it survives re-extraction, re-assembly and any amount of
+// editing. That is what makes it worth pointing a permanent tag at.
 func (r Ref) Label() string {
-	base := fmt.Sprintf("%s-%s-s%d", r.Book, strings.ToLower(r.Chapter), r.Section)
-	if r.Number > 0 {
-		return fmt.Sprintf("%s-%s-%d", base, r.Kind, r.Number)
+	base := r.SectionLabel()
+	if r.Number == 0 {
+		return fmt.Sprintf("%s-n%d-%s-%d", base, r.Subsec, r.Kind, r.Occurrence)
 	}
-	return fmt.Sprintf("%s-n%d-%s-%d", base, r.Subsec, r.Kind, r.Occurrence)
+	if r.ParentKind != "" {
+		return fmt.Sprintf("%s-%s-%d-%s-%d", base, r.ParentKind, r.ParentNumber, r.Kind, r.Number)
+	}
+	if r.Subsec > 0 {
+		return fmt.Sprintf("%s-n%d-%s-%d", base, r.Subsec, r.Kind, r.Number)
+	}
+	return fmt.Sprintf("%s-%s-%d", base, r.Kind, r.Number)
+}
+
+// SectionLabel is the label of the section the statement sits in, which is what
+// every label of that section is built on: alg-viii-s1, alg-viii-a2.
+func (r Ref) SectionLabel() string {
+	in := "s"
+	if r.Appendix {
+		in = "a"
+	}
+	return fmt.Sprintf("%s-%s-%s%d", r.Book, strings.ToLower(r.Chapter), in, r.Section)
 }
 
 var (
 	numberedLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-s(?P<sec>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
-	unnumberedLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-s(?P<sec>\d+)-n(?P<no>\d+)-(?P<kind>[a-z]+)-(?P<occ>\d+)$`)
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+	childLabelRe = regexp.MustCompile(
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)-(?P<pkind>[a-z]+)-(?P<pnum>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+	subsecLabelRe = regexp.MustCompile(
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)-n(?P<no>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
 )
 
 // ParseLabel is the inverse of Ref.Label.
+//
+// One shape carries two meanings and is read by the Kind's Scope:
+// alg-viii-s1-n2-exa-5 is Example 5 of no. 2, because an Example is numbered
+// within the no., and alg-viii-s1-n2-cor-5 is the fifth unnumbered Corollary of
+// no. 2, because a Corollary is not. The two cannot be told apart from the
+// string alone, and they do not have to be: whichever way it is read, Label
+// gives the same string back, so a label is still a key. What it means is that
+// an unnumbered Remark and a numbered one in the same no. can collide, which is
+// why assembly refuses to write a section with two statements at one label.
 func ParseLabel(label string) (Ref, error) {
-	if m := unnumberedLabelRe.FindStringSubmatch(label); m != nil {
-		sec, _ := strconv.Atoi(m[3])
-		no, _ := strconv.Atoi(m[4])
-		occ, _ := strconv.Atoi(m[6])
+	if m := childLabelRe.FindStringSubmatch(label); m != nil {
+		sec, _ := strconv.Atoi(m[4])
+		pnum, _ := strconv.Atoi(m[6])
+		num, _ := strconv.Atoi(m[8])
 		return Ref{
-			Book: m[1], Chapter: strings.ToUpper(m[2]), Section: sec,
-			Kind: Kind(m[5]), Subsec: no, Occurrence: occ,
+			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
+			ParentKind: Kind(m[5]), ParentNumber: pnum, Kind: Kind(m[7]), Number: num,
 		}, nil
 	}
+	if m := subsecLabelRe.FindStringSubmatch(label); m != nil {
+		sec, _ := strconv.Atoi(m[4])
+		no, _ := strconv.Atoi(m[5])
+		n, _ := strconv.Atoi(m[7])
+		r := Ref{
+			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
+			Kind: Kind(m[6]), Subsec: no,
+		}
+		if r.Kind.Scope() == ScopeSubsec {
+			r.Number = n
+		} else {
+			r.Occurrence = n
+		}
+		return r, nil
+	}
 	if m := numberedLabelRe.FindStringSubmatch(label); m != nil {
-		sec, _ := strconv.Atoi(m[3])
-		num, _ := strconv.Atoi(m[5])
+		sec, _ := strconv.Atoi(m[4])
+		num, _ := strconv.Atoi(m[6])
 		return Ref{
-			Book: m[1], Chapter: strings.ToUpper(m[2]), Section: sec,
-			Kind: Kind(m[4]), Number: num,
+			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
+			Kind: Kind(m[5]), Number: num,
 		}, nil
 	}
 	return Ref{}, fmt.Errorf("malformed label: %q", label)

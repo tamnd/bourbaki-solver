@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -34,6 +35,8 @@ type SectionFrontMatter struct {
 	ChapterTitle    string       `yaml:"chapter_title"`
 	Section         int          `yaml:"section"`
 	SectionTitle    string       `yaml:"section_title"`
+	Appendix        bool         `yaml:"appendix,omitempty"`
+	Kind            string       `yaml:"kind,omitempty"`
 	Lang            string       `yaml:"lang"`
 	Source          string       `yaml:"source"`
 	SourceEdition   string       `yaml:"source_edition,omitempty"`
@@ -260,8 +263,35 @@ func Slug(title string, max int) string {
 const SlugLen = 40
 
 // SectionPath is where a section file belongs.
+//
+// A § is named for its number twice over, once so the directory sorts in
+// reading order and once so the name says what it is: 02_s2_the_structure_of_
+// modules_of_finite_length.md. An appendix takes an A in place of the ordinal,
+// A1_a1_algebras_without_unit_element.md, which sorts after every § because a
+// letter sorts after a digit, and that is where the book puts it. Numbering it
+// on from the last § instead would make the name of a file depend on how many
+// §§ the chapter happens to have, and chapters II and III close with an
+// appendix carrying no number at all.
 func SectionPath(root, lang string, m SectionFrontMatter) string {
 	name := fmt.Sprintf("%02d_s%d_%s.md", m.Section, m.Section, Slug(m.SectionTitle, SlugLen))
+	switch m.Kind {
+	case KindFront:
+		// 00 puts the chapter's opening pages first, ahead of § 1, which is
+		// where the book puts them.
+		name = "00_frontmatter.md"
+	case KindHistorical:
+		// The note comes after everything, including the appendices, so its
+		// name has to sort after a leading A. It is the only file here named
+		// for what it is rather than for its number.
+		name = "historical_note.md"
+	}
+	if m.Appendix {
+		n := ""
+		if m.Section > 0 {
+			n = strconv.Itoa(m.Section)
+		}
+		name = fmt.Sprintf("A%s_a%s_%s.md", n, n, Slug(m.SectionTitle, SlugLen))
+	}
 	return filepath.Join(root, "content", lang, m.Book, m.Chapter, name)
 }
 
