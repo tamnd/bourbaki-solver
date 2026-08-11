@@ -197,8 +197,12 @@ func TestItemStartOnRunTogetherExercises(t *testing.T) {
 	if got := strings.TrimSpace(s16[i+len(m[0]):]); !strings.HasPrefix(got, "a) Let A") {
 		t.Errorf("exercise 15 begins %q", first(got, 40))
 	}
-	if m[1] != "*" {
-		t.Errorf("exercise 15 of § 16 is marked supplementary and the marker was read as %q", m[1])
+	// The asterisk after the number opens a starred passage and is not a mark
+	// on the exercise. The book puts its marks in front of the number, and all
+	// nine asterisks of the chapter that mark something are set "$*19)$"; the
+	// six set "$15)*$" are the other thing.
+	if m[1] != "" {
+		t.Errorf("the asterisk after the number of exercise 15 of § 16 was read as a mark: %q", m[1])
 	}
 }
 

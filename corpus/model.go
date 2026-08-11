@@ -82,16 +82,22 @@ func (s Statement) Label() string { return s.Ref.Label() }
 type Exercise struct {
 	Meta ExerciseFrontMatter
 	Body string
+	// Pages is every PDF page the exercise is printed on, in order. Meta
+	// records only the first, which is the one a reader cites; this is what
+	// assembly needs to know which of the volume's footnotes were printed
+	// under the exercise. It is not written to the file.
+	Pages []int
 }
 
 // Ref of an exercise, so that it labels and tags like any other statement.
 func (e Exercise) Ref() Ref {
 	return Ref{
-		Book:    e.Meta.Book,
-		Chapter: e.Meta.Chapter,
-		Section: e.Meta.Section,
-		Kind:    KindExercise,
-		Number:  e.Meta.Exercise,
+		Book:     e.Meta.Book,
+		Chapter:  e.Meta.Chapter,
+		Section:  e.Meta.Section,
+		Appendix: e.Meta.Appendix,
+		Kind:     KindExercise,
+		Number:   e.Meta.Exercise,
 	}
 }
 

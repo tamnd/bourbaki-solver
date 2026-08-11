@@ -82,7 +82,7 @@ func tokens(l Line) []token {
 		if text == "" {
 			continue
 		}
-		if r.Level != Base && footnoteMark(r.Text) {
+		if r.Level == Sup && footnoteMark(r.Text) {
 			// A footnote reference is a superscript and is not an exponent.
 			toks = append(toks, token{text: "[^" + strings.Trim(r.Text, "()") + "]",
 				class: ClassText, left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom()})
@@ -105,6 +105,12 @@ func tokens(l Line) []token {
 // footnoteMark reports whether a run is a reference to a footnote, which this
 // volume sets as a parenthesised number raised above the line. Everything else
 // raised above the line is an exponent.
+//
+// Above the line and not merely off it. A parenthesised number dropped below
+// the line is an index, and reading one as a footnote reference cost three of
+// them in Algebra VIII: X_{\sigma(1)} on page 446, v_{\sigma(1)} on 465 and
+// \varepsilon_{\sigma(1)} on 471 came out as X_{\sigma}[^1] and so on, and each
+// of the three then pointed at a real footnote of the § it stood in.
 func footnoteMark(s string) bool {
 	s = strings.TrimSpace(s)
 	if len(s) < 3 || s[0] != '(' || s[len(s)-1] != ')' {

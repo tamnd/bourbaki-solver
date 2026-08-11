@@ -61,9 +61,13 @@ type SectionFrontMatter struct {
 
 // ExerciseFrontMatter is the head of content/<lang>/<book>/<chapter>/exercises/sN/NN.md.
 type ExerciseFrontMatter struct {
-	Book     string `yaml:"book"`
-	Chapter  string `yaml:"chapter"`
-	Section  int    `yaml:"section"`
+	Book    string `yaml:"book"`
+	Chapter string `yaml:"chapter"`
+	Section int    `yaml:"section"`
+	// Appendix says the exercises are an appendix's rather than a §'s. Appendix
+	// 1 of chapter VIII and its § 1 both number their exercises from one, so
+	// without this the two sets would share a label and a path.
+	Appendix bool   `yaml:"appendix,omitempty"`
 	Exercise int    `yaml:"exercise"`
 	Label    string `yaml:"label"`
 	Tag      string `yaml:"tag,omitempty"`
@@ -296,9 +300,20 @@ func SectionPath(root, lang string, m SectionFrontMatter) string {
 }
 
 // ExercisePath is where an exercise file belongs.
+//
+// The directory is named the way the section label is, s1 for § 1 and a1 for
+// Appendix 1, so that the path and the label say the same thing.
 func ExercisePath(root, lang string, m ExerciseFrontMatter) string {
 	return filepath.Join(root, "content", lang, m.Book, m.Chapter,
-		"exercises", fmt.Sprintf("s%d", m.Section), fmt.Sprintf("%02d.md", m.Exercise))
+		"exercises", ExerciseDir(m.Section, m.Appendix), fmt.Sprintf("%02d.md", m.Exercise))
+}
+
+// ExerciseDir is the directory a section's exercises go in, "s1" or "a1".
+func ExerciseDir(section int, appendix bool) string {
+	if appendix {
+		return fmt.Sprintf("a%d", section)
+	}
+	return fmt.Sprintf("s%d", section)
 }
 
 // SolutionPath is where a solution belongs. It is keyed by the exercise's

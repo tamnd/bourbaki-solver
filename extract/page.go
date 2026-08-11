@@ -735,7 +735,7 @@ func noteNumber(l Line) (string, bool) {
 		return "", false
 	}
 	r := l.Runs[0]
-	if r.Level == Base || r.Class.Math() || !footnoteMark(r.Text) {
+	if r.Level != Sup || r.Class.Math() || !footnoteMark(r.Text) {
 		return "", false
 	}
 	return strings.Trim(strings.TrimSpace(r.Text), "()"), true
