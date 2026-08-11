@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/glossary"
 	"github.com/tamnd/bourbaki-solver/quality"
 	"github.com/tamnd/bourbaki-solver/report"
 )
@@ -33,9 +34,10 @@ flags:
 
 const reportHelp = `usage: bourbaki report <what>
 
-  usage       what the fleet did: pages, wall clock, and why batches failed
-  coverage    what the corpus holds against what the table of contents says
-  printings   where the two printings of a chapter disagree
+  usage        what the fleet did: pages, wall clock, and why batches failed
+  coverage     what the corpus holds against what the table of contents says
+  printings    where the two printings of a chapter disagree
+  translation  what each language holds, what is stale, and which terms it misses
 
 Run bourbaki report <what> -h for the flags.
 `
@@ -52,11 +54,107 @@ func runReport(args []string) error {
 		return reportCoverageCmd(args[1:])
 	case "printings":
 		return reportPrintingsCmd(args[1:])
+	case "translation", "translations":
+		return reportTranslationCmd(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, reportHelp)
 		return nil
 	}
-	return fmt.Errorf("unknown report %q, try: usage, coverage, printings", args[0])
+	return fmt.Errorf("unknown report %q, try: usage, coverage, printings, translation", args[0])
+}
+
+const translationUsage = `usage: bourbaki report translation [flags]
+
+What each target language holds against the English: how many sections and how
+many exercises are translated, how many of those were made from an English that
+has changed since, and how closely the glossary is followed.
+
+The coverage is of what the corpus holds and not of the Éléments. A language at
+100 per cent has every English file there is today.
+
+-terms is the other half, and the one worth running before a translation pass:
+the glossary term by term, worst first, with the files that miss each one. A
+term missed in one file is a sentence somebody wrote differently, and a term
+missed in thirty is a bad row in the glossary. The first run of this check found
+a bad row: respect was pinned as the verb, and all 33 uses in the corpus are
+"with respect to", which is a preposition.
+
+flags:
+  -lang CODE     only this language, vi zh or ja
+  -terms         the per term adherence report rather than the coverage table
+  -all           with -terms, every term and not only the ones something missed
+  -json          print the report as JSON
+`
+
+func reportTranslationCmd(args []string) error {
+	fs := flag.NewFlagSet("report translation", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, translationUsage) }
+	lang := fs.String("lang", "", "only this language")
+	terms := fs.Bool("terms", false, "the per term adherence report")
+	all := fs.Bool("all", false, "every term, not only the ones something missed")
+	asJSON := fs.Bool("json", false, "print the report as JSON")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	c, err := quality.Load(quality.Options{Root: root})
+	if err != nil {
+		return err
+	}
+	g, err := glossary.Load(root)
+	if err != nil {
+		return err
+	}
+
+	if *terms {
+		if *lang == "" {
+			return fmt.Errorf("report translation -terms wants a -lang: the terms are per language")
+		}
+		rows := report.Terms(c, g, *lang, report.TermOptions{All: *all})
+		if *asJSON {
+			return printJSON(rows)
+		}
+		fmt.Print(report.TermTable(*lang, rows))
+		return nil
+	}
+
+	out := report.Translations(c, g)
+	if *lang != "" {
+		var only []*report.Translation
+		for _, t := range out {
+			if t.Lang == *lang {
+				only = append(only, t)
+			}
+		}
+		out = only
+	}
+	if len(out) == 0 {
+		// Nothing translated and nothing said would read as a clean report.
+		fmt.Println("nothing is translated yet")
+		return nil
+	}
+	if *asJSON {
+		return printJSON(out)
+	}
+	for i, t := range out {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Print(t.Table())
+	}
+	return nil
+}
+
+func printJSON(v any) error {
+	raw, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(raw))
+	return nil
 }
 
 const printingsUsage = `usage: bourbaki report printings [flags]

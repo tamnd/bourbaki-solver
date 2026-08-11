@@ -74,6 +74,35 @@ type pair struct {
 	tr, en Doc
 }
 
+// A Pair is what pair is, for a caller outside the rules.
+//
+// The rules are not the only thing that has to walk the translations against
+// their sources: report translation counts what is translated and how closely
+// the glossary is followed, and it has to pair the files the same way the rules
+// do or it will report on a set the rules never looked at.
+type Pair struct {
+	Translation Doc
+	English     Doc
+}
+
+// Pairs is every translated file that names an English source, with the ones
+// that name none or name a file that is not there left out. L01 is what reports
+// those, so a report that also reported them would say the same thing twice.
+func (c *Corpus) Pairs() []Pair {
+	ps, _ := c.pairs()
+	out := make([]Pair, 0, len(ps))
+	for _, p := range ps {
+		out = append(out, Pair{Translation: p.tr, English: p.en})
+	}
+	return out
+}
+
+// Prose is a body with the mathematics and the heading attributes taken out,
+// which is the only text a glossary term can honestly be looked for in. It is
+// exactly what L06 reads, exported so that the report and the rule cannot drift
+// apart on what counts as a mention.
+func Prose(body string) string { return prose(body) }
+
 // pairs are the translated files that name an English source, with the ones
 // that name none or name a file that is not there reported as they are found.
 //

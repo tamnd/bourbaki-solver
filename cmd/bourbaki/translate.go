@@ -21,6 +21,8 @@ import (
 	"github.com/tamnd/bourbaki-solver/glossary"
 	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/prompt"
+	"github.com/tamnd/bourbaki-solver/quality"
+	"github.com/tamnd/bourbaki-solver/report"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
 
@@ -65,6 +67,9 @@ refuses any answer that is not the same section.
   -routes PATH   route file
   -dry           print the first question and stop, without asking anything
   -stale         list what needs translating and why, and ask nothing
+  -check-glossary  hold the translations already on disk to the glossary, term
+                 by term, and ask nothing
+  -all           with -check-glossary, every term and not only the missed ones
   -keep          leave the questions on the boxes, for debugging
 
 A section is skipped when its translation is there, its source_content_sha256
@@ -105,6 +110,8 @@ func runTranslate(args []string) error {
 	routeFile := fs.String("routes", "", "route file")
 	dry := fs.Bool("dry", false, "print the first question and stop")
 	stale := fs.Bool("stale", false, "list what needs translating and why, and ask nothing")
+	checkGlossary := fs.Bool("check-glossary", false, "hold what is on disk to the glossary and ask nothing")
+	all := fs.Bool("all", false, "with -check-glossary, every term and not only the missed ones")
 	keep := fs.Bool("keep", false, "leave the questions on the boxes")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -131,6 +138,12 @@ func runTranslate(args []string) error {
 	}
 	if len(g.In(*lang)) == 0 {
 		return fmt.Errorf("the glossary has no %s in it, run bourbaki glossary translate -lang %s first", *lang, *lang)
+	}
+	// Before the run rather than after it. The pass that follows costs fleet
+	// time per section, and a term the last pass rendered three ways is a term
+	// this one will render three ways too unless the row is fixed first.
+	if *checkGlossary {
+		return checkGlossaryOnDisk(root, *lang, *book, *chapter, *file, *all)
 	}
 	promptHash, err := prompt.TranslateSHA256(*lang)
 	if err != nil {
@@ -220,6 +233,37 @@ func runTranslate(args []string) error {
 // instructions changing means every file is going again, and the terminology
 // changing means one glossary row reached this section. Those are three
 // different sizes of job and the count on its own hides which one this is.
+// checkGlossaryOnDisk holds the translations that are already written to the
+// terminology, term by term, and says nothing about the ones that are not
+// written: this is a check on the corpus and not a plan for a run, which is
+// what -stale is.
+//
+// It reads the committed files through the same loader the audit uses, so the
+// answer here and L06's answer are the same answer counted two ways. A term
+// that is missed is not by itself a defect. Vietnamese inflects nothing but it
+// compounds, and a rendering looked for as it stands will miss a sentence that
+// carries the idea in a pronoun. What the count is for is the shape: one file
+// missing a term is a sentence, and thirty files missing the same term is a row
+// that is wrong.
+func checkGlossaryOnDisk(root, lang, book, chapter, file string, all bool) error {
+	g, err := glossary.Load(root)
+	if err != nil {
+		return err
+	}
+	c, err := quality.Load(quality.Options{Root: root})
+	if err != nil {
+		return err
+	}
+	opt := report.TermOptions{Book: book, Chapter: chapter, File: file, All: all}
+	fmt.Print(report.TermTable(lang, report.Terms(c, g, lang, opt)))
+	for _, t := range report.Translations(c, g) {
+		if t.Lang == lang {
+			fmt.Println(t.Line())
+		}
+	}
+	return nil
+}
+
 func reportStale(jobs []job, skipped int, lang string) error {
 	for _, j := range jobs {
 		fmt.Printf("%-64s %s\n", j.source, j.why)
