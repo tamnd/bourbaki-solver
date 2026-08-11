@@ -198,6 +198,49 @@ func TestBlankPagesAreFoundAndKeptOutOfTheQueue(t *testing.T) {
 	}
 }
 
+// A second render must not touch the blank pages it already wrote. Nothing
+// about a page with no ink on it can have changed, and a fresh generated stamp
+// on five empty files is five files somebody has to read past in a pull
+// request to find the pages that were actually read.
+func TestRenderingAgainLeavesTheBlankPagesAlone(t *testing.T) {
+	run := &poppler{pages: 4, pad: 1, ink: map[int]float64{1: 0, 2: 0.06, 3: 0.06, 4: 0}}
+	opts := options(t, run)
+	opts.WriteBlanks = true
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+
+	blank := corpus.PagePath(opts.Corpus, opts.Book, 1)
+	first, err := os.ReadFile(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	opts.Overwrite = true
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	second, err := os.ReadFile(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(first) != string(second) {
+		t.Errorf("the blank page was rewritten:\n%s\nbecame\n%s", first, second)
+	}
+	after, err := os.Stat(blank)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Errorf("the blank page was written again at %s, having been written at %s",
+			after.ModTime(), before.ModTime())
+	}
+}
+
 func TestInterruptedRunsResume(t *testing.T) {
 	run := &poppler{pages: 8, pad: 1, ink: map[int]float64{
 		1: 0.05, 2: 0.05, 3: 0.05, 4: 0.05, 5: 0.05, 6: 0.05, 7: 0.05, 8: 0.05,
@@ -478,5 +521,39 @@ func TestSummaryReportsWhatTheRunCost(t *testing.T) {
 	var empty Manifest
 	if empty.Summary() == "" {
 		t.Fatal("an empty manifest should still say something")
+	}
+}
+
+func TestARangeIsChunkedAndAListIsGrouped(t *testing.T) {
+	for _, c := range []struct {
+		name             string
+		options          Options
+		first, last, all int
+		want             [][2]int
+	}{
+		{"a plain range", Options{Batch: 25}, 1, 60, 505, [][2]int{{1, 25}, {26, 50}, {51, 60}}},
+		// The pages the extraction of Algebra VIII could not read, at the start
+		// of the list: scattered singles, one pair, and one run of three. Asking
+		// pdftoppm for 41 to 77 would render thirty five pages nobody wants.
+		{"the flagged pages", Options{Batch: 25, Only: []int{76, 41, 77, 61, 310, 311, 312}}, 0, 0, 505,
+			[][2]int{{41, 41}, {61, 61}, {76, 77}, {310, 312}}},
+		{"a page that is not in the volume", Options{Only: []int{3, 900}}, 0, 0, 505, [][2]int{{3, 3}}},
+		{"the same page twice", Options{Only: []int{7, 7}}, 0, 0, 505, [][2]int{{7, 7}}},
+		// A long run still breaks at the batch size, so one pdftoppm call is
+		// never the whole volume.
+		{"a run longer than a batch", Options{Batch: 2, Only: []int{4, 5, 6, 7}}, 0, 0, 505,
+			[][2]int{{4, 5}, {6, 7}}},
+	} {
+		got := spans(c.options, c.first, c.last, c.all)
+		if len(got) != len(c.want) {
+			t.Errorf("%s: spans = %v, want %v", c.name, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("%s: spans = %v, want %v", c.name, got, c.want)
+				break
+			}
+		}
 	}
 }

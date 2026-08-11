@@ -2,6 +2,7 @@ package ocr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,10 @@ type fleet struct {
 	// batches records every batch directory the fleet was asked to write into,
 	// which is how a test sees that a retry did not reuse a directory.
 	batches []string
+	// pushErr is what rsync says when the box is not there. A batch that cannot
+	// be pushed never reaches a host.
+	pushErr error
+	pushes  int
 	// pending is keyed by batch id rather than by remote path, because the
 	// images arrive under in/<id> and are collected from out/<id>.
 	pending map[string][]string
@@ -61,6 +66,10 @@ func (f *fleet) Run(ctx context.Context, host, command string) (string, error) {
 func (f *fleet) Push(ctx context.Context, host string, local []string, remote string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.pushes++
+	if f.pushErr != nil {
+		return f.pushErr
+	}
 	for _, file := range local {
 		if strings.HasPrefix(filepath.Base(file), "prompt-") {
 			continue
@@ -177,32 +186,40 @@ func TestFillSkipsBlanksAndWorkAlreadyDone(t *testing.T) {
 	if again != 0 {
 		t.Errorf("a second fill added %d jobs, want 0", again)
 	}
-	// A different prompt is different work and has to be read again.
+	// A different prompt is different work, but these pages are already in the
+	// queue waiting and a batch reads them with whatever prompt the run holds
+	// now, not the one that was current when the job was made. Queueing them a
+	// second time would put one page in a batch twice, which is the thing that
+	// killed twenty one pages of Algebra I.
 	runner.Prompt += " Keep the exercises."
 	third, err := runner.Fill(w.pages)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third != 4 {
-		t.Errorf("a changed prompt added %d jobs, want 4", third)
+	if third != 0 {
+		t.Errorf("a changed prompt added %d jobs on top of the ones already waiting, want 0", third)
+	}
+
+	// Once they have run, a changed prompt does queue them again: nothing is
+	// waiting any more and what is on disk was read from the old prompt.
+	drained, err := runner.Queue.Drain(queue.StageOCR)
+	if err != nil || drained == 0 {
+		t.Fatalf("drained %d jobs: %v", drained, err)
+	}
+	fourth, err := runner.Fill(w.pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fourth != 4 {
+		t.Errorf("a changed prompt on an empty queue added %d jobs, want 4", fourth)
 	}
 }
 
 func TestFillSkipsAPageAlreadyRead(t *testing.T) {
 	w := newWorld(t, 3)
 	runner := w.runner(t, newFleet(nil))
-	// Page 2 is on disk, read from this image with this prompt.
-	file := corpus.PageFile{Meta: corpus.PageFrontMatter{
-		Book: "alg-iv-vii", PDFPage: 2, Method: corpus.MethodOCR,
-		InputSHA256: w.pages[1].SHA256, PromptSHA256: sha256Hex(runner.Prompt),
-	}, Body: "already read"}
-	path := corpus.PagePath(w.root, "alg-iv-vii", 2)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := file.Write(path); err != nil {
-		t.Fatal(err)
-	}
+	// Page 2 is on disk, read from this image with this prompt, and good.
+	writePage(t, w.root, 2, w.pages[1].SHA256, sha256Hex(runner.Prompt), page("A IV.2"))
 
 	added, err := runner.Fill(w.pages)
 	if err != nil {
@@ -210,6 +227,41 @@ func TestFillSkipsAPageAlreadyRead(t *testing.T) {
 	}
 	if added != 2 {
 		t.Fatalf("filled %d jobs, want 2 with page 2 already read", added)
+	}
+}
+
+// Written is not the same as read. Pages 50 and 53 of Algebra I sat in the
+// corpus failing the math rule from the pilot onwards and no run would touch
+// them, because a file existed with the right hashes on it. A page nobody would
+// accept is work still to do.
+func TestFillReadsARejectedPageAgain(t *testing.T) {
+	w := newWorld(t, 3)
+	runner := w.runner(t, newFleet(nil))
+	// The right image, the right prompt, and a formula nobody closed.
+	writePage(t, w.root, 2, w.pages[1].SHA256, sha256Hex(runner.Prompt),
+		page("A IV.2")+"\n\nand so $x \\in E, which is where the dollar was lost.\n")
+
+	added, err := runner.Fill(w.pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 3 {
+		t.Fatalf("filled %d jobs, want all 3 with page 2 rejected", added)
+	}
+}
+
+func writePage(t *testing.T, root string, number int, imageSHA, promptSHA, body string) {
+	t.Helper()
+	file := corpus.PageFile{Meta: corpus.PageFrontMatter{
+		Book: "alg-iv-vii", PDFPage: number, Method: corpus.MethodOCR,
+		InputSHA256: imageSHA, PromptSHA256: promptSHA,
+	}, Body: body}
+	path := corpus.PagePath(root, "alg-iv-vii", number)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Write(path); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -647,4 +699,223 @@ func TestOnlyTheToolsHeaderIsStripped(t *testing.T) {
 			t.Errorf("stripped something it should not have:\n%q\nbecame\n%q", text, got)
 		}
 	}
+}
+
+// broken is the same page with one inline formula opened and never closed,
+// which is what a real answer looked like on page 50 of Algebra I. Everything
+// else about it is right, and reading it again costs a full page.
+func broken(label string) string {
+	return strings.Replace(page(label), "prime subring of $B$", "prime subring of $B", 1)
+}
+
+func TestAPageThatFailsOnADelimiterIsAskedAboutRatherThanReadAgain(t *testing.T) {
+	w := newWorld(t, 2)
+	machine := newFleet(func(image string) string {
+		if strings.HasSuffix(image, "0001.png") {
+			return "---\nsource: /root/x.png\nmodel: gpt-5\ngenerated: now\nelapsed: 63s\n" +
+				"conversation: https://chatgpt.com/c/abc-1\nprofile: /root/.config/chatgpt-profile-3\n---\n\n" + broken("A IV.1")
+		}
+		return page("A IV.2")
+	})
+	runner := w.runner(t, machine)
+
+	var asked Thread
+	runner.Repair = func(ctx context.Context, thread Thread, page int, text string, problems []Problem) (string, bool) {
+		asked = thread
+		return strings.Replace(text, "prime subring of $B", "prime subring of $B$", 1), true
+	}
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Accepted != 2 || report.Rejected != 0 {
+		t.Fatalf("accepted %d rejected %d: %s", report.Accepted, report.Rejected, report.Summary())
+	}
+	if report.Repaired != 1 {
+		t.Errorf("the report says %d pages were repaired, want 1", report.Repaired)
+	}
+	// The follow up has to go to the conversation that read the page and to the
+	// box that conversation lives on, or it goes nowhere.
+	if asked.Conversation != "https://chatgpt.com/c/abc-1" || asked.Host != "server3" {
+		t.Errorf("the repair was offered %+v", asked)
+	}
+	file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(w.root, "alg-iv-vii", 1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(file.Body, "prime subring of $B$") {
+		t.Errorf("the repaired text is not what was written:\n%s", file.Body)
+	}
+	// A mended page passes every rule now, so nothing else in the corpus would
+	// ever say it was not the transcription the model first gave.
+	if len(file.Meta.Flags) == 0 || !strings.Contains(file.Meta.Flags[0], "repaired in its own thread") {
+		t.Errorf("the page does not record that it was repaired: %v", file.Meta.Flags)
+	}
+}
+
+func TestARepairThatIsRefusedLeavesThePageForTheQueue(t *testing.T) {
+	w := newWorld(t, 1)
+	machine := newFleet(func(image string) string {
+		return "---\nsource: /root/x.png\nmodel: gpt-5\ngenerated: now\nelapsed: 63s\n" +
+			"conversation: https://chatgpt.com/c/abc-1\nprofile: /root/.config/chatgpt-profile-3\n---\n\n" + broken("A IV.1")
+	})
+	runner := w.runner(t, machine)
+	runner.Repair = func(context.Context, Thread, int, string, []Problem) (string, bool) { return "", false }
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Back to the queue, which tries it twice more at a higher resolution and
+	// then gives up on it. That is what a page with no provable repair costs,
+	// and it is the price of not writing a guess into the corpus.
+	if report.Accepted != 0 || report.Repaired != 0 || report.Dead != 1 {
+		t.Fatalf("a refused repair did not send the page back: %s", report.Summary())
+	}
+	if _, err := os.Stat(corpus.PagePath(w.root, "alg-iv-vii", 1)); !os.IsNotExist(err) {
+		t.Error("a page whose repair was refused was written anyway")
+	}
+}
+
+// A page read before the tool reported conversation urls has nothing to ask in,
+// and asking in the wrong thread is worse than reading the page again.
+func TestAPageWithNoThreadIsNotOfferedForRepair(t *testing.T) {
+	w := newWorld(t, 1)
+	machine := newFleet(func(image string) string { return broken("A IV.1") })
+	runner := w.runner(t, machine)
+	var offered int
+	runner.Repair = func(context.Context, Thread, int, string, []Problem) (string, bool) {
+		offered++
+		return "", false
+	}
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Do(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if offered != 0 {
+		t.Errorf("a page with no conversation was offered for repair %d times", offered)
+	}
+	if _, err := ReadThread(w.root, "alg-iv-vii", 1); err == nil {
+		t.Error("a thread was recorded for a page whose answer carried no conversation")
+	}
+}
+
+// A batch that fails on the way out, before chatgpt-tool ever runs, still has
+// to say which box it was and how many pages it was carrying. Two lines in the
+// real usage log have none of that on them, which makes them unreadable a week
+// later.
+func TestAFailedBatchStillNamesTheBox(t *testing.T) {
+	result := named(Result{}, "server2", "alg-i-iii-0050-ab12cd", 4, errors.New("ssh: connect to host server2 port 22: connection refused"))
+	if result.Host != "server2" || result.ID != "alg-i-iii-0050-ab12cd" {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Pages != 4 {
+		t.Errorf("Pages = %d, want the 4 it was carrying", result.Pages)
+	}
+	if !strings.Contains(result.Log, "connection refused") {
+		t.Errorf("Log = %q, want the error that stopped it", result.Log)
+	}
+	if result.Wrote != 0 {
+		t.Errorf("Wrote = %d, want none", result.Wrote)
+	}
+}
+
+// What the tool reported is never overwritten by the fallback.
+func TestAFinishedBatchKeepsWhatItReported(t *testing.T) {
+	result := named(Result{Host: "server3", ID: "real", Pages: 6, Wrote: 6, Log: "kept"}, "server2", "guess", 4, nil)
+	if result.Host != "server3" || result.ID != "real" || result.Pages != 6 || result.Log != "kept" {
+		t.Fatalf("result = %+v", result)
+	}
+}
+
+// A batch that cannot be sent has read nothing. The pages have to come back
+// with their attempts unspent, or a local error costs the same as three bad
+// readings: twenty one pages of Algebra I went from pending to dead in forty
+// one seconds that way, without one image leaving the laptop.
+func TestABatchThatNeverWentOutCostsNoAttempts(t *testing.T) {
+	w := newWorld(t, 4)
+	machine := newFleet(func(string) string { return page("42") })
+	machine.pushErr = errors.New("ssh: connect to host server3 port 22: no route to host")
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Rejected != 0 || report.Dead != 0 {
+		t.Errorf("a batch that never went out rejected %d and killed %d pages", report.Rejected, report.Dead)
+	}
+	if report.Released != 4 {
+		t.Errorf("released = %d, want the 4 pages handed back", report.Released)
+	}
+	// One batch, not one per page: a host that hands everything back is done
+	// for this run, or the loop leases the same pages again at the speed of a
+	// local error.
+	if machine.pushes != 1 {
+		t.Errorf("the run tried the dead host %d times, want once", machine.pushes)
+	}
+
+	stats, err := w.queue.Stats(queue.StageOCR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Counts[queue.Pending] != 4 || stats.Counts[queue.Dead] != 0 {
+		t.Fatalf("queue = %+v, want the four pages waiting", stats.Counts)
+	}
+	for _, job := range mustList(t, w.queue, queue.Pending) {
+		if job.Attempts != 0 {
+			t.Errorf("%s came back with %d attempts spent, want 0", job.Target, job.Attempts)
+		}
+		if len(job.History) != 1 || job.History[0].Reason == "" {
+			t.Errorf("%s says nothing about being handed back: %+v", job.Target, job.History)
+		}
+	}
+}
+
+// Two jobs for one page point at one image file, and the output is matched back
+// to the input by name, so a batch holding both is refused whole. Fill will not
+// make that pair any more and this makes sure a pair from anywhere else, an old
+// queue or a hand written job, costs one page and not the batch.
+func TestOnePageIsNotPutInABatchTwice(t *testing.T) {
+	w := newWorld(t, 2)
+	runner := w.runner(t, newFleet(func(string) string { return page("42") }))
+	for _, sha := range []string{"aaaa", "bbbb"} {
+		if _, err := w.queue.Add(queue.New(queue.StageOCR, Target("alg-iv-vii", 1), sha, "p")); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	tasks, err := runner.lease(runner.Hosts[0], 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("leased %d tasks for one page, want 1", len(tasks))
+	}
+	stats, err := w.queue.Stats(queue.StageOCR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Counts[queue.Pending] != 1 || stats.Counts[queue.Leased] != 1 {
+		t.Errorf("queue = %+v, want the duplicate back in pending and the other leased", stats.Counts)
+	}
+}
+
+func mustList(t *testing.T, q *queue.Queue, state queue.State) []queue.Job {
+	t.Helper()
+	jobs, err := q.List(queue.StageOCR, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return jobs
 }

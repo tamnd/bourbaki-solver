@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
@@ -73,7 +74,14 @@ func (p *Page) flag(f Flag) {
 const headBand = 70
 
 // ReadPage reads one page of a born-digital volume.
-func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page {
+//
+// It is the first of the two passes: it knows nothing of the compound words the
+// volume writes, so a compound broken at the end of a line loses its hyphen.
+// The bodies it returns are what ReadPageWith needs to do better.
+func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page { return ReadPageWith(l, p, nil) }
+
+// ReadPageWith reads one page with the compound words of the volume in hand.
+func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
 	out := &Page{PDFPage: p.Number}
 	lines, columns := LinesColumns(l, p)
 	out.Columns = columns
@@ -104,9 +112,9 @@ func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page {
 			}
 		}
 	}
-	out.Body = blocks(lines)
+	out.Body = blocks(lines, c)
 	if len(notes) > 0 {
-		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes), "\n")
+		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes, c), "\n")
 	}
 	if strings.Count(out.Body, "$")%2 != 0 {
 		out.flag(FlagUnbalanced)
@@ -240,14 +248,14 @@ func size(l Line) int {
 // The margin has to be taken per block rather than per page. A remark set in
 // small type is indented as a whole, so measuring its lines against the margin
 // of the page would make every one of them the start of a paragraph.
-func blocks(lines []Line) string {
+func blocks(lines []Line, c Compounds) string {
 	var out []string
 	for i := 0; i < len(lines); {
 		j := i + 1
 		for j < len(lines) && size(lines[j]) == size(lines[i]) {
 			j++
 		}
-		if s := join(lines[i:j]); s != "" {
+		if s := join(lines[i:j], c); s != "" {
 			out = append(out, s)
 		}
 		i = j
@@ -261,7 +269,7 @@ func blocks(lines []Line) string {
 // starts a paragraph when it is indented past the margin of its block. A word
 // broken across the break is put back together, which is what the trailing
 // hyphen means. A heading stands on its own.
-func join(lines []Line) string {
+func join(lines []Line, c Compounds) string {
 	left := lines[0].Left
 	for _, l := range lines {
 		if l.Left < left {
@@ -269,6 +277,7 @@ func join(lines []Line) string {
 		}
 	}
 	lead := leading(lines)
+	opens := opener(lines, left)
 	var out []string
 	var cur strings.Builder
 	flush := func() {
@@ -277,10 +286,23 @@ func join(lines []Line) string {
 		}
 		cur.Reset()
 	}
+	head := -1 // the line the last heading came off, for its continuation
 	for i, l := range lines {
 		if h, ok := heading(l); ok {
+			// A title too long for the measure is set on two lines and is still
+			// one title. Page 42 sets "§ 2. THE STRUCTURE OF MODULES OF FINITE"
+			// and "LENGTH" under it, page 112 breaks § 6 the same way, and the
+			// four appendices print their number on one line and their name on
+			// the next.
+			if head == i-1 && len(out) > 0 && !opensHead(h) &&
+				l.Top-lines[i-1].Top <= headLead {
+				out[len(out)-1] += " " + strings.TrimLeft(h, "# ")
+				head = i
+				continue
+			}
 			flush()
 			out = append(out, h)
+			head = i
 			continue
 		}
 		text := Render(l)
@@ -292,33 +314,153 @@ func join(lines []Line) string {
 		// it. Both are read: the head where it is bold, the air where a line
 		// sits further below the one before it than the leading of the block.
 		apart := i > 0 && l.Top-lines[i-1].Top > lead+6
-		if apart || l.Left >= left+indent {
+		if apart || opens(l) {
 			if d, ok := display(text); ok {
 				flush()
 				out = append(out, d)
 				continue
 			}
 		}
-		if apart || strings.HasPrefix(text, "**") {
+		// A word broken at a line end is not the end of a paragraph, whatever
+		// the line below it is indented to. The bibliography hangs its indent
+		// the other way round from the rest of the book and page 497 broke
+		// "com-" onto "plexen"; page 237 sets each of the conditions (i), (ii),
+		// (iii) on its own indent and broke "commu-" onto "tative"; page 377
+		// broke "homoge-" onto "neous". All three shipped with the hyphen still
+		// in them and the two halves in paragraphs of their own.
+		if cur.Len() > 0 {
+			if joined, ok := runOn(cur.String(), text, c); ok {
+				cur.Reset()
+				cur.WriteString(joined)
+				continue
+			}
+		}
+		if apart || boldOpen(text) {
 			flush()
 			cur.WriteString(text)
 			continue
 		}
-		if l.Left >= left+indent || cur.Len() == 0 {
+		if opens(l) || cur.Len() == 0 {
 			flush()
 			cur.WriteString(text)
-			continue
-		}
-		s := cur.String()
-		if strings.HasSuffix(s, "-") {
-			cur.Reset()
-			cur.WriteString(strings.TrimSuffix(s, "-") + strings.TrimLeft(text, " "))
 			continue
 		}
 		cur.WriteString(" " + strings.TrimLeft(text, " "))
 	}
 	flush()
 	return strings.Join(out, "\n\n")
+}
+
+// boldOpen reports whether a line opens on bold words, which is where a
+// statement begins and where an entry of the table of contents does.
+//
+// A line opening on a bold number is neither. The bibliography sets the volume
+// number of a journal in bold, page 496 turned over onto one, and reading that
+// as an opening cut the entry for C. Hopkins in two and left "40 (1939), p.
+// 712-730." standing on its own.
+func boldOpen(text string) bool {
+	rest, ok := strings.CutPrefix(text, "**")
+	if !ok {
+		return false
+	}
+	i := strings.Index(rest, "**")
+	return i > 0 && letters(rest[:i]) > 0
+}
+
+// runOn joins a line that runs on into the next one, and says whether it did.
+//
+// A hyphen at a line break usually means a word was broken across it, and
+// putting the word back means dropping the hyphen: "commu-" and "tative" are
+// one word.
+//
+// A hyphen inside the mathematics at the end of a line is the other case. It is
+// the hyphen of A_M-module, where the typesetter set the A_M in mathematics and
+// broke the line after the hyphen, and it comes back on the mathematics side of
+// that boundary. Left there it prints as $A_M-$ module, which is wrong twice
+// over: the hyphen is typeset as a minus sign and the compound word is broken by
+// a space that is not on the page. So it moves outside the dollars and the word
+// joins on to it.
+//
+// What tells that from a subtraction broken across a line is the word after it,
+// under the same reading emit uses on a hyphen in the middle of a line.
+//
+// The third case is a compound word whose own hyphen fell at the end of a line.
+// It is told from a broken word by the rest of the volume, which is what
+// Compounds carries: see compound.go.
+func runOn(s, next string, c Compounds) (string, bool) {
+	next = strings.TrimLeft(next, " ")
+	switch {
+	case strings.HasSuffix(s, "-$") && compoundWord(next):
+		return strings.TrimRight(strings.TrimSuffix(s, "-$"), " ") + "$-" + next, true
+	case strings.HasSuffix(s, "-") && oneLetter(s):
+		return s + next, true
+	case strings.HasSuffix(s, "-") && c.Keeps(s, next):
+		return s + next, true
+	case strings.HasSuffix(s, "-"):
+		return strings.TrimSuffix(s, "-") + next, true
+	}
+	return "", false
+}
+
+// oneLetter reports whether the hyphen a line ends on comes straight after a
+// letter standing on its own, which is the other half of the compound word:
+// the A of A-module, the K of K-algebra, the B of B-linear. Bourbaki sets these
+// in roman when the letter is a plain one, so no dollar is anywhere near them
+// and the line simply ends in "A-".
+//
+// The hyphen has to stay. TeX will not break a word after its first letter, so
+// a one letter fragment before a hyphen is never a word cut in two, and
+// dropping the hyphen the way the ordinary case does gives Amodule. Measured on
+// Algebra VIII before this: 47 of them, Amodule, Kalgebra, Bmodule, Lalgebra,
+// Alinear.
+func oneLetter(s string) bool {
+	s = strings.TrimSuffix(s, "-")
+	if s == "" || !isLetter(rune(s[len(s)-1])) {
+		return false
+	}
+	if len(s) == 1 {
+		return true
+	}
+	c := rune(s[len(s)-2])
+	return !isLetter(c) && (c < '0' || c > '9')
+}
+
+// entryRE is the number a bibliography entry opens with, in square brackets at
+// the margin.
+var entryRE = regexp.MustCompile(`^\[\d+\]`)
+
+// opener says which lines of a block start a paragraph.
+//
+// Bourbaki indents the first line of a paragraph and sets the rest at the
+// margin, so an indented line is where a paragraph begins. The bibliography is
+// set the other way round: the entry opens at the margin with its number in
+// square brackets and the lines after it are indented under it. Read by the
+// ordinary rule every line of it becomes a paragraph of its own, which is what
+// the six pages of the bibliography looked like, hyphens left at the ends of
+// the lines and all. "of any group of linear sub-" was one paragraph and
+// "stitutions", Proc. Lond. Math. Soc." was the next.
+//
+// The number is what turns the rule over, and nothing else does. Leaning on the
+// geometry alone, on the grounds that a hanging indent has more indented lines
+// than not, reads the six enumerated properties of Proposition 4 on page 155 as
+// one paragraph and cuts a sentence of page 257 in half. The volume indents too
+// many things for the shape of the block to say what the block is.
+func opener(lines []Line, left int) func(Line) bool {
+	ordinary := func(l Line) bool { return l.Left >= left+indent }
+	labelled, in := 0, 0
+	for _, l := range lines {
+		if ordinary(l) {
+			in++
+			continue
+		}
+		if len(l.Runs) > 0 && entryRE.MatchString(strings.TrimSpace(l.Runs[0].Text)) {
+			labelled++
+		}
+	}
+	if labelled < 2 || in <= labelled {
+		return ordinary
+	}
+	return func(l Line) bool { return !ordinary(l) }
 }
 
 // displayRE is a line that is nothing but one formula, with the number the
@@ -364,30 +506,151 @@ func leading(lines []Line) int {
 // and nothing else: the chapter, the §, the numbered subsection, the word
 // Exercises. A bold run inside a line of prose is one of the letters N, Z, Q, R
 // and C, or an indeterminate X, and is left to the renderer.
+//
+// Both bold classes are taken. The words of a heading are strong and the number
+// it opens on can be either, since § 16. carries punctuation and the 1. of a
+// subsection is short enough to be read as a symbol on its own.
+//
+// A heading may also carry mathematics, and twelve of them in this volume do:
+// "6. The Grothendieck Group R_K(A)" on page 211, "1. τ-Extensions of Groups"
+// on page 302. Such a line is read by the renderer and its bold marks taken off
+// again, so the mathematics in it comes out as mathematics.
 func heading(l Line) (string, bool) {
-	var b strings.Builder
-	for i, r := range l.Runs {
-		if r.Class != ClassBold {
-			return "", false
-		}
-		if i > 0 && r.Left-l.Runs[i-1].Right() >= 3 {
-			b.WriteString(" ")
-		}
-		b.WriteString(r.Text)
+	if !headed(l) {
+		return "", false
 	}
-	text := strings.Join(strings.Fields(b.String()), " ")
+	text := headingText(l)
 	if len([]rune(text)) < 3 {
 		return "", false
 	}
 	switch {
 	case size(l) >= 18:
 		return "# " + text, true
-	case strings.HasPrefix(text, "§"):
+	case strings.HasPrefix(text, "§"), strings.HasPrefix(text, "APPENDIX"):
+		// An appendix is a section of the chapter and is set like one, and the
+		// table of contents lists the four of this volume beside the twenty-one
+		// §§. Its number stands on a line of its own, which is the only thing
+		// that tells it apart from a subsection head.
 		return "## " + text, true
 	case size(l) < 15:
 		return "## " + text, true
 	}
 	return "### " + text, true
+}
+
+// headingText writes the words of a heading.
+//
+// A line that is bold from end to end is read straight off the runs, with a
+// space where the typesetter left one. The renderer is not asked, because it
+// answers questions a heading does not have: the title page sets "Chapter 8"
+// smaller and lower than "Algebra" above it, which is a subscript to the
+// renderer and the second half of the title to a reader.
+//
+// A line carrying mathematics has to go through the renderer, since that is
+// where the mathematics is written, and its bold marks come off afterwards.
+func headingText(l Line) string {
+	var b strings.Builder
+	for i, r := range l.Runs {
+		if r.Class != ClassBold && r.Class != ClassStrong {
+			text := strings.Join(strings.Fields(strings.ReplaceAll(Render(l), "**", "")), " ")
+			// The star that marks a subsection optional is a mark of the book
+			// and not a formula, so it comes out of the dollars and is escaped
+			// where it stands.
+			if rest, ok := strings.CutPrefix(text, "$*$"); ok {
+				text = `\*` + rest
+			}
+			return text
+		}
+		if i > 0 && r.Left-l.Runs[i-1].Right() >= 3 {
+			b.WriteString(" ")
+		}
+		b.WriteString(r.Text)
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// headLead is how far under a heading the rest of that heading can be.
+//
+// The volume sets a heading in 13-unit lines and puts the second line of one 21
+// units under the first, or 29 where the number stands on a line of its own as
+// it does over an appendix. What is not a continuation is much further off: the
+// chapter title of page 18 is 64 units under the word CHAPTER, in a larger font,
+// and the title page sets the name of the book 93 units under the name of the
+// series.
+const headLead = 32
+
+// opensHead reports whether a heading line opens a heading of its own rather
+// than carrying on the one above it. Every heading of the volume that does opens
+// on its number or on a word that names what it is.
+func opensHead(h string) bool {
+	t := strings.TrimLeft(h, "# ")
+	if i := strings.IndexByte(t, '.'); i > 0 && i <= 3 && allDigits(t[:i]) {
+		return true
+	}
+	for _, w := range []string{"§", "CHAPTER", "APPENDIX", "Exercises"} {
+		if strings.HasPrefix(t, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func allDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
+}
+
+// headed reports whether a line is a heading.
+//
+// A line set in bold from end to end is one, and that is most of them. The rest
+// carry the mathematics of their own title, so the test cannot be that every
+// run is bold, and it cannot be that any run is either: the historical note
+// sets its citation numbers bold and the bibliography sets the volume number of
+// a journal bold, so "an arbitrary base field ([51], p. 102)" has a bold run in
+// the middle of a sentence.
+//
+// What separates them is where the bold is and what it says. A heading opens on
+// its own words, so the line has to start on bold, and it has to carry a bold
+// run of four letters or more somewhere, which a citation number never is. A
+// line of the table of contents passes both and is not a heading, so the dot
+// leaders are read as well: nothing else in the volume prints a row of dots.
+func headed(l Line) bool {
+	if len(l.Runs) == 0 {
+		return false
+	}
+	runs := l.Runs
+	if r := runs[0]; r.Class == ClassMath && len([]rune(strings.TrimSpace(r.Text))) == 1 {
+		// The star that marks a subsection optional is drawn before its number.
+		runs = runs[1:]
+	}
+	if len(runs) == 0 || runs[0].Class != ClassBold && runs[0].Class != ClassStrong {
+		return false
+	}
+	words := false
+	for _, r := range l.Runs {
+		if strings.Contains(r.Text, ". . .") || strings.Contains(r.Text, "...") {
+			return false
+		}
+		if r.Class == ClassStrong && letters(r.Text) >= 4 {
+			words = true
+		}
+	}
+	return words
+}
+
+// letters counts the letters of a run.
+func letters(s string) int {
+	n := 0
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			n++
+		}
+	}
+	return n
 }
 
 // splitNotes takes the footnotes off the bottom of a page. A footnote opens on
@@ -416,7 +679,7 @@ func noteNumber(l Line) (string, bool) {
 
 // footnotes writes the notes of a page as Markdown footnote definitions, which
 // is where the references written for them in the body point.
-func footnotes(lines []Line) string {
+func footnotes(lines []Line, c Compounds) string {
 	var out []string
 	var cur strings.Builder
 	num := ""
@@ -438,10 +701,9 @@ func footnotes(lines []Line) string {
 		if text == "" {
 			continue
 		}
-		s := strings.TrimRight(cur.String(), " ")
-		if strings.HasSuffix(s, "-") {
+		if joined, ok := runOn(strings.TrimRight(cur.String(), " "), text, c); ok {
 			cur.Reset()
-			cur.WriteString(strings.TrimSuffix(s, "-") + text)
+			cur.WriteString(joined)
 			continue
 		}
 		cur.WriteString(" " + text)

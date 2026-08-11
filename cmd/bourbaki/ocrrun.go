@@ -24,13 +24,18 @@ import (
 
 // ocrLaneMemoryMB is how much free memory a host needs per OCR lane.
 //
-// A lane is a Chrome profile under Xvfb, which is about a gigabyte resident on
-// these boxes. Half a gigabyte on top is the tool itself and the page images it
-// is holding. Measured on the fleet: server3 has 15378 MB free and runs four
-// lanes comfortably, server2 has 7363 MB and runs three, and server1 has 1334
-// MB, which is not enough for one, so it takes model calls over HTTP and no
-// page images at all.
+// It is a floor and not a measurement. A lane sampled per process on server2
+// peaked at 275 MB, so memory is not what runs out here, the CPU is. What this
+// number is for is refusing a box that has nothing left at all: server1 sat at
+// 736 MB free the day this was written, which will start a browser and then be
+// killed by the OOM reaper halfway through a batch.
 const ocrLaneMemoryMB = 1500
+
+// ocrFleetRecheck is how long to wait before asking a busy fleet again.
+//
+// Long enough that three ssh round trips are noise against it, short enough
+// that a box which frees up is picked up in the same coffee break.
+const ocrFleetRecheck = 2 * time.Minute
 
 // setup is everything the two OCR commands both need.
 type setup struct {
@@ -39,9 +44,20 @@ type setup struct {
 	pmap     *pagemap.Map
 	manifest render.Manifest
 	queue    *queue.Queue
+	// only, when set, is the pages a run may touch whatever else is rendered.
+	// It is how the flagged pages of a born-digital volume are read without the
+	// other four hundred and forty nine going anywhere near a model.
+	only map[int]bool
 }
 
-func ocrSetup(book, queueRoot string) (setup, error) {
+// ocrSetup finds the book, its render manifest and the queue.
+//
+// flagged is the door for a born-digital volume. Algebra VIII extracts from its
+// text layer and has no business here, except for the pages the text layer
+// could not carry: a commutative diagram is not in the text layer at all. Those
+// pages are named in the extraction report, rendered by render -flagged, and
+// read here, and nothing else of that volume is.
+func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
 	var out setup
 	root, err := corpus.Root()
 	if err != nil {
@@ -55,8 +71,20 @@ func ocrSetup(book, queueRoot string) (setup, error) {
 	if !ok {
 		return out, fmt.Errorf("no book %q in %s", book, corpus.BooksPath(root))
 	}
-	if entry.Extraction != "ocr" {
-		return out, fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract", entry.ID, entry.Nature, entry.Extraction)
+	if entry.Extraction != "ocr" && !flagged {
+		return out, fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract, or -flagged for the pages it could not read",
+			entry.ID, entry.Nature, entry.Extraction)
+	}
+	var only map[int]bool
+	if flagged {
+		pages, err := flaggedPages(root, entry.ID)
+		if err != nil {
+			return out, err
+		}
+		only = map[int]bool{}
+		for _, page := range pages {
+			only[page] = true
+		}
 	}
 	manifest, err := render.ReadManifest(root, entry.ID)
 	if err != nil {
@@ -70,7 +98,7 @@ func ocrSetup(book, queueRoot string) (setup, error) {
 	if mapErr != nil {
 		fmt.Fprintf(os.Stderr, "no page map for %s, so the running head and page label rules are skipped: %v\n", entry.ID, mapErr)
 	}
-	return setup{root: root, entry: entry, pmap: pmap, manifest: manifest, queue: q}, nil
+	return setup{root: root, entry: entry, pmap: pmap, manifest: manifest, queue: q, only: only}, nil
 }
 
 func (s setup) expect(page int) ocr.Expect {
@@ -107,6 +135,9 @@ func expectFor(entry *corpus.Book, pmap *pagemap.Map, manifest render.Manifest, 
 func (s setup) sources(first, last int) []ocr.Source {
 	var out []ocr.Source
 	for _, page := range s.manifest.Pages {
+		if s.only != nil && !s.only[page.Page] {
+			continue
+		}
 		if first > 0 && page.Page < first {
 			continue
 		}
@@ -136,6 +167,7 @@ func ocrFlags(fs *flag.FlagSet) (book, hosts, routes, queueRoot *string, first, 
 func ocrFill(args []string) error {
 	fs := flag.NewFlagSet("ocr fill", flag.ExitOnError)
 	book, _, _, queueRoot, first, last, _, _, _, _ := ocrFlags(fs)
+	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -143,7 +175,7 @@ func ocrFill(args []string) error {
 		fs.Usage()
 		os.Exit(2)
 	}
-	state, err := ocrSetup(*book, *queueRoot)
+	state, err := ocrSetup(*book, *queueRoot, *flagged)
 	if err != nil {
 		return err
 	}
@@ -169,6 +201,24 @@ func ocrFill(args []string) error {
 func ocrRun(args []string) error {
 	fs := flag.NewFlagSet("ocr run", flag.ExitOnError)
 	book, hostList, routeFile, queueRoot, first, last, batch, limit, keep, dry := ocrFlags(fs)
+	// On by default, and this is the way to turn it off. A run that is
+	// measuring how well the model reads a page wants the raw rate, not the
+	// rate after the pages that nearly worked were mended.
+	noRepair := fs.Bool("no-repair", false, "reject a failed page instead of asking about it in its own thread")
+	// Half the cores is a rule of thumb, not a measurement of this page. A
+	// browser rendering chatgpt.com in software wants more than one core and
+	// less than two, and where it falls between them depends on the box. The
+	// number is worth overriding by somebody who has watched a run and read the
+	// load average, which is cheaper than making the probe guess.
+	lanes := fs.Int("lanes", 0, "override how many pages a host reads at once")
+	// These boxes are shared and the load moves. Rather than refuse a run
+	// because somebody else's build is on the machine right now, sit and ask
+	// again. Zero keeps the old behaviour of failing straight away.
+	wait := fs.Duration("wait", 0, "how long to wait for a host with a spare core before giving up")
+	// The same door as render -flagged, and it has to be asked for twice on
+	// purpose: rendering the pages of a born-digital volume is cheap and local,
+	// reading them costs rationed uploads.
+	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -176,11 +226,7 @@ func ocrRun(args []string) error {
 		fs.Usage()
 		os.Exit(2)
 	}
-	state, err := ocrSetup(*book, *queueRoot)
-	if err != nil {
-		return err
-	}
-	hosts, err := ocrHosts(*routeFile, *hostList)
+	state, err := ocrSetup(*book, *queueRoot, *flagged)
 	if err != nil {
 		return err
 	}
@@ -188,6 +234,23 @@ func ocrRun(args []string) error {
 	start := time.Now()
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "["+time.Since(start).Round(time.Second).String()+"] "+format+"\n", args...)
+	}
+
+	// Ctrl-C stops the run without losing the pages that are in flight. The
+	// leases expire on their own and the next run reaps them, which is the
+	// whole point of putting the work list on disk. It is set up before the
+	// fleet is measured so that a wait can be interrupted too.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	hosts, err := ocrHostsNow(ctx, *routeFile, *hostList, *wait, logf)
+	if err != nil {
+		return err
+	}
+	if *lanes > 0 {
+		for i := range hosts {
+			hosts[i].Lanes = *lanes
+		}
 	}
 
 	runner := &ocr.Runner{
@@ -198,6 +261,13 @@ func ocrRun(args []string) error {
 		Expect: state.expect, RetryDPI: render.RetryDPI,
 		Rerender: rerender(state),
 		Logf:     logf,
+	}
+	// A page that fails on a delimiter is asked about in its own thread before
+	// it is sent back to the queue for another full reading. The queue is the
+	// fallback, not the first move: a follow up costs one turn and a re-read
+	// costs a page.
+	if !*noRepair {
+		runner.Repair = mender(state.root, hosts, state.expect, logf)
 	}
 
 	added, err := runner.Fill(state.sources(*first, *last))
@@ -219,12 +289,6 @@ func ocrRun(args []string) error {
 		fmt.Println("nothing to do")
 		return nil
 	}
-
-	// Ctrl-C stops the run without losing the pages that are in flight. The
-	// leases expire on their own and the next run reaps them, which is the
-	// whole point of putting the work list on disk.
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	report, runErr := runner.Do(ctx)
 	fmt.Print(report.Summary())
@@ -303,12 +367,116 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 	return out, nil
 }
 
+// refreshFleet re-measures the boxes named in the route file before a run.
+//
+// Load average is the one fact in there with a short shelf life. server2 read
+// 0.55 one evening and 7.67 an hour later, compiling somebody else's rust, so a
+// run that schedules against the state file as it was left by the last doctor
+// is scheduling against a number that has already moved. Three ssh trips in
+// parallel cost about a second, which is nothing against a batch.
+func refreshFleet(ctx context.Context, routeFile, names string) error {
+	registry, _, err := route.LoadOrDefault(routeFile)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(names) != "" {
+		if registry, err = registry.Select(strings.Split(names, ",")); err != nil {
+			return err
+		}
+	}
+	var targets []fleet.Target
+	for _, value := range registry.Enabled() {
+		if strings.TrimSpace(value.Host) == "" {
+			continue
+		}
+		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+	}
+	if len(targets) == 0 {
+		return nil
+	}
+
+	rows := fleet.ProbeAll(ctx, fleet.SSH{Timeout: 30 * time.Second}, targets)
+	path := fleet.StatePath()
+	state, err := fleet.LoadState(path)
+	if err != nil {
+		return err
+	}
+	for index, target := range targets {
+		// A host that did not answer keeps the facts it had. One refused ssh
+		// connection is not a reason to forget where chatgpt-tool lives.
+		if rows[index].Err != "" && rows[index].Hostname == "" {
+			continue
+		}
+		state.Hosts[target.Host] = rows[index]
+	}
+	state.Written = time.Now().UTC()
+	return state.Save(path)
+}
+
+// ocrHostsNow measures the fleet and then picks the hosts that can read pages,
+// waiting for one if the whole fleet is busy and the caller said to wait.
+//
+// Waiting is the useful behaviour on rented boxes. The fleet had no spare core
+// at all one evening, all of it other tenants, and the honest choices are to
+// refuse the run or to sit until a core comes back. A run left overnight should
+// sit.
+func ocrHostsNow(ctx context.Context, routeFile, names string, wait time.Duration, logf func(string, ...any)) ([]ocr.Host, error) {
+	return hostsWithin(ctx, wait, logf, sleepFor, func() ([]ocr.Host, error) {
+		if err := refreshFleet(ctx, routeFile, names); err != nil {
+			logf("could not re-measure the fleet, going on what the state file says: %v", err)
+		}
+		return ocrHosts(routeFile, names)
+	})
+}
+
+// sleepFor is the wait a run really does, interruptible by Ctrl-C.
+func sleepFor(ctx context.Context, pause time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(pause):
+		return nil
+	}
+}
+
+// hostsWithin is the loop on its own, with the measuring and the sleeping
+// handed in, so a test can run it without an ssh key or a two minute pause.
+func hostsWithin(ctx context.Context, wait time.Duration, logf func(string, ...any),
+	sleep func(context.Context, time.Duration) error, pick func() ([]ocr.Host, error)) ([]ocr.Host, error) {
+	deadline := time.Now().Add(wait)
+	for {
+		hosts, err := pick()
+		if err == nil {
+			return hosts, nil
+		}
+		left := time.Until(deadline)
+		if wait <= 0 || left <= 0 {
+			return nil, err
+		}
+		// Never sleep past the deadline the caller gave. A -wait of thirty
+		// seconds should come back in thirty seconds, not in two minutes.
+		pause := min(ocrFleetRecheck, left)
+		logf("%v, asking again in %s, giving up at %s",
+			err, pause.Round(time.Second), deadline.Format(time.Kitchen))
+		if err := sleep(ctx, pause); err != nil {
+			return nil, err
+		}
+	}
+}
+
 // ocrLanes is how many page images a host reads at once, and when the answer is
 // none, why.
 //
 // A route's concurrency is model calls over HTTP, which cost a socket. A lane
-// here is a Chrome profile under Xvfb, which costs a gigabyte. A box can have
-// the room for the first and not the second, and server1 does.
+// here is a Chrome profile under Xvfb, which costs a core and a half. A box can
+// have the room for the first and not the second, and server1 does.
+//
+// Memory is not what runs out. A lane measured on server2 peaks at 275 MB, and
+// the box sat at 10 GB free through a page that took six minutes. What runs out
+// is CPU: the browser draws through swiftshader, because these boxes have no
+// GPU, and four of them on six cores took the load average to ten and left every
+// page blank. So the ceiling here is Facts.Lanes, which counts cores, and the
+// memory floor below is kept only to refuse a box that has nothing left at all.
 func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 	switch {
 	case !facts.Xvfb:
@@ -322,11 +490,20 @@ func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 	if lanes <= 0 {
 		lanes = 1
 	}
-	if facts.MemFreeMB > 0 {
-		// Never more lanes than the memory measured on the box will hold,
-		// whatever the route file says. Swapping a browser is slower than not
-		// starting it.
-		lanes = min(lanes, facts.MemFreeMB/ocrLaneMemoryMB)
+	// Never more than the box itself says it can carry, whatever the route
+	// file asks for. The route file is written by hand and the facts are
+	// measured, so when they disagree the measurement wins.
+	//
+	// Cores is the marker of a box that was actually measured. A route with no
+	// facts behind it is taken at its word, because refusing a host on the
+	// strength of a struct nobody filled in helps nobody.
+	if facts.Cores > 0 {
+		capacity := facts.Lanes()
+		if capacity <= 0 {
+			return 0, fmt.Sprintf("load average %.1f across %d cores, thrashing, not slow",
+				float64(facts.LoadX100)/100, facts.Cores)
+		}
+		lanes = min(lanes, capacity)
 	}
 	return lanes, ""
 }

@@ -2,6 +2,7 @@ package extract
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
@@ -35,6 +36,10 @@ const (
 	// pieces cannot be reassembled from their positions, so a page carrying
 	// any of them is flagged rather than guessed at.
 	ClassDiagram
+	// ClassStrong is bold roman set as prose, which in this volume is a
+	// heading, a citation number or the volume number of a journal. It comes
+	// last so that the values above it keep the numbers they had.
+	ClassStrong
 )
 
 func (c Class) String() string {
@@ -49,6 +54,8 @@ func (c Class) String() string {
 		return "math"
 	case ClassDiagram:
 		return "diagram"
+	case ClassStrong:
+		return "strong"
 	}
 	return "text"
 }
@@ -74,12 +81,40 @@ func Classify(f pdfsrc.FontSpec, s pdfsrc.Span) Class {
 		return ClassDiagram
 	}
 	switch {
+	case s.Bold && strong(s.Text):
+		return ClassStrong
 	case s.Bold:
 		return ClassBold
 	case s.Italic:
 		return ClassEmph
 	}
 	return ClassText
+}
+
+// strong reports whether a bold run is prose rather than a symbol.
+//
+// The volume sets N, Z, Q, R, C and the classical groups in bold roman, and it
+// sets every heading in bold roman as well, so the font does not say which of
+// the two a run is. Its shape does. All 345 distinct bold runs of the volume
+// were dumped and read: every symbol among them is at most three letters long
+// and is nothing but letters (Z 271 times, M 196, GL 71, SL 33, PGL 3, Sp, pq,
+// pp, N, Q, A, C, R, α), and everything longer or carrying a digit or a mark of
+// punctuation is a heading, a piece of one, a citation number like the 51 of
+// ([51], p. 102) or the volume number of a journal in the bibliography.
+//
+// Getting this wrong is not a small matter of style. A heading classified as a
+// symbol goes inside dollar signs a letter at a time, and page 213 shipped its
+// title as \mathbf{M}\mathbf{u}\mathbf{l}\mathbf{t}\mathbf{i} and so on for the
+// whole line.
+func strong(s string) bool {
+	n := 0
+	for _, r := range strings.TrimSpace(s) {
+		if !unicode.IsLetter(r) {
+			return true
+		}
+		n++
+	}
+	return n > 3
 }
 
 // cmex maps what poppler prints for a CMEX glyph to the operator it is.

@@ -65,6 +65,15 @@ type Runner struct {
 	// Expect says what is already known about a page, which is what rules 4 and
 	// 6 compare the answer against.
 	Expect func(page int) Expect
+	// Repair is offered a page that failed validation, in the conversation that
+	// produced it, and returns the corrected page and true when it fixed it.
+	//
+	// A function rather than a dependency, because the package that decides
+	// whether an answer is a repair has to validate its result, so it imports
+	// this one and this one cannot import it back. Nil means no repair is
+	// attempted and every failed page goes back to the image, which is what
+	// happened before there was a repair pass and is always the safe answer.
+	Repair func(ctx context.Context, thread Thread, page int, text string, problems []Problem) (string, bool)
 	// Rerender puts a fresh image on disk at a higher resolution before a retry.
 	// It is a function rather than a dependency on the render package, because
 	// this package has no business knowing about pdftoppm.
@@ -129,11 +138,25 @@ func Target(book string, page int) string { return fmt.Sprintf("%s/%04d", book, 
 // of the image and the prompt and the queue refuses to add a job it has already
 // done. A page accepted under an older prompt gets a new id and is read again,
 // which is the intended cost of changing the prompt.
+//
+// A page that already has a job waiting is skipped whatever its hash says. The
+// hash is of the image and the image is not fixed: attempt two re-renders the
+// page at 600 dpi over the top of the old file, so the same page comes back as
+// unseen work and is queued a second time. Ten pages of Algebra I were sitting
+// in the queue twice by the time that showed up, as a batch holding page 70 and
+// page 70.
 func (r *Runner) Fill(sources []Source) (int, error) {
 	promptSHA := sha256Hex(r.Prompt)
+	waiting, err := r.Queue.Outstanding(queue.StageOCR)
+	if err != nil {
+		return 0, err
+	}
 	var added int
 	for _, source := range sources {
 		if source.Blank {
+			continue
+		}
+		if _, ok := waiting[Target(r.Book, source.Page)]; ok {
 			continue
 		}
 		if r.accepted(source, promptSHA) {
@@ -152,7 +175,13 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 }
 
 // accepted says whether a page is already on disk, read from this image with
-// this prompt.
+// this prompt, and passing the rules.
+//
+// The last of those is not pedantry. Pages 50 and 53 of Algebra I have been
+// sitting in the corpus failing the math rule since the pilot, and no run would
+// touch them, because a file existed with the right hashes on it. Written is
+// not the same as read: the word for a page nobody would accept is rejected,
+// and a rejected page is work still to do.
 func (r *Runner) accepted(source Source, promptSHA string) bool {
 	file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(r.Root, r.Book, source.Page))
 	if err != nil {
@@ -164,7 +193,15 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 	// The image hash is compared as well as the prompt. A page re-rendered at
 	// 600 dpi is a different image and deserves a fresh reading, and comparing
 	// only the prompt would keep the old answer.
-	return file.Meta.PromptSHA256 == promptSHA && file.Meta.InputSHA256 == source.SHA256
+	if file.Meta.PromptSHA256 != promptSHA || file.Meta.InputSHA256 != source.SHA256 {
+		return false
+	}
+	expect := Expect{Book: r.Book, PDFPage: source.Page}
+	if r.Expect != nil {
+		expect = r.Expect(source.Page)
+	}
+	text := textguard.Normalise(textguard.Strip(file.Body))
+	return len(Validate(text, expect, r.Options)) == 0
 }
 
 // Failure is a page that did not come back clean, kept so the audit can name it
@@ -178,16 +215,22 @@ type Failure struct {
 
 // Report is what a run did.
 type Report struct {
-	Book      string              `json:"book"`
-	Started   time.Time           `json:"started"`
-	Finished  time.Time           `json:"finished"`
-	Batches   []Result            `json:"batches"`
-	Accepted  int                 `json:"accepted"`
-	Rejected  int                 `json:"rejected"`
-	Dead      int                 `json:"dead"`
-	Rules     map[Rule]int        `json:"rules,omitempty"`
-	Failures  []Failure           `json:"failures,omitempty"`
-	Reaped    int                 `json:"reaped,omitempty"`
+	Book     string       `json:"book"`
+	Started  time.Time    `json:"started"`
+	Finished time.Time    `json:"finished"`
+	Batches  []Result     `json:"batches"`
+	Accepted int          `json:"accepted"`
+	Repaired int          `json:"repaired,omitempty"`
+	Rejected int          `json:"rejected"`
+	Dead     int          `json:"dead"`
+	Rules    map[Rule]int `json:"rules,omitempty"`
+	Failures []Failure    `json:"failures,omitempty"`
+	Reaped   int          `json:"reaped,omitempty"`
+	// Released is pages handed back with their attempts intact because a batch
+	// never reached a host. They are not rejections and are reported apart from
+	// them, since a run that released fifty pages did nothing wrong to any of
+	// them and a run that rejected fifty has fifty bad readings to explain.
+	Released  int                 `json:"released,omitempty"`
 	PerHost   map[string]int      `json:"per_host,omitempty"`
 	HostTimes map[string]Duration `json:"host_times,omitempty"`
 }
@@ -208,6 +251,12 @@ func (r Report) Summary() string {
 	elapsed := r.Finished.Sub(r.Started).Round(time.Second)
 	fmt.Fprintf(&out, "%s: %d accepted, %d rejected, %d dead in %s, %.1f %% accepted\n",
 		r.Book, r.Accepted, r.Rejected, r.Dead, elapsed, r.Rate())
+	if r.Repaired > 0 {
+		fmt.Fprintf(&out, "  %d of the accepted pages were repaired in their own thread rather than read again\n", r.Repaired)
+	}
+	if r.Released > 0 {
+		fmt.Fprintf(&out, "  %d pages went back to the queue untouched, their batch never reached a host\n", r.Released)
+	}
 	hosts := make([]string, 0, len(r.PerHost))
 	for host := range r.PerHost {
 		hosts = append(hosts, host)
@@ -313,6 +362,7 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				lock.Lock()
 				report.Batches = append(report.Batches, result)
 				report.Accepted += outcome.accepted
+				report.Repaired += outcome.repaired
 				report.Rejected += outcome.rejected
 				report.Dead += outcome.dead
 				report.Failures = append(report.Failures, outcome.failures...)
@@ -321,8 +371,17 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				}
 				report.PerHost[host.Name] += outcome.accepted
 				report.HostTimes[host.Name] += result.Elapsed
+				report.Released += outcome.released
+				// The pages went back, so they are not read and the next host
+				// may still get them.
+				read -= outcome.released
 				lock.Unlock()
 				r.logf("%s", result.Summary())
+
+				if outcome.released == len(tasks) {
+					r.logf("%s: the batch never left this laptop, so %s is out of this run", host.Name, host.Name)
+					return
+				}
 			}
 		}(host)
 	}
@@ -362,6 +421,11 @@ type task struct {
 	// job's input hash once a retry has re-rendered the page at 600 dpi.
 	sha string
 	dpi int
+	// repaired is what was wrong with the page before a follow up fixed it,
+	// empty when the model got it right the first time. It goes in the front
+	// matter, because a page that was mended is a page a reader should be told
+	// about even though it passes every rule now.
+	repaired string
 }
 
 // lease claims up to n pages for a host.
@@ -374,8 +438,20 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 	// another host while this one is still reading them.
 	expected := time.Duration(n) * host.pageTimeout() / time.Duration(host.lanes())
 	var out []task
+	held := map[int]bool{}
+	// Duplicates are held until the leasing is over and given back together.
+	// Handing one back inside the loop puts it straight into pending, where the
+	// next Lease finds it again, and the loop never ends.
+	var duplicates []queue.Job
+	defer func() {
+		for _, job := range duplicates {
+			if err := r.Queue.Release(job, "another job for this page is already in the batch"); err != nil {
+				r.logf("could not hand back the duplicate job for %s: %v", job.Target, err)
+			}
+		}
+	}()
 	for len(out) < n {
-		job, err := r.Queue.Lease(queue.StageOCR, host.Name, expected)
+		job, err := r.Queue.Lease(queue.StageOCR, host.Name, r.Book, expected)
 		if errors.Is(err, queue.ErrEmpty) {
 			break
 		}
@@ -389,6 +465,18 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 			}
 			continue
 		}
+		// One page cannot be in a batch twice. The output is matched back to the
+		// input by file name, so two jobs for page 70 are two jobs pointing at
+		// one file and one answer, and Batch.Validate refuses the whole batch
+		// rather than guess. That refusal cost twenty one pages three attempts
+		// each. Fill no longer makes the duplicates and this no longer passes
+		// one on if something else does.
+		if held[page] {
+			duplicates = append(duplicates, job)
+			r.logf("page %d is in the queue twice, one of them handed back", page)
+			continue
+		}
+		held[page] = true
 		out = append(out, task{job: job, page: page, image: ImagePath(r.Root, r.Book, page)})
 	}
 	return out, nil
@@ -409,8 +497,16 @@ func pageOf(target string) (int, error) {
 // outcome is what one batch did to the queue.
 type outcome struct {
 	accepted, rejected, dead int
-	rules                    map[Rule]int
-	failures                 []Failure
+	// released is pages handed back untouched because the batch never went out.
+	// They are not rejections and must not be counted as any, but the run does
+	// have to notice: a host that hands everything back is a host to stop using.
+	released int
+	// repaired is how many of the accepted pages needed a follow up first. They
+	// are counted apart because a run where a third of the pages had to be
+	// repaired is not a healthy run, and the accepted count alone hides that.
+	repaired int
+	rules    map[Rule]int
+	failures []Failure
 }
 
 // one runs a single batch and files everything it produced.
@@ -449,11 +545,50 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 	if err != nil {
 		r.logf("%s: batch %s: %v", host.Name, id, err)
 	}
+	result = named(result, host.Name, id, len(work.Images), err)
+
+	// A batch that never reached the host has read nothing, so there is nothing
+	// to file and nothing the model got wrong. The pages go back with their
+	// attempts intact and the run stops sending work to this box, because
+	// leasing them again in the next turn of the loop would spend the same three
+	// attempts on the same failure at the speed of a local error.
+	if err != nil && result.PID == 0 {
+		out.released = len(tasks)
+		for _, value := range tasks {
+			if relErr := r.Queue.Release(value.job, err.Error()); relErr != nil {
+				r.logf("could not hand page %d back: %v", value.page, relErr)
+			}
+		}
+		return result, out
+	}
 
 	for _, value := range tasks {
-		r.file(work.Dest, value, &out)
+		r.file(ctx, host, work.Dest, value, &out)
 	}
 	return result, out
+}
+
+// named fills in what a batch that died before it started cannot report.
+//
+// A failure on the way out, an ssh that would not connect or an rsync that
+// could not write, comes back as a zero Result, and that went into the usage
+// log as a line with no host, no id and no page count on it. Two of those are
+// in the log already. The point of that file is which box did what, so a batch
+// that failed says so under its own name.
+func named(result Result, host, id string, pages int, err error) Result {
+	if result.Host == "" {
+		result.Host = host
+	}
+	if result.ID == "" {
+		result.ID = id
+	}
+	if result.Pages == 0 {
+		result.Pages = pages
+	}
+	if err != nil && result.Log == "" {
+		result.Log = err.Error()
+	}
+	return result
 }
 
 // batchID names a batch on the host.
@@ -503,20 +638,27 @@ func StripToolHeader(text string) string {
 }
 
 // file decides what happened to one page and tells the queue.
-func (r *Runner) file(dest string, value task, out *outcome) {
+func (r *Runner) file(ctx context.Context, host Host, dest string, value task, out *outcome) {
 	raw, err := os.ReadFile(filepath.Join(dest, OutputName(filepath.Base(value.image))))
 	if err != nil {
 		r.reject(value, out, nil, "no answer came back for this page")
 		return
 	}
+	thread := r.record(host, value.page, string(raw))
 	text := textguard.Normalise(textguard.Strip(StripToolHeader(string(raw))))
 	expect := Expect{Book: r.Book, PDFPage: value.page}
 	if r.Expect != nil {
 		expect = r.Expect(value.page)
 	}
 	if problems := Validate(text, expect, r.Options); len(problems) > 0 {
-		r.reject(value, out, Rules(problems), Reasons(problems))
-		return
+		fixed, ok := r.mend(ctx, thread, value.page, text, problems)
+		if !ok {
+			r.reject(value, out, Rules(problems), Reasons(problems))
+			return
+		}
+		text = fixed
+		out.repaired++
+		value.repaired = Reasons(problems)
 	}
 	if err := r.write(value, text); err != nil {
 		r.reject(value, out, nil, "could not write the page: "+err.Error())
@@ -526,6 +668,49 @@ func (r *Runner) file(dest string, value task, out *outcome) {
 		r.logf("page %d: could not mark the job done: %v", value.page, err)
 	}
 	out.accepted++
+}
+
+// record keeps the conversation a page was read in, and returns it.
+//
+// It runs before validation, so a page that is about to be rejected is recorded
+// too. That page is the one a repair is for, and the record is the only thing
+// that makes a repair possible at all.
+func (r *Runner) record(host Host, page int, raw string) Thread {
+	fields := HeaderFields(raw)
+	thread := Thread{
+		Book: r.Book, Page: page, Host: host.Name,
+		Conversation: fields["conversation"], Profile: fields["profile"],
+		Model: fields["model"], Read: r.now().Format(time.RFC3339),
+	}
+	if thread.Conversation == "" {
+		// An older chatgpt-tool does not report it. Worth saying once per page
+		// rather than silently producing a corpus no page of which can be
+		// repaired without being read again.
+		r.logf("page %d: the answer carries no conversation url, so it cannot be repaired in its own thread", page)
+		return thread
+	}
+	if err := WriteThread(r.Root, thread); err != nil {
+		r.logf("page %d: could not record the conversation: %v", page, err)
+	}
+	return thread
+}
+
+// mend offers a failed page to the repair pass, and reports whether it came
+// back fixed.
+//
+// Everything about whether an answer is a repair is decided by the caller's
+// function. What is decided here is only that a repair is attempted at all, and
+// that a page with no conversation to ask in is not.
+func (r *Runner) mend(ctx context.Context, thread Thread, page int, text string, problems []Problem) (string, bool) {
+	if r.Repair == nil || thread.Conversation == "" {
+		return "", false
+	}
+	fixed, ok := r.Repair(ctx, thread, page, text, problems)
+	if !ok {
+		return "", false
+	}
+	r.logf("page %d: repaired in its own thread, %s", page, Reasons(problems))
+	return fixed, true
 }
 
 func (r *Runner) reject(value task, out *outcome, rules []Rule, reason string) {
@@ -561,6 +746,9 @@ func (r *Runner) write(value task, text string) error {
 	}
 	if value.dpi > 0 {
 		meta.Flags = append(meta.Flags, fmt.Sprintf("rendered at %d dpi on attempt %d", value.dpi, value.job.Attempts))
+	}
+	if value.repaired != "" {
+		meta.Flags = append(meta.Flags, "repaired in its own thread: "+value.repaired)
 	}
 	path := corpus.PagePath(r.Root, r.Book, value.page)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

@@ -303,14 +303,22 @@ func (q *Queue) ids(stage Stage, state State) ([]string, error) {
 	return out, nil
 }
 
-// Lease claims the next pending job for a host.
+// Lease claims the next pending job for a host, out of one group.
 //
 // The claim is the rename itself. Two workers that pick the same job both call
 // rename, the loser gets ENOENT because the file is already gone, and it moves
 // on to the next one. That is the whole mutual exclusion, and it works between
 // processes and between machines sharing a directory, which a mutex in this
 // program would not.
-func (q *Queue) Lease(stage Stage, host string, expected time.Duration) (Job, error) {
+//
+// The group is the part of the target before the slash, which for OCR is the
+// book. It is a parameter and not an option because a caller that leases across
+// books is a caller that has already gone wrong: an OCR run knows the page
+// number from the target and resolves the image against the book it was started
+// with, so a job from another book reads the wrong file and writes a real page
+// of one volume over a real page of another. An empty group takes anything, and
+// only a caller that owns the whole stage should pass it.
+func (q *Queue) Lease(stage Stage, host, group string, expected time.Duration) (Job, error) {
 	ids, err := q.ids(stage, Pending)
 	if err != nil {
 		return Job{}, err
@@ -322,6 +330,9 @@ func (q *Queue) Lease(stage Stage, host string, expected time.Duration) (Job, er
 				continue // somebody else took it between the listing and here
 			}
 			return Job{}, err
+		}
+		if group != "" && GroupOf(job.Target) != group {
+			continue
 		}
 		from, to := q.path(stage, Pending, id), q.path(stage, Leased, id)
 		if err := os.Rename(from, to); err != nil {
@@ -338,6 +349,16 @@ func (q *Queue) Lease(stage Stage, host string, expected time.Duration) (Job, er
 		return job, nil
 	}
 	return Job{}, ErrEmpty
+}
+
+// GroupOf is the part of a target before the slash, or the whole target when
+// there is no slash in it.
+func GroupOf(target string) string {
+	group, _, ok := strings.Cut(target, "/")
+	if !ok {
+		return target
+	}
+	return group
 }
 
 // Finish records the result of a leased job.
@@ -388,6 +409,56 @@ func hostOf(job Job) string {
 // Fail is Finish with ok false, which is the common call and reads better at
 // the call site than a bare false.
 func (q *Queue) Fail(job Job, reason string) (State, error) { return q.Finish(job, false, reason) }
+
+// Release hands a leased job back without spending the attempt.
+//
+// Fail is for a page that was read and came back wrong. This is for a batch
+// that never went out at all: an ssh that would not connect, an rsync with
+// nowhere to write, a batch this program refused to assemble. Twenty one pages
+// of Algebra I went from pending to dead in forty one seconds one morning, three
+// attempts each, without a single image leaving the laptop, because the only
+// way to give a job back was to fail it. Attempts are for the model's mistakes.
+//
+// The attempt is given back too, since Lease spent it, and the handing back is
+// still written into the history: a job that quietly loses attempts is a job
+// that can loop forever with nothing to read afterwards.
+func (q *Queue) Release(job Job, reason string) error {
+	host := hostOf(job)
+	job.Lease = nil
+	if job.Attempts > 0 {
+		job.Attempts--
+	}
+	job.History = append(job.History, Event{TS: q.now(), Host: host, OK: false,
+		Reason: "handed back without an attempt: " + reason})
+	if err := q.write(Pending, job); err != nil {
+		return err
+	}
+	if err := os.Remove(q.path(job.Stage, Leased, job.ID)); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}
+
+// Outstanding is every target with a job still to run, and where that job is.
+//
+// It exists because the id is content addressed on the input hash and a page
+// image is not immutable: a retry re-renders page 70 at 600 dpi, the hash
+// changes, and the next Add sees work it has never seen before and queues the
+// same page twice. Both then land in one batch, pointing at one file, and the
+// batch is refused. Targets, not hashes, are what one page means.
+func (q *Queue) Outstanding(stage Stage) (map[string]State, error) {
+	out := map[string]State{}
+	for _, state := range []State{Dead, Pending, Leased} {
+		jobs, err := q.List(stage, state)
+		if err != nil {
+			return nil, err
+		}
+		for _, job := range jobs {
+			out[job.Target] = state
+		}
+	}
+	return out, nil
+}
 
 // Reap returns jobs whose lease has expired.
 //

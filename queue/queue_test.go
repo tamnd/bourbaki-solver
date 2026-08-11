@@ -72,7 +72,7 @@ func TestAddIsIdempotent(t *testing.T) {
 
 	// A finished job must not come back either, or every rerun of the pipeline
 	// would redo the whole corpus.
-	leased, err := q.Lease(StageOCR, "server3", time.Minute)
+	leased, err := q.Lease(StageOCR, "server3", "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,11 +84,44 @@ func TestAddIsIdempotent(t *testing.T) {
 	}
 }
 
+// A run is started for one book and resolves the image path from the book it
+// was started with plus the page number in the target. Hand it a job from
+// another volume and it reads Algebra VIII page 66 out of the Algebra I to III
+// directory, or reads nothing and kills a page that was fine. Forty five
+// Algebra VIII jobs sat in this stage next to a live Algebra I run once, which
+// is how close this came to happening for real.
+func TestLeaseStaysInsideItsGroup(t *testing.T) {
+	q := open(t)
+	add(t, q, "alg-viii/0066")
+	add(t, q, "alg-i-iii/0066")
+
+	job, err := q.Lease(StageOCR, "server3", "alg-i-iii", time.Minute)
+	if err != nil {
+		t.Fatalf("Lease: %v", err)
+	}
+	if job.Target != "alg-i-iii/0066" {
+		t.Errorf("leased %s for a run of alg-i-iii", job.Target)
+	}
+	if _, err := q.Lease(StageOCR, "server3", "alg-i-iii", time.Minute); !errors.Is(err, ErrEmpty) {
+		t.Errorf("another book's job was handed to an alg-i-iii run: %v", err)
+	}
+
+	// The other book is untouched and not spent an attempt, so its own run
+	// still finds it waiting.
+	other, err := q.Lease(StageOCR, "server2", "alg-viii", time.Minute)
+	if err != nil {
+		t.Fatalf("Lease for the other book: %v", err)
+	}
+	if other.Target != "alg-viii/0066" || other.Attempts != 1 {
+		t.Errorf("the other book's job came back as %s on attempt %d", other.Target, other.Attempts)
+	}
+}
+
 func TestLeaseThenFinish(t *testing.T) {
 	q := open(t)
 	add(t, q, "alg-i-iii/0045")
 
-	job, err := q.Lease(StageOCR, "server3", 10*time.Minute)
+	job, err := q.Lease(StageOCR, "server3", "", 10*time.Minute)
 	if err != nil {
 		t.Fatalf("Lease: %v", err)
 	}
@@ -104,7 +137,7 @@ func TestLeaseThenFinish(t *testing.T) {
 		t.Errorf("lease until %s, want at least %s of room", job.Lease.Until, want)
 	}
 
-	if _, err := q.Lease(StageOCR, "server1", time.Minute); !errors.Is(err, ErrEmpty) {
+	if _, err := q.Lease(StageOCR, "server1", "", time.Minute); !errors.Is(err, ErrEmpty) {
 		t.Errorf("a leased job was handed out twice: %v", err)
 	}
 
@@ -135,7 +168,7 @@ func TestFailureRetriesThenDies(t *testing.T) {
 	add(t, q, "alg-i-iii/0045")
 
 	for attempt := 1; attempt <= 2; attempt++ {
-		job, err := q.Lease(StageOCR, "server3", time.Minute)
+		job, err := q.Lease(StageOCR, "server3", "", time.Minute)
 		if err != nil {
 			t.Fatalf("attempt %d: %v", attempt, err)
 		}
@@ -148,7 +181,7 @@ func TestFailureRetriesThenDies(t *testing.T) {
 		}
 	}
 
-	job, err := q.Lease(StageOCR, "server2", time.Minute)
+	job, err := q.Lease(StageOCR, "server2", "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +209,7 @@ func TestFailureRetriesThenDies(t *testing.T) {
 	if hosts[0] != "server3" || hosts[1] != "server2" {
 		t.Errorf("history lost the hosts: %v", hosts)
 	}
-	if _, err := q.Lease(StageOCR, "server3", time.Minute); !errors.Is(err, ErrEmpty) {
+	if _, err := q.Lease(StageOCR, "server3", "", time.Minute); !errors.Is(err, ErrEmpty) {
 		t.Errorf("a dead job was handed out again: %v", err)
 	}
 }
@@ -189,7 +222,7 @@ func TestExpiredLeasesComeBack(t *testing.T) {
 	q.Now = func() time.Time { return now }
 	add(t, q, "alg-i-iii/0045")
 
-	job, err := q.Lease(StageOCR, "server3", 10*time.Minute)
+	job, err := q.Lease(StageOCR, "server3", "", 10*time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +248,7 @@ func TestExpiredLeasesComeBack(t *testing.T) {
 		t.Fatalf("Reap = %v %v", reaped, err)
 	}
 
-	back, err := q.Lease(StageOCR, "server2", time.Minute)
+	back, err := q.Lease(StageOCR, "server2", "", time.Minute)
 	if err != nil {
 		t.Fatalf("the reaped job did not come back: %v", err)
 	}
@@ -235,7 +268,7 @@ func TestReapRespectsTheAttemptBound(t *testing.T) {
 	q.Now, q.MaxAttempts = func() time.Time { return now }, 1
 	add(t, q, "alg-i-iii/0045")
 
-	if _, err := q.Lease(StageOCR, "server3", time.Minute); err != nil {
+	if _, err := q.Lease(StageOCR, "server3", "", time.Minute); err != nil {
 		t.Fatal(err)
 	}
 	now = now.Add(time.Hour)
@@ -264,7 +297,7 @@ func TestConcurrentLeasesHandEachJobOutOnce(t *testing.T) {
 	for worker := range workers {
 		group.Go(func() {
 			for {
-				job, err := q.Lease(StageOCR, fmt.Sprintf("w%d", worker), time.Minute)
+				job, err := q.Lease(StageOCR, fmt.Sprintf("w%d", worker), "", time.Minute)
 				if errors.Is(err, ErrEmpty) {
 					return
 				}
@@ -336,7 +369,7 @@ func TestRetryAndDrain(t *testing.T) {
 		add(t, q, fmt.Sprintf("alg-i-iii/%04d", index))
 	}
 	for range 3 {
-		job, err := q.Lease(StageOCR, "server3", time.Minute)
+		job, err := q.Lease(StageOCR, "server3", "", time.Minute)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -359,7 +392,7 @@ func TestRetryAndDrain(t *testing.T) {
 	}
 	// Retry clears the count, or a job fixed by a person would die again on its
 	// first attempt.
-	back, err := q.Lease(StageOCR, "server3", time.Minute)
+	back, err := q.Lease(StageOCR, "server3", "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +466,7 @@ func TestOpenCreatesTheTree(t *testing.T) {
 			}
 		}
 	}
-	if _, err := q.Lease(StageSolve, "server3", time.Minute); !errors.Is(err, ErrEmpty) {
+	if _, err := q.Lease(StageSolve, "server3", "", time.Minute); !errors.Is(err, ErrEmpty) {
 		t.Errorf("an empty stage returned %v, want ErrEmpty", err)
 	}
 }
@@ -512,7 +545,7 @@ func TestMetaSurvives(t *testing.T) {
 	if _, err := q.Add(job); err != nil {
 		t.Fatal(err)
 	}
-	leased, err := q.Lease(StageOCR, "server3", time.Minute)
+	leased, err := q.Lease(StageOCR, "server3", "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -523,11 +556,133 @@ func TestMetaSurvives(t *testing.T) {
 	if _, err := q.Fail(leased, "blurry"); err != nil {
 		t.Fatal(err)
 	}
-	again, err := q.Lease(StageOCR, "server3", time.Minute)
+	again, err := q.Lease(StageOCR, "server3", "", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if again.Meta["dpi"] != "400" {
 		t.Errorf("the escalated dpi was lost: %v", again.Meta)
+	}
+}
+
+func TestReleaseGivesTheAttemptBackAndSaysWhy(t *testing.T) {
+	q := open(t)
+	job := New(StageOCR, "alg-i-iii/0070", "sha", "prompt")
+	if _, err := q.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	leased, err := q.Lease(StageOCR, "server3", "", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leased.Attempts != 1 {
+		t.Fatalf("attempts = %d after leasing, want 1", leased.Attempts)
+	}
+
+	if err := q.Release(leased, "ssh: no route to host"); err != nil {
+		t.Fatal(err)
+	}
+	back, state, err := q.Find(StageOCR, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state != Pending {
+		t.Errorf("state = %s, want pending", state)
+	}
+	if back.Attempts != 0 {
+		t.Errorf("attempts = %d, want the attempt given back", back.Attempts)
+	}
+	if back.Lease != nil {
+		t.Error("the lease is still on a job that was handed back")
+	}
+	// Silence would make a job that loops look like a job that never ran.
+	if len(back.History) != 1 || !strings.Contains(back.History[0].Reason, "no route to host") {
+		t.Errorf("history = %+v, want the reason it came back", back.History)
+	}
+	if back.History[0].Host != "server3" {
+		t.Errorf("history says host %q, want server3", back.History[0].Host)
+	}
+}
+
+// Three releases in a row must not drive the count below zero, or the job
+// becomes one that can never die.
+func TestReleasingAJobThatWasNeverLeasedIsHarmless(t *testing.T) {
+	q := open(t)
+	job := New(StageOCR, "alg-i-iii/0070", "sha", "prompt")
+	if _, err := q.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Release(job, "never mind"); err != nil {
+		t.Fatal(err)
+	}
+	back, _, err := q.Find(StageOCR, job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Attempts != 0 {
+		t.Errorf("attempts = %d, want 0", back.Attempts)
+	}
+}
+
+// Outstanding is what stops one page being queued twice. Done is not in it: a
+// page read at the old prompt is work again when the prompt changes.
+func TestOutstandingIsEveryTargetStillToRun(t *testing.T) {
+	q := open(t)
+	pending := New(StageOCR, "alg-i-iii/0061", "a", "p")
+	leased := New(StageOCR, "alg-i-iii/0062", "b", "p")
+	dead := New(StageOCR, "alg-i-iii/0063", "c", "p")
+	done := New(StageOCR, "alg-i-iii/0064", "d", "p")
+	for _, job := range []Job{pending, leased, dead, done} {
+		if _, err := q.Add(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Lease hands out the lowest id first, so they all come out and the ones
+	// this test is not using go back. Releasing inside the loop would put a job
+	// back where the next Lease finds it, and the loop would never end.
+	held := map[string]Job{}
+	for range 4 {
+		job, err := q.Lease(StageOCR, "server3", "", time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held[job.ID] = job
+	}
+	take := func(id string) Job {
+		t.Helper()
+		job, ok := held[id]
+		if !ok {
+			t.Fatalf("job %s never came out of the queue", id)
+		}
+		return job
+	}
+	if _, err := q.Finish(take(done.ID), true, ""); err != nil {
+		t.Fatal(err)
+	}
+	out := take(dead.ID)
+	out.Attempts = DefaultMaxAttempts
+	if _, err := q.Fail(out, "no answer came back"); err != nil {
+		t.Fatal(err)
+	}
+	if err := q.Release(take(pending.ID), "putting this one back"); err != nil {
+		t.Fatal(err)
+	}
+
+	outstanding, err := q.Outstanding(StageOCR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]State{
+		"alg-i-iii/0061": Pending,
+		"alg-i-iii/0062": Leased,
+		"alg-i-iii/0063": Dead,
+	}
+	if len(outstanding) != len(want) {
+		t.Fatalf("outstanding = %+v, want %+v", outstanding, want)
+	}
+	for target, state := range want {
+		if outstanding[target] != state {
+			t.Errorf("%s = %q, want %q", target, outstanding[target], state)
+		}
 	}
 }

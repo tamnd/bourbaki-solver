@@ -182,8 +182,12 @@ type Result struct {
 	ID   string `json:"id"`
 	// Pages is how many images went out, Wrote how many Markdown files came
 	// back, and Missing which pages did not.
-	Pages   int      `json:"pages"`
-	Wrote   int      `json:"wrote"`
+	Pages int `json:"pages"`
+	Wrote int `json:"wrote"`
+	// Lanes is how many pages the host was reading at once. Without it the
+	// usage log cannot answer what a second lane bought, which is the whole
+	// question fleet bench exists to settle.
+	Lanes   int      `json:"lanes,omitempty"`
 	Missing []string `json:"missing,omitempty"`
 	PID     int      `json:"pid"`
 	Elapsed Duration `json:"elapsed"`
@@ -362,7 +366,7 @@ func (b Batch) Run(ctx context.Context) (result Result, err error) {
 	if err := b.Validate(); err != nil {
 		return Result{}, err
 	}
-	result = Result{Host: b.Host.Name, ID: b.ID, Pages: len(b.Images)}
+	result = Result{Host: b.Host.Name, ID: b.ID, Pages: len(b.Images), Lanes: b.Host.Lanes}
 	started := time.Now()
 	defer func() { result.Elapsed = Duration(time.Since(started)) }()
 
@@ -371,20 +375,8 @@ func (b Batch) Run(ctx context.Context) (result Result, err error) {
 	out := path(root, "out", b.ID)
 	logFile := path(root, "logs", b.ID+".log")
 
-	// One round trip makes the directories and answers the only question worth
-	// asking before any page is sent: is there a display for Chrome to open on.
-	// A batch started without one fails every page in a second and the tool
-	// reads that as an IP block, so asking first costs one ssh and saves a pool.
-	ready, err := b.Shell.Run(ctx, b.Host.Name, fmt.Sprintf(
-		"mkdir -p %s %s %s && (pgrep -f %s >/dev/null && echo display-up || echo display-down)",
-		quote(in), quote(out), quote(path(root, "logs")),
-		quote("Xvfb "+b.Host.display()+" ")))
-	if err != nil {
-		return result, fmt.Errorf("prepare %s: %w", b.Host.Name, err)
-	}
-	if strings.Contains(ready, "display-down") {
-		return result, fmt.Errorf("%s has no Xvfb on %s, so Chrome cannot start: run chatgpt-tool's run-serve.sh there first",
-			b.Host.Name, b.Host.display())
+	if err := prepare(ctx, b.Shell, b.Host, in, out, path(root, "logs")); err != nil {
+		return result, err
 	}
 	// Removing the images is not conditional on the rest working.
 	defer func() {
@@ -434,6 +426,32 @@ func (b Batch) Run(ctx context.Context) (result Result, err error) {
 		result.Log = b.tail(ctx, logFile)
 	}
 	return result, pollErr
+}
+
+// prepare makes the scratch directories on a host and answers the only question
+// worth asking before anything is sent: is there a display for Chrome to open
+// on.
+//
+// One round trip for both. A browser started without a display fails in a
+// second, and the tool reads a pile of instant failures as an IP level block
+// and bans the accounts behind them for eight hours, so asking first costs one
+// ssh and saves a pool.
+func prepare(ctx context.Context, shell Shell, host Host, dirs ...string) error {
+	quoted := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		quoted = append(quoted, quote(dir))
+	}
+	ready, err := shell.Run(ctx, host.Name, fmt.Sprintf(
+		"mkdir -p %s && (pgrep -f %s >/dev/null && echo display-up || echo display-down)",
+		strings.Join(quoted, " "), quote("Xvfb "+host.display()+" ")))
+	if err != nil {
+		return fmt.Errorf("prepare %s: %w", host.Name, err)
+	}
+	if strings.Contains(ready, "display-down") {
+		return fmt.Errorf("%s has no Xvfb on %s, so Chrome cannot start: run chatgpt-tool's run-serve.sh there first",
+			host.Name, host.display())
+	}
+	return nil
 }
 
 // pushPrompt puts the prompt on the host, named by its hash.

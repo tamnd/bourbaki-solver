@@ -90,6 +90,82 @@ func TestAccentCutsRun(t *testing.T) {
 	}
 }
 
+// Formula (14) of page 114 and the line of prose under it. The display reads
+// Λ̃ = Θ ∘ (σ̃ ⊗ 1_P), and both of its accents were wrong before.
+//
+// The tilde over the sigma is at 257, which is too low to overlap the band of
+// the display at 246 to 260 by half its height, so it arrives as a line of its
+// own. It was then read as a piece of the prose at 268 and put over the y of
+// "by relations", and the page went out saying "b~y relations". The tilde over
+// the lambda is at 271, which is where the box of the bracket before the sigma
+// ends, and it was put over the bracket.
+const displayAccentXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="114" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="15" family="MJDJIW+LMRoman10" color="#000000"/>
+<fontspec id="3" size="15" family="XJSZDJ+LMMathItalic10" color="#000000"/>
+<fontspec id="4" size="15" family="XHUWIC+LMMathSymbols10" color="#000000"/>
+<fontspec id="5" size="15" family="MJDJIW+LMRoman10" color="#000000"/>
+<fontspec id="6" size="15" family="XAEWAV+CMEX10" color="#000000"/>
+<fontspec id="7" size="10" family="DCOIDG+LMRoman7" color="#000000"/>
+<fontspec id="10" size="10" family="GORNHQ+LMMathSymbols7" color="#000000"/>
+<fontspec id="11" size="15" family="MJDJIW+LMRoman10" color="#0000ff"/>
+<text top="252" left="271" width="8" height="7" font="6">e</text>
+<text top="247" left="270" width="42" height="13" font="5">Λ = Θ</text>
+<text top="246" left="315" width="7" height="14" font="4">◦</text>
+<text top="247" left="326" width="6" height="13" font="5">(</text>
+<text top="257" left="332" width="8" height="7" font="6">e</text>
+<text top="247" left="332" width="9" height="13" font="3"><i>σ</i></text>
+<text top="246" left="344" width="12" height="14" font="4">⊗</text>
+<text top="247" left="359" width="7" height="13" font="5">1</text>
+<text top="254" left="367" width="8" height="9" font="7">P</text>
+<text top="247" left="375" width="6" height="13" font="5">)</text>
+<text top="247" left="384" width="4" height="13" font="3"><i>.</i></text>
+<text top="247" left="80" width="27" height="13" font="2">(14)</text>
+<text top="268" left="110" width="22" height="13" font="2">For</text>
+<text top="268" left="137" width="9" height="13" font="3"><i>x</i></text>
+<text top="267" left="150" width="10" height="14" font="4">&#8712;</text>
+<text top="268" left="164" width="14" height="13" font="5">P,</text>
+<text top="268" left="184" width="9" height="13" font="3"><i>x</i></text>
+<text top="265" left="193" width="6" height="10" font="10">&#8727;</text>
+<text top="267" left="204" width="10" height="14" font="4">&#8712;</text>
+<text top="268" left="218" width="10" height="13" font="5">P</text>
+<text top="265" left="228" width="6" height="10" font="10">&#8727;</text>
+<text top="268" left="235" width="34" height="13" font="2">, and</text>
+<text top="268" left="274" width="7" height="13" font="3"><i>y</i></text>
+<text top="267" left="286" width="10" height="14" font="4">&#8712;</text>
+<text top="268" left="301" width="108" height="13" font="5">P, by relations (</text>
+<text top="268" left="408" width="7" height="13" font="11">4</text>
+<text top="268" left="416" width="21" height="13" font="2">), (</text>
+<text top="268" left="437" width="7" height="13" font="11">8</text>
+<text top="268" left="444" width="21" height="13" font="2">), (</text>
+<text top="268" left="465" width="15" height="13" font="11">10</text>
+<text top="268" left="480" width="50" height="13" font="2">), and (</text>
+<text top="268" left="530" width="15" height="13" font="11">11</text>
+<text top="268" left="545" width="32" height="13" font="2">), we</text>
+</page>
+</pdf2xml>
+`
+
+func TestAnAccentOfADisplayStaysOnTheDisplay(t *testing.T) {
+	lines := parse(t, displayAccentXML)
+	if len(lines) != 2 {
+		for _, l := range lines {
+			t.Logf("line [%d %d] %q", l.Top, l.Left, Render(l))
+		}
+		t.Fatalf("got %d lines, want the display and the prose under it", len(lines))
+	}
+	want := []string{
+		`(14) $\widetilde{Λ} = Θ\circ (\widetilde{\sigma}\otimes 1_P)$.`,
+		`For $x\in P,x^*\in P^*$, and $y\in P$, by relations (4), (8), (10), and (11), we`,
+	}
+	for i, w := range want {
+		if got := Render(lines[i]); got != w {
+			t.Errorf("Render line %d:\n got %s\nwant %s", i, got, w)
+		}
+	}
+}
+
 // The extent of every line of two pages of the volume, as poppler reports them:
 // page 500, the first page of the index, which is set in two columns, and page
 // 115, which is prose. Each line is the horizontal runs of ink on it, so the

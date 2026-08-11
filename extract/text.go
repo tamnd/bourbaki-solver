@@ -24,9 +24,14 @@ type token struct {
 	class Class
 	level Level
 	depth int
-	left  int
-	right int
-	math  bool
+	// The box the run it came from was drawn in. Across the page it says
+	// where one token ends and the next begins; up and down it says which of
+	// them an accent was drawn over.
+	left   int
+	right  int
+	top    int
+	bottom int
+	math   bool
 }
 
 // Render writes one line as Markdown with LaTeX mathematics.
@@ -70,7 +75,7 @@ func tokens(l Line) []token {
 				continue
 			}
 			toks = append(toks, token{text: text, class: ClassMath, level: r.Level,
-				left: r.Left, right: r.Right(), math: true})
+				left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(), math: true})
 			continue
 		}
 		text := runText(r)
@@ -80,7 +85,7 @@ func tokens(l Line) []token {
 		if r.Level != Base && footnoteMark(r.Text) {
 			// A footnote reference is a superscript and is not an exponent.
 			toks = append(toks, token{text: "[^" + strings.Trim(r.Text, "()") + "]",
-				class: ClassText, left: r.Left, right: r.Right()})
+				class: ClassText, left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom()})
 			continue
 		}
 		level, depth := r.Level, r.Depth
@@ -92,7 +97,7 @@ func tokens(l Line) []token {
 			level, depth = Base, max(depth-1, 0)
 		}
 		toks = append(toks, token{text: text, class: r.Class, level: level, depth: depth,
-			left: r.Left, right: r.Right(), math: r.Class.Math() || r.Level != Base})
+			left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(), math: r.Class.Math() || r.Level != Base})
 	}
 	return place(toks, accents)
 }
@@ -116,19 +121,39 @@ func footnoteMark(s string) bool {
 // place puts each accent over the token it was drawn over. An accent is a glyph
 // of its own sitting at the position of the letter it decorates, so the letter
 // is the token it overlaps.
+//
+// Overlapping across the page is not enough on its own. A line gathers what is
+// drawn beside it as well as what is on it, and a display carries its accents
+// far enough above the letters that they can be gathered onto the wrong line;
+// when that happened on page 114 every tilde of the display found a letter of
+// the sentence below it at the same place across the measure and went over
+// that. So the accent has to be inside the token's band as well, which is where
+// poppler reports it and where the letters of another line are not.
+//
+// Across the page it is the token the accent covers most, not the first one it
+// touches. The boxes of a formula are set edge to edge, so the tilde over the
+// sigma of Θ ∘ (σ ⊗ 1_P) starts at exactly the right edge of the bracket before
+// it, and taking the first token that overlaps puts the tilde over the bracket.
 func place(toks []token, accents []Run) []token {
 	for _, a := range accents {
 		latex, _, ok := CMEX(first(a.Text))
 		if !ok {
 			continue
 		}
-		for i := range toks {
-			if toks[i].right < a.Left || toks[i].left > a.Right() {
+		at, best := -1, 0
+		for i, t := range toks {
+			over := min(t.right, a.Right()) - max(t.left, a.Left)
+			if over < 0 || a.Top < t.top || a.Top >= t.bottom {
 				continue
 			}
-			toks = append(toks[:i], append(accent(toks[i], a, latex), toks[i+1:]...)...)
-			break
+			if at < 0 || over > best {
+				at, best = i, over
+			}
 		}
+		if at < 0 {
+			continue
+		}
+		toks = append(toks[:at], append(accent(toks[at], a, latex), toks[at+1:]...)...)
 	}
 	return toks
 }
@@ -223,6 +248,9 @@ func runText(r Run) string {
 	case "LMMathSymbols":
 		return symbols(s)
 	}
+	if r.Class == ClassStrong {
+		return bold(s)
+	}
 	if r.Class == ClassBold {
 		return wrapLetters(s, `\mathbf`)
 	}
@@ -235,6 +263,18 @@ func runText(r Run) string {
 		return `\boldsymbol{` + runes(s, nil) + `}`
 	}
 	return runes(s, nil)
+}
+
+// bold marks a run as bold Markdown, keeping the space it was set with outside
+// the asterisks. Markdown reads a pair of asterisks with a space after it as
+// two literal asterisks, and a run of a heading often ends in one.
+func bold(s string) string {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return s
+	}
+	i := strings.Index(s, t)
+	return s[:i] + "**" + t + "**" + s[i+len(t):]
 }
 
 // symbols renders a run of the mathematics symbol font, where the letters are
@@ -329,7 +369,12 @@ func first(s string) rune {
 func extend(toks []token) []token {
 	out := make([]token, 0, len(toks))
 	for i, t := range toks {
-		if t.math || t.class == ClassHead {
+		// A statement head and a heading are prose whatever they sit beside.
+		// Page 438 opens its subsection on the star that marks it optional, and
+		// reading the number after the star as part of a formula turned "∗13.
+		// Complex Linear Representations" into $***13$ and left the asterisks
+		// of the heading open.
+		if t.math || t.class == ClassHead || t.class == ClassStrong {
 			out = append(out, t)
 			continue
 		}
@@ -455,6 +500,29 @@ func mathWord(w string) bool {
 	return true
 }
 
+// spaceGap is how far two runs have to stand apart before the white between
+// them is a space of the sentence rather than the fit of the letters.
+//
+// A word space in this volume is five units and the letters of a word touch, so
+// three was enough until the operators. Bourbaki sets a thin space before the
+// argument of one, and a thin space is two units: page 145 ends "Ker" at 376 and
+// opens "u" at 378, and read at three that page said "Keru". The same goes for
+// det u, Tr u, Im u, Ann x and Nrd.
+//
+// The narrower measure is only taken when a letter follows, and only when it is
+// written on the line. Two units apart is where the volume also sets a closing
+// bracket against the word it closes and the leaders of the table of contents
+// against their entry, and those want no space at all: 472 of them against 81
+// that open on a letter. An index is written against the thing it indexes for
+// the same reason, which is why page 348 wants Inf^q and not Inf ^q.
+func spaceGap(t token) int {
+	r, _ := utf8.DecodeRuneInString(strings.TrimLeft(t.text, " "))
+	if unicode.IsLetter(r) && t.level == Base && t.depth == 0 {
+		return 2
+	}
+	return 3
+}
+
 // emit writes the tokens out, opening and closing the dollar signs and putting
 // the superscripts and subscripts back where they belong.
 //
@@ -483,7 +551,10 @@ func emit(toks []token) string {
 			open, at = open[:len(open)-1], at[:len(at)-1]
 		}
 	}
-	closeMath := func() {
+	// hyphenated says the formula just closed ended in the hyphen of a compound
+	// word, so the word that follows joins on to it without a space.
+	hyphenated := false
+	closeMath := func(compound bool) {
 		if !inMath {
 			return
 		}
@@ -496,16 +567,33 @@ func emit(toks []token) string {
 			tail = out[len(out)-1:] + tail
 			out = out[:len(out)-1]
 		}
+		// A hyphen at the end of a formula is not a minus sign, it is the
+		// hyphen of a compound word. Bourbaki sets the A_M of "A_M-module" in
+		// the mathematics font and the word after it in roman, and the hyphen
+		// comes back on the mathematics side of that boundary. Left there the
+		// page reads $A_M-$ module, which is wrong twice over: the hyphen is
+		// typeset as a minus sign, and the compound word is broken by a space
+		// that is not on the page. Measured on Algebra VIII before this: 64 of
+		// them across 50 of its 505 pages.
+		if compound && strings.HasSuffix(out, "-") {
+			out = strings.TrimRight(out[:len(out)-1], " ")
+			tail = "-" + tail
+			hyphenated = true
+		}
 		out = strings.TrimRight(out, " ") + "$" + tail
 		inMath = false
 	}
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
 		text := t.text
-		gap := prev.right >= 0 && t.left-prev.right >= 3
+		gap := prev.right >= 0 && t.left-prev.right >= spaceGap(t)
 		if !t.math {
-			closeMath()
-			if gap {
+			closeMath(!gap && compoundWord(text))
+			switch {
+			case hyphenated:
+				text = strings.TrimLeft(text, " ")
+				hyphenated = false
+			case gap:
 				text = " " + strings.TrimLeft(text, " ")
 			}
 			out += text
@@ -549,8 +637,43 @@ func emit(toks []token) string {
 		out += text
 		prev = t
 	}
-	closeMath()
+	// Nothing is known about what follows the end of a line, so a hyphen there
+	// stays where it is and join decides, where the next line is in hand.
+	closeMath(false)
 	return strings.TrimRight(out, " ")
+}
+
+// compoundWord reports whether the run after a hyphen at the end of a formula
+// is the second half of a compound word rather than the operand of a
+// subtraction. It is what tells the hyphen of A_M-module from the minus of
+// R = P-XQ, and both shapes are common in this volume.
+//
+// The word has to be lower case, and it has to end where a word ends. Bourbaki
+// writes A_M-module, A_M-linear, (A,B)_k-bimodule, k-algebra, and every one of
+// them is a whole word of prose with a space or a full stop after it. The
+// operand of a subtraction is either capital, as in P-XQ, or it is the name of
+// a function with its argument after it, as in cl(E)-cl(E'), and the bracket
+// is what gives that one away: no word of the book has a bracket welded to it.
+// A second hyphen is a word too, since the book writes (D,A)-sub-bimodule, and
+// so is a closing bracket, since the word can be the last thing in an aside.
+func compoundWord(s string) bool {
+	s = strings.TrimLeft(s, " ")
+	n := 0
+	for _, r := range s {
+		if !unicode.IsLower(r) {
+			break
+		}
+		n += utf8.RuneLen(r)
+	}
+	if n == 0 {
+		return false
+	}
+	rest := s[n:]
+	if rest == "" {
+		return true
+	}
+	r, _ := utf8.DecodeRuneInString(rest)
+	return r == ' ' || strings.ContainsRune(",.;:-)", r)
 }
 
 // mark is how a level is written in LaTeX.

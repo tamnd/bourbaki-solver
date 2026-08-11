@@ -19,9 +19,11 @@ import (
 
 func runExtract(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("extract: want one of fonts, page, run")
+		return fmt.Errorf("extract: want one of audit, fonts, page, run")
 	}
 	switch args[0] {
+	case "audit":
+		return extractAudit(args[1:])
 	case "fonts":
 		return extractFonts(args[1:])
 	case "page":
@@ -198,10 +200,21 @@ func extractRun(args []string) error {
 		return err
 	}
 
+	// The volume is read twice. A hyphen at the end of a line is the typesetter
+	// breaking a word most of the time and the hyphen of a compound word the
+	// rest of the time, and the line it stands on does not say which. The rest
+	// of the book does: a compound broken at its hyphen here is set inside a
+	// line somewhere else. So the first pass is only there to collect the words
+	// the volume writes with a hyphen, and the second lays out the pages.
+	compounds := extract.Compounds{}
+	for _, pg := range lay.Pages {
+		compounds.Read(extract.ReadPage(lay, pg).Body)
+	}
+
 	res := &extract.Result{Book: b.ID}
 	stamp := time.Now().UTC().Format(time.RFC3339)
 	for _, pg := range lay.Pages {
-		p := extract.ReadPage(lay, pg)
+		p := extract.ReadPageWith(lay, pg, compounds)
 		res.Add(p)
 		if *dry {
 			continue

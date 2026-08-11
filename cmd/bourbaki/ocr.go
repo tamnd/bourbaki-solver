@@ -21,6 +21,8 @@ commands:
   fill     put a job in the queue for every page of a volume that has to be read
   run      lease pages, read them on the fleet, validate what comes back
   check    run the seven validation rules over the page files already on disk
+  repair   ask the model to fix a flagged page in the conversation that read it
+  audit    ask about pages that passed the rules and may still be wrong
 
 flags for fill and run:
   -book ID       book id from manifests/books.yaml
@@ -31,6 +33,11 @@ flags for fill and run:
   -routes PATH   route file, default ~/.config/bourbaki/routes.json
   -queue PATH    queue directory
   -keep          leave the page images on the hosts, for debugging
+  -no-repair     reject a failed page instead of asking about it in its thread
+  -lanes N       override how many pages a host reads at once
+  -wait DUR      wait this long for a box with a spare core rather than fail
+  -flagged       only the pages a native extraction could not read, which is the
+                 one way a born-digital volume is read through a model
   -dry           say what would be read and stop
 
 flags for check:
@@ -47,6 +54,19 @@ prompt, and a run that is interrupted picks up where it stopped.
 check is the same code that decides whether to accept a page, run against what
 is already written. It is how a change to the rules is measured before it is
 turned loose on 1194 pages.
+
+repair is for the pages check finds. A page with one unclosed formula does not
+need reading again, it needs one question asked in the thread that produced it,
+where the image is still in context. What comes back has to be the same page
+with a dollar moved and nothing else, proved rather than assumed, or it is
+thrown away and the page goes back to the image. See bourbaki ocr repair -h.
+
+audit is for the pages check says are fine. Page 51 of Algebra I passed all
+seven rules and reads i in {1, n} where the scan prints i in [1, n], which is a
+set of two elements where the book has an interval. No rule can see that. The
+detectors look for shapes this scan gets wrong, and each one becomes one
+question in the thread that produced the page, where the image still is. See
+bourbaki ocr audit -h.
 `
 
 func runOCR(args []string) error {
@@ -61,6 +81,10 @@ func runOCR(args []string) error {
 		return ocrRun(args[1:])
 	case "check":
 		return ocrCheck(args[1:])
+	case "repair":
+		return ocrRepair(args[1:])
+	case "audit":
+		return ocrAudit(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, ocrUsage)
 		return nil

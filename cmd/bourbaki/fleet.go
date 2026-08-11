@@ -21,6 +21,7 @@ commands:
   up       start the ssh tunnels and wait for each to answer
   down     stop the tunnels
   status   print the tunnels, the health of each route and what it can carry
+  bench    say what concurrency each host should carry, from the runs already done
 
 flags:
   -routes PATH   route file (default $BOURBAKI_ROUTES, else ~/.config/bourbaki/routes.json)
@@ -79,6 +80,8 @@ func runFleet(args []string) error {
 		return runFleetDown(args[1:])
 	case "status":
 		return runFleetStatus(args[1:])
+	case "bench":
+		return runFleetBench(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, fleetUsage)
 		return nil
