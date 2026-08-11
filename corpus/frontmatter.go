@@ -57,6 +57,12 @@ type SectionFrontMatter struct {
 	TranslationModel string `yaml:"translation_model,omitempty"`
 	TranslationRun   string `yaml:"translation_run,omitempty"`
 	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
+	// PromptSHA256 is the hash of the instructions this file was made with,
+	// the common half and the language half together. It is the third kind of
+	// staleness, beside the English changing and the glossary bumping: edit
+	// the prompt and every file that carries the old hash was translated
+	// under rules that no longer hold.
+	PromptSHA256 string `yaml:"prompt_sha256,omitempty"`
 }
 
 // ExerciseFrontMatter is the head of content/<lang>/<book>/<chapter>/exercises/sN/NN.md.

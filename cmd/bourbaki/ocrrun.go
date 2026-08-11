@@ -485,6 +485,11 @@ func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 		return 0, "no rsync, the page images cannot get there"
 	case facts.MemFreeMB > 0 && facts.MemFreeMB < ocrLaneMemoryMB:
 		return 0, fmt.Sprintf("%d MB free, one lane needs %d", facts.MemFreeMB, ocrLaneMemoryMB)
+	// Cores is the marker of a box that was measured, and it is used here
+	// rather than a nonzero disk figure because zero free disk is the case
+	// this check exists for. server2 read 0 and kept its lane.
+	case facts.Cores > 0 && facts.DiskFreeMB < fleet.OCRDiskMB:
+		return 0, fmt.Sprintf("%d MB free on disk, one lane needs %d", facts.DiskFreeMB, fleet.OCRDiskMB)
 	}
 	lanes := value.Concurrency
 	if lanes <= 0 {

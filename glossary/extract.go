@@ -425,7 +425,7 @@ func runs(line string) [][]string {
 		// what made the first run of this mine "viii proposition" 149 times:
 		// that is "VIII, p. 31, Proposition 4", with the p thrown away and the
 		// two words either side of it left standing next to each other.
-		if len([]rune(w)) < 2 || stop[w] || romans[w] {
+		if len([]rune(w)) < 2 || stop[w] || romans[w] || Operators[w] {
 			flush()
 			continue
 		}
@@ -519,6 +519,56 @@ follows following follow followed denote denoted denotes write written writes
 obtain obtained obtains consider considered consists consist
 respectively particular general case cases sense way ways
 p no cf loc cit ibid ff pp vol
+`)
+
+// notTerms are ordinary English words that are not vocabulary.
+//
+// Kept apart from stop, and used only when a row is judged and never when a
+// phrase is cut. That is the whole point of it being a second list: "fixed
+// point" and "character table" and "historical note" are terms, so a miner that
+// broke a phrase at fixed, table or note would lose all three, while a glossary
+// holding the bare words fix, table and note holds three rows that are not
+// terminology and that tell a model how to render an ordinary word.
+//
+// Every word here was measured. It is what the second Vietnamese run put into
+// manifests/glossary.yaml as a single-word row on 11 August 2026, read one by
+// one, minus the ones that are terms. The renderings were mostly right, which
+// is the point: "prove" came back "chứng minh" and that is correct Vietnamese
+// for the word and no part of the terminology of algebra.
+//
+// It is not a rule that generalises and it does not pretend to. The real fix is
+// upstream, where a frequency list of prose n-grams offers its tail as
+// vocabulary, and until the miner is better than that this is the list.
+var notTerms = set(`
+abuse act adapt admit apply begin can come endow exist fact fix fixed hold
+idea imply large last later lie make may mean must next now out prove roles
+run send side study treat use used using well work
+cor de resp th
+`)
+
+// Operators are Bourbaki's own abbreviations, the ones that are set upright
+// inside a formula: Ker, Im, End, Aut, Hom, tr, det, and the rest.
+//
+// They are here because they came out of the second Vietnamese run as glossary
+// rows, twenty-two of them, with renderings that are not wrong: end became "kết
+// thúc", ker became "hạt nhân", inf became "cận dưới lớn nhất". Every one of
+// those is the right Vietnamese for the notion and every one of them is a
+// disaster in a translation prompt, because the prompt puts the glossary in
+// front of a model and tells it to use the right hand column wherever the left
+// hand one appears, and the left hand one appears inside $\operatorname{Ker} f$.
+// A model that obeyed would break invariant 1 on every line it touched.
+//
+// They are in the corpus as bare words rather than as TeX because the printed
+// page sets them upright and a transcription that read them off the page wrote
+// them as words. So the miner sees them in prose and there is nothing about
+// them, as words, that says they are notation. This list is what says it.
+//
+// A phrase breaks at one of these the same way it breaks at a stop word, which
+// is right: "reduced trace trd" is not a term and neither is "trd nrd".
+var Operators = set(`
+ann aut card cl coker coim coker deg det diag dim end ex gal hom id im ind
+inf int inv ker lcm gcd max min mod nrd ord pr proj rad rk sdet sgn sup supp
+th tr trd
 `)
 
 func set(text string) map[string]bool {

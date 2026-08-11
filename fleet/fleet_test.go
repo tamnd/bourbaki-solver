@@ -106,6 +106,26 @@ func TestServer1CannotOCR(t *testing.T) {
 	}
 }
 
+// A full disk is the same shape of problem as no memory, and it went unnoticed
+// for longer: the probe read the number and only printed it, so server2 kept
+// its lane with nothing left to write to and every chunk sent to it came back
+// "No space left on device".
+func TestAFullDiskIsRefused(t *testing.T) {
+	facts := Facts{Cores: 6, LoadX100: 231, MemFreeMB: 10898, DiskFreeMB: 0,
+		Tool: "t", Xvfb: true, Rsync: true}
+
+	ok, why := facts.CanOCR()
+	if ok {
+		t.Fatal("a host with a full disk was called capable")
+	}
+	if !strings.Contains(why, "disk") {
+		t.Errorf("reason = %q, want it to say which resource ran out", why)
+	}
+	if got := facts.Lanes(); got != 0 {
+		t.Errorf("Lanes = %d, want 0", got)
+	}
+}
+
 func TestLanes(t *testing.T) {
 	for _, c := range []struct {
 		name  string
@@ -114,28 +134,33 @@ func TestLanes(t *testing.T) {
 	}{
 		// The CPU is the binding constraint on an idle server3: eight cores
 		// carry four lanes and 13217 MB would carry eight, so four wins.
-		{"server3 idle", Facts{Cores: 8, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 4},
-		{"two cores plenty of ram", Facts{Cores: 2, MemFreeMB: 16000, Tool: "t", Xvfb: true, Rsync: true}, 1},
-		{"just enough ram", Facts{Cores: 8, MemFreeMB: 1600, Tool: "t", Xvfb: true, Rsync: true}, 1},
-		{"no xvfb", Facts{Cores: 8, MemFreeMB: 16000, Tool: "t", Rsync: true}, 0},
+		{"server3 idle", Facts{Cores: 8, MemFreeMB: 13217, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 4},
+		{"two cores plenty of ram", Facts{Cores: 2, MemFreeMB: 16000, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 1},
+		{"just enough ram", Facts{Cores: 8, MemFreeMB: 1600, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 1},
+		{"no xvfb", Facts{Cores: 8, MemFreeMB: 16000, DiskFreeMB: 12024, Tool: "t", Rsync: true}, 0},
 
 		// The evening this was written server3 sat at 8.27 across its eight
 		// cores running another tenant's work, and it still read 98 pages in
 		// that state. One lane, not the four the core count would promise and
 		// not the nothing the free cores would.
-		{"server3 as it really was", Facts{Cores: 8, LoadX100: 827, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 1},
+		{"server3 as it really was", Facts{Cores: 8, LoadX100: 827, MemFreeMB: 13217, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 1},
 		// server1 the same morning: four cores at 39, a Kubernetes control
 		// plane and a registry belonging to somebody else. That is not a slow
 		// box, it is a stuck one, and it gets nothing.
-		{"a box that is thrashing", Facts{Cores: 4, LoadX100: 3914, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 0},
+		{"a box that is thrashing", Facts{Cores: 4, LoadX100: 3914, MemFreeMB: 13217, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 0},
 		// The line between the two, drawn at two runnable things per core.
-		{"right on the line", Facts{Cores: 4, LoadX100: 800, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 0},
-		{"just inside it", Facts{Cores: 4, LoadX100: 799, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 1},
+		{"right on the line", Facts{Cores: 4, LoadX100: 800, MemFreeMB: 13217, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 0},
+		{"just inside it", Facts{Cores: 4, LoadX100: 799, MemFreeMB: 13217, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 1},
 		// Half the box spoken for is half the lanes.
-		{"half spoken for", Facts{Cores: 8, LoadX100: 400, MemFreeMB: 13217, Tool: "t", Xvfb: true, Rsync: true}, 2},
+		{"half spoken for", Facts{Cores: 8, LoadX100: 400, MemFreeMB: 13217, DiskFreeMB: 12024, Tool: "t", Xvfb: true, Rsync: true}, 2},
 		// server2 on the same evening: six cores at 0.55, which rounds up to
 		// one spoken for, leaving five and so two lanes.
-		{"server2 as it really was", Facts{Cores: 6, LoadX100: 55, MemFreeMB: 7363, Tool: "t", Xvfb: true, Rsync: true}, 2},
+		{"server2 as it really was", Facts{Cores: 6, LoadX100: 55, MemFreeMB: 7363, DiskFreeMB: 44256, Tool: "t", Xvfb: true, Rsync: true}, 2},
+		// server2 a day later, with the disk full. Everything else about the
+		// box is fine, which is what made this the expensive one to miss.
+		{"server2 with the disk full", Facts{Cores: 6, LoadX100: 231, MemFreeMB: 10898, DiskFreeMB: 0, Tool: "t", Xvfb: true, Rsync: true}, 0},
+		// Room for two lanes on disk and four on the CPU is two lanes.
+		{"disk is the binding constraint", Facts{Cores: 8, MemFreeMB: 13217, DiskFreeMB: 2400, Tool: "t", Xvfb: true, Rsync: true}, 2},
 	} {
 		if got := c.facts.Lanes(); got != c.want {
 			t.Errorf("%s: Lanes = %d, want %d", c.name, got, c.want)
