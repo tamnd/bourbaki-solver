@@ -294,6 +294,166 @@ func DropStray(body string) (string, bool) {
 	return out, true
 }
 
+// Unstraddle moves a closing bracket that belongs to the prose back out of the
+// mathematics it was left inside.
+//
+// The fault is the text layer putting the delimiter in the wrong place around a
+// function whose name Bourbaki sets upright. The name comes through as prose,
+// its opening bracket comes through as prose, and its closing bracket is swept
+// into the formula with the argument:
+//
+//	the sum is equal to Tr($u)$.
+//
+// It renders the same as Tr($u$) does, which is why nobody sees it by reading,
+// and it is not the same text. The mathematics of that span is "u)", so a
+// translator asked to copy the formulae hands back "u" with the bracket set as
+// prose, which is right, and the audit refuses the section because a translation
+// may not alter mathematics. That is a real refusal: it cost a seventeen minute
+// run of the appendix on the trace of an endomorphism, and nothing was written.
+//
+// The rule is deliberately narrower than "the brackets inside a span balance".
+// Measured over the corpus, 979 of 18,664 spans do not balance their own
+// brackets and most of them are innocent, because the book writes "(resp. $x$)"
+// and labels list items "$\alpha$)". What makes this one a fault is the bracket
+// standing immediately before the opening delimiter with nothing between them.
+// That shape occurs 138 times in 66 pages and every one of them is a name in
+// prose: Tr, det, Ker, Im, Card, cl, deg, rg, diag, int, Br, Nrd, Pc.
+//
+// Two conditions past the shape, and both are there to keep it from inventing:
+//
+//   - No more brackets come out than the line has open. A span may close a
+//     bracket opened earlier in the same line, and the count is taken over the
+//     line with the delimiters removed, so a bracket opened inside an earlier
+//     span counts as much as one opened in the prose.
+//   - Nothing but a delimiter moves. The body with every dollar sign taken out
+//     has to be the body it started as, character for character, and a body that
+//     fails that check is handed back untouched. It is a total proof and it is
+//     cheap, and it is the only reason this can run unattended over 510 pages.
+//
+// It returns the new body and how many spans it repaired.
+func Unstraddle(body string) (string, int) {
+	spans, _ := Split(body)
+	rs := []rune(body)
+	var b strings.Builder
+	n, at := 0, 0
+	for _, s := range spans {
+		if !straddles(rs, s) {
+			continue
+		}
+		text := []rune(s.Text)
+		cut := looseCloser(text)
+		run := 1
+		for cut+run < len(text) && text[cut+run] == ')' {
+			run++
+		}
+		if open := looseOpeners(rs[lineStart(rs, s.Start):s.Start]); run > open {
+			run = open
+		}
+		head := strings.TrimRight(string(text[:cut]), " \t")
+		if run == 0 || head == "" {
+			continue
+		}
+		b.WriteString(string(rs[at:s.Start]))
+		b.WriteString(head)
+		b.WriteString("$")
+		b.WriteString(string(text[:cut])[len(head):]) // the spaces trimmed off it
+		b.WriteString(strings.Repeat(")", run))
+		b.WriteString(wrap(string(text[cut+run:])))
+		at = s.End + 1 // the closing delimiter, which has been written already
+		n++
+	}
+	if n == 0 {
+		return body, 0
+	}
+	b.WriteString(string(rs[at:]))
+	out := b.String()
+	if strings.ReplaceAll(out, "$", "") != strings.ReplaceAll(body, "$", "") {
+		return body, 0
+	}
+	return out, n
+}
+
+// Straddles are the spans a bracket from the prose closes inside, which is the
+// fault Unstraddle repairs, read from the other side.
+//
+// The audit has it as M07 and the repair has it here, off the same test, so the
+// rule cannot report a shape the repair does not know about and the repair
+// cannot quietly leave one behind. Unstraddle repairs all but the spans where
+// the line has fewer brackets open than the span closes, and those are the ones
+// worth a person looking at, which is what M07 is for.
+func Straddles(body string) []Span {
+	spans, _ := Split(body)
+	rs := []rune(body)
+	var out []Span
+	for _, s := range spans {
+		if straddles(rs, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// straddles is the shape: a bracket standing against the opening delimiter with
+// nothing between them, and a closing one inside the span that closes nothing of
+// the span's own. A display is set on its own lines, so there is no prose
+// against it and nothing to have been swept in.
+func straddles(rs []rune, s Span) bool {
+	return !s.Display && s.Start >= 2 && rs[s.Start-2] == '(' && looseCloser([]rune(s.Text)) >= 0
+}
+
+// wrap puts what is left of a span back in delimiters, with the space at either
+// end left outside where it reads as the space between two words.
+func wrap(rest string) string {
+	inner := strings.TrimSpace(rest)
+	if inner == "" {
+		return rest // nothing but space, and it is prose now
+	}
+	lead := rest[:len(rest)-len(strings.TrimLeft(rest, " \t\n\r"))]
+	return lead + "$" + inner + "$" + rest[len(lead)+len(inner):]
+}
+
+// looseCloser is where the first bracket that closes nothing of its own sits.
+func looseCloser(rs []rune) int {
+	depth := 0
+	for i, r := range rs {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				return i
+			}
+			depth--
+		}
+	}
+	return -1
+}
+
+// looseOpeners is how many brackets are still open at the end of a stretch of
+// body, counting prose and mathematics alike.
+func looseOpeners(rs []rune) int {
+	depth := 0
+	for _, r := range rs {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return depth
+}
+
+// lineStart is the first rune of the line position i sits on.
+func lineStart(rs []rune, i int) int {
+	for i > 0 && rs[i-1] != '\n' {
+		i--
+	}
+	return i
+}
+
 // repairSpan rewrites the inside of one math span.
 func repairSpan(rs []rune) (string, int, []Refusal) {
 	var b strings.Builder

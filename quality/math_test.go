@@ -179,6 +179,32 @@ func TestM05(t *testing.T) {
 	}
 }
 
+// M07 is the rule a translation found rather than a reader. The two shapes here
+// print the same and say different things, and only the second is a fault.
+func TestM07(t *testing.T) {
+	// The bracket belongs to the sentence, and the space in front of the
+	// delimiter is what says so. Most straddles in the corpus are this.
+	if got := run(t, m07, doc("a.md", `the ring $A$ (resp. $B)$ is one`)); len(got) != 0 {
+		t.Errorf("an innocent straddle was reported: %v", got)
+	}
+	if got := run(t, m07, doc("a.md", `the sum is Tr($u$).`)); len(got) != 0 {
+		t.Errorf("a repaired page was reported: %v", got)
+	}
+
+	// The bracket belongs to a name Bourbaki sets upright, and the closing one
+	// was swept into the formula. The mathematics of that span is "u)".
+	got := run(t, m07, doc("a.md", "the trace\nis Tr($u)$."))
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].Line != 2 {
+		t.Errorf("the finding is on line %d, want 2", got[0].Line)
+	}
+	if !strings.Contains(got[0].Msg, "u)") {
+		t.Errorf("the finding does not say what the span holds: %s", got[0].Msg)
+	}
+}
+
 // The rules and the tool that writes the pages have to agree about where the
 // mathematics is, which is why the splitter is one function under both. This is
 // the test that says the alias still points at it.
