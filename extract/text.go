@@ -37,6 +37,7 @@ type token struct {
 // Render writes one line as Markdown with LaTeX mathematics.
 func Render(l Line) string {
 	toks := tokens(l)
+	toks = restack(toks)
 	toks = extend(toks)
 	return statementHead(emit(toks), capsOpen(toks))
 }
