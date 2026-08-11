@@ -189,6 +189,27 @@ func Load(opt Options) (*Corpus, error) {
 	return c, nil
 }
 
+// SourceLangs are the languages the library is printed in, which is English
+// plus every language a registered volume carries, so in practice en and fr.
+//
+// It is what separates an extraction from a translation. content/fr is read off
+// the French volume the same way content/en is read off the English one, so it
+// names no translated_from and there is no English file to compare it against.
+// Without this the translation rules would take all of the French for a
+// translation with its source missing and say so once per file.
+func (c *Corpus) SourceLangs() map[string]bool {
+	out := map[string]bool{"en": true}
+	if c.Books == nil {
+		return out
+	}
+	for _, b := range c.Books.Books {
+		if b.Lang != "" {
+			out[b.Lang] = true
+		}
+	}
+	return out
+}
+
 // languages lists the languages under content/. content/solutions is a sibling
 // of the languages and not one of them, which is the one thing a caller walking
 // that directory always gets wrong.

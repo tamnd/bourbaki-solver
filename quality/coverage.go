@@ -77,7 +77,29 @@ func Coverage(c *Corpus) string {
 	}
 	fmt.Fprintf(&b, "\n%d of %d sections are in the corpus, %.0f per cent. %d statements and %d exercises, %d of them carrying a permanent tag.\n",
 		have, want, pct, statements, exercises, tagged)
+	if n, pages := unread(c); n > 0 {
+		fmt.Fprintf(&b, "\nThe table is one row per chapter of the volumes that have a table of contents. %d further volumes and %d pages are registered in `manifests/books.yaml` with no table of contents read off them yet, so none of their chapters are counted above.\n",
+			n, pages)
+	}
 	return b.String()
+}
+
+// unread is how much of the registered library the table above says nothing
+// about, in volumes and pages. Without it the percentage reads as a fraction of
+// the Éléments when it is a fraction of the three volumes anybody has opened,
+// which is the kind of number that looks like progress and is not.
+func unread(c *Corpus) (volumes, pages int) {
+	has := map[string]bool{}
+	for _, bt := range c.TOC.Books {
+		has[bt.ID] = true
+	}
+	for _, b := range c.Books.Books {
+		if !has[b.ID] {
+			volumes++
+			pages += b.Pages
+		}
+	}
+	return volumes, pages
 }
 
 // coverageRows is one row per chapter of every book in the table of contents,

@@ -109,6 +109,14 @@ func runTranslate(args []string) error {
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
+	// French is a source and not a target. The corpus holds 28 French volumes
+	// and they are the original, so content/fr is extracted like content/en and
+	// translating into it would be translating a translation back into the
+	// language it came from. It is worth its own sentence because -lang fr is
+	// an easy thing to type once the manifest lists French volumes.
+	if *lang == "fr" {
+		return fmt.Errorf("french is a source language, not a target: content/fr is extracted from the French printing, not translated into")
+	}
 	if !known(*lang) {
 		fs.Usage()
 		os.Exit(2)

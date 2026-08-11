@@ -87,8 +87,9 @@ func (c *Corpus) pairs() ([]pair, []Finding) {
 	}
 	var out []pair
 	var bad []Finding
+	source := c.SourceLangs()
 	for _, d := range c.Docs {
-		if d.Lang == "en" || d.Kind == KindSolution {
+		if source[d.Lang] || d.Kind == KindSolution {
 			continue
 		}
 		from := ""

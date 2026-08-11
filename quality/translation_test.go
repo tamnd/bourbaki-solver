@@ -228,3 +228,36 @@ func TestL08NamesTheFileASmallModelWrote(t *testing.T) {
 		})
 	}
 }
+
+// content/fr is read off the French volume, not translated from the English, so
+// it names no translated_from and must not be reported as a translation with a
+// missing source. The library is printed in two languages and only one of them
+// is the language of record.
+func TestFrenchExtractionIsNotATranslation(t *testing.T) {
+	fr := Doc{
+		Path: "content/fr/alg/VIII/01_s1.md", Lang: "fr", Kind: KindSection,
+		Body: "Soit A un anneau.", head: 1,
+		Section: &corpus.SectionFrontMatter{},
+	}
+	c := &Corpus{
+		Docs:  []Doc{fr},
+		Books: &corpus.BooksManifest{Books: []corpus.Book{{ID: "alg-viii-fr", Lang: "fr"}}},
+	}
+	if _, bad := c.pairs(); len(bad) != 0 {
+		t.Errorf("the French extraction was taken for a translation: %v", bad)
+	}
+}
+
+// With no French volume registered, a French file really is a translation
+// somebody made, and a translation with no source is still a finding.
+func TestATranslationWithNoSourceIsStillAFinding(t *testing.T) {
+	vi := Doc{
+		Path: "content/vi/alg/VIII/01_s1.md", Lang: "vi", Kind: KindSection,
+		Body: "Cho A là một vành.", head: 1,
+		Section: &corpus.SectionFrontMatter{},
+	}
+	c := &Corpus{Docs: []Doc{vi}, Books: &corpus.BooksManifest{}}
+	if _, bad := c.pairs(); len(bad) != 1 {
+		t.Errorf("want one finding for a translation with no source, got %v", bad)
+	}
+}

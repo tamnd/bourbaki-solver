@@ -2,6 +2,7 @@ package pdfsrc
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -35,7 +36,9 @@ File size:       7418389 bytes
 PDF version:     1.6
 `
 
-// Note page 2 is missing: it is blank and carries no image.
+// The front of the 1998 scan, still used for the column parsing test. Note page
+// 2 is missing: it is blank and carries no image, and page 1 is the colour
+// plate rather than a body page.
 const imagesAlgIIII = `page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio
 --------------------------------------------------------------------------------------------
    1     0 image    3026  4713  rgb     3   8  image  no      7007  0   600   600  123K 0.3%
@@ -49,9 +52,87 @@ const imagesAlgIIII = `page   num  type   width height color comp bpc  enc inter
   10     8 image    3026  4713  gray    1   1  jbig2  no        25  0   600   600 7550B 0.4%
 `
 
+// The body band of the 1998 scan, pages 183 to 192, which is where Classify
+// looks. Page 190 is blank.
+const imagesAlgIIIIBody = `page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio
+--------------------------------------------------------------------------------------------
+ 183   180 image    3026  4713  gray    1   1  jbig2  no      1503  0   600   600 51.1K 3.0%
+ 184   181 image    3026  4713  gray    1   1  jbig2  no      1510  0   600   600 49.7K 2.9%
+ 185   182 image    3026  4713  gray    1   1  jbig2  no      1517  0   600   600 52.4K 3.1%
+ 186   183 image    3026  4713  gray    1   1  jbig2  no      1524  0   600   600 48.8K 2.9%
+ 187   184 image    3026  4713  gray    1   1  jbig2  no      1531  0   600   600 50.2K 3.0%
+ 188   185 image    3026  4713  gray    1   1  jbig2  no      1538  0   600   600 47.9K 2.8%
+ 189   186 image    3026  4713  gray    1   1  jbig2  no      1545  0   600   600 53.0K 3.1%
+ 191   187 image    3026  4713  gray    1   1  jbig2  no      1552  0   600   600 46.6K 2.7%
+ 192   188 image    3026  4713  gray    1   1  jbig2  no      1559  0   600   600 49.1K 2.9%
+`
+
+// The front of the 2007 French reprint of Algèbre chapters 1 to 3: a small
+// colour cover, three pages of front matter Springer reset in type, and then
+// the scan. Six full pages in ten is under the threshold, so reading the front
+// of this file calls a 645-page scan born-digital.
+const imagesAlgIIIIFrFront = `page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio
+--------------------------------------------------------------------------------------------
+   1     0 image     827  1252  rgb     3   8  jpeg   no         6  0   136   135 80.6K 2.7%
+   5     1 image    1831  2775  gray    1   1  jbig2  no        56  0   300   300 24.3K 3.9%
+   6     2 image    1831  2775  gray    1   1  jbig2  no        72  0   300   300 40.2K 6.5%
+   7     3 image    1848  2786  gray    1   1  jbig2  no        84  0   300   300 27.5K 4.4%
+   8     4 image    1831  2775  gray    1   1  jbig2  no        96  0   300   300 31.1K 5.0%
+   9     5 image    1848  2783  gray    1   1  jbig2  no       108  0   300   300 28.4K 4.6%
+  10     6 image    1831  2775  gray    1   1  jbig2  no       120  0   300   300 33.7K 5.4%
+`
+
+// The same file at page 161, a quarter of the way in, which is all scan.
+const imagesAlgIIIIFrBody = `page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio
+--------------------------------------------------------------------------------------------
+ 161     0 image    1831  2775  gray    1   1  jbig2  no      2801  0   300   300 39.9K 6.4%
+ 162     1 image    1840  2779  gray    1   1  jbig2  no      2820  0   300   300 41.7K 6.7%
+ 163     2 image    1831  2775  gray    1   1  jbig2  no      2839  0   300   300 39.9K 6.4%
+ 164     3 image    1848  2783  gray    1   1  jbig2  no      2858  0   300   300 35.1K 5.6%
+ 165     4 image    1831  2775  gray    1   1  jbig2  no      2877  0   300   300 38.2K 6.1%
+ 166     5 image    1840  2779  gray    1   1  jbig2  no      2896  0   300   300 40.4K 6.5%
+ 167     6 image    1831  2775  gray    1   1  jbig2  no      2915  0   300   300 37.6K 6.0%
+ 168     7 image    1848  2783  gray    1   1  jbig2  no      2934  0   300   300 36.3K 5.8%
+ 169     8 image    1831  2775  gray    1   1  jbig2  no      2953  0   300   300 39.1K 6.3%
+ 170     9 image    1840  2779  gray    1   1  jbig2  no      2972  0   300   300 41.0K 6.6%
+`
+
+// Ten body pages of the 2007 French reprint of Fonctions d'une variable
+// réelle, scanned at 150 dpi.
+const imagesFVRFr = `page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio
+--------------------------------------------------------------------------------------------
+  82     0 image     920  1390  gray    1   1  ccitt  no       604  0   150   150 19.9K  13%
+  83     1 image     924  1392  gray    1   1  ccitt  no       607  0   150   150 18.5K  12%
+  84     2 image     915  1388  gray    1   1  ccitt  no       610  0   150   150 21.3K  14%
+  85     3 image     924  1390  gray    1   1  ccitt  no       613  0   150   150 23.9K  15%
+  86     4 image     914  1386  gray    1   1  ccitt  no       616  0   150   150 27.4K  18%
+  87     5 image     915  1388  gray    1   1  ccitt  no       619  0   150   150 29.2K  19%
+  88     6 image     914  1386  gray    1   1  ccitt  no       622  0   150   150 25.7K  17%
+  89     7 image     915  1388  gray    1   1  ccitt  no       625  0   150   150 16.9K  11%
+  90     8 image     914  1386  gray    1   1  ccitt  no       628  0   150   150 14.5K 9.4%
+  91     9 image     915  1388  gray    1   1  ccitt  no       631  0   150   150 16.7K  11%
+`
+
 const imagesAlgVIII = `page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio
 --------------------------------------------------------------------------------------------
 `
+
+// Ten body pages of Algèbre chapter 10, each drawn as 24 ccitt stencils 2055 by
+// 121 at 260 dpi. The real listing is 240 rows of that one geometry, so it is
+// built here rather than pasted.
+func imagesAlgXFr() string {
+	b := "page   num  type   width height color comp bpc  enc interp  object ID x-ppi y-ppi size ratio\n" +
+		"--------------------------------------------------------------------------------------------\n"
+	num := 0
+	for page := 55; page <= 64; page++ {
+		for range 24 {
+			b += fmt.Sprintf("%4d %5d stencil  2055   121  -       1   1  ccitt  no      %4d  0   260   260 3384B  11%%\n",
+				page, num, 1300+num)
+			num++
+		}
+	}
+	return b
+}
 
 // The 1998 scan really does report a mix. This is why Classify ignores fonts.
 const fontsAlgIIII = `name                                 type              encoding         emb sub uni object ID
@@ -163,9 +244,9 @@ func TestFonts(t *testing.T) {
 // sent 734 scanned pages down the native text path.
 func TestClassifyScanWithEmbeddedFonts(t *testing.T) {
 	s := fake("a.pdf", map[string]string{
-		"pdfinfo a.pdf":                    "Pages: 734\n",
-		"pdfimages -list -f 1 -l 10 a.pdf": imagesAlgIIII,
-		"pdffonts a.pdf":                   fontsAlgIIII,
+		"pdfinfo a.pdf":                       "Pages: 734\nPage size: 363.12 x 565.56 pts\n",
+		"pdfimages -list -f 183 -l 192 a.pdf": imagesAlgIIIIBody,
+		"pdffonts a.pdf":                      fontsAlgIIII,
 	})
 	c, err := s.Classify(context.Background(), 10)
 	if err != nil {
@@ -189,11 +270,80 @@ func TestClassifyScanWithEmbeddedFonts(t *testing.T) {
 	}
 }
 
+// Springer reset the front matter of their French reprints in type and scanned
+// only the body. Classifying on the first ten pages called this 645-page scan
+// born-digital, which would have sent it down the native text path.
+func TestClassifyReprintWithTypesetFrontMatter(t *testing.T) {
+	cmds := map[string]string{
+		"pdfinfo a.pdf":                       "Pages: 645\nPage size: 439.37 x 666.142 pts\n",
+		"pdfimages -list -f 1 -l 10 a.pdf":    imagesAlgIIIIFrFront,
+		"pdfimages -list -f 161 -l 170 a.pdf": imagesAlgIIIIFrBody,
+		"pdffonts a.pdf":                      fontsAlgIIII,
+	}
+	c, err := fake("a.pdf", cmds).Classify(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Nature != NatureScanned {
+		t.Errorf("Nature = %q, want %q", c.Nature, NatureScanned)
+	}
+	if c.First != 161 || c.Last != 170 {
+		t.Errorf("sampled pages %d to %d, want the band a quarter of the way in", c.First, c.Last)
+	}
+	if c.PagesWithFull != 10 {
+		t.Errorf("PagesWithFull = %d, want all ten body pages", c.PagesWithFull)
+	}
+}
+
+// Fonctions d'une variable réelle is scanned at 150 dpi, so a full page of it
+// is 914 by 1386 pixels. A pixel threshold reads that as a figure and the
+// volume as born-digital, and it is a scan carrying somebody else's OCR.
+func TestClassifyLowResolutionScan(t *testing.T) {
+	c, err := fake("a.pdf", map[string]string{
+		"pdfinfo a.pdf":                     "Pages: 329\nPage size: 439.37 x 666.142 pts\n",
+		"pdfimages -list -f 82 -l 91 a.pdf": imagesFVRFr,
+		"pdffonts a.pdf":                    fontsAlgIIII,
+	}).Classify(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Nature != NatureScanned {
+		t.Errorf("Nature = %q, want %q", c.Nature, NatureScanned)
+	}
+	img, ok := c.BodyImage()
+	if !ok || img.XPPI != 150 {
+		t.Errorf("BodyImage = %+v, %v, want the 150 dpi page", img, ok)
+	}
+}
+
+// Algèbre chapter 10 draws each page as two dozen ccitt strips 2055 by 121.
+// No one strip is a page and together they cover it, and no strip is the
+// geometry of the volume, so nothing goes in the scan block.
+func TestClassifyPagesTiledOutOfStrips(t *testing.T) {
+	c, err := fake("a.pdf", map[string]string{
+		"pdfinfo a.pdf":                     "Pages: 222\nPage size: 612 x 792 pts\n",
+		"pdfimages -list -f 55 -l 64 a.pdf": imagesAlgXFr(),
+		"pdffonts a.pdf":                    "",
+	}).Classify(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Nature != NatureScanned {
+		t.Errorf("Nature = %q, want %q", c.Nature, NatureScanned)
+	}
+	if c.PagesWithFull != 10 {
+		t.Errorf("PagesWithFull = %d, want all ten", c.PagesWithFull)
+	}
+	if img, ok := c.BodyImage(); ok {
+		t.Errorf("BodyImage = %+v, want nothing, since no strip is a page", img)
+	}
+}
+
 func TestClassifyBornDigital(t *testing.T) {
 	s := fake("b.pdf", map[string]string{
-		"pdfinfo b.pdf":                    infoAlgVIII,
-		"pdfimages -list -f 1 -l 10 b.pdf": imagesAlgVIII,
-		"pdffonts b.pdf":                   fontsAlgVIII,
+		"pdfinfo b.pdf":                       infoAlgVIII,
+		"pdfimages -list -f 126 -l 135 b.pdf": imagesAlgVIII,
+		"pdffonts b.pdf":                      fontsAlgVIII,
 	})
 	c, err := s.Classify(context.Background(), 10)
 	if err != nil {
@@ -224,6 +374,66 @@ func TestTextBuildsTheRightCommand(t *testing.T) {
 	s2 := &Source{Path: "a.pdf", Run: f2}
 	if _, err := s2.Text(context.Background(), 0, 0, false); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSpreadPagesStaysInTheMiddleHalf(t *testing.T) {
+	for _, c := range []struct {
+		pages, n int
+		want     []int
+	}{
+		{642, 5, []int{160, 240, 320, 400, 481}},
+		{4, 5, []int{1, 2, 3, 4}},
+		{5, 5, []int{1, 2, 3, 4, 5}},
+		{6, 5, []int{1, 1, 2, 3, 4}},
+		{100, 1, []int{25}},
+		{0, 5, nil},
+		{100, 0, nil},
+	} {
+		got := spreadPages(c.pages, c.n)
+		if len(got) != len(c.want) {
+			t.Errorf("spreadPages(%d, %d) = %v, want %v", c.pages, c.n, got, c.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != c.want[i] {
+				t.Errorf("spreadPages(%d, %d) = %v, want %v", c.pages, c.n, got, c.want)
+				break
+			}
+		}
+	}
+}
+
+// The three volumes with no text layer at all report zero characters on every
+// body page, and a scan somebody has already read reports a full page of them.
+// Sampling the front matter would say the same thing about both, since a half
+// title page is nearly empty in every volume of the series.
+func TestSampleTextReadsBodyPages(t *testing.T) {
+	s := fake("a.pdf", map[string]string{
+		"pdfinfo a.pdf":                   "Pages: 400\n",
+		"pdftotext -f 100 -l 100 a.pdf -": "  Théorème 1  \n",
+		"pdftotext -f 150 -l 150 a.pdf -": "",
+		"pdftotext -f 200 -l 200 a.pdf -": "\f\n \n",
+		"pdftotext -f 250 -l 250 a.pdf -": "ab",
+		"pdftotext -f 300 -l 300 a.pdf -": "",
+	})
+	got, err := s.SampleText(context.Background(), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Pages != 5 {
+		t.Errorf("Pages = %d, want 5", got.Pages)
+	}
+	// "Théorème1" is 9 characters and "ab" is 2. The form feed and the spaces
+	// are not text and must not be counted as any.
+	if got.Chars != 11 {
+		t.Errorf("Chars = %d, want 11", got.Chars)
+	}
+	if got.PerPage() != 2 {
+		t.Errorf("PerPage() = %d, want 2", got.PerPage())
+	}
+	if (TextSample{}).PerPage() != 0 {
+		t.Error("an empty sample should average 0 rather than divide by zero")
 	}
 }
 
