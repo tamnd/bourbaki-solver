@@ -253,7 +253,7 @@ func TestWriteExercisesRefusesAGap(t *testing.T) {
 		p.Exercises = append(p.Exercises, e)
 	}
 	cx := corpus.ChapterExercises{Chapter: "VIII"}
-	err := writeExercises(t.TempDir(), "en", p, map[string][]byte{}, &cx)
+	err := writeExercises(t.TempDir(), "en", p, map[string][]byte{}, &cx, nil)
 	if err == nil {
 		t.Fatal("a § missing exercise 3 should be an error")
 	}
