@@ -258,12 +258,17 @@ func gather(lines []Line) []Line {
 			take(&out[n-1], lines[i])
 			continue
 		}
-		if i+1 < len(lines) && stray(lines[i], lines[i+1]) {
+		below := i+1 < len(lines) && stray(lines[i], lines[i+1])
+		above := len(out) > 0 && stray(lines[i], out[len(out)-1])
+		if below && above && closest(lines[i], out[len(out)-1], lines[i+1]) {
+			below = false
+		}
+		if below {
 			take(&lines[i+1], lines[i])
 			continue
 		}
-		if n := len(out); n > 0 && stray(lines[i], out[n-1]) {
-			take(&out[n-1], lines[i])
+		if above {
+			take(&out[len(out)-1], lines[i])
 			continue
 		}
 		out = append(out, lines[i])
@@ -405,6 +410,94 @@ func limit(l, other Line) bool {
 		}
 	}
 	return true
+}
+
+// closest reports whether a stray line that both of its neighbours answered for
+// belongs to the one above it.
+//
+// Both answering is what two display lines do when each sets a large operator
+// with a limit written under it. The limit between them is under the sign of the
+// line above and over the sign of the line below, a line's width from either, so
+// nothing about where it sits refuses either line, and gather offers the line
+// below first. Pages 318 to 321 of the English printing and 299 to 302 of the
+// French set the same product on line after line, and every one of them was
+// handed the limit of the product above it and lost its own.
+//
+// A limit is centred on its sign, so the sign it is centred on is the one it
+// belongs to. The measure is taken run by run and the worst run counts, since a
+// display of two sums puts both lower limits on one line and the middle of that
+// line is centred on nothing.
+//
+// Where the two signs stand at the same place across the page, which is what a
+// display that repeats one product line after line does, the measure says
+// nothing and the nearer band takes it. The nearer band takes it too where
+// neither line sets a sign, since then the stray line is not the limit of
+// anything but an index hanging off the end of a formula, and French page 414
+// hangs one off each of two lines that overlap it.
+//
+// A stray line can carry the sign itself, and then the sign is evidence for
+// both neighbours equally and for neither.
+func closest(l, above, below Line) bool {
+	if _, ok := reach(l, l); ok {
+		// The stray line carries the operator itself, which happens when the
+		// signs of a display come away on a line of their own. The sign then
+		// answers for both neighbours equally and says nothing about either.
+		return false
+	}
+	da, oka := reach(l, above)
+	db, okb := reach(l, below)
+	switch {
+	case oka && !okb:
+		// A limit belongs to an operator, so where only one of the two sets one
+		// there is nothing to weigh.
+		return true
+	case okb && !oka:
+		return false
+	case oka && okb && da != db:
+		return da < db
+	}
+	return l.Top-above.Bottom <= below.Top-l.Bottom
+}
+
+// reach is how far the runs of a stray line stand from the large operators of
+// the line beside it, worst run first, and whether that line sets one at all.
+// Distances are doubled, being between midpoints, which are halves.
+func reach(l, other Line) (int, bool) {
+	var signs []Run
+	for _, r := range other.Runs {
+		// A wide tilde is drawn in the same font as a summation sign and is not
+		// an operator and has no limits. French page 333 sets det(u~) on the
+		// line above the sum of item (6), and the tilde stood nearer the bound
+		// of that sum than anything on the sum's own line did, so the bound went
+		// up into the determinant and item (6) lost it.
+		if _, ok := Accent(r.Spec, r.Text); ok {
+			continue
+		}
+		if tall(r) {
+			signs = append(signs, r)
+		}
+	}
+	if len(signs) == 0 {
+		return 0, false
+	}
+	worst := 0
+	for _, r := range l.Runs {
+		if tall(r) {
+			continue
+		}
+		best := -1
+		for _, s := range signs {
+			d := r.Left + r.Right() - s.Left - s.Right()
+			if d < 0 {
+				d = -d
+			}
+			if best < 0 || d < best {
+				best = d
+			}
+		}
+		worst = max(worst, best)
+	}
+	return worst, true
 }
 
 // under reports whether a run stands against one of the large operators among
