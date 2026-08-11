@@ -118,7 +118,7 @@ func TestWhatRunsOnAtTheEndOfALine(t *testing.T) {
 		{"a line that does not run on", "the center of A", "is the set of", ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			got, ok := runOn(c.line, c.next)
+			got, ok := runOn(c.line, c.next, nil)
 			if ok != (c.want != "") {
 				t.Fatalf("runOn(%q, %q) joined = %v, want %v", c.line, c.next, ok, c.want != "")
 			}

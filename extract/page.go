@@ -74,7 +74,14 @@ func (p *Page) flag(f Flag) {
 const headBand = 70
 
 // ReadPage reads one page of a born-digital volume.
-func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page {
+//
+// It is the first of the two passes: it knows nothing of the compound words the
+// volume writes, so a compound broken at the end of a line loses its hyphen.
+// The bodies it returns are what ReadPageWith needs to do better.
+func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page { return ReadPageWith(l, p, nil) }
+
+// ReadPageWith reads one page with the compound words of the volume in hand.
+func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
 	out := &Page{PDFPage: p.Number}
 	lines, columns := LinesColumns(l, p)
 	out.Columns = columns
@@ -105,9 +112,9 @@ func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page {
 			}
 		}
 	}
-	out.Body = blocks(lines)
+	out.Body = blocks(lines, c)
 	if len(notes) > 0 {
-		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes), "\n")
+		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes, c), "\n")
 	}
 	if strings.Count(out.Body, "$")%2 != 0 {
 		out.flag(FlagUnbalanced)
@@ -241,14 +248,14 @@ func size(l Line) int {
 // The margin has to be taken per block rather than per page. A remark set in
 // small type is indented as a whole, so measuring its lines against the margin
 // of the page would make every one of them the start of a paragraph.
-func blocks(lines []Line) string {
+func blocks(lines []Line, c Compounds) string {
 	var out []string
 	for i := 0; i < len(lines); {
 		j := i + 1
 		for j < len(lines) && size(lines[j]) == size(lines[i]) {
 			j++
 		}
-		if s := join(lines[i:j]); s != "" {
+		if s := join(lines[i:j], c); s != "" {
 			out = append(out, s)
 		}
 		i = j
@@ -262,7 +269,7 @@ func blocks(lines []Line) string {
 // starts a paragraph when it is indented past the margin of its block. A word
 // broken across the break is put back together, which is what the trailing
 // hyphen means. A heading stands on its own.
-func join(lines []Line) string {
+func join(lines []Line, c Compounds) string {
 	left := lines[0].Left
 	for _, l := range lines {
 		if l.Left < left {
@@ -301,6 +308,20 @@ func join(lines []Line) string {
 				continue
 			}
 		}
+		// A word broken at a line end is not the end of a paragraph, whatever
+		// the line below it is indented to. The bibliography hangs its indent
+		// the other way round from the rest of the book and page 497 broke
+		// "com-" onto "plexen"; page 237 sets each of the conditions (i), (ii),
+		// (iii) on its own indent and broke "commu-" onto "tative"; page 377
+		// broke "homoge-" onto "neous". All three shipped with the hyphen still
+		// in them and the two halves in paragraphs of their own.
+		if cur.Len() > 0 {
+			if joined, ok := runOn(cur.String(), text, c); ok {
+				cur.Reset()
+				cur.WriteString(joined)
+				continue
+			}
+		}
 		if apart || boldOpen(text) {
 			flush()
 			cur.WriteString(text)
@@ -309,11 +330,6 @@ func join(lines []Line) string {
 		if opens(l) || cur.Len() == 0 {
 			flush()
 			cur.WriteString(text)
-			continue
-		}
-		if joined, ok := runOn(cur.String(), text); ok {
-			cur.Reset()
-			cur.WriteString(joined)
 			continue
 		}
 		cur.WriteString(" " + strings.TrimLeft(text, " "))
@@ -354,12 +370,18 @@ func boldOpen(text string) bool {
 //
 // What tells that from a subtraction broken across a line is the word after it,
 // under the same reading emit uses on a hyphen in the middle of a line.
-func runOn(s, next string) (string, bool) {
+//
+// The third case is a compound word whose own hyphen fell at the end of a line.
+// It is told from a broken word by the rest of the volume, which is what
+// Compounds carries: see compound.go.
+func runOn(s, next string, c Compounds) (string, bool) {
 	next = strings.TrimLeft(next, " ")
 	switch {
 	case strings.HasSuffix(s, "-$") && compoundWord(next):
 		return strings.TrimRight(strings.TrimSuffix(s, "-$"), " ") + "$-" + next, true
 	case strings.HasSuffix(s, "-") && oneLetter(s):
+		return s + next, true
+	case strings.HasSuffix(s, "-") && c.Keeps(s, next):
 		return s + next, true
 	case strings.HasSuffix(s, "-"):
 		return strings.TrimSuffix(s, "-") + next, true
@@ -605,7 +627,7 @@ func noteNumber(l Line) (string, bool) {
 
 // footnotes writes the notes of a page as Markdown footnote definitions, which
 // is where the references written for them in the body point.
-func footnotes(lines []Line) string {
+func footnotes(lines []Line, c Compounds) string {
 	var out []string
 	var cur strings.Builder
 	num := ""
@@ -627,7 +649,7 @@ func footnotes(lines []Line) string {
 		if text == "" {
 			continue
 		}
-		if joined, ok := runOn(strings.TrimRight(cur.String(), " "), text); ok {
+		if joined, ok := runOn(strings.TrimRight(cur.String(), " "), text, c); ok {
 			cur.Reset()
 			cur.WriteString(joined)
 			continue
