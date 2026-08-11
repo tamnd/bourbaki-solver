@@ -380,14 +380,28 @@ func containsPhrase(long, short string) bool {
 func strip(s string) string {
 	s = mathRE.ReplaceAllString(s, " | ")
 	s = attrRE.ReplaceAllString(s, " | ")
+	// What is left of a control sequence after the pairing above got it wrong.
+	//
+	// Pairing dollars is only right when a line has an even number of them, and
+	// the volume has lines that do not: "the mapping cl(A$/\mathfrak{m})$ is a
+	// bijection" opens a span in the middle of a token. Everything after the odd
+	// dollar is then read as prose, and the prose it is read as is LaTeX.
+	//
+	// Measured by asking a model to translate the result. Of the 800 candidates
+	// sent to it in the first Vietnamese run, it answered UNKNOWN to 26, and
+	// eight of those were control sequences that got out this way: mathscr,
+	// otimes, varepsilon, widetilde, sdet, and three more. It is a good detector
+	// and a bad way to find out.
+	s = commandRE.ReplaceAllString(s, " | ")
 	s = markupRE.ReplaceAllString(s, " ")
 	return s
 }
 
 var (
-	mathRE   = regexp.MustCompile(`\$\$[^$]*\$\$|\$[^$]*\$`)
-	attrRE   = regexp.MustCompile(`\{#[^}]*\}`)
-	markupRE = regexp.MustCompile(`[*_` + "`" + `]`)
+	mathRE    = regexp.MustCompile(`\$\$[^$]*\$\$|\$[^$]*\$`)
+	attrRE    = regexp.MustCompile(`\{#[^}]*\}`)
+	commandRE = regexp.MustCompile(`\\[a-zA-Z]+`)
+	markupRE  = regexp.MustCompile(`[*_` + "`" + `]`)
 )
 
 // runs cuts a line into the stretches of ordinary words, breaking at anything
