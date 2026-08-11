@@ -181,7 +181,7 @@ func printingsDoc(out []*report.Printings) string {
 		b.WriteString(c.Table(true))
 		b.WriteString("\n")
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
 const coverageUsage = `usage: bourbaki report coverage [-write-readme]
