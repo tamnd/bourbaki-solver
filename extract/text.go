@@ -38,19 +38,46 @@ type token struct {
 func Render(l Line) string {
 	toks := tokens(l)
 	toks = extend(toks)
-	return statementHead(emit(toks))
+	return statementHead(emit(toks), capsOpen(toks))
 }
 
-// headWord is the word a statement opens with. The four Bourbaki sets in small
-// capitals are told by their font; the rest are set in the italic of the
-// statement itself and are told by the word and the dash after it.
+// headWord is the word a statement opens with, for the statements Bourbaki sets
+// in the italic of the statement itself rather than in small capitals. The ones
+// set in small capitals are told by their font instead, which is capsOpen, and
+// that is the only route the French printings have: they open on Corollaire,
+// Théorème, Définition, Remarque and Exemple, and listing the words of every
+// language the corpus carries is a losing game when the font has already said
+// it.
 var headRE = regexp.MustCompile(`^(Definition|Proposition|Theorem|Lemma|Corollary|Corollaries|Remarks?|Examples?|Scholium|Criterion)( [0-9]+)?\.( —| --)`)
+
+// capsTailRE is what the volume prints between the name of a statement and the
+// statement: its number, a full stop, and a dash.
+var capsTailRE = regexp.MustCompile(`^( [0-9]+)?\.(\s*(—|--))`)
+
+// capsOpen is the words a line opens with in small capitals, which is what
+// Bourbaki sets the name of a statement in.
+func capsOpen(toks []token) string {
+	var b strings.Builder
+	for _, t := range toks {
+		if t.class != ClassHead {
+			break
+		}
+		b.WriteString(t.text)
+	}
+	return strings.TrimSpace(b.String())
+}
 
 // statementHead bolds the head of a statement, which is how the corpus marks
 // where one begins. Bourbaki prints it in small capitals or in italic and
 // follows it with a number and a dash, and the dash stays outside the bold, as
 // it is punctuation of the page rather than part of the name.
-func statementHead(s string) string {
+func statementHead(s, caps string) string {
+	if caps != "" && strings.HasPrefix(s, caps) {
+		if m := capsTailRE.FindStringSubmatch(s[len(caps):]); m != nil {
+			name := caps + m[1] + "."
+			return "**" + name + "**" + s[len(name):]
+		}
+	}
 	m := headRE.FindStringSubmatch(s)
 	if m == nil {
 		return s
@@ -65,6 +92,10 @@ func tokens(l Line) []token {
 	var toks []token
 	var accents []Run
 	for _, r := range l.Runs {
+		if _, ok := Accent(r.Spec, r.Text); ok {
+			accents = append(accents, r)
+			continue
+		}
 		if family(r.Spec) == "CMEX" {
 			text, acc := cmexText(r)
 			if acc {
@@ -133,8 +164,15 @@ func footnoteMark(s string) bool {
 // far enough above the letters that they can be gathered onto the wrong line;
 // when that happened on page 114 every tilde of the display found a letter of
 // the sentence below it at the same place across the measure and went over
-// that. So the accent has to be inside the token's band as well, which is where
-// poppler reports it and where the letters of another line are not.
+// that. So the accent's band has to meet the token's, which it does on the line
+// it belongs to and does not on the line below.
+//
+// Meeting the band and not starting inside it. The two printings draw the same
+// accent differently: the English sets the glyph inside the band of the letters
+// it covers, and the French sets it above them, so that the hat of the omitted
+// factor of p(v1), . . . , widehat{p(vi)}, . . . , p(vn) on page 441 opens at
+// 333 where the letters run from 340 to 352. Reading the top alone lost every
+// one of the 24 hats of that appendix.
 //
 // Across the page it is the token the accent covers most, not the first one it
 // touches. The boxes of a formula are set edge to edge, so the tilde over the
@@ -142,14 +180,14 @@ func footnoteMark(s string) bool {
 // it, and taking the first token that overlaps puts the tilde over the bracket.
 func place(toks []token, accents []Run) []token {
 	for _, a := range accents {
-		latex, _, ok := CMEX(first(a.Text))
+		latex, ok := Accent(a.Spec, a.Text)
 		if !ok {
 			continue
 		}
 		at, best := -1, 0
 		for i, t := range toks {
 			over := min(t.right, a.Right()) - max(t.left, a.Left)
-			if over < 0 || a.Top < t.top || a.Top >= t.bottom {
+			if over < 0 || a.Bottom() <= t.top || a.Top >= t.bottom {
 				continue
 			}
 			if at < 0 || over > best {
@@ -229,6 +267,15 @@ func cmexText(r Run) (text string, accent bool) {
 			b.WriteString("(")
 			continue
 		}
+		// A character the volume names properly is read as itself. Preparing
+		// a volume turns the names CMEX gives its glyphs into the characters
+		// they stand for where there is one, so a run of this font can carry
+		// a real ℓ or ℜ, and the code page of the font says nothing about
+		// those.
+		if latex, ok := unicodeMath[c]; ok {
+			b.WriteString(spaced(latex))
+			continue
+		}
 		latex, acc, ok := CMEX(c)
 		if !ok {
 			continue
@@ -253,6 +300,14 @@ func runText(r Run) string {
 		return wrapLetters(s, `\mathsf`)
 	case "LMMathSymbols":
 		return symbols(s)
+	case "BOUR":
+		// The font holds the brackets of a citation and the dangerous bend,
+		// which sits at the letter Z in it. Read as a letter it puts a stray
+		// capital at the head of the passage it marks, and the passages it
+		// marks are the ones a reader most wants to find again.
+		if bend(r) {
+			return `\dbend`
+		}
 	}
 	if r.Class == ClassStrong {
 		return bold(s)

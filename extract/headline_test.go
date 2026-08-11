@@ -54,7 +54,7 @@ const chapterHeadXML = `<?xml version="1.0" encoding="UTF-8"?>
 func heads(t *testing.T, doc string) []string {
 	t.Helper()
 	var out []string
-	for _, p := range strings.Split(blocks(parse(t, doc), nil), "\n\n") {
+	for _, p := range strings.Split(blocks(parse(t, doc), Volume{}), "\n\n") {
 		if strings.HasPrefix(p, "#") {
 			out = append(out, p)
 		}

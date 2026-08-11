@@ -175,6 +175,36 @@ func CMEX(r rune) (latex string, accent, ok bool) {
 	return "", false, false
 }
 
+// combining is the accents that arrive as a combining character rather than as
+// a letter of the extension font. Some are drawn out of the AMS symbol fonts,
+// where a letter of CMEX read in another font is only a letter, and some are
+// drawn out of CMEX itself: preparing a volume names both of them after the
+// accent they are, so a hat that reached this file as the letter b in the
+// English printing and as nothing at all in the French now reaches it as
+// U+0302 in either. See pdfglyph.
+var combining = map[rune]string{
+	'̂': `\widehat`,
+	'̃': `\widetilde`,
+}
+
+// Accent returns the LaTeX for a run that is an accent drawn over another run,
+// whichever font it was set in. An accent is not written where it is found: the
+// caller has to put it over the run it covers.
+func Accent(f pdfsrc.FontSpec, text string) (string, bool) {
+	r := first(text)
+	// The accent itself is read before the font's own code page, since a
+	// prepared volume says U+0302 where the font said b, and the b is only a
+	// hat by the convention of a font nobody can see.
+	if latex, ok := combining[r]; ok {
+		return latex, true
+	}
+	if family(f) == "CMEX" {
+		latex, acc, ok := CMEX(r)
+		return latex, ok && acc
+	}
+	return "", false
+}
+
 // symbolPairs are the places where TeX draws one symbol out of two glyphs and
 // poppler prints both. A hook and an arrow is a mapsto, a solidus and a
 // relation is that relation negated, three centred dots are an ellipsis.
@@ -240,6 +270,14 @@ var unicodeMath = map[rune]string{
 	'′': `'`, '‵': `'`, '⋆': `\star`, '•': `\bullet`, '⊙': `\odot`, '⊘': `\oslash`,
 	'□': `\square`, '△': `\triangle`, '≺': `\prec`, '≻': `\succ`, '≪': `\ll`, '≫': `\gg`,
 	'⊔': `\sqcup`, '⊓': `\sqcap`, '⊢': `\vdash`, '⊣': `\dashv`, '∤': `\nmid`,
+	// The last row arrives only from the French printings, and only once their
+	// glyph names have been rewritten to names poppler can resolve. See
+	// pdfglyph: the script ell of a lattice, the real and imaginary parts, the
+	// boxed times of a tensor product of representations, the natural sign the
+	// series uses for a canonical map and the complement of a subset were all
+	// coming out as nothing at all.
+	'ℓ': `\ell`, 'ℜ': `\Re`, 'ℑ': `\Im`,
+	'⊠': `\boxtimes`, '♮': `\natural`, '∁': `\complement`,
 }
 
 // PUA is the Private Use Area block poppler puts the pieces of a delimiter that

@@ -14,12 +14,11 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/extract"
 	"github.com/tamnd/bourbaki-solver/pagemap"
-	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
 
 func runExtract(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("extract: want one of audit, fonts, page, run")
+		return fmt.Errorf("extract: want one of audit, fonts, page, prepare, run")
 	}
 	switch args[0] {
 	case "audit":
@@ -28,6 +27,8 @@ func runExtract(args []string) error {
 		return extractFonts(args[1:])
 	case "page":
 		return extractPage(args[1:])
+	case "prepare":
+		return extractPrepare(args[1:])
 	case "run":
 		return extractRun(args[1:])
 	default:
@@ -72,7 +73,7 @@ func extractFonts(args []string) error {
 	if !ok {
 		return fmt.Errorf("no book %q in %s", *book, corpus.BooksPath(root))
 	}
-	src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+	src, err := openPDF(root, b)
 	if err != nil {
 		return err
 	}
@@ -181,7 +182,7 @@ func extractRun(args []string) error {
 	if b.Extraction != "native" {
 		return fmt.Errorf("%s is extracted by %q, not native: this reads the text layer", b.ID, b.Extraction)
 	}
-	src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+	src, err := openPDF(root, b)
 	if err != nil {
 		return err
 	}
@@ -206,16 +207,19 @@ func extractRun(args []string) error {
 	// of the book does: a compound broken at its hyphen here is set inside a
 	// line somewhere else. So the first pass is only there to collect the words
 	// the volume writes with a hyphen, and the second lays out the pages.
+	vol := extract.Measure(lay)
+	fmt.Printf("  running head band measured at %d\n", vol.HeadBand)
 	compounds := extract.Compounds{}
 	for _, pg := range lay.Pages {
-		compounds.Read(extract.ReadPage(lay, pg).Body)
+		compounds.Read(extract.ReadPageWith(lay, pg, vol).Body)
 	}
+	vol.Compounds = compounds
 
 	res := &extract.Result{Book: b.ID}
 	var kept []int // the pages repaired by hand, which this run left alone
 	stamp := time.Now().UTC().Format(time.RFC3339)
 	for _, pg := range lay.Pages {
-		p := extract.ReadPageWith(lay, pg, compounds)
+		p := extract.ReadPageWith(lay, pg, vol)
 		res.Add(p)
 		if *dry {
 			continue
@@ -354,7 +358,7 @@ func extractPage(args []string) error {
 	if !ok {
 		return fmt.Errorf("no book %q in %s", *book, corpus.BooksPath(root))
 	}
-	src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+	src, err := openPDF(root, b)
 	if err != nil {
 		return err
 	}
@@ -382,7 +386,18 @@ func extractPage(args []string) error {
 		}
 		return nil
 	}
-	p := extract.ReadPage(lay, lay.Pages[0])
-	fmt.Printf("head: %s\nlines: %d  flags: %v\n\n%s\n", p.Head, p.Lines, p.Flags, p.Body)
+	// The head band is a measurement over the volume, and one page cannot
+	// supply it, so a window either side of the page is read for it. Without
+	// this the page prints here with its running head in the body and prints
+	// correctly in a run of the whole volume, which is the wrong way round for
+	// a command whose whole use is arguing with a reading.
+	around, err := src.XML(context.Background(), max(1, *page-12), *page+12)
+	if err != nil {
+		return err
+	}
+	vol := extract.Measure(around)
+	p := extract.ReadPageWith(lay, lay.Pages[0], vol)
+	fmt.Printf("head: %s [band %d]\nlines: %d  flags: %v\n\n%s\n",
+		p.Head, vol.HeadBand, p.Lines, p.Flags, p.Body)
 	return nil
 }

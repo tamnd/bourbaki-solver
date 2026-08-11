@@ -83,19 +83,16 @@ func (p *Page) flag(f Flag) {
 	p.Flags = append(p.Flags, f)
 }
 
-// headBand is how far down the page the running head can be. The 2023 volume
-// sets it at 56 and the first line of the body at 87.
-const headBand = 70
-
-// ReadPage reads one page of a born-digital volume.
+// ReadPage reads one page of a born-digital volume, measuring the volume around
+// it as it goes.
 //
 // It is the first of the two passes: it knows nothing of the compound words the
 // volume writes, so a compound broken at the end of a line loses its hyphen.
 // The bodies it returns are what ReadPageWith needs to do better.
-func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page { return ReadPageWith(l, p, nil) }
+func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page { return ReadPageWith(l, p, Measure(l)) }
 
-// ReadPageWith reads one page with the compound words of the volume in hand.
-func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
+// ReadPageWith reads one page with the volume it belongs to in hand.
+func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 	out := &Page{PDFPage: p.Number}
 	lines, columns := LinesColumns(l, p)
 	out.Columns = columns
@@ -103,7 +100,7 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
 		out.flag(FlagEmpty)
 		return out
 	}
-	if lines[0].Top < headBand {
+	if lines[0].Top < v.HeadBand {
 		out.Head = plain(lines[0])
 		out.readHead()
 		lines = lines[1:]
@@ -127,9 +124,9 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
 		}
 	}
 	out.Continues = continues(lines)
-	out.Body = blocks(lines, c)
+	out.Body = blocks(lines, v)
 	if len(notes) > 0 {
-		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes, c), "\n")
+		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes, v), "\n")
 	}
 	// A glyph is mapped to its TeX while the run's font is known, and a Greek
 	// capital is not in a font that says it is mathematics: Bourbaki sets those
@@ -272,10 +269,15 @@ const indent = 12
 // run sitting on the baseline. Bourbaki sets a remark, an example and an
 // exercise in a smaller type than the text around it, and that change of size is
 // where one block of the page ends and the next begins.
+//
+// A sign drawn out of proportion to the type beside it says nothing about the
+// size that type is set in. The dangerous bend of French page 19 stands at 29
+// against a remark set in 13, and taking the size from it cut the first line of
+// the remark off from the rest of it.
 func size(l Line) int {
 	best := 0
 	for _, r := range l.Runs {
-		if r.Level != Base || tall(r) {
+		if r.Level != Base || offband(r) {
 			continue
 		}
 		if r.Spec.Size > best {
@@ -294,14 +296,14 @@ func size(l Line) int {
 // The margin has to be taken per block rather than per page. A remark set in
 // small type is indented as a whole, so measuring its lines against the margin
 // of the page would make every one of them the start of a paragraph.
-func blocks(lines []Line, c Compounds) string {
+func blocks(lines []Line, v Volume) string {
 	var out []string
 	for i := 0; i < len(lines); {
 		j := i + 1
 		for j < len(lines) && size(lines[j]) == size(lines[i]) {
 			j++
 		}
-		if s := join(lines[i:j], c); s != "" {
+		if s := join(lines[i:j], v); s != "" {
 			out = append(out, s)
 		}
 		i = j
@@ -315,7 +317,7 @@ func blocks(lines []Line, c Compounds) string {
 // starts a paragraph when it is indented past the margin of its block. A word
 // broken across the break is put back together, which is what the trailing
 // hyphen means. A heading stands on its own.
-func join(lines []Line, c Compounds) string {
+func join(lines []Line, v Volume) string {
 	left := lines[0].Left
 	for _, l := range lines {
 		if l.Left < left {
@@ -334,7 +336,7 @@ func join(lines []Line, c Compounds) string {
 	}
 	head := -1 // the line the last heading came off, for its continuation
 	for i, l := range lines {
-		if h, ok := heading(l); ok {
+		if h, ok := heading(l, v.BodySize); ok {
 			// A title too long for the measure is set on two lines and is still
 			// one title. Page 42 sets "§ 2. THE STRUCTURE OF MODULES OF FINITE"
 			// and "LENGTH" under it, page 112 breaks § 6 the same way, and the
@@ -375,7 +377,7 @@ func join(lines []Line, c Compounds) string {
 		// broke "homoge-" onto "neous". All three shipped with the hyphen still
 		// in them and the two halves in paragraphs of their own.
 		if cur.Len() > 0 {
-			if joined, ok := runOn(cur.String(), text, c); ok {
+			if joined, ok := runOn(cur.String(), text, v.Compounds); ok {
 				cur.Reset()
 				cur.WriteString(joined)
 				continue
@@ -427,7 +429,7 @@ func continues(lines []Line) bool {
 	if len(lines) == 0 {
 		return false
 	}
-	if _, ok := heading(lines[0]); ok {
+	if _, ok := heading(lines[0], 0); ok {
 		return false
 	}
 	// The margin is the margin of the block, as it is in blocks and join. A
@@ -619,7 +621,14 @@ func leading(lines []Line) int {
 // "6. The Grothendieck Group R_K(A)" on page 211, "1. τ-Extensions of Groups"
 // on page 302. Such a line is read by the renderer and its bold marks taken off
 // again, so the mathematics in it comes out as mathematics.
-func heading(l Line) (string, bool) {
+//
+// Which level a heading is set at is measured against the size the volume sets
+// its body in, since the printings do not agree on a size: the English chapter
+// is set in 15 and the French one in 14, and a rule reading anything under 15 as
+// the word CHAPTER made every subsection head of the French volume a ## where
+// the English has ###. body is that size, and zero means nobody measured, in
+// which case the English size is assumed.
+func heading(l Line, body int) (string, bool) {
 	if !headed(l) {
 		return "", false
 	}
@@ -627,8 +636,11 @@ func heading(l Line) (string, bool) {
 	if len([]rune(text)) < 3 {
 		return "", false
 	}
+	if body == 0 {
+		body = englishBodySize
+	}
 	switch {
-	case size(l) >= 18:
+	case size(l) >= body+3:
 		return "# " + text, true
 	case strings.HasPrefix(text, "§"), strings.HasPrefix(text, "APPENDIX"):
 		// An appendix is a section of the chapter and is set like one, and the
@@ -636,11 +648,17 @@ func heading(l Line) (string, bool) {
 		// §§. Its number stands on a line of its own, which is the only thing
 		// that tells it apart from a subsection head.
 		return "## " + text, true
-	case size(l) < 15:
+	case size(l) < body:
+		// The word CHAPTER, which the volume sets small over the title of the
+		// chapter itself.
 		return "## " + text, true
 	}
 	return "### " + text, true
 }
+
+// englishBodySize is the size the 2023 English printing sets its text in, which
+// is what the reading of that volume was audited against.
+const englishBodySize = 15
 
 // headingText writes the words of a heading.
 //
@@ -783,7 +801,7 @@ func noteNumber(l Line) (string, bool) {
 
 // footnotes writes the notes of a page as Markdown footnote definitions, which
 // is where the references written for them in the body point.
-func footnotes(lines []Line, c Compounds) string {
+func footnotes(lines []Line, v Volume) string {
 	var out []string
 	var cur strings.Builder
 	num := ""
@@ -805,7 +823,7 @@ func footnotes(lines []Line, c Compounds) string {
 		if text == "" {
 			continue
 		}
-		if joined, ok := runOn(strings.TrimRight(cur.String(), " "), text, c); ok {
+		if joined, ok := runOn(strings.TrimRight(cur.String(), " "), text, v.Compounds); ok {
 			cur.Reset()
 			cur.WriteString(joined)
 			continue
