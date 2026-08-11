@@ -286,10 +286,23 @@ func join(lines []Line, c Compounds) string {
 		}
 		cur.Reset()
 	}
+	head := -1 // the line the last heading came off, for its continuation
 	for i, l := range lines {
 		if h, ok := heading(l); ok {
+			// A title too long for the measure is set on two lines and is still
+			// one title. Page 42 sets "§ 2. THE STRUCTURE OF MODULES OF FINITE"
+			// and "LENGTH" under it, page 112 breaks § 6 the same way, and the
+			// four appendices print their number on one line and their name on
+			// the next.
+			if head == i-1 && len(out) > 0 && !opensHead(h) &&
+				l.Top-lines[i-1].Top <= headLead {
+				out[len(out)-1] += " " + strings.TrimLeft(h, "# ")
+				head = i
+				continue
+			}
 			flush()
 			out = append(out, h)
+			head = i
 			continue
 		}
 		text := Render(l)
@@ -513,7 +526,11 @@ func heading(l Line) (string, bool) {
 	switch {
 	case size(l) >= 18:
 		return "# " + text, true
-	case strings.HasPrefix(text, "§"):
+	case strings.HasPrefix(text, "§"), strings.HasPrefix(text, "APPENDIX"):
+		// An appendix is a section of the chapter and is set like one, and the
+		// table of contents lists the four of this volume beside the twenty-one
+		// §§. Its number stands on a line of its own, which is the only thing
+		// that tells it apart from a subsection head.
 		return "## " + text, true
 	case size(l) < 15:
 		return "## " + text, true
@@ -550,6 +567,41 @@ func headingText(l Line) string {
 		b.WriteString(r.Text)
 	}
 	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// headLead is how far under a heading the rest of that heading can be.
+//
+// The volume sets a heading in 13-unit lines and puts the second line of one 21
+// units under the first, or 29 where the number stands on a line of its own as
+// it does over an appendix. What is not a continuation is much further off: the
+// chapter title of page 18 is 64 units under the word CHAPTER, in a larger font,
+// and the title page sets the name of the book 93 units under the name of the
+// series.
+const headLead = 32
+
+// opensHead reports whether a heading line opens a heading of its own rather
+// than carrying on the one above it. Every heading of the volume that does opens
+// on its number or on a word that names what it is.
+func opensHead(h string) bool {
+	t := strings.TrimLeft(h, "# ")
+	if i := strings.IndexByte(t, '.'); i > 0 && i <= 3 && allDigits(t[:i]) {
+		return true
+	}
+	for _, w := range []string{"§", "CHAPTER", "APPENDIX", "Exercises"} {
+		if strings.HasPrefix(t, w) {
+			return true
+		}
+	}
+	return false
+}
+
+func allDigits(s string) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return s != ""
 }
 
 // headed reports whether a line is a heading.
