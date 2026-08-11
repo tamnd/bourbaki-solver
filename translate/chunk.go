@@ -186,4 +186,3 @@ func GlossaryBlock(g *glossary.Glossary, lang, body string) string {
 	}
 	return b.String()
 }
-
