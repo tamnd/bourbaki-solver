@@ -415,11 +415,21 @@ func m06(c *Corpus) ([]Finding, error) {
 // So it is hard, and the argument for that is the same argument: a span whose
 // text is not the mathematics on the page is a span nothing downstream can
 // copy, compare, or translate. It was 138 spans in 66 pages of chapter VIII
-// when it was found and bourbaki fix parens repaired all of them, so this is at
-// nothing and is here to stay at nothing.
+// when it was found, and bourbaki fix parens repaired every one it could reach.
 //
-// What it will report is the case the repair will not touch: a span closing
-// more brackets than the line has open. Moving those out would leave the line
+// Three are left and they are all in one exercise, VIII, A2, Exercise 4, and
+// they are not this fault so much as the shadow of another one. The page they
+// come from is p. 477, where a display arrived from the text layer without its
+// opening delimiter, so from line 7 to the foot of the page there is one span
+// that never closes and the repair cannot see where any of the mathematics
+// ends. The page is already one of M01's five. Assembling it cuts the page at
+// the exercise markers, which closes the run, and the straddles inside it
+// become visible in the section files where they were invisible in the page.
+// Repairing them means repairing p. 477 against the printed image, which is the
+// OCR repair pass and not a table.
+//
+// The other case this will report is the one the repair refuses: a span closing
+// more brackets than its line has open. Moving those out would leave the line
 // with a bracket that closes nothing, which is a guess about what the page says
 // rather than a repair, so they are reported for somebody to read the printed
 // page.
