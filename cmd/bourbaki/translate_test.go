@@ -224,3 +224,26 @@ func writeSection(t *testing.T, path string, f corpus.SectionFile) {
 		t.Fatal(err)
 	}
 }
+
+// A section is fifteen asks over fifteen minutes and nobody chooses the model,
+// so the account can be moved down halfway through one. A file that names only
+// the model of the first chunk is a file that says gpt-5-6 about a section half
+// of which came back on the small one, and L08 reads that field.
+func TestTheFileNamesEveryModelThatAnsweredIt(t *testing.T) {
+	cases := []struct {
+		name   string
+		models []string
+		want   string
+	}{
+		{"one model throughout", []string{"gpt-5-6", "gpt-5-6", "gpt-5-6"}, "gpt-5-6"},
+		{"moved down halfway", []string{"gpt-5-6", "gpt-5-6-mini"}, "gpt-5-6, gpt-5-6-mini"},
+		{"moved down and back", []string{"gpt-5-6", "gpt-5-6-mini", "gpt-5-6"}, "gpt-5-6, gpt-5-6-mini"},
+		{"a chunk that did not say", []string{"", "gpt-5-6"}, "gpt-5-6"},
+		{"nothing said at all", []string{"", ""}, ""},
+	}
+	for _, c := range cases {
+		if got := modelsUsed(c.models); got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+}
