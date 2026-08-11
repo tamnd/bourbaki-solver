@@ -11,6 +11,7 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/assemble"
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/tags"
 )
 
 // assemble is the stage that turns five hundred page files into twenty-six
@@ -69,6 +70,15 @@ func runAssemble(args []string) error {
 		return fmt.Errorf("no pages in %s: run bourbaki extract run first", corpus.PagesDir(root, *book))
 	}
 
+	// The permanent tags are read and written back out, never allocated here:
+	// assembly runs on every push and minting an identifier that can never be
+	// taken back is not something a build gets to do. bourbaki tags assign is.
+	set, err := tags.Load(root)
+	if err != nil {
+		return err
+	}
+	tagOf := set.Lookup()
+
 	rec := corpus.BookSections{ID: *book}
 	exrec := corpus.BookExercises{ID: *book}
 	files := map[string][]byte{}
@@ -81,10 +91,10 @@ func runAssemble(args []string) error {
 		cr := corpus.ChapterSections{Chapter: ch.Numeral, Title: ch.Title}
 		cx := corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
 		for _, p := range pieces {
-			if err := writeExercises(root, *lang, p, files, &cx); err != nil {
+			if err := writeExercises(root, *lang, p, files, &cx, tagOf); err != nil {
 				return err
 			}
-			f := sectionFile(*b, ch, p, *lang)
+			f := sectionFile(*b, ch, p, *lang, tagOf)
 			path := corpus.SectionPath(root, *lang, f.Meta)
 			out, err := f.Bytes()
 			if err != nil {
@@ -176,7 +186,7 @@ func runAssemble(args []string) error {
 // writing the manifest and carrying on would leave the corpus quietly short of
 // an exercise.
 func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte,
-	cx *corpus.ChapterExercises) error {
+	cx *corpus.ChapterExercises, tagOf map[string]tags.Tag) error {
 	if len(p.Exercises) == 0 {
 		return nil
 	}
@@ -189,6 +199,7 @@ func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte
 		Count:    len(p.Exercises),
 	}
 	for _, e := range p.Exercises {
+		e.Meta.Tag = string(tagOf[e.Meta.Label])
 		f := corpus.ExerciseFile{Meta: e.Meta, Body: e.Body}
 		out, err := f.Bytes()
 		if err != nil {
@@ -215,7 +226,8 @@ func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte
 }
 
 // sectionFile is one assembled piece as it goes to disk.
-func sectionFile(b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string) corpus.SectionFile {
+func sectionFile(b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string,
+	tagOf map[string]tags.Tag) corpus.SectionFile {
 	m := corpus.SectionFrontMatter{
 		Book:          b.Book,
 		BookTitle:     corpus.BookTitle(b.Book),
@@ -240,7 +252,7 @@ func sectionFile(b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string
 	case p.Historical:
 		m.Kind, m.SectionTitle = corpus.KindHistorical, "Historical Note"
 	}
-	return corpus.SectionFile{Meta: m, Body: p.Body}
+	return corpus.SectionFile{Meta: m, Body: tags.Apply(p.Body, tagOf)}
 }
 
 func kindOf(p assemble.Piece) string {
