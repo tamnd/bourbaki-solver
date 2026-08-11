@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	tagset "github.com/tamnd/bourbaki-solver/tags"
 )
 
 // Index is what a citation is looked up in: the sections of the corpus with the
@@ -98,6 +99,19 @@ func Load(root, lang string) (*Index, error) {
 	}
 	ix := &Index{byLabel: map[string]*Section{}, stmt: map[stmtKey][]*Statement{},
 		byStmt: map[string]*Statement{}, tagOf: map[string]string{}}
+	// A statement carries its tag in the heading the resolver is already reading,
+	// but an exercise carries it in the front matter of a file of its own, and
+	// opening 317 of them to learn 317 tags is not worth it when tags/tags says
+	// the same thing in one file. tags verify is what holds the two together.
+	set, err := tagset.Load(root)
+	if err != nil {
+		return nil, err
+	}
+	for label, tag := range set.Lookup() {
+		if strings.Contains(label, "-ex-") {
+			ix.tagOf[label] = string(tag)
+		}
+	}
 	for _, b := range sections.Books {
 		for _, ch := range b.Chapters {
 			for _, rec := range ch.Sections {

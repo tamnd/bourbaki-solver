@@ -153,7 +153,7 @@ func (res *Result) lines(ix *Index, rel, body string, line0 int, at func(int) wh
 
 func (res *Result) one(ix *Index, c Citation, at where, rel string) {
 	res.Forms[c.Form]++
-	t, err := ix.Resolve(c, at.section)
+	t, err := ix.Resolve(c, Site{Section: at.section, File: rel, Line: c.Line})
 	if err != nil {
 		res.Counts["unresolved"]++
 		res.Unresolved = append(res.Unresolved, Problem{

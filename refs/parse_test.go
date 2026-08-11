@@ -104,6 +104,48 @@ func TestParse(t *testing.T) {
 		in:   "as in VIII, p. 155, Exercise 9, the module is faithful.",
 		want: []Citation{{Raw: "VIII, p. 155, Exercise 9", Form: FormPage,
 			Chapter: "VIII", Page: 155, Kind: corpus.KindExercise, Number: 9}},
+	}, {
+		// The same as the named form with the locator bracketed instead of
+		// following "of". Read as two references it would be a bare Remark 1 of
+		// whatever § the sentence is in and a page nothing points at.
+		name: "the statement said first with the page in brackets",
+		in:   "follows from Proposition 4, a) and Remark 1 (VIII, p. 97). Assume",
+		want: []Citation{
+			{Raw: "Proposition 4", Form: FormLocal, Kind: corpus.KindProposition, Number: 4},
+			{Raw: "Remark 1 (VIII, p. 97", Form: FormNamed,
+				Chapter: "VIII", Page: 97, Kind: corpus.KindRemark, Number: 1},
+		},
+	}, {
+		// The letter is the part of the statement meant. Nothing is done with
+		// it, since a part carries no tag, but it has to be read past.
+		name: "a part of a statement",
+		in:   "therefore $\\mathfrak{R}\\subset N$ by Corollary 1, c) of VIII, p. 152.",
+		want: []Citation{{Raw: "Corollary 1, c) of VIII, p. 152", Form: FormNamed,
+			Chapter: "VIII", Page: 152, Kind: corpus.KindCorollary, Number: 1}},
+	}, {
+		// The second page in the bracket does not repeat the chapter.
+		name: "a second page in the same bracket",
+		in:   "have the same class in $R_K(G)$ (VIII, p. 190, Corollary and p. 401, Corollary 1).",
+		want: []Citation{
+			{Raw: "VIII, p. 190", Form: FormPage, Chapter: "VIII", Page: 190},
+			{Raw: "p. 401, Corollary 1", Form: FormPage, Chapter: "VIII", Page: 401,
+				Kind: corpus.KindCorollary, Number: 1},
+		},
+	}, {
+		// Page 213 was run into the maths that follows it when the page was
+		// transcribed. Without the dollar the locator fails and a bare Corollary
+		// 2 is left behind, pointing at this § rather than at Algebra II.
+		name: "a page number pulled into the maths",
+		in:   "By Corollary 2 of II, §1, No. 10, p. $213,\\theta$ is bijective.",
+		want: []Citation{{Raw: "Corollary 2 of II, §1, No. 10, p. $213", Form: FormNamed,
+			Chapter: "II", Section: 1, Subsec: 10, Page: 213,
+			Kind: corpus.KindCorollary, Number: 2}},
+	}, {
+		// Nothing on the line named a chapter, so there is nothing to carry and
+		// the reference is dropped rather than pinned on the § being read.
+		name: "a bare page with no chapter to carry",
+		in:   "and p. 401, Corollary 1 gives the result.",
+		want: nil,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Parse(tc.in, 1)

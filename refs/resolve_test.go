@@ -9,23 +9,34 @@ import (
 
 // testIndex is two sections of chapter VIII with the shapes that make the
 // lookups hard: a Corollary the book numbered and one it did not, both hanging
-// off the same Proposition, and a Remark repeated in two no.s of one §.
+// off the same Proposition, a Remark repeated in two no.s of one §, and two
+// statements called Corollary 1, which is the shape eighteen of the chapter's
+// twenty-two sections have.
+//
+// The lines are the lines of the file the § is written in, because a bare
+// "Corollary 1" is settled by which candidate is printed above the sentence.
 func testIndex() *Index {
+	const s1file = "content/en/alg/VIII/01_s1.md"
 	s1 := Section{
 		Label: "alg-viii-s1", Chapter: "VIII", First: 1, Last: 23, Exercises: 12,
 		Subsecs: []Subsec{{No: 1, Page: 1}, {No: 2, Page: 9}, {No: 3, Page: 15}},
 		Statements: []*Statement{
-			{Label: "alg-viii-s1-prop-1", Tag: "0001", Kind: corpus.KindProposition, Number: 1, Subsec: 1},
+			{Label: "alg-viii-s1-prop-1", Tag: "0001", Kind: corpus.KindProposition, Number: 1, Subsec: 1,
+				Path: s1file, Line: 10},
 			{Label: "alg-viii-s1-n1-rem-1", Tag: "0002", Kind: corpus.KindRemark, Number: 0, Subsec: 1,
-				FollowsKind: corpus.KindProposition, FollowsNumber: 1},
-			{Label: "alg-viii-s1-prop-2", Tag: "0003", Kind: corpus.KindProposition, Number: 2, Subsec: 2},
+				FollowsKind: corpus.KindProposition, FollowsNumber: 1, Path: s1file, Line: 20},
+			{Label: "alg-viii-s1-prop-2", Tag: "0003", Kind: corpus.KindProposition, Number: 2, Subsec: 2,
+				Path: s1file, Line: 30},
+			{Label: "alg-viii-s1-prop-2-cor-1", Tag: "000A", Kind: corpus.KindCorollary, Number: 1, Subsec: 2,
+				Named: true, FollowsKind: corpus.KindProposition, FollowsNumber: 2, Path: s1file, Line: 34},
 			{Label: "alg-viii-s1-n2-cor-1", Tag: "0004", Kind: corpus.KindCorollary, Subsec: 2,
-				FollowsKind: corpus.KindProposition, FollowsNumber: 2},
+				FollowsKind: corpus.KindProposition, FollowsNumber: 2, Path: s1file, Line: 40},
 			{Label: "alg-viii-s1-n2-cor-2", Tag: "0005", Kind: corpus.KindCorollary, Subsec: 2,
-				FollowsKind: corpus.KindProposition, FollowsNumber: 2},
-			{Label: "alg-viii-s1-thm-1", Tag: "0006", Kind: corpus.KindTheorem, Number: 1, Subsec: 3},
+				FollowsKind: corpus.KindProposition, FollowsNumber: 2, Path: s1file, Line: 44},
+			{Label: "alg-viii-s1-thm-1", Tag: "0006", Kind: corpus.KindTheorem, Number: 1, Subsec: 3,
+				Path: s1file, Line: 60},
 			{Label: "alg-viii-s1-thm-1-cor-1", Tag: "0007", Kind: corpus.KindCorollary, Number: 1, Subsec: 3,
-				Named: true, FollowsKind: corpus.KindTheorem, FollowsNumber: 1},
+				Named: true, FollowsKind: corpus.KindTheorem, FollowsNumber: 1, Path: s1file, Line: 64},
 		},
 	}
 	s2 := Section{
@@ -112,13 +123,22 @@ func TestResolve(t *testing.T) {
 	}, {
 		name: "a local reference in no §", in: "by Proposition 2",
 		err: "the sentence is in no §",
+	}, {
+		// The exercises are not in the statement index, and one exercise citing
+		// another of the same § is how the book cross-refers within a run of
+		// them.
+		name: "an exercise cited in prose", in: "as in Exercise 9",
+		from: "alg-viii-s1", label: "alg-viii-s1-ex-9", how: ByExercise,
+	}, {
+		name: "an exercise cited in prose that the § does not have", in: "as in Exercise 90",
+		from: "alg-viii-s1", err: "12 exercises and none numbered 90",
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			cs := Parse(tc.in, 1)
 			if len(cs) != 1 {
 				t.Fatalf("%q read as %d citations: %+v", tc.in, len(cs), cs)
 			}
-			got, err := ix.Resolve(cs[0], tc.from)
+			got, err := ix.Resolve(cs[0], Site{Section: tc.from})
 			if tc.err != "" {
 				if err == nil {
 					t.Fatalf("resolved to %+v, want an error about %q", got, tc.err)
@@ -158,12 +178,90 @@ func TestResolveNarrowsOnlyWhenItHasTo(t *testing.T) {
 	if len(c) != 1 {
 		t.Fatalf("read %d citations: %+v", len(c), c)
 	}
-	got, err := ix.Resolve(c[0], "")
+	got, err := ix.Resolve(c[0], Site{})
 	if err != nil {
 		t.Fatalf("a no. that disagrees with the page broke a lookup with one candidate: %v", err)
 	}
 	if got.Label != "alg-viii-s1-prop-1" || got.How != ByPage {
 		t.Errorf("resolved to %+v", got)
+	}
+}
+
+// § 1 has two statements called Corollary 1, one under Proposition 2 and one
+// under Theorem 1, which is the ordinary shape: a § restarts the corollary
+// count at every statement that has corollaries. Prose that says "by Corollary
+// 1" and nothing else means the one it is standing under.
+func TestResolveTakesTheNearestCorollaryAbove(t *testing.T) {
+	ix := testIndex()
+	const file = "content/en/alg/VIII/01_s1.md"
+	for _, tc := range []struct {
+		name  string
+		line  int
+		label string
+		how   string
+		err   string
+	}{{
+		name: "in the proof under Proposition 2", line: 50,
+		label: "alg-viii-s1-prop-2-cor-1", how: ByNearest,
+	}, {
+		name: "in the proof under Theorem 1", line: 70,
+		label: "alg-viii-s1-thm-1-cor-1", how: ByNearest,
+	}, {
+		// Nothing of that name is printed above the sentence, so there is
+		// nothing to be nearest to and the reference is reported instead.
+		name: "above both of them", line: 12,
+		err: "2 statements called Corollary 1 and nothing says which",
+	}, {
+		// An exercise is a file of its own, so "above" says nothing about the §
+		// and the reference is left alone rather than pointed at the last one.
+		name: "from an exercise", line: 70,
+		err: "2 statements called Corollary 1 and nothing says which",
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			at := Site{Section: "alg-viii-s1", File: file, Line: tc.line}
+			if tc.name == "from an exercise" {
+				at.File = "content/en/alg/VIII/exercises/s1/03.md"
+			}
+			c := Parse("by Corollary 1", tc.line)
+			if len(c) != 1 {
+				t.Fatalf("read %d citations: %+v", len(c), c)
+			}
+			got, err := ix.Resolve(c[0], at)
+			if tc.err != "" {
+				if err == nil {
+					t.Fatalf("resolved to %+v, want an error about %q", got, tc.err)
+				}
+				if !strings.Contains(err.Error(), tc.err) {
+					t.Errorf("the error is %q, want it to mention %q", err, tc.err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("did not resolve: %v", err)
+			}
+			if got.Label != tc.label || got.How != tc.how {
+				t.Errorf("resolved to %q by %q, want %q by %q", got.Label, got.How, tc.label, tc.how)
+			}
+		})
+	}
+}
+
+// A reference that carries a page has said where to look, and taking whatever
+// is nearest instead would throw that away. § 1 prints two Corollary 1s and
+// page 3 is in no. 1, which holds neither, so this is left unresolved even
+// though a Corollary 1 stands above the sentence.
+func TestResolveDoesNotTakeTheNearestWhenAPageSaidWhere(t *testing.T) {
+	ix := testIndex()
+	c := Parse("Corollary 1 of VIII, p. 3", 70)
+	if len(c) != 1 {
+		t.Fatalf("read %d citations: %+v", len(c), c)
+	}
+	got, err := ix.Resolve(c[0], Site{Section: "alg-viii-s1", File: "content/en/alg/VIII/01_s1.md", Line: 70})
+	if err == nil {
+		t.Fatalf("resolved to %+v, want the page to be reported rather than guessed past", got)
+	}
+	if !strings.Contains(err.Error(), "0 of them in no. 1") {
+		t.Errorf("the error is %q", err)
 	}
 }
 
