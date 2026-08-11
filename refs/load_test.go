@@ -266,3 +266,68 @@ func TestBuildRejectsAMissingLanguage(t *testing.T) {
 		t.Error("a language with no content built a graph")
 	}
 }
+
+// The corpus holds Algebra VIII twice, in English and in French, and the two
+// printings share their labels and their printed page numbers because they are
+// the same chapter. The graph is over one of them.
+//
+// Indexing both is what broke on the day the French was assembled: a citation
+// to VIII, p. 3 found the page in two sections at once and resolved to nothing,
+// and 979 references went with it. The second printing has to be out of the
+// index, not merely deduplicated, because its § 2 holds one exercise fewer and
+// the counts would then depend on which one was read last.
+func TestASecondPrintingIsNotASecondSection(t *testing.T) {
+	root := fixture(t)
+	french := `books:
+    - id: alg-viii
+      chapters:
+        - chapter: VIII
+          sections:
+            - kind: front
+              path: content/en/alg/VIII/00_frontmatter.md
+              book_pages: A VIII.1
+            - kind: section
+              section: 1
+              path: content/en/alg/VIII/01_s1_a.md
+              label: alg-viii-s1
+              book_pages: A VIII.1 - A VIII.23
+    - id: alg-viii-fr
+      chapters:
+        - chapter: VIII
+          sections:
+            - kind: section
+              section: 1
+              path: content/fr/alg/VIII/01_s1_a.md
+              label: alg-viii-s1
+              book_pages: A VIII.1 - A VIII.23
+`
+	if err := os.WriteFile(filepath.Join(root, "manifests", "sections.yaml"), []byte(french), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// The French printing is on disk, so that what this test catches is the
+	// index holding two sections and not a file that could not be opened.
+	en, err := os.ReadFile(filepath.Join(root, "content", "en", "alg", "VIII", "01_s1_a.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr := filepath.Join(root, "content", "fr", "alg", "VIII", "01_s1_a.md")
+	if err := os.MkdirAll(filepath.Dir(fr), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(fr, []byte(strings.Replace(string(en), "lang: en", "lang: fr", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := Build(root, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Counts[ByPage] != 1 {
+		t.Fatalf("references resolved by page = %d, want 1: %+v", res.Counts[ByPage], res.Counts)
+	}
+	for _, u := range res.Unresolved {
+		if strings.Contains(u.Reason, "sections at once") {
+			t.Fatalf("the two printings were indexed as two sections: %s", u.Reason)
+		}
+	}
+}
