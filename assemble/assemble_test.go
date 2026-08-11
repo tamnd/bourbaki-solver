@@ -65,7 +65,7 @@ func smallChapter() (corpus.Chapter, map[int]corpus.PageFile) {
 
 func TestChapter(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestChapter(t *testing.T) {
 // text of them.
 func TestChapterSplitsTheExercises(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestChapterSplitsTheExercises(t *testing.T) {
 // on, so it leaves the section with it, and both files number from one.
 func TestChapterPutsAFootnoteInTheFileThatMarksIt(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestChapterRefusesAFootnoteNothingMarks(t *testing.T) {
 	p := pages[19]
 	p.Body = strings.Replace(p.Body, "Artinian[^1]", "Artinian", 1)
 	pages[19] = p
-	if _, err := Chapter("alg", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages); err == nil {
 		t.Fatal("a footnote nothing marks should be an error")
 	}
 }
@@ -174,7 +174,7 @@ func TestChapterRefusesAFootnoteNothingMarks(t *testing.T) {
 // The publisher's line is not part of the book and is not ours to republish.
 func TestChapterDropsTheImprint(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestChapterDropsTheImprint(t *testing.T) {
 // definition and in the mark alike.
 func TestChapterJoinsAndRenumbers(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestChapterDoesNotGlueAnExerciseOntoThePageBefore(t *testing.T) {
 	pages[20] = p
 	ch.Sections[0].Exercises = nil
 
-	got, err := Chapter("alg", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,12 +231,12 @@ func TestChapterDoesNotGlueAnExerciseOntoThePageBefore(t *testing.T) {
 func TestChapterRefusesAHeadingTheContentsDisagreesWith(t *testing.T) {
 	ch, pages := smallChapter()
 	ch.Sections[0].Title = "Artinian Modules"
-	if _, err := Chapter("alg", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages); err == nil {
 		t.Fatal("a title the page disagrees with should be an error")
 	}
 	ch, pages = smallChapter()
 	ch.Sections[0].PDFPage = 19
-	if _, err := Chapter("alg", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages); err == nil {
 		t.Fatal("a § on the wrong page should be an error")
 	}
 }
@@ -246,7 +246,7 @@ func TestChapterRefusesAHeadingTheContentsDisagreesWith(t *testing.T) {
 func TestChapterRefusesAMissingPage(t *testing.T) {
 	ch, pages := smallChapter()
 	delete(pages, 19)
-	if _, err := Chapter("alg", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages); err == nil {
 		t.Fatal("a missing page should be an error")
 	}
 }
@@ -331,7 +331,7 @@ func TestJoinable(t *testing.T) {
 		{"the module is", "Theorem 1 (Wedderburn). — A ring is simple", false},
 	}
 	for _, c := range cases {
-		if got := joinable(c.prev, c.next); got != c.want {
+		if got := joinable(c.prev, c.next, printings["en"]); got != c.want {
 			t.Errorf("joinable(%q, %q) = %v, want %v", c.prev, c.next, got, c.want)
 		}
 	}
@@ -392,7 +392,7 @@ func TestCutExercises(t *testing.T) {
 		{text: "### Exercises {#alg-viii-a2-exercises}", page: 20, last: 20},
 		{text: "1) Let A be a ring.", page: 20, last: 21},
 	}
-	got := cutExercises(in, 2, true)
+	got := cutExercises(in, 2, true, printings["en"])
 	if len(got) != 3 {
 		t.Fatalf("got %d blocks, want the prose, the heading and the link", len(got))
 	}

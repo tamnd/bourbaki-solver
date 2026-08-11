@@ -325,6 +325,7 @@ func join(lines []Line, v Volume) string {
 		}
 	}
 	lead := leading(lines)
+	right := measure(lines)
 	opens := opener(lines, left)
 	var out []string
 	var cur strings.Builder
@@ -360,8 +361,10 @@ func join(lines []Line, v Volume) string {
 		// Bourbaki opens a statement at the margin and not on an indent, so
 		// what says a new one has begun is the head itself and the air above
 		// it. Both are read: the head where it is bold, the air where a line
-		// sits further below the one before it than the leading of the block.
+		// sits further below the one before it than the leading of the block,
+		// and the line above where it stops short of the measure.
 		apart := i > 0 && l.Top-lines[i-1].Top > lead+6
+		apart = apart || (i > 0 && right > 0 && lines[i-1].Right < right-short)
 		if apart || opens(l) {
 			if d, ok := display(text); ok {
 				flush()
@@ -596,6 +599,32 @@ func display(text string) (string, bool) {
 // step from one line to the next. A step longer than that is white space the
 // typesetter put there, and white space between two lines of prose is a
 // paragraph.
+// short is how far a line has to stop before the measure to have ended the
+// paragraph it is in. A line of justified type ends on the measure to within a
+// unit or two, so anything wider than a character of the body type is a line
+// that was not filled, and the only line of a paragraph that is not filled is
+// its last.
+const short = 20
+
+// measure is the width the block is set to, taken from its longest line, and
+// zero when the block is too short to have a line that was filled.
+//
+// The measure has to be taken per block for the same reason the margin does: a
+// remark set in small type is indented on both sides and its lines end well
+// inside the measure of the page around it.
+func measure(lines []Line) int {
+	if len(lines) < 3 {
+		return 0
+	}
+	right := 0
+	for _, l := range lines {
+		if l.Right > right {
+			right = l.Right
+		}
+	}
+	return right
+}
+
 func leading(lines []Line) int {
 	if len(lines) < 3 {
 		return 1 << 20 // too few lines to tell; never break on the step

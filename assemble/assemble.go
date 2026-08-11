@@ -101,8 +101,12 @@ func (p Piece) Extraction() string {
 // beyond its own first and last page: the § that opens the chapter shares a page
 // with the chapter title, and the historical note ends where the volume's back
 // matter begins.
-func Chapter(book string, ch corpus.Chapter, pages map[int]corpus.PageFile) ([]Piece, error) {
-	marks, err := marks(ch, pages)
+func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile) ([]Piece, error) {
+	pr, err := printingOf(lang)
+	if err != nil {
+		return nil, err
+	}
+	marks, err := marks(ch, pages, pr)
 	if err != nil {
 		return nil, err
 	}
@@ -124,26 +128,26 @@ func Chapter(book string, ch corpus.Chapter, pages map[int]corpus.PageFile) ([]P
 			p.Methods = append(p.Methods, q.method)
 		}
 		p.Subsections = subsections(parts)
-		blocks, notes := join(parts)
+		blocks, notes := join(parts, pr)
 		if !p.Front && !p.Historical {
 			id := corpus.Ref{Book: book, Chapter: ch.Numeral, Section: p.Number, Appendix: p.Appendix}
-			if blocks, p.Statements, err = statements(blocks, id); err != nil {
+			if blocks, p.Statements, err = statements(blocks, id, pr); err != nil {
 				return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, p.Name(), err)
 			}
-			blocks, p.HasExercise = anchorExercises(blocks, id)
-			if p.Exercises, err = exercises(blocks); err != nil {
+			blocks, p.HasExercise = anchorExercises(blocks, id, pr)
+			if p.Exercises, err = exercises(blocks, pr); err != nil {
 				return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, p.Name(), err)
 			}
 			for i := range p.Exercises {
 				m := &p.Exercises[i].Meta
-				m.Book, m.Chapter, m.Section, m.Lang = id.Book, id.Chapter, id.Section, "en"
+				m.Book, m.Chapter, m.Section, m.Lang = id.Book, id.Chapter, id.Section, pr.lang
 				m.Appendix = id.Appendix
 				m.Label = p.Exercises[i].Ref().Label()
 				body, left := takeNotes(corpus.NormalizeBody(p.Exercises[i].Body),
 					p.Exercises[i].Pages, notes)
 				p.Exercises[i].Body, notes = corpus.NormalizeBody(body), left
 			}
-			blocks = cutExercises(blocks, p.Number, p.Appendix)
+			blocks = cutExercises(blocks, p.Number, p.Appendix, pr)
 		}
 		body, left := takeNotes(render(blocks), pagesOf(blocks), notes)
 		// A definition nothing points at is a note whose mark was lost in
@@ -174,9 +178,9 @@ type mark struct {
 // have to agree. The page is what the run works from, since it is the only one
 // of the two that says where on the page the section starts, and the heading is
 // what says the page is the right one.
-func marks(ch corpus.Chapter, pages map[int]corpus.PageFile) ([]mark, error) {
+func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]mark, error) {
 	var out []mark
-	off, err := find(pages, ch.PDFPage, "## CHAPTER")
+	off, err := find(pages, ch.PDFPage, pr.chapter)
 	if err != nil {
 		return nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
 	}
@@ -184,7 +188,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile) ([]mark, error) {
 	for _, s := range ch.Sections {
 		prefix := fmt.Sprintf("## § %d.", s.Number)
 		if s.Appendix {
-			prefix = fmt.Sprintf("## APPENDIX %d", s.Number)
+			prefix = pr.appendixHead(s.Number)
 		}
 		off, err := find(pages, s.PDFPage, prefix)
 		if err != nil {
@@ -203,7 +207,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile) ([]mark, error) {
 		out = append(out, mark{page: s.PDFPage, off: off, piece: Piece{Section: s}})
 	}
 	if ch.Historical != nil {
-		off, err := find(pages, ch.Historical.PDFPage, "# HISTORICAL NOTE")
+		off, err := find(pages, ch.Historical.PDFPage, pr.historical)
 		if err != nil {
 			return nil, fmt.Errorf("chapter %s historical note: %w", ch.Numeral, err)
 		}
@@ -364,7 +368,7 @@ var noteRE = regexp.MustCompile(`^\[\^([0-9a-zA-Z]+)\]:\s`)
 // files of their own and eight notes of chapter VIII are marked inside an
 // exercise. Each note has to end up in the file that refers to it, which is
 // what takeNotes does once the pieces of the section are known.
-func join(parts []part) ([]block, []note) {
+func join(parts []part, pr printing) ([]block, []note) {
 	var blocks []block
 	var notes []note
 	for _, p := range parts {
@@ -377,7 +381,7 @@ func join(parts []part) ([]block, []note) {
 		if len(bs) == 0 {
 			continue
 		}
-		if p.continues && len(blocks) > 0 && joinable(blocks[len(blocks)-1].text, bs[0]) {
+		if p.continues && len(blocks) > 0 && joinable(blocks[len(blocks)-1].text, bs[0], pr) {
 			blocks[len(blocks)-1].text = glue(blocks[len(blocks)-1].text, bs[0])
 			blocks[len(blocks)-1].last = p.page
 			bs = bs[1:]
@@ -467,9 +471,9 @@ func spanning(pages []int, b block) []int {
 // two to keep in step. What stays behind is the anchored heading, which is what
 // a cross-reference to "VIII, p. 15, Exercise 9" points at, and one line under
 // it saying where the exercises went.
-func cutExercises(blocks []block, section int, appendix bool) []block {
+func cutExercises(blocks []block, section int, appendix bool, pr printing) []block {
 	for i, b := range blocks {
-		if !strings.HasPrefix(b.text, exercisesHead) {
+		if !strings.HasPrefix(b.text, pr.exercises) {
 			continue
 		}
 		dir := corpus.ExerciseDir(section, appendix)
@@ -532,7 +536,7 @@ func imprint(b string) string {
 // opening "5) " is the fifth exercise and never the tail of a broken sentence,
 // and taking the text's word for it is what keeps § 1 from reporting four
 // exercises where the book prints twenty-eight.
-func joinable(prev, next string) bool {
+func joinable(prev, next string, pr printing) bool {
 	if itemOpen(next) {
 		return false
 	}
@@ -544,7 +548,7 @@ func joinable(prev, next string) bool {
 	// tag, and nothing in the corpus can point at it. This was 36 statements of
 	// chapter VIII, found by the reference graph rather than by eye: the book
 	// cites Theorem 1 of § 7 thirteen times and there was no Theorem 1 of § 7.
-	if headRE.MatchString(next) {
+	if pr.head.MatchString(next) {
 		return false
 	}
 	for _, s := range []string{prev, next} {

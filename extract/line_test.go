@@ -156,7 +156,10 @@ func TestAnAccentOfADisplayStaysOnTheDisplay(t *testing.T) {
 		t.Fatalf("got %d lines, want the display and the prose under it", len(lines))
 	}
 	want := []string{
-		`(14) $\widetilde{Λ} = Θ\circ (\widetilde{\sigma}\otimes 1_P)$.`,
+		// The two capitals are set upright, in the text face, and are written
+		// as TeX because they end up inside the dollar signs: see the tables in
+		// split and accent.
+		`(14) $\widetilde{\Lambda} = \Theta \circ (\widetilde{\sigma}\otimes 1_P)$.`,
 		`For $x\in P,x^*\in P^*$, and $y\in P$, by relations (4), (8), (10), and (11), we`,
 	}
 	for i, w := range want {

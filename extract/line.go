@@ -74,7 +74,7 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 	runs := make([]Run, 0, len(p.Spans))
 	for _, s := range p.Spans {
 		spec := l.Font(s)
-		s.Text = unligature(s.Text)
+		s.Text = Unligature(s.Text)
 		runs = append(runs, Run{Span: s, Spec: spec, Class: Classify(spec, s)})
 	}
 	lines := rows(runs)
@@ -102,12 +102,12 @@ var ligatures = strings.NewReplacer(
 	"ﬃ", "ffi", "ﬄ", "ffl", "ﬅ", "st", "ﬆ", "st",
 )
 
-// unligature writes the letters a ligature stands for.
+// Unligature writes the letters a ligature stands for.
 //
 // The æ and œ of French are not here. They are letters of the alphabet the
 // volume is set in rather than two letters drawn as one, and the volume spells
 // œuvre and cæsius with them on purpose.
-func unligature(s string) string {
+func Unligature(s string) string {
 	for _, c := range s {
 		if c >= 'ﬀ' && c <= 'ﬆ' {
 			return ligatures.Replace(s)
@@ -428,11 +428,24 @@ func under(r Run, runs []Run) bool {
 // and the letter it hangs off do not share a top and a superscript sits above
 // both. Half of the shorter run has to be inside the taller one's band, which
 // separates an index from the line below it without separating it from its own.
+// A large delimiter is asked for its middle instead, because it is drawn to
+// span what it encloses and so overlaps the line above the formula as readily
+// as the formula itself. The characteristic polynomial on French page 356 is
+// printed (X² − T_F(q)X + N_F(q))², and its parentheses, drawn 15 units tall
+// against a body of 12, clipped the band of the head above them by exactly half
+// their neighbour's height. Both went to the head, which then read "Proposition
+// $($ 1. — ... élément$)q$ de F", and the formula below lost the brackets that
+// say what is squared. Nothing but a delimiter is drawn to a size the line it
+// belongs to does not account for, so nothing else needs the stricter test.
 func joins(l Line, r Run) bool {
 	lo, hi := max(l.Top, r.Top), min(l.Bottom, r.Bottom())
 	overlap := hi - lo
 	if overlap <= 0 {
 		return false
+	}
+	if tall(r) {
+		mid := r.Top + r.Height/2
+		return l.Top <= mid && mid <= l.Bottom
 	}
 	shorter := min(l.Height(), r.Height)
 	return overlap*2 >= shorter

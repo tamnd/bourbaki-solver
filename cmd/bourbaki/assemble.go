@@ -123,7 +123,7 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 	exrec := corpus.BookExercises{ID: book}
 	files := map[string][]byte{}
 	for _, ch := range bt.Chapters {
-		pieces, err := assemble.Chapter(b.Book, ch, pages)
+		pieces, err := assemble.Chapter(b.Book, lang, ch, pages)
 		if err != nil {
 			return nil, nil, sum, err
 		}

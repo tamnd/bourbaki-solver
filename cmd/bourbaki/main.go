@@ -37,7 +37,7 @@ commands:
   label            parse a statement label, or a running head, and print what it means
   fleet            probe the hosts, and run the ssh tunnels that reach them
   queue            the durable work list: stats, reap, retry, drain, list
-  report           what the fleet did: pages, wall clock, and why batches failed
+  report           usage, coverage, and the two printings of a chapter against each other
   doctor           check that at least one route can take work, for use in cron
 
 Set BOURBAKI_CORPUS to the checkout of tamnd/bourbaki.
