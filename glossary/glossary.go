@@ -164,6 +164,67 @@ func (g Glossary) Sorted() []Term {
 	return out
 }
 
+// Save writes the glossary and moves the version on if the terms changed.
+//
+// The version is what makes a translated file stale, and until now it was a
+// number somebody had to remember to raise. It was raised by hand twice: once
+// when the Vietnamese renderings landed and once when Nullstellensatz was pinned
+// after a heading came back half translated. A number that has to be remembered
+// is a number that will be forgotten, and the cost of forgetting it is a corpus
+// where some files were translated against one glossary and some against
+// another with nothing recording which.
+//
+// The comparison is on the renderings and not on the bytes, so re-ordering the
+// file does not move it and neither does editing a note, which is written for a
+// person and never reaches a model. A row added, removed or rendered differently
+// does move it, because those are the three things that change what a prompt
+// says.
+//
+// It returns the version as written and whether it moved, so a command can say
+// so. A glossary that is not there yet starts at 1.
+func (g *Glossary) Save(path string) (version int, bumped bool, err error) {
+	old, err := os.ReadFile(path)
+	switch {
+	case os.IsNotExist(err):
+		if g.Version == 0 {
+			g.Version = 1
+		}
+	case err != nil:
+		return 0, false, err
+	default:
+		var was Glossary
+		if err := yaml.Unmarshal(old, &was); err != nil {
+			return 0, false, fmt.Errorf("%s: %w", path, err)
+		}
+		if !sameTerms(was.Terms, g.Terms) {
+			g.Version = max(was.Version, g.Version) + 1
+			bumped = true
+		}
+	}
+	if err := g.Write(path); err != nil {
+		return 0, false, err
+	}
+	return g.Version, bumped, nil
+}
+
+func sameTerms(a, b []Term) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	was := make(map[string]Term, len(a))
+	for _, t := range a {
+		t.Note = ""
+		was[Key(t.EN)] = t
+	}
+	for _, t := range b {
+		t.Note = ""
+		if other, ok := was[Key(t.EN)]; !ok || other != t {
+			return false
+		}
+	}
+	return true
+}
+
 // Write renders the glossary to a path, creating the directory.
 func (g Glossary) Write(path string) error {
 	b, err := yaml.Marshal(g)

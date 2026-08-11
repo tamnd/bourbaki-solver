@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/tamnd/bourbaki-solver/textguard"
 )
 
 // The hygiene rules are about the repository rather than about the corpus, and
@@ -34,6 +36,8 @@ func init() {
 			Title: "LF endings, one trailing newline, no trailing white space", Run: h05, Need: needGit},
 		Check{ID: "H06", Group: Hygiene, Hard: true,
 			Title: "the README coverage table is the one the corpus has", Run: h06},
+		Check{ID: "H07", Group: Hygiene, Hard: true,
+			Title: "no content file carries a provider's own markup", Run: h07},
 	)
 }
 
@@ -234,4 +238,37 @@ func h06(c *Corpus) ([]Finding, error) {
 			Msg: "the coverage table is not the one the corpus has, run bourbaki report coverage -write-readme"}}, nil
 	}
 	return nil, nil
+}
+
+// H07. No content file carries a provider's own markup.
+//
+// This one was written after the corpus had already shipped an example of it. A
+// retranslation of the appendix on the Nullstellensatz came back wrapped in a
+// :::writing fence, was accepted by every check on the translate path, and was
+// written to content/vi. All seven translation rules passed it: the mathematics
+// matched span for span, the tags matched, the heading tree matched, and the
+// block count matched because the fence lines carried no blank line around them
+// and so joined the paragraphs either side. It was found by reading the diff,
+// which is not a control.
+//
+// The test is textguard's, which is the same one the OCR path and the translate
+// path use on an answer before it is written. Having it here as well is not
+// redundant: the guards run on what a model said, this runs on what the corpus
+// holds, and the corpus is what a reader gets. A file can also be written by
+// hand, or by a version of the tool that predates the guard, and this is what
+// catches those.
+//
+// Hard. There is no version of a directive fence or a citation anchor that
+// belongs in a book of algebra.
+func h07(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		for _, leak := range textguard.Check(d.Body) {
+			if leak.Kind != "markup" {
+				continue
+			}
+			out = append(out, Finding{File: d.Path, Line: d.BodyLine(leak.Line), Msg: leak.Detail})
+		}
+	}
+	return out, nil
 }

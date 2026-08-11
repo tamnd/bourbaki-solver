@@ -11,13 +11,14 @@ package textguard
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
 
 // Leak is one thing found in an answer that should not be there.
 type Leak struct {
-	// Kind is refusal, no-image, meta, prompt or empty.
+	// Kind is refusal, no-image, meta, prompt, markup or empty.
 	Kind string
 	// Detail is the phrase that was found, as it appeared.
 	Detail string
@@ -128,6 +129,38 @@ var prompts = []string{
 	"do not summarize, paraphrase",
 }
 
+// markup is the provider's own formatting, wrapped around an answer that is
+// otherwise fine.
+//
+// This is a different failure from the ones above and it is the nastier one,
+// because there is no English sentence to search for and every rule that
+// compares a translation with its English can pass it. It happened: a retranslation
+// of the appendix on the Nullstellensatz came back inside
+//
+//	:::writing{variant="document" id="58321"}
+//	...
+//	:::
+//
+// and reached the corpus. The math spans matched, the tags matched, the heading
+// tree matched, the block count matched because the fence lines had no blank
+// line around them and so joined the paragraphs either side of them, and all
+// seven translation rules passed the file. It was found by reading the diff.
+//
+// A ::: line is a directive fence, which the Markdown this corpus is written in
+// does not use anywhere: 3,891 English paragraphs and not one of them has a
+// ::: on it. The private use area is where a provider hides its own citation
+// anchors, and 【 】 is where another one puts them. None of the three can be
+// part of a page of Bourbaki, so all three are refused wherever they turn up
+// rather than only at the start of an answer.
+var markup = []struct {
+	what string
+	re   *regexp.Regexp
+}{
+	{"a directive fence, which is the provider's markup and not Markdown this corpus uses", regexp.MustCompile(`(?m)^\s*:::`)},
+	{"a citation anchor", regexp.MustCompile(`【[^】]*】|oai_citation|contentReference`)},
+	{"a private use character, which is a provider's own marker", regexp.MustCompile(`[\x{e000}-\x{f8ff}]`)},
+}
+
 // Check reads an answer and reports everything wrong with it.
 //
 // Every leak is reported rather than the first, because a page that both
@@ -137,6 +170,15 @@ func Check(text string) []Leak {
 	var leaks []Leak
 	if strings.TrimSpace(text) == "" {
 		return []Leak{{Kind: "empty", Detail: "the answer is empty"}}
+	}
+	for i, line := range strings.Split(text, "\n") {
+		for _, m := range markup {
+			if found := m.re.FindString(line); found != "" {
+				leaks = append(leaks, Leak{Kind: "markup",
+					Detail: m.what + ", " + strconv.Quote(strings.TrimSpace(found)), Line: i + 1})
+				break
+			}
+		}
 	}
 	// One leak per line, worst kind first. A line that both apologises and
 	// narrates is one bad line, and reporting it twice makes the failures

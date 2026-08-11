@@ -229,3 +229,34 @@ func TestNormaliseDoesNotEatALongerMacroName(t *testing.T) {
 		}
 	}
 }
+
+// The provider's own formatting, which is the leak with no English sentence in
+// it. A retranslation of the appendix on the Nullstellensatz came back inside a
+// :::writing fence and passed all seven translation rules, because the fence
+// lines had no blank line around them and so joined the paragraphs either side.
+func TestProviderMarkupIsRefused(t *testing.T) {
+	cases := []struct {
+		name, text string
+		want       bool
+	}{
+		{"a directive fence", ":::writing{variant=\"document\" id=\"58321\"}\nCho A là một vành.\n:::", true},
+		{"an indented fence", "Cho A là một vành.\n  ::: ", true},
+		{"a citation anchor", "the ring A 【4:0†source】 is local", true},
+		{"a private use character", "the ring A \ue203 is local", true}, // written as an escape, since it prints as nothing
+		{"a section with three colons in the mathematics", "the map $A ::: B$ is one", false},
+		{"ordinary prose", "Cho A là một vành giao hoán.", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var found bool
+			for _, l := range Check(c.text) {
+				if l.Kind == "markup" {
+					found = true
+				}
+			}
+			if found != c.want {
+				t.Errorf("Check(%q) markup = %v, want %v: %v", c.text, found, c.want, Check(c.text))
+			}
+		})
+	}
+}

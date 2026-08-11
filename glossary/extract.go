@@ -539,10 +539,18 @@ p no cf loc cit ibid ff pp vol
 // It is not a rule that generalises and it does not pretend to. The real fix is
 // upstream, where a frequency list of prose n-grams offers its tail as
 // vocabulary, and until the miner is better than that this is the list.
+//
+// "respect" was added later and it is the one word here that was found rather
+// than read. L06 reported it against the first translated section: the row
+// rendered it bảo toàn, which is the verb, a map respecting a structure. The
+// corpus uses the word 33 times and every one of the 33 is "with respect to",
+// which is a preposition. So the row went out in the prompt for every chunk
+// holding that phrase, inviting a mistake the translator did not make, and the
+// rule that found it is the reason it is here.
 var notTerms = set(`
 abuse act adapt admit apply begin can come endow exist fact fix fixed hold
-idea imply large last later lie make may mean must next now out prove roles
-run send side study treat use used using well work
+idea imply large last later lie make may mean must next now out prove respect
+roles run send side study treat use used using well work
 cor de resp th
 `)
 

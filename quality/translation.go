@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
@@ -17,13 +18,15 @@ import (
 // will quietly renumber a proposition or drop a display if nothing is watching.
 // These rules are what watches.
 //
-// Nothing in the corpus is translated yet, so every one of them reports not
-// run. That is the honest state and it is written into the report rather than
-// left as a row of passes: a rule with nothing to look at has not passed.
+// These rules reported not run for as long as the corpus had no language but
+// English, which is the honest state for a rule with nothing to look at. The
+// appendix on the Nullstellensatz is the first section that is translated, and
+// all seven of them run against it now.
 //
-// The numbers in L07 are the one place here that is not measured, because there
-// is no translation to measure against. They are marked as such where they are
-// used and M7 has to set them from the first real run.
+// The one section is also where the numbers in L06 and L07 come from. That is
+// thin evidence and it is written down as what it is, one section, with the
+// counts that produced each number, so that the next few sections can move a
+// figure rather than argue with it.
 
 func init() {
 	register(
@@ -41,6 +44,8 @@ func init() {
 			Title: "the glossary is followed", Run: l06, Need: needGlossary},
 		Check{ID: "L07", Group: Translation, Hard: true,
 			Title: "no paragraph was left untranslated", Run: l07, Need: needTranslations},
+		Check{ID: "L08", Group: Translation, Hard: false,
+			Title: "no translation was written by a small model", Run: l08, Need: needTranslations},
 	)
 }
 
@@ -318,14 +323,86 @@ func l05(c *Corpus) ([]Finding, error) {
 
 // L06. The glossary is followed.
 //
-// Bourbaki's vocabulary is fixed and a translation that renders "anneau
-// artinien" three ways across one § is a translation nobody can search. The
-// glossary is the agreed rendering per term per language; this counts the terms
-// that appear and the ones rendered as the glossary says.
+// Bourbaki's vocabulary is fixed and a translation that renders "artinian ring"
+// three ways across one § is a translation nobody can search. The glossary is
+// the agreed rendering per term per language, and the prompt puts the rows that
+// match a chunk in front of the model. This reads the finished file and asks
+// the same question of the answer that the chunker asked of the source: the
+// terms the section was shown, and the ones it used.
 //
-// Soft, and not run: there is no glossary yet, and there is nothing to hold to
-// one. M7 builds both.
-func l06(c *Corpus) ([]Finding, error) { return nil, nil }
+// Soft, and it has to be. The rendering is looked for as it stands, and a
+// language does things to a word that a literal search does not follow. So a
+// finding here is a term to look at rather than a section to throw away, and
+// the hard rules are the ones about mathematics, tags and structure, which are
+// mechanical and admit no judgement.
+//
+// Measured on the first translated section, the appendix on the
+// Nullstellensatz: the English mentions 57 glossary terms and the Vietnamese
+// carries 56 of them as the glossary writes them. The one it does not is
+// "respect", and the rule is right and the glossary is wrong. The row renders
+// it as bảo toàn, which is the verb, a map respecting a structure. The corpus
+// uses the word 33 times and all 33 of them are "with respect to", which is a
+// preposition and not a term at all. The row went out in the prompt for every
+// chunk that contained the phrase, inviting exactly the mistake the translator
+// did not make. So the first thing this rule found was a bad row, which is one
+// of the two things it is for.
+func l06(c *Corpus) ([]Finding, error) {
+	g, err := glossary.Load(c.Root)
+	if err != nil {
+		return nil, err
+	}
+	ps, out := c.pairs()
+	for _, p := range ps {
+		en := strings.ToLower(prose(p.en.Body))
+		tr := strings.ToLower(prose(p.tr.Body))
+		var missed []string
+		for _, t := range g.Mentioned(p.tr.Lang, en) {
+			if glossary.Follows(p.tr.Lang, tr, t.In(p.tr.Lang)) {
+				continue
+			}
+			missed = append(missed, fmt.Sprintf("%s (%s)", t.EN, t.In(p.tr.Lang)))
+		}
+		if len(missed) == 0 {
+			continue
+		}
+		out = append(out, Finding{File: p.tr.Path, Line: 1,
+			Msg: fmt.Sprintf("the English mentions %d glossary terms and %d are not in this file as the glossary writes them: %s",
+				len(g.Mentioned(p.tr.Lang, en)), len(missed), strings.Join(missed, ", "))})
+	}
+	return out, nil
+}
+
+// prose is a body with the things a translator was told to copy taken out: the
+// mathematics, and the attribute block of a heading.
+//
+// Both would otherwise be read as vocabulary. A heading carries
+// {#alg-viii-a3-thm-1 .statement tag=00QM}, and .statement is a word; a formula
+// carries \operatorname{Spec} and the glossary has a row for spectrum. A term
+// that appears only inside one of those is a term the section was never asked
+// to render.
+// A display block is dropped whole, the same way paragraphs drops it.
+func prose(body string) string {
+	var b strings.Builder
+	inDisplay := false
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "$$" {
+			inDisplay = !inDisplay
+			continue
+		}
+		if inDisplay {
+			continue
+		}
+		if m := headingRE.FindStringSubmatch(line); m != nil {
+			b.WriteString(stripMath(m[2]))
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString(stripMath(line))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
 
 // L07. No paragraph was left untranslated.
 //
@@ -339,28 +416,80 @@ func l06(c *Corpus) ([]Finding, error) { return nil, nil }
 // written in the Latin alphabet, so the test there is the diacritics, which
 // Vietnamese uses in almost every sentence and English uses in none.
 //
-// The twelve-word floor below is the one number in this package that has not
-// been measured, because there is no translation to measure it against. It is
-// there to keep short fragments, a heading in a table or a bare formula caption,
-// out of the count. M7 has to set it from the first real run and say what it
-// set it from.
+// The floor was twelve words and it was a guess, written down as a guess because
+// there was no translation to measure it against. There is one now, and the
+// first thing the measurement says is that the guess was expensive: the corpus
+// has 3,891 English paragraphs and 921 of them, 23.7 per cent, are under twelve
+// words. A floor that blinds a hard rule to a quarter of the book is not a
+// floor, it is a hole.
+//
+// The second thing it says is that counting words is the wrong idea altogether.
+// paragraphs runs after the mathematics has been taken out, so what is left of a
+// display line is punctuation and operator names: "(1) Card(J) Card(I ." is four
+// words and none of them are words, and a translation leaves it exactly as it
+// stands. Counting the ones that start lower case does better and still leaks,
+// because Bourbaki has lower case operators too and "long dim ." reads as two
+// words of prose.
+//
+// So the question is not how long the paragraph is, it is whether the paragraph
+// is English. That is what the failure is. englishWords counts the words that
+// hold an English sentence together, and the separation is total: of the 3,891
+// English paragraphs, 288 carry none of them and those 288 are the residue,
+// while every one of the fourteen Vietnamese paragraphs in the corpus carries
+// none either. Two, then, with a floor of two skipping 400 paragraphs of 3,891,
+// 10.3 per cent against 23.7, and leaving two clear of everything real that has
+// been measured. That margin is what a hard rule needs, since a false positive
+// here fails the build.
 func l07(c *Corpus) ([]Finding, error) {
 	ps, out := c.pairs()
 	for _, p := range ps {
 		for i, para := range paragraphs(p.tr.Body) {
-			words := len(strings.Fields(para.text))
-			if words < 12 {
+			words := englishWords(para.text)
+			if words < 2 {
 				continue
 			}
 			if translatedInto(p.tr.Lang, para.text) {
 				continue
 			}
 			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(para.line),
-				Msg: fmt.Sprintf("paragraph %d is %d words with nothing of %s in it: %s",
+				Msg: fmt.Sprintf("paragraph %d carries %d English words and nothing of %s: %s",
 					i+1, words, p.tr.Lang, ellipsis(para.text, 50))})
 		}
 	}
 	return out, nil
+}
+
+// english is the words that hold an English sentence together and carry no
+// mathematics of their own. A paragraph with two of them is an English
+// paragraph; what is left of a display when the dollars come off has none.
+//
+// Four words are missing from it that belong there on the face of it, and they
+// are missing because Vietnamese has them too. "in" is to print, "to" is big,
+// "an" is peace, "do" is the first half of "do đó", which is how a Vietnamese
+// proof says therefore and which turned up in two of the fourteen paragraphs
+// measured. "so", "may" and "can" are out for the same reason. A word that both
+// languages spell the same way says nothing about which language a paragraph is
+// in, and this list is only worth having if every word on it does.
+var english = map[string]bool{}
+
+func init() {
+	for _, w := range strings.Fields(`the of is and for be we that it as if then every there
+this which are has have let was were from but not all such where when its they one on or
+thus hence therefore follows also only same each other into over under between because since
+while what who whose whom does did shall will would could might must been being had here now
+first second third these those`) {
+		english[w] = true
+	}
+}
+
+func englishWords(s string) int {
+	n := 0
+	for _, w := range strings.Fields(strings.ToLower(s)) {
+		if english[strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) })] {
+			n++
+		}
+	}
+	return n
 }
 
 // translatedInto asks whether this text carries the script of the language.
@@ -439,4 +568,53 @@ func stripMath(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// smallModel is the name of a model that is a cut down version of another one.
+//
+// Matched on the name and not on a list of models, because the list changes
+// under us and the naming does not: a provider that serves a smaller variant
+// says so in the suffix.
+var smallModel = regexp.MustCompile(`(?i)[-_](mini|nano|lite|small|flash|turbo)\b`)
+
+// L08. No translation was written by a small model.
+//
+// Nobody chooses the model here. The ask goes to a browser profile signed in to
+// an account and whatever that account is being served comes back, and the name
+// of it is what the answer reports. Two runs of the same section on the same
+// host a half hour apart came back as gpt-5-6 and then gpt-5-6-mini, which is
+// the account having been moved down between them.
+//
+// The second translation was measurably worse in one place and better in
+// another. "no common zero" went from "không có không điểm chung", which is
+// right, to "không có một không chung", which is not Vietnamese for anything;
+// and "integral over K" went from "nguyên trên K" to "đại số trên K", algebraic,
+// which is what the English of that line actually says. One better and one
+// worse is not evidence that the small model is fine, it is evidence that
+// nobody was looking, and this rule is what looks.
+//
+// Soft, and it has to be. The text may well be good and the corpus should not
+// go red because an account was throttled at the wrong minute. What it should
+// do is say which files were written that way, so that a later pass can decide
+// to do them again rather than discover it by reading.
+func l08(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		if d.Lang == "" || d.Lang == "en" {
+			continue
+		}
+		var model string
+		switch {
+		case d.Section != nil:
+			model = d.Section.TranslationModel
+		case d.Exercise != nil:
+			model = d.Exercise.TranslationModel
+		}
+		if !smallModel.MatchString(model) {
+			continue
+		}
+		out = append(out, Finding{File: d.Path, Line: 1,
+			Msg: fmt.Sprintf("was translated by %s, which is a cut down model, so the section is worth doing again", model)})
+	}
+	return out, nil
 }
