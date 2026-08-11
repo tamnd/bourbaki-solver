@@ -35,6 +35,8 @@ func init() {
 			Title: "displays per page within three sigma of the book mean", Run: m06},
 		Check{ID: "M07", Group: Mathematics, Hard: true,
 			Title: "no bracket from the prose closes inside the mathematics", Run: m07},
+		Check{ID: "M08", Group: Mathematics, Hard: false,
+			Title: "no matrix is left flattened into a pair of scripts", Run: m08},
 	)
 }
 
@@ -441,5 +443,51 @@ func m07(c *Corpus) ([]Finding, error) {
 				Msg: "a bracket the prose opened closes inside the mathematics: " + ellipsis(s.Text, 60)})
 		}
 	}
+	return out, nil
+}
+
+// M08. No matrix is left flattened into a pair of scripts.
+//
+// A matrix is set as rows one above the other. The text layer of a born-digital
+// volume has no rows in it, only runs with a height, so the top row comes back
+// raised and the bottom row lowered, and a 2 by 2 arrives as a superscript
+// holding one row and a subscript holding the other. The page prints
+//
+//	A = ( a  b )
+//	    ( c  d )
+//
+// and the Markdown says $(^{a b}_{c d})$, which renders as a b with c d under
+// it and is not a matrix at all. The larger ones fare worse: the product of
+// three 2 by 2 matrices in VIII, A2, Exercise 3 arrived as the display
+// (IR)((P0)((I0) with the second row of all three left below it as loose prose.
+//
+// This is reported and not repaired, and the reason is the same one the dropped
+// glyph test ran into. What separates a matrix from x^2_i is that the rows of a
+// matrix line up, which is a fact about the boxes, and pdftohtml works a box
+// out by dividing an element up by character count. The error in that division
+// is the width being measured. So the page goes back to the model with the
+// printed image, which is extract.FlagStackedMatrix and the -flagged path.
+//
+// Soft, because a flattened matrix is a defect of the reading and not of the
+// corpus's structure, and because there are 62 of them across the two printings
+// of chapter VIII: making it hard would stop every build until a fleet with
+// image quota reads 19 pages, and the rule would then be a schedule rather than
+// a check. It goes hard when the count reaches zero.
+func m08(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		for i, line := range strings.Split(d.Body, "\n") {
+			for _, m := range mathtex.StackedRows(line) {
+				out = append(out, Finding{File: d.Path, Line: d.BodyLine(i + 1),
+					Msg: "a matrix the text layer flattened into a pair of scripts: " + m})
+			}
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].File != out[j].File {
+			return out[i].File < out[j].File
+		}
+		return out[i].Line < out[j].Line
+	})
 	return out, nil
 }

@@ -11,6 +11,7 @@ package mathtex
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -490,4 +491,45 @@ func oneLine(s string, n int) string {
 		return s
 	}
 	return string([]rune(s)[:n]) + "…"
+}
+
+// stackedRowRE is a matrix the layer flattened: a superscript holding one row
+// and a subscript holding the other, on the same base, in either order.
+//
+// Two things have to hold and both are needed. The scripts are adjacent, which
+// is what makes it a matrix rather than a script: the layer raised the top row
+// and lowered the bottom row of the same thing, so they come back stuck
+// together. And each holds two or more entries with a space between them,
+// because the page puts a gap between two columns. Entries are letters and
+// digits, which is what the corners of a matrix hold in the Eléments: A B over
+// C D, 1 0 over 0 0, a b over c d.
+//
+// A lone script with a space in it is not this and must not be counted. M_{I J}
+// is one, 21 times in chapter VIII, and it is a real defect: the page prints
+// the set difference M_{I \ J} and the layer dropped the backslash. It is a
+// different defect with a different repair, and reporting it here would put 21
+// findings under a heading that names the wrong fault.
+var stackedRowRE = regexp.MustCompile(
+	`\^\{` + rowGroup + `\}_\{` + rowGroup + `\}|_\{` + rowGroup + `\}\^\{` + rowGroup + `\}`)
+
+// rowGroup is one row: two or more entries with a space between them.
+const rowGroup = `[A-Za-z0-9]+(?: +[A-Za-z0-9]+)+`
+
+// StackedMatrices counts the matrices a body has flattened.
+//
+// It is exported because the same count is wanted from two sides: here, to flag
+// the page while the volume is being read, and in the audit, to say what the
+// committed corpus still carries. Two implementations of one shape would drift,
+// and the one in the audit would be the one nobody checked against a PDF.
+func StackedMatrices(body string) int {
+	return len(stackedRowRE.FindAllString(body, -1))
+}
+
+// StackedRows is every flattened matrix row in a body, as it is written.
+//
+// StackedMatrices counts them; this names them, which is what an audit finding
+// needs so that somebody can find the thing on the page without opening the
+// file.
+func StackedRows(body string) []string {
+	return stackedRowRE.FindAllString(body, -1)
 }
