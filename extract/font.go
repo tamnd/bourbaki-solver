@@ -145,6 +145,18 @@ var cmex = map[rune]string{
 	'`': `\coprod`, 'a': `\coprod`,
 }
 
+// cmexOps is the LaTeX every large operator is written as, which is what tells
+// an operator from a delimiter or an accent drawn out of the same font. TeX
+// sets limits over and under an operator and nothing over or under a bracket,
+// so this is the list of glyphs that can have a limit written across them.
+var cmexOps = func() map[string]bool {
+	m := make(map[string]bool, len(cmex))
+	for _, s := range cmex {
+		m[s] = true
+	}
+	return m
+}()
+
 // cmexAccent maps the accent glyphs, which are the three widths CMEX carries of
 // each. An accent is drawn over the run it decorates rather than beside it, so
 // it is not written where it is found.

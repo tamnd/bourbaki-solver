@@ -27,6 +27,115 @@ package extract
 // because nothing on the page needs it.
 const restackGap = 2
 
+// hoistGap is how far the limit of an operator may stop short of the sign, and
+// how wide a break it may carry inside itself, in the pixel units of the page.
+//
+// A limit is centred on its sign, so the two meet by construction and the gap
+// is only there for the rounding pdftohtml does on a box. Chapter VIII measures
+// 3 at the widest, where the x of a product over x in H\G stops three units
+// short of the sign, and 8 is taken because that is the reach text.go already
+// uses for two pieces of one word.
+const hoistGap = 8
+
+// hoist puts a large operator in front of the limit written across it.
+//
+// TeX centres the limit of an operator on the sign, so the first half of the
+// limit is drawn to the left of it, and pdftohtml hands back a page in the
+// order it draws it. Reading a line left to right therefore writes half the
+// limit before the operator it belongs to, and the product of English page 320
+// came out as "_{x\in}\prod_{H\backslash G}": every piece is there, in the order
+// the page draws them, and none of it is where TeX wants it.
+//
+// A limit is told from an index by the band of the line. TeX sets an index
+// against the term it hangs off, close enough that the two share a band, and it
+// sets a limit far enough out that its box clears the band altogether, which is
+// why a limit arrives as a line of its own and gather has to put it back at all.
+// So the walk to the left stops at the first token that is on the band, and
+// A_1\prod keeps its index while \prod_{x\in H\backslash G} gives up its limit.
+//
+// The walk also stops where the tokens stop touching, since a limit is one
+// thing and what stands beyond a break in it is something else the line was
+// carrying at that height, and where it reaches material that is centred on
+// another sign.
+//
+// Moving the sign out leaves the two halves of the limit side by side, which is
+// what restack then reads as a single cluster.
+func hoist(toks []token, top, bottom int) []token {
+	var signs []token
+	for _, t := range toks {
+		if t.sign {
+			signs = append(signs, t)
+		}
+	}
+	if len(signs) == 0 {
+		return toks
+	}
+	out := append([]token(nil), toks...)
+	for i := range out {
+		s := out[i]
+		if !s.sign {
+			continue
+		}
+		j, left := i, s.left
+		for j > 0 {
+			t := out[j-1]
+			if t.depth == 0 || t.bottom > top && t.top < bottom {
+				break
+			}
+			if t.right < left-hoistGap || !nearest(t, s, signs) {
+				break
+			}
+			j, left = j-1, min(left, t.left)
+		}
+		if j == i {
+			continue
+		}
+		// The sign now stands where the limit started, so it takes the reach the
+		// limit had. What is on either side of a formula measures its distance
+		// from the token at the end of it, and the sign of English page 320 is
+		// drawn fourteen units past the equals sign that introduces it with the
+		// x of its limit four units along. Left with its own edge the sign looked
+		// a word away, the equals sign fell out of the formula, and the display
+		// came back as "= $\prod...$".
+		s.left = left
+		copy(out[j+1:i+1], out[j:i])
+		out[j] = s
+	}
+	return out
+}
+
+// nearest reports whether a sign is the one a token is centred on.
+//
+// A limit is centred on its sign, so where a line sets two signs the middle of
+// the token says which of them it answers to. The signs of a double sum stand a
+// limit's width apart and the bound of the first is written between them, so
+// walking left from the second reaches it before it reaches anything that stops
+// the walk. French page 399 sets a sum over G against a sum over the dual of G
+// twice, and both times the bound of the first went behind both signs and the
+// page said "\sum\sum_{g\in G\lambda\in\widehat{G}}".
+//
+// The measure is between midpoints, so the distances are doubled, which they
+// are on both sides and so says nothing.
+func nearest(t, s token, signs []token) bool {
+	d := gap(t, s)
+	for _, o := range signs {
+		if gap(t, o) < d {
+			return false
+		}
+	}
+	return true
+}
+
+// gap is how far two tokens stand from each other, midpoint to midpoint and
+// doubled.
+func gap(a, b token) int {
+	d := a.left + a.right - b.left - b.right
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
 // restack puts the clusters of a line back into their levels.
 func restack(toks []token) []token {
 	out := make([]token, 0, len(toks))
