@@ -419,7 +419,7 @@ func spreadPages(pages, n int) []int {
 // An image has to cover half its page on its own to count. A volume whose pages
 // are tiled out of strips, as Algèbre chapter 10 is, has no such image, and
 // then there is no one geometry to record and saying there is would be a
-// falsehood in a generated manifest.
+// falsehood in a generated manifest. TiledImage is the answer for those.
 func (c Classification) BodyImage() (Image, bool) {
 	half := c.pageArea() / 2
 	var best Image
@@ -432,6 +432,66 @@ func (c Classification) BodyImage() (Image, bool) {
 		}
 		if im.Width*im.Height > best.Width*best.Height {
 			best = im
+		}
+	}
+	return best, best.Width > 0
+}
+
+// TiledImage describes a page that is drawn as a stack of strips rather than as
+// one image. Algèbre chapter 10 draws each of its 222 pages as 24 ccitt strips
+// 2055 by 121 at 260 ppi, so BodyImage finds nothing and the volume comes out of
+// the probe with no scan block at all, which is what leaves render guessing at
+// its resolution.
+//
+// The strips of such a page have one width and one resolution between them, and
+// those two numbers are measurements, not guesses. The height is their heights
+// added up. They have to agree on the width and the resolution and to cover half
+// the page together, or this says nothing, because a page with a figure on it is
+// also a page with more than one image on it.
+//
+// They do not have to agree on the encoding. The last strip of every page of
+// Algèbre chapter 10 is 2055 by 51 and stored raw where the other 23 are ccitt,
+// which is the encoder giving up on a sliver, and the volume is a ccitt scan all
+// the same. What the strips are called is taken from the tallest of them.
+func (c Classification) TiledImage() (Image, bool) {
+	byPage := map[int][]Image{}
+	for _, im := range c.Images {
+		if im.Page == 1 || im.XPPI <= 0 || im.YPPI <= 0 {
+			continue
+		}
+		byPage[im.Page] = append(byPage[im.Page], im)
+	}
+	half := c.pageArea() / 2
+	var best Image
+	var bestPixels int
+	for _, images := range byPage {
+		if len(images) < 2 {
+			continue
+		}
+		head, tallest := images[0], images[0]
+		var height, pixels int
+		agree := true
+		for _, im := range images {
+			if im.Width != head.Width || im.XPPI != head.XPPI || im.YPPI != head.YPPI {
+				agree = false
+				break
+			}
+			if im.Height > tallest.Height {
+				tallest = im
+			}
+			height += im.Height
+			pixels += im.Width * im.Height
+		}
+		if !agree {
+			continue
+		}
+		if float64(head.Width)/float64(head.XPPI)*float64(height)/float64(head.YPPI) < half {
+			continue
+		}
+		if pixels > bestPixels {
+			bestPixels, best = pixels, tallest
+			best.Height = height
+			best.Num = 0
 		}
 	}
 	return best, best.Width > 0

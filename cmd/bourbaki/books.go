@@ -122,7 +122,15 @@ func booksAdd(args []string) error {
 	}
 	if cls.Nature == pdfsrc.NatureScanned {
 		b.Extraction = "ocr"
-		if img, ok := cls.BodyImage(); ok {
+		img, ok := cls.BodyImage()
+		if !ok {
+			// Algèbre chapter 10 draws every page as two dozen strips, so no
+			// single image describes it and the volume used to come out with no
+			// scan block at all. render then has nothing to hold its resolution
+			// down to and rasterises a 260 dpi scan at 300.
+			img, ok = cls.TiledImage()
+		}
+		if ok {
 			b.Scan = &corpus.Scan{
 				Format: img.Enc, Width: img.Width, Height: img.Height,
 				DPI: img.XPPI, BPC: img.BPC, Color: img.Color,

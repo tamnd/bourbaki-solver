@@ -125,11 +125,15 @@ func imagesAlgXFr() string {
 		"--------------------------------------------------------------------------------------------\n"
 	num := 0
 	for page := 55; page <= 64; page++ {
-		for range 24 {
+		for range 23 {
 			b += fmt.Sprintf("%4d %5d stencil  2055   121  -       1   1  ccitt  no      %4d  0   260   260 3384B  11%%\n",
 				page, num, 1300+num)
 			num++
 		}
+		// The sliver at the foot of every page is stored raw, not ccitt.
+		b += fmt.Sprintf("%4d %5d stencil  2055    51  -       1   1  image  no      %4d  0   260   260 13.0K 100%%\n",
+			page, num, 1300+num)
+		num++
 	}
 	return b
 }
@@ -336,6 +340,32 @@ func TestClassifyPagesTiledOutOfStrips(t *testing.T) {
 	}
 	if img, ok := c.BodyImage(); ok {
 		t.Errorf("BodyImage = %+v, want nothing, since no strip is a page", img)
+	}
+	// The strips of one page do describe the page between them, and that is
+	// what the volume gets recorded as: 23 of them 2055 by 121 at 260 ppi and
+	// a sliver at the foot.
+	img, ok := c.TiledImage()
+	if !ok {
+		t.Fatal("TiledImage found nothing on a volume that is nothing but tiles")
+	}
+	if want := 23*121 + 51; img.Width != 2055 || img.Height != want || img.XPPI != 260 || img.Enc != "ccitt" {
+		t.Errorf("TiledImage = %+v, want 2055 by %d at 260 ppi ccitt", img, want)
+	}
+}
+
+// A page with a figure on it also has more than one image on it, and it is not
+// a tiled page. Two images that disagree about their width describe a page with
+// something on it, not a page cut into strips.
+func TestTiledImageWantsStripsThatAgree(t *testing.T) {
+	c := Classification{
+		PageWidthPt: 612, PageHeightPt: 792,
+		Images: []Image{
+			{Page: 4, Width: 2500, Height: 3300, XPPI: 300, YPPI: 300, Enc: "jbig2"},
+			{Page: 4, Width: 600, Height: 400, XPPI: 300, YPPI: 300, Enc: "jpeg"},
+		},
+	}
+	if img, ok := c.TiledImage(); ok {
+		t.Errorf("TiledImage = %+v, want nothing: a scan of a page with a photo on it is not a tiled page", img)
 	}
 }
 

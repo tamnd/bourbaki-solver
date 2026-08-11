@@ -557,3 +557,47 @@ func TestARangeIsChunkedAndAListIsGrouped(t *testing.T) {
 		}
 	}
 }
+
+func TestDPIDoesNotGoAboveTheScan(t *testing.T) {
+	tests := []struct {
+		want, source, dpi int
+	}{
+		// Fonctions d'une variable reelle is scanned at 150, so the default
+		// asks for twice what is there and gets what is there.
+		{300, 150, 150},
+		// Commutative Algebra reports 301 and means 300. A cap that took that
+		// literally would render the whole volume one dot short of the default
+		// and call it a saving.
+		{300, 301, 300},
+		{600, 301, 301},
+		{600, 600, 600},
+		{300, 600, 300},
+		// A volume the probe never got a figure out of, like the French
+		// Algebra chapter 10, renders at what it is asked for.
+		{300, 0, 300},
+	}
+	for _, test := range tests {
+		if got := capDPI(test.want, test.source); got != test.dpi {
+			t.Errorf("capDPI(%d, %d) = %d, want %d", test.want, test.source, got, test.dpi)
+		}
+	}
+}
+
+func TestARenderOfALowResolutionScanStaysAtTheScan(t *testing.T) {
+	run := &poppler{pages: 2, pad: 1, ink: map[int]float64{1: 0.05, 2: 0.05}}
+	opts := options(t, run)
+	opts.SourceDPI = 150
+
+	manifest, err := Render(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manifest.DPI != 150 {
+		t.Fatalf("the manifest says %d dpi, want 150", manifest.DPI)
+	}
+	for _, command := range run.seen {
+		if strings.Contains(command, "-r 300") {
+			t.Fatalf("pdftoppm was asked for 300 dpi on a 150 dpi scan: %v", run.seen)
+		}
+	}
+}

@@ -339,12 +339,12 @@ func TestARejectedPageIsTriedAgainAtAHigherResolution(t *testing.T) {
 	runner := w.runner(t, machine)
 	var rerendered []int
 	runner.RetryDPI = 600
-	runner.Rerender = func(ctx context.Context, page, dpi int) error {
+	runner.Rerender = func(ctx context.Context, page, dpi int) (int, error) {
 		if dpi != 600 {
 			t.Errorf("re-rendered at %d dpi, want 600", dpi)
 		}
 		rerendered = append(rerendered, page)
-		return nil
+		return dpi, nil
 	}
 	if _, err := runner.Fill(w.pages); err != nil {
 		t.Fatal(err)

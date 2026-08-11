@@ -305,14 +305,19 @@ func ocrRun(args []string) error {
 	return nil
 }
 
-// rerender is what escalates a page to 600 dpi before a second attempt.
-func rerender(state setup) func(context.Context, int, int) error {
-	return func(ctx context.Context, page, dpi int) error {
-		_, err := render.Render(ctx, render.Options{
+// rerender is what escalates a page to 600 dpi before a second attempt, and
+// reports what it managed: a scan that holds 260 dpi is re-rendered at 260.
+func rerender(state setup) func(context.Context, int, int) (int, error) {
+	return func(ctx context.Context, page, dpi int) (int, error) {
+		manifest, err := render.Render(ctx, render.Options{
 			Book: state.entry.ID, PDF: filepath.Join(state.root, state.entry.PDF), Corpus: state.root,
-			DPI: dpi, Gray: true, First: page, Last: page, Batch: 1, Overwrite: true,
+			DPI: dpi, SourceDPI: sourceDPI(state.entry), Gray: true,
+			First: page, Last: page, Batch: 1, Overwrite: true,
 		})
-		return err
+		if err != nil {
+			return 0, err
+		}
+		return manifest.DPI, nil
 	}
 }
 
