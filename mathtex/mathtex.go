@@ -505,10 +505,15 @@ func oneLine(s string, n int) string {
 // C D, 1 0 over 0 0, a b over c d.
 //
 // A lone script with a space in it is not this and must not be counted. M_{I J}
-// is one, 21 times in chapter VIII, and it is a real defect: the page prints
-// the set difference M_{I \ J} and the layer dropped the backslash. It is a
-// different defect with a different repair, and reporting it here would put 21
-// findings under a heading that names the wrong fault.
+// was one, 21 times in chapter VIII, and it was a real defect: the page prints
+// the set difference M_{I−J} and the space is the room TeX left for a sign that
+// is drawn and not set, so it is in no font and no text layer. That is a
+// different defect with a different repair, and reporting it here would have
+// put 21 findings under a heading that names the wrong fault. It is repaired
+// now, in extract.Minus, which reads the rules pdftocairo reports and puts the
+// sign back, so the shape no longer occurs. This paragraph stays because the
+// exclusion is still what keeps a script with a space in it from being read as
+// a row.
 var stackedRowRE = regexp.MustCompile(
 	`\^\{` + rowGroup + `\}_\{` + rowGroup + `\}|_\{` + rowGroup + `\}\^\{` + rowGroup + `\}`)
 

@@ -37,6 +37,8 @@ func init() {
 			Title: "no bracket from the prose closes inside the mathematics", Run: m07},
 		Check{ID: "M08", Group: Mathematics, Hard: true,
 			Title: "no matrix is left flattened into a pair of scripts", Run: m08},
+		Check{ID: "M09", Group: Mathematics, Hard: false,
+			Title: "no base carries two superscripts or two subscripts", Run: m09},
 	)
 }
 
@@ -505,5 +507,68 @@ func m08(c *Corpus) ([]Finding, error) {
 		}
 		return out[i].Line < out[j].Line
 	})
+	return out, nil
+}
+
+// M09. No base carries two superscripts or two subscripts.
+//
+// TeX gives a base one of each and refuses the second by name: x^a_b^c is
+// Double superscript, and nothing renders it. So this is not a rule about what
+// the page meant, it is a rule about whether the Markdown is mathematics at
+// all, and it is the only rule here whose finding a reader can confirm without
+// the printed volume in front of them.
+//
+// It was written after a translation went looking for English words and turned
+// up $\theta^-_E^1$ in a Vietnamese file, where the appendix on the trace
+// prints the inverse of the isomorphism \theta_E. The reading is exact and the
+// fault is upstream of the reading: TeX stacks the -1 over the E at the same
+// place across the page, pdftohtml has no rows and hands the runs back left to
+// right, and the minus starts a hair left of the E while the one ends a hair
+// right of it. So the three arrive as minus, E, one, and extract writes them in
+// the order it was given.
+//
+// 189 findings in 62 content files when this was written, 93 in the English
+// chapter VIII, 95 in the French and 1 in the Vietnamese, with 149 in the
+// sections and 40 in the exercises. Three faults share the shape:
+//
+//	^-_E^1                  an inverse, 51 of them in 16 files
+//	^X_0^0_I                a two by two matrix flattened into its two rows
+//	^p_{i=0}^{-1}           \sum_{i=0}^{p-1} with the bound pulled to the front
+//	\Gamma '_1^{\pi'_1}     a prime, which is a superscript, 9 in one file
+//
+// The matrix line is why this is worth having beside M08 rather than folded
+// into it. M08 wants a space inside both scripts, because it reads a row as two
+// entries with a gap between them, and its own note says the brace-less kind
+// slipped past it and that a rule for it "needs a different signal and does not
+// exist". This is that signal, and it needed nothing about matrices to find
+// them: ^X_0^0_I is refused for being two superscripts, which it is.
+//
+// Measured against KaTeX over all 82,775 math spans of the corpus, both trees:
+// KaTeX refuses 313 spans with Double superscript or Double subscript and this
+// reports every one of them, with no span reported that KaTeX renders. The four
+// it reports that KaTeX refuses for another reason first are broken twice over,
+// all the same exercise, where _' inside the span trips the parser before the
+// outer pair does. That agreement is what the prime is in for: eleven spans in
+// the French chapter on the Brauer group carry no two marks a reader would
+// count, and \Gamma '_1^{\pi'_1} is a double superscript because the prime is
+// the first of the two.
+//
+// Soft, on M08's argument and for M08's reason. The count is not zero and the
+// repairs are three different jobs, one of them a pass over printed pages, so
+// hard today would be a schedule rather than a check. It goes hard when the
+// count reaches zero, and the first of the three to go should be the inverse,
+// since a -1 straddling a subscript is a shape extract can put back together
+// from the boxes it already has.
+func m09(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		spans, _ := Math(d.Body)
+		for _, s := range spans {
+			for _, w := range mathtex.DoubleScripts(s.Text) {
+				out = append(out, Finding{File: d.Path, Line: d.BodyLine(s.Line),
+					Msg: "two of one script against one base, which TeX will not set: " + w})
+			}
+		}
+	}
 	return out, nil
 }
