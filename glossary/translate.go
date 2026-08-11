@@ -380,9 +380,21 @@ func clean(text string) string {
 // others, and goes only when it has none left. Nothing is corrected: this
 // removes and it never writes terminology, because writing terminology is the
 // thing this program is not allowed to do.
+//
+// A row with a note is left alone. Nothing in this program writes a note, so a
+// note is a person's writing and the row it is on is a row a person has already
+// judged. That is not a nicety. The Nullstellensatz row renders the term as the
+// German word itself, because that is what Vietnamese mathematical writing does
+// with it, and to the rendering rules that is the English coming back unchanged
+// and a row to throw away. The rule is right in general and wrong here, and the
+// note is how the file says so.
 func (g *Glossary) Tidy() (dropped []Reject) {
 	var keep []Term
 	for _, t := range g.Terms {
+		if strings.TrimSpace(t.Note) != "" {
+			keep = append(keep, t)
+			continue
+		}
 		if why := badTerm(t.EN); why != "" {
 			dropped = append(dropped, Reject{EN: t.EN, Reason: why})
 			continue

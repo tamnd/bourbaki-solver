@@ -149,16 +149,23 @@ func Join(answers []string) string {
 //
 // The cost of getting this wrong is a term rendered its own way in one chunk,
 // which is what the glossary exists to prevent. It is guarded against by
-// matching on a word boundary rather than a substring, and by the adherence
-// report, which reads the finished files and asks the same question of the
-// answer that this asks of the source.
+// matching on a word boundary rather than a substring, and by L06, which reads
+// the finished files and asks the same question of the answer that this asks of
+// the source. The matcher is glossary.Mentions, one copy shared with L06, so
+// that the rule cannot hold a section to a term the prompt never showed it.
+//
+// This list is not masked and L06's is. A prompt that carries both "ring" and
+// "semisimple ring" tells the model something true twice; a rule that held the
+// answer to both would want a rendering of "ring" inside a phrase that has no
+// room for one. So the prompt is generous and the rule is strict, in that
+// order, and the difference is deliberate.
 func GlossaryBlock(g *glossary.Glossary, lang, body string) string {
 	lower := strings.ToLower(body)
 	type row struct{ en, tr string }
 	var rows []row
 	for _, t := range g.Terms {
 		tr := t.In(lang)
-		if tr == "" || !containsTerm(lower, strings.ToLower(t.EN)) {
+		if tr == "" || !glossary.Mentions(lower, glossary.Key(t.EN)) {
 			continue
 		}
 		rows = append(rows, row{t.EN, tr})
@@ -178,31 +185,4 @@ func GlossaryBlock(g *glossary.Glossary, lang, body string) string {
 		b.WriteString("\n")
 	}
 	return b.String()
-}
-
-// containsTerm asks whether a term appears in the text as a term rather than as
-// a run of letters inside another word. Both arguments are already lowered.
-func containsTerm(text, term string) bool {
-	if term == "" {
-		return false
-	}
-	for i := 0; ; {
-		j := strings.Index(text[i:], term)
-		if j < 0 {
-			return false
-		}
-		j += i
-		if boundary(text, j-1) && boundary(text, j+len(term)) {
-			return true
-		}
-		i = j + 1
-	}
-}
-
-func boundary(text string, i int) bool {
-	if i < 0 || i >= len(text) {
-		return true
-	}
-	c := text[i]
-	return !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9')
 }

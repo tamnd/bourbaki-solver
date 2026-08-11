@@ -73,9 +73,13 @@ func glossaryTidy(args []string) error {
 		fmt.Println("nothing was written, run again with -write")
 		return nil
 	}
-	if err := g.Write(glossary.Path(root)); err != nil {
+	version, bumped, err := g.Save(glossary.Path(root))
+	if err != nil {
 		return err
 	}
 	fmt.Printf("wrote %s\n", glossary.Path(root))
+	if bumped {
+		fmt.Printf("glossary tidy: version %d, so every translated file is stale and bourbaki translate will do it again\n", version)
+	}
 	return nil
 }

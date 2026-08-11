@@ -153,17 +153,16 @@ func glossaryTranslate(args []string) error {
 	}
 
 	added, kept := g.Merge(*lang, rows)
-	if g.Version == 0 {
-		g.Version = 1
-	}
 	if err := g.Validate(); err != nil {
 		return fmt.Errorf("the merge would leave the glossary invalid, nothing was written: %w", err)
 	}
 	// A run where every question failed writes nothing. It would otherwise put
 	// an empty glossary.yaml in the corpus, which is a file somebody has to
 	// notice and delete, and which reads as a glossary that exists.
+	version, bumped := g.Version, false
 	if len(g.Terms) > 0 {
-		if err := g.Write(glossary.Path(root)); err != nil {
+		var err error
+		if version, bumped, err = g.Save(glossary.Path(root)); err != nil {
 			return err
 		}
 	}
@@ -172,6 +171,9 @@ func glossaryTranslate(args []string) error {
 		added, kept, rejects, len(unknown), collisions, len(suspect))
 	fmt.Printf("\t%s now holds %d terms, %d with %s\n",
 		rel(root, glossary.Path(root)), len(g.Terms), len(g.In(*lang)), *lang)
+	if bumped {
+		fmt.Printf("\tversion %d, so every translated file is stale and bourbaki translate will do it again\n", version)
+	}
 	if len(suspect) > 0 {
 		fmt.Printf("\nthese %d were accepted and are worth an eye, because nothing here can tell\na diacritic-free Vietnamese word from an English one left standing:\n", len(suspect))
 		for _, s := range suspect {
