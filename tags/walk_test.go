@@ -50,6 +50,36 @@ func TestApply(t *testing.T) {
 	}
 }
 
+// A heading somebody typed a tag into by hand has to be found and named. A
+// pattern that only matched the correct form would read it as a heading with no
+// tag at all, and the report would then say something true and useless.
+func TestWalkKeepsAMalformedTag(t *testing.T) {
+	body := strings.Join([]string{
+		"#### Definition 1 {#alg-viii-s1-def-1 .statement tag=0001}",
+		"#### Proposition 1 {#alg-viii-s1-prop-1 .statement tag=000a}",
+		"#### Remark {#alg-viii-s1-n1-rem-1 .statement}",
+	}, "\n")
+	got := statements(t.TempDir(), filepath.Join(t.TempDir(), "s1.md"), body)
+	if len(got) != 3 {
+		t.Fatalf("found %+v", got)
+	}
+	if got[0].Tag != "0001" || got[0].Bad != "" {
+		t.Errorf("a good tag came out as %+v", got[0])
+	}
+	if got[1].Tag != "" || got[1].Bad != "000a" {
+		t.Errorf("a lowercase tag came out as %+v", got[1])
+	}
+	if got[2].Tag != "" || got[2].Bad != "" {
+		t.Errorf("an untagged statement came out as %+v", got[2])
+	}
+	// The record is the truth, so assembly writes the right tag over the wrong
+	// one rather than refusing to touch it.
+	fixed := Apply(body, map[string]Tag{"alg-viii-s1-prop-1": "0002"})
+	if !strings.Contains(fixed, "{#alg-viii-s1-prop-1 .statement tag=0002}") {
+		t.Errorf("a malformed tag was not written over:\n%s", fixed)
+	}
+}
+
 const walkSection = `---
 book: alg
 book_title: Algebra
