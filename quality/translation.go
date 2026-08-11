@@ -3,6 +3,7 @@ package quality
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -46,6 +47,8 @@ func init() {
 			Title: "no paragraph was left untranslated", Run: l07, Need: needTranslations},
 		Check{ID: "L08", Group: Translation, Hard: false,
 			Title: "no translation was written by a small model", Run: l08, Need: needTranslations},
+		Check{ID: "L09", Group: Translation, Hard: true,
+			Title: "the glossary version moves when the renderings do", Run: l09, Need: needGlossaryBase},
 	)
 }
 
@@ -617,4 +620,61 @@ func l08(c *Corpus) ([]Finding, error) {
 			Msg: fmt.Sprintf("was translated by %s, which is a cut down model, so the section is worth doing again", model)})
 	}
 	return out, nil
+}
+
+// baseGlossary reads manifests/glossary.yaml as it stood at a revision.
+func baseGlossary(root, base string) (*glossary.Glossary, error) {
+	cmd := exec.Command("git", "show", base+":manifests/glossary.yaml")
+	cmd.Dir = root
+	out, err := cmd.Output()
+	if err != nil {
+		// The file not being there at the base is not a fault. It is the
+		// commit that introduced the glossary.
+		return &glossary.Glossary{}, nil
+	}
+	return glossary.Parse(out, base+":manifests/glossary.yaml")
+}
+
+func needGlossaryBase(c *Corpus) string {
+	if c.Opt.Base == "" {
+		return "no base revision was given, so there is nothing to compare the glossary against"
+	}
+	if _, err := os.Stat(filepath.Join(c.Root, "manifests", "glossary.yaml")); err != nil {
+		return "there is no manifests/glossary.yaml"
+	}
+	return ""
+}
+
+// L09. The glossary version moves when the renderings do.
+//
+// Every translated file records the glossary version it was written against,
+// and a file is stale when that number is not the glossary's. The number is the
+// whole of the staleness model for terminology, and it is a number somebody has
+// to raise.
+//
+// glossary.Save raises it, so the tool cannot forget. A person editing the YAML
+// by hand can, and did: a row was added by hand in the same session Save was
+// written, and the version stayed where it was, which would have left every
+// translated file reporting current against a glossary it had never seen. At
+// one file that is a curiosity. At the 344 the corpus already has in English it
+// is the corpus quietly disagreeing with itself.
+//
+// Hard, because a wrong answer here is silent everywhere else. It reports not
+// run without a base revision, which is the honest state for a rule that has
+// nothing to compare against, and CI gives it one.
+func l09(c *Corpus) ([]Finding, error) {
+	was, err := baseGlossary(c.Root, c.Opt.Base)
+	if err != nil {
+		return nil, err
+	}
+	now, err := glossary.Load(c.Root)
+	if err != nil {
+		return nil, err
+	}
+	if glossary.SameTerms(was.Terms, now.Terms) || was.Version != now.Version {
+		return nil, nil
+	}
+	return []Finding{{File: "manifests/glossary.yaml", Line: 1,
+		Msg: fmt.Sprintf("the terms changed since %s and the version is still %d, so every translated file will report current against a glossary it was not written against",
+			c.Opt.Base, now.Version)}}, nil
 }

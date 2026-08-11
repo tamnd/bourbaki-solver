@@ -100,14 +100,22 @@ func Load(root string) (*Glossary, error) {
 	if err != nil {
 		return nil, err
 	}
+	return Parse(b, Path(root))
+}
+
+// Parse reads a glossary from bytes. name is what an error is blamed on, since
+// the bytes do not always come from a file: the audit reads an older revision
+// of the glossary out of git to see whether the version moved when the terms
+// did.
+func Parse(b []byte, name string) (*Glossary, error) {
 	var g Glossary
 	dec := yaml.NewDecoder(strings.NewReader(string(b)))
 	dec.KnownFields(true)
 	if err := dec.Decode(&g); err != nil {
-		return nil, fmt.Errorf("%s: %w", Path(root), err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	if err := g.Validate(); err != nil {
-		return nil, fmt.Errorf("%s: %w", Path(root), err)
+		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	return &g, nil
 }
@@ -196,7 +204,7 @@ func (g *Glossary) Save(path string) (version int, bumped bool, err error) {
 		if err := yaml.Unmarshal(old, &was); err != nil {
 			return 0, false, fmt.Errorf("%s: %w", path, err)
 		}
-		if !sameTerms(was.Terms, g.Terms) {
+		if !SameTerms(was.Terms, g.Terms) {
 			g.Version = max(was.Version, g.Version) + 1
 			bumped = true
 		}
@@ -207,7 +215,16 @@ func (g *Glossary) Save(path string) (version int, bumped bool, err error) {
 	return g.Version, bumped, nil
 }
 
-func sameTerms(a, b []Term) bool {
+// SameTerms says whether two glossaries hold the same renderings.
+//
+// Compared by key with the note cleared, so that reordering the file and
+// writing down why a row is there do not count as a change. Only what a
+// translation is actually held to counts, which is the renderings.
+//
+// Exported because Save is not the only way the file changes. Somebody editing
+// the YAML by hand goes round Save entirely, and L09 is what catches that, by
+// asking this the same question about the committed revision.
+func SameTerms(a, b []Term) bool {
 	if len(a) != len(b) {
 		return false
 	}
