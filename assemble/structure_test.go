@@ -1,0 +1,330 @@
+package assemble
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
+)
+
+func blocks(texts ...string) []block {
+	out := make([]block, 0, len(texts))
+	for _, t := range texts {
+		out = append(out, block{text: t, page: 42, label: "A VIII.7"})
+	}
+	return out
+}
+
+var vii = corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1}
+
+func labels(ss []corpus.Statement) []string {
+	out := make([]string, 0, len(ss))
+	for _, s := range ss {
+		out = append(out, s.Label())
+	}
+	return out
+}
+
+func same(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %d\n  %v\nwant %d\n  %v", len(got), got, len(want), want)
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// The four Examples of § 1 no. 1 as page 19 sets them: a plural head carrying
+// the first, then three paragraphs of their own, the third of them marked with
+// the asterisk that says it draws on something the reader has not reached yet.
+func TestStatementsReadsARun(t *testing.T) {
+	in := blocks(
+		"### 1. Artinian Modules and Noetherian Modules",
+		"**Examples.** — 1) A finite-dimensional vector space over a field K is both Artinian and Noetherian.",
+		"2) Let M be an A-module. If there exists an infinite family of nonzero submodules of M, then M is neither Artinian nor Noetherian.",
+		`$*3)$ We will see further on that the $\mathbf{Z}$-module $\mathbf{Z}$ is Noetherian and not Artinian.`,
+		"4) Let $p$ be a prime number and $M_p$ the $p$-primary component of the torsion module.",
+	)
+	_, got, err := statements(in, vii)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"alg-viii-s1-n1-exa-1",
+		"alg-viii-s1-n1-exa-2",
+		"alg-viii-s1-n1-exa-3",
+		"alg-viii-s1-n1-exa-4",
+	})
+	if strings.HasPrefix(got[2].Body, "$*3)$") {
+		t.Errorf("the marker is still on the body: %q", got[2].Body)
+	}
+}
+
+// A run carries on across whatever stands between its members, and a heading
+// closes it. No. 7 of § 16 is the case that made this a rule: it prints Remark
+// 1, a Definition, "Remarks. — 2)", then "3)" on its own.
+func TestStatementsCarriesARunAcrossAStatement(t *testing.T) {
+	in := blocks(
+		"### 7. The Brauer Group",
+		"**Remark 1.** — The mapping is bijective.",
+		"**Definition 4.** — A K-algebra A is said to be split by L.",
+		"**Remarks.** — 2) The construction does not depend on the choice.",
+		"3) The normal basis theorem is a specific case of this.",
+		"### 8. Cyclic Algebras",
+		"4) This paragraph opens on a number in a new no. and is not a remark.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 16})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"alg-viii-s16-n7-rem-1",
+		"alg-viii-s16-def-4",
+		"alg-viii-s16-n7-rem-2",
+		"alg-viii-s16-n7-rem-3",
+	})
+	if last := out[len(out)-1].text; !strings.HasPrefix(last, "4) This paragraph") {
+		t.Errorf("the run was carried past its heading: %q", last)
+	}
+}
+
+// A Corollary is numbered under the statement it hangs from, and its label says
+// so. A Remark and an Example are numbered inside the no.
+func TestStatementsNumbersByScope(t *testing.T) {
+	in := blocks(
+		"### 2. Wedderburn's Theorem",
+		"**Theorem 1.** — Let A be a ring.",
+		"**Corollary 1.** — Every simple module is isomorphic to a quotient of A.",
+		"**Corollary 2.** — The ring A is left Artinian.",
+		"**Proposition 4.** — Let M be an A-module.",
+		"**Corollary.** — The module M is semisimple.",
+		"**Remark.** — The converse is false.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"alg-viii-s5-thm-1",
+		"alg-viii-s5-thm-1-cor-1",
+		"alg-viii-s5-thm-1-cor-2",
+		"alg-viii-s5-prop-4",
+		"alg-viii-s5-n2-cor-1",
+		"alg-viii-s5-n2-rem-1",
+	})
+}
+
+// A Corollary standing under nothing is a section boundary read wrong, not a
+// statement to guess a number for.
+func TestStatementsRefusesAnOrphanCorollary(t *testing.T) {
+	in := blocks("### 1. Modules", "**Corollary 1.** — Every module is a module.")
+	if _, _, err := statements(in, vii); err == nil {
+		t.Fatal("a Corollary with no parent should be an error")
+	}
+}
+
+func TestStatementsRefusesTwoStatementsAtOneLabel(t *testing.T) {
+	in := blocks(
+		"### 1. Modules",
+		"**Proposition 3.** — The first one.",
+		"**Proposition 3.** — The second one.",
+	)
+	if _, _, err := statements(in, vii); err == nil {
+		t.Fatal("two statements at one label should be an error")
+	}
+}
+
+func TestHeadingCarriesTheLabel(t *testing.T) {
+	r := corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: corpus.KindProposition, Number: 6}
+	if got, want := heading(r, r.Label()),
+		"#### Proposition 6 {#alg-viii-s1-prop-6 .statement}"; got != want {
+		t.Errorf("heading() = %q, want %q", got, want)
+	}
+	u := corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: corpus.KindRemark, Subsec: 3, Occurrence: 2}
+	if got, want := heading(u, u.Label()),
+		"#### Remark {#alg-viii-s1-n3-rem-2 .statement}"; got != want {
+		t.Errorf("heading() = %q, want %q", got, want)
+	}
+}
+
+// The marks the book sets on an exercise are written as the mathematics the
+// volume's text layer holds them as, and every one of these is a line out of
+// chapter VIII.
+func TestItemOpenOnRealMarkers(t *testing.T) {
+	for _, s := range []string{
+		"1) Let A be a ring and M an A-module.",
+		`$\P 15)$ Let K be a commutative field.`,
+		`$*19)$ Let A be an Artinian ring.`,
+		`$*\P 12)$ Let G be a finite group.`,
+		"12)$ Show that the ring A is simple.",
+	} {
+		if !itemOpen(s) {
+			t.Errorf("itemOpen(%q) = false", s)
+		}
+	}
+	for _, s := range []string{
+		"a) Let A be a ring.",
+		"(i) The module M is simple.",
+		"Let A be a ring and 15) is not how a sentence opens.",
+		"$$ 5) $$",
+	} {
+		if itemOpen(s) {
+			t.Errorf("itemOpen(%q) = true", s)
+		}
+	}
+}
+
+// Two of the 317 exercises of chapter VIII are set straight after the end of
+// the one before them with no break the extractor can see. These are both of
+// them, cut out of the pages as they stand.
+func TestItemStartOnRunTogetherExercises(t *testing.T) {
+	s11 := "12) Let A be a ring. Show that the module is projective (argue as in Exercise 11, c)). 13) Denote by $\\mathscr{C}$ the category of A-modules."
+	i, m := itemStart(s11, 13)
+	if i < 0 {
+		t.Fatal("exercise 13 of § 11 was not found")
+	}
+	if got := strings.TrimSpace(s11[i+len(m[0]):]); !strings.HasPrefix(got, "Denote by") {
+		t.Errorf("exercise 13 begins %q", first(got, 40))
+	}
+	s16 := "14) Show that the mappings are bijective.$*$ $15)*$a) Let A be a regular integral domain."
+	i, m = itemStart(s16, 15)
+	if i < 0 {
+		t.Fatal("exercise 15 of § 16 was not found")
+	}
+	if got := strings.TrimSpace(s16[i+len(m[0]):]); !strings.HasPrefix(got, "a) Let A") {
+		t.Errorf("exercise 15 begins %q", first(got, 40))
+	}
+	if m[1] != "*" {
+		t.Errorf("exercise 15 of § 16 is marked supplementary and the marker was read as %q", m[1])
+	}
+}
+
+// The number of a cross-reference is not the number of an exercise, and the two
+// look the same. What tells them apart is that one of them is the number the §
+// is up to and comes after the end of a sentence.
+func TestItemStartIgnoresACrossReference(t *testing.T) {
+	for _, s := range []string{
+		"Show that the ring is simple (VIII, p. 210, Exercise 13).",
+		"By Exercise 13) of § 11, the module M is projective.",
+	} {
+		if i, _ := itemStart(s, 13); i >= 0 {
+			t.Errorf("itemStart(%q) found an exercise at %d", first(s, 40), i)
+		}
+	}
+}
+
+func TestSentenceEnd(t *testing.T) {
+	for _, s := range []string{"the module is projective.", "are bijective.$*$", "as in Exercise 11, c))", "M is simple. $"} {
+		if !sentenceEnd(s) {
+			t.Errorf("sentenceEnd(%q) = false", s)
+		}
+	}
+	for _, s := range []string{"By Exercise", "the ring A", "VIII, p. 210, Exercise"} {
+		if sentenceEnd(s) {
+			t.Errorf("sentenceEnd(%q) = true", s)
+		}
+	}
+}
+
+func TestExercisesReadsTheMarks(t *testing.T) {
+	in := blocks(
+		"### Exercises",
+		"1) Let A be a ring. Show that A is simple.",
+		"a) The first part. b) The second part.",
+		`$\P 2)$ Let K be a commutative field.`,
+		`$*3)$ Let G be a finite group.`,
+	)
+	got, err := exercises(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d exercises, want 3", len(got))
+	}
+	if !strings.Contains(got[0].Body, "a) The first part") {
+		t.Errorf("the lettered parts left exercise 1: %q", got[0].Body)
+	}
+	if got[1].Meta.Starred != true || got[1].Meta.Supplementary {
+		t.Errorf("exercise 2 carries the pilcrow alone, got starred=%v supplementary=%v",
+			got[1].Meta.Starred, got[1].Meta.Supplementary)
+	}
+	if got[2].Meta.Supplementary != true || got[2].Meta.Starred {
+		t.Errorf("exercise 3 carries the asterisk alone, got starred=%v supplementary=%v",
+			got[2].Meta.Starred, got[2].Meta.Supplementary)
+	}
+	if got[0].Meta.PDFPage != 42 || got[0].Meta.BookPage != "A VIII.7" {
+		t.Errorf("exercise 1 is on %d, %q", got[0].Meta.PDFPage, got[0].Meta.BookPage)
+	}
+}
+
+// A block after the exercises heading that is not exercise 1 means the § was
+// cut in the wrong place, and a wrong cut is not something to write out.
+func TestExercisesRefusesToOpenOnAnythingButOne(t *testing.T) {
+	in := blocks("### Exercises", "2) Let A be a ring.")
+	if _, err := exercises(in); err == nil {
+		t.Fatal("exercises opening on 2 should be an error")
+	}
+}
+
+func TestAnchorExercises(t *testing.T) {
+	in := blocks("### Exercises", "1) Let A be a ring.")
+	out, found := anchorExercises(in, vii)
+	if !found {
+		t.Fatal("the exercises heading was not found")
+	}
+	if got, want := out[0].text, "### Exercises {#alg-viii-s1-exercises}"; got != want {
+		t.Errorf("anchor = %q, want %q", got, want)
+	}
+}
+
+// The contents flattens the mathematics out of a subsection title and the page
+// does not, so the title is read off the page. This is no. 6 of § 11 as both
+// print it.
+func TestSubsectionsTakeTheirTitleFromThePage(t *testing.T) {
+	got := subsections([]part{{
+		page:  231,
+		label: "A VIII.213",
+		body:  "### 6. The Grothendieck Group $R_K(A)$\n\nLet K be a commutative field.",
+	}})
+	if len(got) != 1 {
+		t.Fatalf("got %d subsections, want 1", len(got))
+	}
+	if got[0].Number != 6 || got[0].Title != `The Grothendieck Group $R_K(A)$` {
+		t.Errorf("subsection = %+v", got[0])
+	}
+	if got[0].PDFPage != 231 || got[0].Page != 213 {
+		t.Errorf("subsection pages = %d, %d", got[0].PDFPage, got[0].Page)
+	}
+}
+
+func TestVerifyChecksTheContents(t *testing.T) {
+	p := Piece{
+		Section: corpus.Section{Number: 1, Title: "Modules", PDFPage: 18, Subsections: []corpus.Subsection{
+			{Number: 1, Title: "Modules", PDFPage: 18},
+			{Number: 2, Title: "Rings", PDFPage: 21},
+		}},
+		Subsections: []corpus.Subsection{
+			{Number: 1, Title: "Modules", PDFPage: 18},
+			{Number: 2, Title: "Rings", PDFPage: 21},
+		},
+	}
+	if err := p.Verify(); err != nil {
+		t.Fatalf("a piece that agrees with the contents should verify: %v", err)
+	}
+	short := p
+	short.Subsections = p.Subsections[:1]
+	if err := short.Verify(); err == nil {
+		t.Error("a missing no. should be an error")
+	}
+	moved := p
+	moved.Subsections = []corpus.Subsection{
+		{Number: 1, Title: "Modules", PDFPage: 18},
+		{Number: 2, Title: "Rings", PDFPage: 22},
+	}
+	if err := moved.Verify(); err == nil {
+		t.Error("a no. on the wrong page should be an error")
+	}
+}
