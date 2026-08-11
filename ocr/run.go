@@ -748,8 +748,7 @@ func (r *Runner) write(value task, text string) error {
 		Book: r.Book, PDFPage: value.page, Method: corpus.MethodOCR, Model: r.Model,
 		PageLabel: head.Label, RunningHead: head.Title, Locator: head.Locator,
 		InputSHA256: value.sha, PromptSHA256: sha256Hex(r.Prompt),
-		Generated: r.now().Format(time.RFC3339),
-		Lines:     len(strings.Split(strings.TrimSpace(body), "\n")),
+		Lines: len(strings.Split(strings.TrimSpace(body), "\n")),
 	}
 	if meta.InputSHA256 == "" {
 		meta.InputSHA256 = value.job.InputSHA256
