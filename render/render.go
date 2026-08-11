@@ -116,6 +116,13 @@ type Options struct {
 	PDF    string
 	Corpus string
 	DPI    int
+	// SourceDPI is the resolution of the images inside the PDF, off the scan
+	// block of books.yaml. Rendering above it invents nothing: pdftoppm
+	// interpolates, the page gets no sharper and the file gets bigger, and the
+	// bytes are what this pipeline pays for. Fonctions d'une variable reelle is
+	// scanned at 150, so the flat 300 was doubling every one of its 329 pages
+	// for nothing. Zero means unknown, and then the default stands.
+	SourceDPI int
 	// Gray is on by default for these volumes: the source is bilevel, so gray
 	// throws nothing away and the files come out smaller.
 	Gray bool
@@ -142,11 +149,25 @@ type Options struct {
 	Logf        func(string, ...any)
 }
 
+// dpi is what the pages are rendered at: what was asked for, or the default,
+// held down to what the scan actually holds.
 func (o Options) dpi() int {
-	if o.DPI > 0 {
-		return o.DPI
+	want := o.DPI
+	if want <= 0 {
+		want = DefaultDPI
 	}
-	return DefaultDPI
+	return capDPI(want, o.SourceDPI)
+}
+
+// capDPI holds a request down to the source. The cap is generous by a tenth
+// because a scanner's own figure is a rounded one: Commutative Algebra reports
+// 301 and is meant to be 300, and it would be silly to render that volume at
+// 300 and call it capped, or to refuse a 600 retry on a 590 dpi scan.
+func capDPI(want, source int) int {
+	if source <= 0 || want <= source+source/10 {
+		return want
+	}
+	return source
 }
 
 func (o Options) batch() int {

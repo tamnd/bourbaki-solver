@@ -76,8 +76,12 @@ type Runner struct {
 	Repair func(ctx context.Context, thread Thread, page int, text string, problems []Problem) (string, bool)
 	// Rerender puts a fresh image on disk at a higher resolution before a retry.
 	// It is a function rather than a dependency on the render package, because
-	// this package has no business knowing about pdftoppm.
-	Rerender func(ctx context.Context, page, dpi int) error
+	// this package has no business knowing about pdftoppm. It returns the
+	// resolution it actually rendered at, which is not always the one it was
+	// asked for: a scan holds only so many dots, and the French Algebra chapter
+	// 10 holds 260, so a retry there is the same image again and the log should
+	// say so rather than claim an escalation that did not happen.
+	Rerender func(ctx context.Context, page, dpi int) (int, error)
 	// RetryDPI is what Rerender is asked for on the second attempt and after.
 	RetryDPI int
 	Options  Options
@@ -519,11 +523,17 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 	for i := range tasks {
 		tasks[i].dpi = 0
 		if tasks[i].job.Attempts > 1 && r.Rerender != nil && r.RetryDPI > 0 {
-			if err := r.Rerender(ctx, tasks[i].page, r.RetryDPI); err != nil {
+			dpi, err := r.Rerender(ctx, tasks[i].page, r.RetryDPI)
+			switch {
+			case err != nil:
 				r.logf("page %d: could not re-render at %d dpi: %v", tasks[i].page, r.RetryDPI, err)
-			} else {
-				tasks[i].dpi = r.RetryDPI
-				r.logf("page %d: attempt %d, re-rendered at %d dpi", tasks[i].page, tasks[i].job.Attempts, r.RetryDPI)
+			case dpi >= r.RetryDPI:
+				tasks[i].dpi = dpi
+				r.logf("page %d: attempt %d, re-rendered at %d dpi", tasks[i].page, tasks[i].job.Attempts, dpi)
+			default:
+				tasks[i].dpi = dpi
+				r.logf("page %d: attempt %d, the scan holds %d dpi, so the image is the same one again",
+					tasks[i].page, tasks[i].job.Attempts, dpi)
 			}
 		}
 		if sum, err := fileSHA256(tasks[i].image); err == nil {

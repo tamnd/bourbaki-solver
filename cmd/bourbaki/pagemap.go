@@ -67,20 +67,12 @@ func pagemapBuild(args []string) error {
 	ctx := context.Background()
 	failed := 0
 	for _, b := range books {
-		src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+		pages, err := pageText(ctx, root, b)
 		if err != nil {
 			return err
 		}
-		// One pdftotext call for the whole document. Per page it is 1700 process
-		// launches for the three volumes and takes minutes; in one call it takes
-		// seconds.
-		text, err := src.Text(ctx, 0, 0, true)
-		if err != nil {
-			return err
-		}
-		pages := pagemap.SplitPages(text)
 		if len(pages) != b.Pages {
-			fmt.Printf("%s: pdftotext gave %d pages, the manifest says %d\n", b.ID, len(pages), b.Pages)
+			fmt.Printf("%s: got %d pages, the manifest says %d\n", b.ID, len(pages), b.Pages)
 		}
 		// A born-digital volume has no misreads to guard against, so two anchors
 		// that agree are enough there and three are not needed. It matters at the
@@ -238,4 +230,60 @@ func pagemapGaps(args []string) error {
 		}
 	}
 	return nil
+}
+
+// pageText is the text of every page of a volume, indexed from page 1, which is
+// what the head parsers read.
+//
+// For nearly every volume that is pdftotext: one call for the whole document,
+// because per page it is 1700 process launches over the three Algebra volumes
+// and takes minutes where one call takes seconds.
+//
+// Three volumes have no text layer at all. Commutative Algebra, General Topology
+// chapters 5 to 10 and the French Algebra chapter 10 are scans nobody has run
+// OCR over, so pdftotext returns 642, 372 and 222 empty pages and every page map
+// built from them is empty. Those read their pages back out of pages/<book>/,
+// which is what render and ocr put there, and say so plainly when they are not
+// there yet rather than reporting a volume with no anchors on it.
+func pageText(ctx context.Context, root string, b corpus.Book) ([]string, error) {
+	if b.TextLayer == "none" {
+		return readPageFiles(root, b)
+	}
+	src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+	if err != nil {
+		return nil, err
+	}
+	text, err := src.Text(ctx, 0, 0, true)
+	if err != nil {
+		return nil, err
+	}
+	return pagemap.SplitPages(text), nil
+}
+
+// readPageFiles is the body of every page file of a volume, in page order, with
+// a gap where a page has not been read. A gap is not an error here: the page map
+// wants a running head off as many pages as it can get, and a volume half read
+// still yields the offsets of the half that is there.
+func readPageFiles(root string, b corpus.Book) ([]string, error) {
+	pages := make([]string, b.Pages)
+	found := 0
+	for page := 1; page <= b.Pages; page++ {
+		file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, b.ID, page))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		pages[page-1] = file.Body
+		found++
+	}
+	if found == 0 {
+		return nil, fmt.Errorf("%s carries no text layer and has no pages in %s: run bourbaki render -book %s and then bourbaki ocr -book %s first",
+			b.ID, corpus.PagesDir(root, b.ID), b.ID, b.ID)
+	}
+	if found < b.Pages {
+		fmt.Printf("%s: %d of %d pages have been read, the map covers those\n", b.ID, found, b.Pages)
+	}
+	return pages, nil
 }

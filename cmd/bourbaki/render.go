@@ -111,7 +111,8 @@ func runRender(args []string) error {
 
 	options := render.Options{
 		Book: entry.ID, PDF: filepath.Join(root, entry.PDF), Corpus: root,
-		DPI: *dpi, Gray: *gray, First: *first, Last: *last, Only: only, Batch: *batch,
+		DPI: *dpi, SourceDPI: sourceDPI(entry), Gray: *gray,
+		First: *first, Last: *last, Only: only, Batch: *batch,
 		Overwrite: *overwrite, WriteBlanks: *blanks,
 	}
 	if !*quiet {
@@ -179,4 +180,14 @@ func printManifest(manifest render.Manifest, asJSON bool) error {
 		fmt.Printf("blank pages: %v\n", blank)
 	}
 	return nil
+}
+
+// sourceDPI is the resolution of the images inside a volume, or zero when the
+// probe never got a figure out of it. Rendering above it is interpolation, and
+// interpolation is bytes over rsync for nothing.
+func sourceDPI(entry *corpus.Book) int {
+	if entry.Scan == nil {
+		return 0
+	}
+	return entry.Scan.DPI
 }
