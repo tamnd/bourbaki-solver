@@ -573,10 +573,15 @@ cor de resp th
 //
 // A phrase breaks at one of these the same way it breaks at a stop word, which
 // is right: "reduced trace trd" is not a term and neither is "trd nrd".
+// pc, pcrd and coind were added after the list was written, off the rows they
+// let through. The glossary was rendering pcrd as "ước chung phải lớn nhất",
+// greatest right common divisor, where the book means the reduced
+// characteristic polynomial and prints it upright in a formula, and the corpus
+// says Pcrd 27 times, Pc 42 and Coind 30.
 var Operators = set(`
-ann aut card cl coker coim coker deg det diag dim end ex gal hom id im ind
-inf int inv ker lcm gcd max min mod nrd ord pr proj rad rk sdet sgn sup supp
-th tr trd
+ann aut card cl coind coker coim coker deg det diag dim end ex gal hom id im
+ind inf int inv ker lcm gcd max min mod nrd ord pc pcrd pr proj rad rk sdet
+sgn sup supp th tr trd
 `)
 
 func set(text string) map[string]bool {
