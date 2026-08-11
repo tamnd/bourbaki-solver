@@ -33,6 +33,8 @@ func init() {
 			Title: "no illegible marker is left in the corpus", Run: m05},
 		Check{ID: "M06", Group: Mathematics, Hard: false,
 			Title: "displays per page within three sigma of the book mean", Run: m06},
+		Check{ID: "M07", Group: Mathematics, Hard: true,
+			Title: "no bracket from the prose closes inside the mathematics", Run: m07},
 	)
 }
 
@@ -392,5 +394,42 @@ func m06(c *Corpus) ([]Finding, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out, nil
+}
+
+// M07. No bracket from the prose closes inside the mathematics.
+//
+// Bourbaki sets the name of a function upright, in the text face, so the text
+// layer hands the name and its opening bracket back as prose and sweeps the
+// closing one into the formula with the argument. The page then reads
+// Tr($u)$ where it should read Tr($u$).
+//
+// The two print the same, which is why this was not found by reading and was
+// not found by any rule here either. It was found by a translation: the model
+// copied the formula back as "u" with the bracket set as prose, correctly, and
+// the audit of the translation refused the section because a translation may
+// not alter mathematics. That cost a seventeen minute run of the appendix on
+// the trace of an endomorphism, and it would have cost one for every section
+// that carries the shape.
+//
+// So it is hard, and the argument for that is the same argument: a span whose
+// text is not the mathematics on the page is a span nothing downstream can
+// copy, compare, or translate. It was 138 spans in 66 pages of chapter VIII
+// when it was found and bourbaki fix parens repaired all of them, so this is at
+// nothing and is here to stay at nothing.
+//
+// What it will report is the case the repair will not touch: a span closing
+// more brackets than the line has open. Moving those out would leave the line
+// with a bracket that closes nothing, which is a guess about what the page says
+// rather than a repair, so they are reported for somebody to read the printed
+// page.
+func m07(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		for _, s := range mathtex.Straddles(d.Body) {
+			out = append(out, Finding{File: d.Path, Line: d.BodyLine(s.Line),
+				Msg: "a bracket the prose opened closes inside the mathematics: " + ellipsis(s.Text, 60)})
+		}
+	}
 	return out, nil
 }

@@ -337,16 +337,11 @@ func Unstraddle(body string) (string, int) {
 	var b strings.Builder
 	n, at := 0, 0
 	for _, s := range spans {
-		// A display is set on its own lines, so there is no prose against it and
-		// nothing to have been swept in.
-		if s.Display || s.Start < 2 || rs[s.Start-2] != '(' {
+		if !straddles(rs, s) {
 			continue
 		}
 		text := []rune(s.Text)
 		cut := looseCloser(text)
-		if cut < 0 {
-			continue
-		}
 		run := 1
 		for cut+run < len(text) && text[cut+run] == ')' {
 			run++
@@ -376,6 +371,34 @@ func Unstraddle(body string) (string, int) {
 		return body, 0
 	}
 	return out, n
+}
+
+// Straddles are the spans a bracket from the prose closes inside, which is the
+// fault Unstraddle repairs, read from the other side.
+//
+// The audit has it as M07 and the repair has it here, off the same test, so the
+// rule cannot report a shape the repair does not know about and the repair
+// cannot quietly leave one behind. Unstraddle repairs all but the spans where
+// the line has fewer brackets open than the span closes, and those are the ones
+// worth a person looking at, which is what M07 is for.
+func Straddles(body string) []Span {
+	spans, _ := Split(body)
+	rs := []rune(body)
+	var out []Span
+	for _, s := range spans {
+		if straddles(rs, s) {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// straddles is the shape: a bracket standing against the opening delimiter with
+// nothing between them, and a closing one inside the span that closes nothing of
+// the span's own. A display is set on its own lines, so there is no prose
+// against it and nothing to have been swept in.
+func straddles(rs []rune, s Span) bool {
+	return !s.Display && s.Start >= 2 && rs[s.Start-2] == '(' && looseCloser([]rune(s.Text)) >= 0
 }
 
 // wrap puts what is left of a span back in delimiters, with the space at either
