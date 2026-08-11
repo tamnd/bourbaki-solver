@@ -581,6 +581,31 @@ func bandSize(r Run) int {
 // them whatever their real size, so they are recognised by their font.
 func tall(r Run) bool { return family(r.Spec) == "CMEX" }
 
+// sign reports whether a run is a large operator, which is the one kind of
+// glyph a line can write a limit across rather than beside. A wide tilde and a
+// wide hat are drawn out of the same font and are neither.
+func sign(r Run) bool {
+	if !tall(r) {
+		return false
+	}
+	for _, c := range strings.TrimSpace(r.Text) {
+		s, accent, ok := CMEX(c)
+		return ok && !accent && cmexOps[s]
+	}
+	return false
+}
+
+// across reports whether a run stands over or under a large operator on this
+// line, which is what a limit does and nothing else does.
+func across(r Run, runs []Run) bool {
+	for _, o := range runs {
+		if sign(o) && r.Left < o.Right() && o.Left < r.Right() {
+			return true
+		}
+	}
+	return false
+}
+
 // bend reports whether a run is the dangerous bend, the sign Bourbaki sets in
 // the margin against a passage the reader is to take slowly.
 //
@@ -639,7 +664,16 @@ func finish(l *Line) {
 		// sets its headings in large bold capitals and its entries in small
 		// type beside them in the other column, and reading those entries as
 		// exponents of the headings puts half the index inside dollar signs.
-		if i > 0 && !offband(l.Runs[i-1]) && r.Left > l.Runs[i-1].Right()+4*r.Spec.Size {
+		// The run a limit stands clear of is the one before the display, so
+		// the gap is not asked of it. Equation (18) of § 21 opens on the bound
+		// of a sum, a hundred units past the equation number and directly under
+		// the sign, and reading the gap there made the bound a change of type
+		// and left the display as "\lambda \sum_{\in\widehat{G}}e_{\lambda}".
+		// A limit is centred on its sign, so what says a run is one is that it
+		// stands across a large operator, which is the one thing on a line that
+		// can have something written over and under it.
+		if i > 0 && !offband(l.Runs[i-1]) && r.Left > l.Runs[i-1].Right()+4*r.Spec.Size &&
+			!across(*r, l.Runs) {
 			r.Depth = 0
 			parent = append(parent[:1], *r)
 			continue
