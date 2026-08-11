@@ -6,51 +6,147 @@ import (
 )
 
 // Every running head below was copied out of pdftotext -layout run over the
-// three volumes. The mangled ones are not invented: the 2003 scan really does
+// volumes named. The mangled ones are not invented: the 2003 scan really does
 // print "A.IV.3 8" for A.IV.38, and reading those correctly is worth 24 pages
 // of the map.
 func TestReadHeadLabelOnRealRunningHeads(t *testing.T) {
+	tests := []struct {
+		line    string
+		prefix  string
+		chapter string
+		page    int
+		ok      bool
+	}{
+		// Chapter 8, 2023, Springer Nature. Clean text layer, recto and verso.
+		{"A VIII.466        TRACE OF AN ENDOMORPHISM OF FINITE RANK", "A", "VIII", 466, true},
+		{"EXERCISES                                   A VIII.467", "A", "VIII", 467, true},
+		{"A VIII.470                                HISTORICAL NOTE", "A", "VIII", 470, true},
+
+		// Chapters 4 to 7, 2003, Springer. A scan, so the text layer is
+		// somebody else's OCR and it splits the label in several ways.
+		{"A.IV.82                    POLYNOMIALS AND RATIONAL FRACTIONS", "A", "IV", 82, true},
+		{"A.IV.3 8                 POLYNOMIALS AND RATIONAL FRACTIONS       §4", "A", "IV", 38, true},
+		{"A.IV. 5 6              POLYNOMIALS AND RATIONAL FRACTIONS         §5", "A", "IV", 56, true},
+		{"No. 5     SYMMETRIC TENSORS AND POLYNOMIAL MAPPINGS       A.I V. 4 7", "A", "IV", 47, true},
+		{"A .I V. 74              POLYNOMIALS AND RATIONAL FRACTIONS        §6", "A", "IV", 74, true},
+		{"No. 2                  p-RADICAL EXTENSIONS OF HEIGHT = I     A. V.101", "A", "V", 101, true},
+		{"No. 6                D                CRITERIA OF SEPARABIL.ITY   A. V .13 5", "A", "V", 135, true},
+		{"A. V. 192.                        COMMUTATIVE FIELDS          § 16", "A", "V", 192, true},
+
+		// Pages that carry no label. Bourbaki prints no running head on a
+		// chapter opener, a section opener or a blank verso, which is where
+		// every interpolated entry in the map comes from.
+		{"CHAPTER VIII", "", "", 0, false},
+		{"§ 2.   THE STRUCTURE OF MODULES OF FINITE", "", "", 0, false},
+		{"HISTORICAL NOTE", "", "", 0, false},
+		{"", "", "", 0, false},
+
+		// The 1998 volume prints the chapter numeral alone on the verso. It
+		// must not read as a label, because that volume's number is at the foot.
+		{"I                              ALGEBRAIC STRUCTURES", "", "", 0, false},
+		{"III                            TENSOR ALGEBRAS", "", "", 0, false},
+	}
+	for _, tt := range tests {
+		pre, ch, p, ok := readHeadLabel(tt.line)
+		if ok != tt.ok || pre != tt.prefix || ch != tt.chapter || p != tt.page {
+			t.Errorf("readHeadLabel(%q) = %q, %q, %d, %v; want %q, %q, %d, %v",
+				tt.line, pre, ch, p, ok, tt.prefix, tt.chapter, tt.page, tt.ok)
+		}
+	}
+}
+
+// The volumes that are not Algebra print a Book prefix of two or three letters,
+// and until this session the reader took one letter, so every one of these read
+// as nothing at all. Each line below was copied out of pdftotext -layout run
+// over the volume named beside it.
+func TestReadHeadLabelOutsideAlgebra(t *testing.T) {
+	tests := []struct {
+		line    string
+		prefix  string
+		chapter string
+		page    int
+		ok      bool
+	}{
+		// Theories spectrales chapters 1 and 2, French, born digital.
+		{"TS I.142         ENDOMORPHISMES DES ESPACES DE BANACH                   § 7", "TS", "I", 142, true},
+		{"No 1                        SOUS-ALGEBRES                           TS I.143", "TS", "I", 143, true},
+		// Theories spectrales chapters 3 to 5, same printing, chapter IV.
+		{"TS IV.248                   OPERATEURS PARTIELS                       § 4", "TS", "IV", 248, true},
+		{"No 7                SPECTRE ET RESOLVANTE                      TS IV.247", "TS", "IV", 247, true},
+		// Topologie algebrique chapters 1 to 4, French, born digital. This one
+		// also prints a bare number at the foot, so it is the one volume where
+		// the two readers both find something and the label has to win.
+		{"TA II.214                       COEGALISATEUR                          § 5", "TA", "II", 214, true},
+		{"                             EXERCICES                                 TA II.217", "TA", "II", 217, true},
+		// Integration, three letters and a chapter numeral of two.
+		{"INT IV.43              MESURES SUR LES ESPACES TOPOLOGIQUES", "INT", "IV", 43, true},
+		// Fonctions d'une variable reelle, French. The scan reads the Roman
+		// numeral as ones, so a numeral that is all digits is ordinary here.
+		{"FVR 111.10                    FONCTIONS ELEMENTAIRES", "FVR", "III", 10, true},
+	}
+	for _, tt := range tests {
+		pre, ch, p, ok := readHeadLabel(tt.line)
+		if ok != tt.ok || pre != tt.prefix || ch != tt.chapter || p != tt.page {
+			t.Errorf("readHeadLabel(%q) = %q, %q, %d, %v; want %q, %q, %d, %v",
+				tt.line, pre, ch, p, ok, tt.prefix, tt.chapter, tt.page, tt.ok)
+		}
+	}
+}
+
+// The English Lie groups and Lie algebras chapters 7 to 9 prints its number at
+// the outer edge of the running head and its chapter at the inner edge, which
+// is neither of the two grammars the package started with. Every line below is
+// a real head from that volume, except the last two, which are heads from
+// volumes printed the other two ways and must not be read as this one.
+func TestReadHeadNumber(t *testing.T) {
 	tests := []struct {
 		line    string
 		chapter string
 		page    int
 		ok      bool
 	}{
-		// Chapter 8, 2023, Springer Nature. Clean text layer, recto and verso.
-		{"A VIII.466        TRACE OF AN ENDOMORPHISM OF FINITE RANK", "VIII", 466, true},
-		{"EXERCISES                                   A VIII.467", "VIII", 467, true},
-		{"A VIII.470                                HISTORICAL NOTE", "VIII", 470, true},
-
-		// Chapters 4 to 7, 2003, Springer. A scan, so the text layer is
-		// somebody else's OCR and it splits the label in several ways.
-		{"A.IV.82                    POLYNOMIALS AND RATIONAL FRACTIONS", "IV", 82, true},
-		{"A.IV.3 8                 POLYNOMIALS AND RATIONAL FRACTIONS       §4", "IV", 38, true},
-		{"A.IV. 5 6              POLYNOMIALS AND RATIONAL FRACTIONS         §5", "IV", 56, true},
-		{"No. 5     SYMMETRIC TENSORS AND POLYNOMIAL MAPPINGS       A.I V. 4 7", "IV", 47, true},
-		{"A .I V. 74              POLYNOMIALS AND RATIONAL FRACTIONS        §6", "IV", 74, true},
-		{"No. 2                  p-RADICAL EXTENSIONS OF HEIGHT = I     A. V.101", "V", 101, true},
-		{"No. 6                D                CRITERIA OF SEPARABIL.ITY   A. V .13 5", "V", 135, true},
-		{"A. V. 192.                        COMMUTATIVE FIELDS          § 16", "V", 192, true},
-
-		// Pages that carry no label. Bourbaki prints no running head on a
-		// chapter opener, a section opener or a blank verso, which is where
-		// every interpolated entry in the map comes from.
+		{"§13.             CLASSICAL SPLITTABLE SIMPLE LIE ALGEBRAS                    189", "", 189, true},
+		{"190                        SPLIT SEMI-SIMPLE LIE ALGEBRAS               Ch. VIII", "VIII", 190, true},
+		{"192                           SPLIT SEMI-SIMPLE LIE ALGEBRAS                         Ch. VIII", "VIII", 192, true},
+		// A chapter opener and a section opener carry no number, as in every
+		// other volume.
 		{"CHAPTER VIII", "", 0, false},
 		{"§ 2.   THE STRUCTURE OF MODULES OF FINITE", "", 0, false},
-		{"HISTORICAL NOTE", "", 0, false},
-		{"", "", 0, false},
-
-		// The 1998 volume prints the chapter numeral alone on the verso. It
-		// must not read as a label, because that volume's number is at the foot.
-		{"I                              ALGEBRAIC STRUCTURES", "", 0, false},
-		{"III                            TENSOR ALGEBRAS", "", 0, false},
 	}
 	for _, tt := range tests {
-		ch, p, ok := readHeadLabel(tt.line)
+		ch, p, ok := readHeadNumber(tt.line)
 		if ok != tt.ok || ch != tt.chapter || p != tt.page {
-			t.Errorf("readHeadLabel(%q) = %q, %d, %v; want %q, %d, %v",
+			t.Errorf("readHeadNumber(%q) = %q, %d, %v; want %q, %d, %v",
 				tt.line, ch, p, ok, tt.chapter, tt.page, tt.ok)
 		}
+	}
+}
+
+// A head that cites another Book must not become an anchor. The prefix is
+// measured off the volume, so the minority prefix loses however plausible it
+// looks on the line.
+func TestAnchorsKeepTheDominantPrefixOnly(t *testing.T) {
+	pages := []string{
+		"TS I.142         ENDOMORPHISMES DES ESPACES DE BANACH\nbody\n",
+		"No 1             SOUS-ALGEBRES                    TS I.143\nbody\n",
+		"TS I.144         FONCTIONS CONTINUES\nbody\n",
+		"cf. TG I.4 et la prop. 3                          A I.99\nbody\n",
+	}
+	as, prefix := readAnchorsPrefix(pages, HeadLabel, []string{"I"})
+	if prefix != "TS" {
+		t.Fatalf("prefix = %q, want TS", prefix)
+	}
+	if len(as) != 3 {
+		t.Fatalf("got %d anchors, want 3: %v", len(as), as)
+	}
+}
+
+func TestDominantBreaksTiesWithoutMapOrder(t *testing.T) {
+	if got := dominant(map[string]int{"A": 2, "TS": 2}); got != "A" {
+		t.Errorf("dominant = %q, want A", got)
+	}
+	if got := dominant(nil); got != "" {
+		t.Errorf("dominant = %q, want empty", got)
 	}
 }
 
@@ -317,5 +413,80 @@ func TestPDFPageOf(t *testing.T) {
 	}
 	if _, ok := m.PDFPageOf("IV", 9); ok {
 		t.Error("printed page 9 is a dropped leaf and has no pdf page")
+	}
+}
+
+// The 2015 printings changed what a page label means. Theories spectrales
+// prints TS I.1 to TS I.197 and then TS II.200, so the numeral says which
+// chapter the page is in while the number counts the volume, where Algebra
+// chapter 8 numbers the chapter. Assuming the older convention put all 197
+// pages of chapter I into chapter II.
+func TestPaginationIsDetectedNotAssumed(t *testing.T) {
+	perChapter := []anchor{
+		{chapter: "IV", page: 2}, {chapter: "IV", page: 80},
+		{chapter: "V", page: 3}, {chapter: "V", page: 101},
+		{chapter: "VI", page: 2}, {chapter: "VI", page: 44},
+	}
+	if got := detectPagination(perChapter); got != PerChapter {
+		t.Errorf("detectPagination = %q, want %q", got, PerChapter)
+	}
+	continuous := []anchor{
+		{chapter: "I", page: 2}, {chapter: "I", page: 197},
+		{chapter: "II", page: 200}, {chapter: "II", page: 334},
+	}
+	if got := detectPagination(continuous); got != Continuous {
+		t.Errorf("detectPagination = %q, want %q", got, Continuous)
+	}
+	// One chapter says nothing either way, and nothing downstream depends on
+	// the answer, so it keeps the older convention.
+	if got := detectPagination([]anchor{{chapter: "VIII", page: 4}}); got != PerChapter {
+		t.Errorf("detectPagination = %q, want %q", got, PerChapter)
+	}
+}
+
+// Where a volume prints the chapter on every page, that is where the chapter
+// boundary is, and the boundary falls on the opener rather than on the first
+// page that prints a number, because Bourbaki prints no running head on an
+// opener. Theories spectrales chapters 1 and 2 is the case in hand: pdf 210
+// prints TS I.197, pdf 211 is the page that says "chapitre ii" and prints
+// nothing else, pdf 212 prints TS II.200.
+func TestChapterStartsComeFromTheLabels(t *testing.T) {
+	as := []anchor{
+		{pdfPage: 14, chapter: "I", page: 1},
+		{pdfPage: 210, chapter: "I", page: 197},
+		{pdfPage: 212, chapter: "II", page: 200},
+		{pdfPage: 346, chapter: "II", page: 334},
+	}
+	starts := chapterStartsFromAnchors(as)
+	want := map[int]string{1: "I", 211: "II"}
+	if len(starts) != len(want) {
+		t.Fatalf("starts = %v, want %v", starts, want)
+	}
+	for at, ch := range want {
+		if starts[at] != ch {
+			t.Errorf("starts[%d] = %q, want %q", at, starts[at], ch)
+		}
+	}
+}
+
+// A page that fell between two fitted stretches goes to the chapter before it,
+// because that is where the exercises and the historical note sit. A chapter
+// opener is the exception and has to go the other way.
+func TestOpenerGoesToTheChapterItOpens(t *testing.T) {
+	covers := []cover{
+		{from: 14, to: 210, offset: 13, chapter: "I"},
+		{from: 212, to: 346, offset: 12, chapter: "II"},
+	}
+	got := closeCracks(openersGoRight(covers, []int{1, 211}))
+	if got[0].to != 210 {
+		t.Errorf("chapter I ends at pdf %d, want 210", got[0].to)
+	}
+	if got[1].from != 211 {
+		t.Errorf("chapter II starts at pdf %d, want 211", got[1].from)
+	}
+	// Printed 199 rather than 198: the opener is a recto, and every opener in
+	// the six volumes that map cleanly carries an odd printed number.
+	if p := got[1].from - got[1].offset; p != 199 {
+		t.Errorf("the opener is printed page %d, want 199", p)
 	}
 }
