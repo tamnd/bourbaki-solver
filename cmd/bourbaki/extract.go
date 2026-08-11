@@ -212,6 +212,7 @@ func extractRun(args []string) error {
 	}
 
 	res := &extract.Result{Book: b.ID}
+	var kept []int // the pages repaired by hand, which this run left alone
 	stamp := time.Now().UTC().Format(time.RFC3339)
 	for _, pg := range lay.Pages {
 		p := extract.ReadPageWith(lay, pg, compounds)
@@ -243,14 +244,26 @@ func extractRun(args []string) error {
 		for _, f := range p.Flags {
 			meta.Flags = append(meta.Flags, string(f))
 		}
+		path := corpus.PagePath(root, b.ID, p.PDFPage)
+		// A page somebody has repaired by hand is left as it is. The text layer
+		// has not changed since it was repaired, so re-reading it would put
+		// back exactly the fault that was repaired, and the repair is the one
+		// thing here that cost somebody reading the printed page.
+		if old, err := corpus.ReadFile[corpus.PageFrontMatter](path); err == nil && old.Meta.Manual {
+			kept = append(kept, p.PDFPage)
+			continue
+		}
 		f := corpus.PageFile{Meta: meta, Body: p.Body}
-		if err := f.Write(corpus.PagePath(root, b.ID, p.PDFPage)); err != nil {
+		if err := f.Write(path); err != nil {
 			return err
 		}
 	}
 	fmt.Print(res)
 	if *dry {
 		return nil
+	}
+	if len(kept) > 0 {
+		fmt.Printf("  %d pages were repaired by hand and were left alone: %v\n", len(kept), kept)
 	}
 	fmt.Printf("  pages written to %s\n", corpus.PagesDir(root, b.ID))
 	out, err := json.MarshalIndent(res, "", "  ")

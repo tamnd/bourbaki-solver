@@ -37,7 +37,7 @@ import (
 // confirmed. The ones that do not are corrected under a proof that only the
 // flagged span moved.
 
-const auditUsage = `usage: bourbaki ocr audit -book ID [flags]
+const ocrAuditUsage = `usage: bourbaki ocr audit -book ID [flags]
 
 Look for pages that passed every rule and may still be wrong, and ask about
 them in the conversations that produced them.
@@ -69,7 +69,7 @@ func ocrAudit(args []string) error {
 	hostList := fs.String("hosts", "", "comma separated route names")
 	routeFile := fs.String("routes", "", "route file")
 	dry := fs.Bool("dry", false, "say what would be asked and stop")
-	fs.Usage = func() { fmt.Fprint(os.Stderr, auditUsage) }
+	fs.Usage = func() { fmt.Fprint(os.Stderr, ocrAuditUsage) }
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}

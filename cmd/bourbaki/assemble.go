@@ -45,113 +45,7 @@ func runAssemble(args []string) error {
 	if err != nil {
 		return err
 	}
-	books, err := corpus.LoadBooks(root)
-	if err != nil {
-		return err
-	}
-	b, ok := books.Get(*book)
-	if !ok {
-		return fmt.Errorf("no book %q in %s", *book, corpus.BooksPath(root))
-	}
-	toc, err := corpus.LoadTOC(root)
-	if err != nil {
-		return err
-	}
-	bt, ok := toc.Get(*book)
-	if !ok || len(bt.Chapters) == 0 {
-		return fmt.Errorf("no table of contents for %q in %s: run bourbaki toc build first",
-			*book, corpus.TOCPath(root))
-	}
-	pages, err := readPages(root, *book)
-	if err != nil {
-		return err
-	}
-	if len(pages) == 0 {
-		return fmt.Errorf("no pages in %s: run bourbaki extract run first", corpus.PagesDir(root, *book))
-	}
-
-	// The permanent tags are read and written back out, never allocated here:
-	// assembly runs on every push and minting an identifier that can never be
-	// taken back is not something a build gets to do. bourbaki tags assign is.
-	set, err := tags.Load(root)
-	if err != nil {
-		return err
-	}
-	tagOf := set.Lookup()
-
-	rec := corpus.BookSections{ID: *book}
-	exrec := corpus.BookExercises{ID: *book}
-	files := map[string][]byte{}
-	var statements, exercises int
-	for _, ch := range bt.Chapters {
-		pieces, err := assemble.Chapter(b.Book, ch, pages)
-		if err != nil {
-			return err
-		}
-		cr := corpus.ChapterSections{Chapter: ch.Numeral, Title: ch.Title}
-		cx := corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
-		for _, p := range pieces {
-			if err := writeExercises(root, *lang, p, files, &cx, tagOf); err != nil {
-				return err
-			}
-			f := sectionFile(*b, ch, p, *lang, tagOf)
-			path := corpus.SectionPath(root, *lang, f.Meta)
-			out, err := f.Bytes()
-			if err != nil {
-				return err
-			}
-			files[path] = out
-			rel, _ := filepath.Rel(root, path)
-			cr.Sections = append(cr.Sections, corpus.SectionRecord{
-				Kind:          kindOf(p),
-				Section:       f.Meta.Section,
-				Title:         f.Meta.SectionTitle,
-				Path:          filepath.ToSlash(rel),
-				Label:         labelOf(b.Book, ch.Numeral, p),
-				FirstPDFPage:  p.First,
-				LastPDFPage:   p.Last,
-				BookPages:     f.Meta.BookPages,
-				Subsections:   len(p.Subsections),
-				Statements:    len(p.Statements),
-				Exercises:     len(p.Exercises),
-				Extraction:    f.Meta.Extraction,
-				ContentSHA256: corpus.ContentSHA256(f.Body),
-			})
-			statements += len(p.Statements)
-			exercises += len(p.Exercises)
-			if !*quiet {
-				fmt.Printf("%-46s %4d-%-4d %3d no. %3d statements %3d exercises\n",
-					filepath.Base(path), p.First, p.Last, len(p.Subsections),
-					len(p.Statements), len(p.Exercises))
-			}
-		}
-		rec.Chapters = append(rec.Chapters, cr)
-		exrec.Chapters = append(exrec.Chapters, cx)
-	}
-
-	sections, err := corpus.LoadSections(root)
-	if err != nil {
-		return err
-	}
-	sections.Upsert(rec)
-	manifest, err := sections.Bytes()
-	if err != nil {
-		return err
-	}
-	files[corpus.SectionsPath(root)] = manifest
-
-	exm, err := corpus.LoadExercises(root)
-	if err != nil {
-		return err
-	}
-	exm.Upsert(exrec)
-	exmanifest, err := exm.Bytes()
-	if err != nil {
-		return err
-	}
-	files[corpus.ExercisesPath(root)] = exmanifest
-
-	stale, err := staleFiles(root, *lang, b.Book, bt.Chapters, files)
+	files, stale, sum, err := assembleBook(root, *book, *lang, !*quiet)
 	if err != nil {
 		return err
 	}
@@ -173,8 +67,134 @@ func runAssemble(args []string) error {
 		fmt.Printf("removed %s\n", rel(root, path))
 	}
 	fmt.Printf("%s: %d files, %d statements, %d exercises\n",
-		*book, len(files)-2, statements, exercises)
+		*book, len(files)-2, sum.statements, sum.exercises)
 	return nil
+}
+
+// assembleTotals is what one run of the assembler came to.
+type assembleTotals struct{ statements, exercises int }
+
+// assembleBook is the assembler itself, with the flags and the writing taken
+// out. It returns what the run would put on disk and what is on disk that the
+// run did not produce, which is everything three callers need: assemble, which
+// writes it, assemble -check, which diffs it, and audit, whose S09 is that same
+// diff run as a rule alongside the other forty.
+//
+// It is here rather than in package assemble because it is the driver and not
+// the algorithm: it reads the manifests, walks the chapters and lays out the
+// paths, and moving it would take the command's tests with it for no gain.
+func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []string, assembleTotals, error) {
+	var sum assembleTotals
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	b, ok := books.Get(book)
+	if !ok {
+		return nil, nil, sum, fmt.Errorf("no book %q in %s", book, corpus.BooksPath(root))
+	}
+	toc, err := corpus.LoadTOC(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	bt, ok := toc.Get(book)
+	if !ok || len(bt.Chapters) == 0 {
+		return nil, nil, sum, fmt.Errorf("no table of contents for %q in %s: run bourbaki toc build first",
+			book, corpus.TOCPath(root))
+	}
+	pages, err := readPages(root, book)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	if len(pages) == 0 {
+		return nil, nil, sum, fmt.Errorf("no pages in %s: run bourbaki extract run first", corpus.PagesDir(root, book))
+	}
+
+	// The permanent tags are read and written back out, never allocated here:
+	// assembly runs on every push and minting an identifier that can never be
+	// taken back is not something a build gets to do. bourbaki tags assign is.
+	set, err := tags.Load(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	tagOf := set.Lookup()
+
+	rec := corpus.BookSections{ID: book}
+	exrec := corpus.BookExercises{ID: book}
+	files := map[string][]byte{}
+	for _, ch := range bt.Chapters {
+		pieces, err := assemble.Chapter(b.Book, ch, pages)
+		if err != nil {
+			return nil, nil, sum, err
+		}
+		cr := corpus.ChapterSections{Chapter: ch.Numeral, Title: ch.Title}
+		cx := corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
+		for _, p := range pieces {
+			if err := writeExercises(root, lang, p, files, &cx, tagOf); err != nil {
+				return nil, nil, sum, err
+			}
+			f := sectionFile(*b, ch, p, lang, tagOf)
+			path := corpus.SectionPath(root, lang, f.Meta)
+			out, err := f.Bytes()
+			if err != nil {
+				return nil, nil, sum, err
+			}
+			files[path] = out
+			rel, _ := filepath.Rel(root, path)
+			cr.Sections = append(cr.Sections, corpus.SectionRecord{
+				Kind:          kindOf(p),
+				Section:       f.Meta.Section,
+				Title:         f.Meta.SectionTitle,
+				Path:          filepath.ToSlash(rel),
+				Label:         labelOf(b.Book, ch.Numeral, p),
+				FirstPDFPage:  p.First,
+				LastPDFPage:   p.Last,
+				BookPages:     f.Meta.BookPages,
+				Subsections:   len(p.Subsections),
+				Statements:    len(p.Statements),
+				Exercises:     len(p.Exercises),
+				Extraction:    f.Meta.Extraction,
+				ContentSHA256: corpus.ContentSHA256(f.Body),
+			})
+			sum.statements += len(p.Statements)
+			sum.exercises += len(p.Exercises)
+			if verbose {
+				fmt.Printf("%-46s %4d-%-4d %3d no. %3d statements %3d exercises\n",
+					filepath.Base(path), p.First, p.Last, len(p.Subsections),
+					len(p.Statements), len(p.Exercises))
+			}
+		}
+		rec.Chapters = append(rec.Chapters, cr)
+		exrec.Chapters = append(exrec.Chapters, cx)
+	}
+
+	sections, err := corpus.LoadSections(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	sections.Upsert(rec)
+	manifest, err := sections.Bytes()
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	files[corpus.SectionsPath(root)] = manifest
+
+	exm, err := corpus.LoadExercises(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	exm.Upsert(exrec)
+	exmanifest, err := exm.Bytes()
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	files[corpus.ExercisesPath(root)] = exmanifest
+
+	stale, err := staleFiles(root, lang, b.Book, bt.Chapters, files)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	return files, stale, sum, nil
 }
 
 // writeExercises turns the exercises of one piece into one file each and

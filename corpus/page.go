@@ -71,6 +71,17 @@ type PageFrontMatter struct {
 	// Columns is how many columns the page was set in. It is written only when
 	// it is not one, which in this volume means the index at the back.
 	Columns int `yaml:"columns,omitempty"`
+
+	// Manual says somebody has repaired this page by hand and extract must not
+	// write over it.
+	//
+	// Without this the pipeline quietly destroys work. extract run rewrites
+	// every page it reads, so a formula somebody reconstructed from the printed
+	// page by looking at it survives exactly until the next extraction, and
+	// nothing anywhere says it was lost. Four pages of chapter VIII carry it:
+	// the accents of § 21 and the summation sign of § 5, none of which can be
+	// recovered by a table.
+	Manual bool `yaml:"manual,omitempty"`
 }
 
 // PageFile is one page of one volume.

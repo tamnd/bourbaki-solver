@@ -158,7 +158,40 @@ func Load(root, book string) (*Map, error) {
 	}
 	m.PDFPages = len(m.Entries)
 	m.Gaps = findGaps(m.Entries)
+	m.Steps = stepsOf(m.Entries)
 	return m, nil
+}
+
+// stepsOf recovers the steps from the rows, the way the chapter spans and the
+// gaps are recovered.
+//
+// Without this a loaded map has no steps at all, and Validate reads the two
+// leaves chapter VIII does not print as two unexplained jumps and the chapter
+// itself as 490 printed pages over 488 with nothing to account for the
+// difference. That is three problems reported against a map that is correct,
+// which is worse than no check: it is a check that teaches people to ignore it.
+//
+// A step is not a second source of truth here. The rows already say where the
+// printed number jumps, so this reads it off them rather than trusting anything
+// the builder wrote down and a later hand edit could have left behind.
+func stepsOf(entries []Entry) []Step {
+	var out []Step
+	for i := 1; i < len(entries); i++ {
+		prev, cur := entries[i-1], entries[i]
+		if prev.Page == 0 || cur.Page == 0 || prev.Chapter != cur.Chapter {
+			continue
+		}
+		if cur.Page <= prev.Page+1 {
+			continue
+		}
+		s := Step{AtPDFPage: cur.PDFPage, Chapter: cur.Chapter,
+			FromOffset: prev.PDFPage - prev.Page, ToOffset: cur.PDFPage - cur.Page}
+		for p := prev.Page + 1; p < cur.Page; p++ {
+			s.MissingPages = append(s.MissingPages, p)
+		}
+		out = append(out, s)
+	}
+	return out
 }
 
 // chaptersOf lists the chapters the entries mention, in the order they appear,
