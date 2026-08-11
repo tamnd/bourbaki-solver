@@ -65,6 +65,7 @@ extract           native text extraction
 fleet             SSH, tunnels, routing, queue
 api               chat client
 assemble          pages to sections
+share             public ChatGPT share pages, read whole over plain HTTP
 translate         vi, zh, ja
 solve             exercise solver and verifier
 audit             corpus checks
