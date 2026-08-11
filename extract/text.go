@@ -500,6 +500,29 @@ func mathWord(w string) bool {
 	return true
 }
 
+// spaceGap is how far two runs have to stand apart before the white between
+// them is a space of the sentence rather than the fit of the letters.
+//
+// A word space in this volume is five units and the letters of a word touch, so
+// three was enough until the operators. Bourbaki sets a thin space before the
+// argument of one, and a thin space is two units: page 145 ends "Ker" at 376 and
+// opens "u" at 378, and read at three that page said "Keru". The same goes for
+// det u, Tr u, Im u, Ann x and Nrd.
+//
+// The narrower measure is only taken when a letter follows, and only when it is
+// written on the line. Two units apart is where the volume also sets a closing
+// bracket against the word it closes and the leaders of the table of contents
+// against their entry, and those want no space at all: 472 of them against 81
+// that open on a letter. An index is written against the thing it indexes for
+// the same reason, which is why page 348 wants Inf^q and not Inf ^q.
+func spaceGap(t token) int {
+	r, _ := utf8.DecodeRuneInString(strings.TrimLeft(t.text, " "))
+	if unicode.IsLetter(r) && t.level == Base && t.depth == 0 {
+		return 2
+	}
+	return 3
+}
+
 // emit writes the tokens out, opening and closing the dollar signs and putting
 // the superscripts and subscripts back where they belong.
 //
@@ -563,7 +586,7 @@ func emit(toks []token) string {
 	for i := 0; i < len(toks); i++ {
 		t := toks[i]
 		text := t.text
-		gap := prev.right >= 0 && t.left-prev.right >= 3
+		gap := prev.right >= 0 && t.left-prev.right >= spaceGap(t)
 		if !t.math {
 			closeMath(!gap && compoundWord(text))
 			switch {

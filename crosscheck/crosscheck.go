@@ -17,13 +17,12 @@
 // those were measured on Algebra VIII, and both are why the rules below are
 // written the way they are.
 //
-// Quiet: 494 pages of the volume as it stands come to 7 pages and 9 words. Four
-// of the nine are ours, where a word runs into the mathematics beside it and
-// leaves "longe" or "thatp"; two are the two-column index, which both readings
-// take apart differently; one is pdftotext's debris; one is a footnote set in
-// two columns; and one is the PDF itself, which writes "fromn" and "groupnK" on
-// page 203 and is the only line in the volume that does. Every one of the nine
-// is explainable by reading the page.
+// Quiet: 494 pages of the volume as it stands come to 4 pages and 6 words. Two
+// are the two-column index, which the two readings take apart differently; one
+// is pdftotext's debris; one is a footnote set in two columns; one is a display
+// formula; and one is the PDF itself, which writes "fromn" and "groupnK" on page
+// 203 and is the only line in the volume that does. Every one of the six is
+// explainable by reading the page.
 //
 // Worth reading: run against the same volume three commits back, it names pages
 // 113, 114, 354, 424, 429, 431 and 466, which is every page an accent was drawn
