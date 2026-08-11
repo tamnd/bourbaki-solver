@@ -61,6 +61,21 @@ func (t Term) In(lang string) string {
 	return ""
 }
 
+// Set writes the term's rendering in one language. A language this glossary
+// does not carry is ignored rather than added, because the audit and the
+// translation prompts both read the three fields by name and a fourth would go
+// nowhere.
+func (t *Term) Set(lang, value string) {
+	switch lang {
+	case "vi":
+		t.VI = value
+	case "zh":
+		t.ZH = value
+	case "ja":
+		t.JA = value
+	}
+}
+
 // Langs are the languages a glossary row carries, in the order M7 does them.
 var Langs = []string{"vi", "zh", "ja"}
 
