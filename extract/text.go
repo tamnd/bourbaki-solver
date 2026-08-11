@@ -32,11 +32,15 @@ type token struct {
 	top    int
 	bottom int
 	math   bool
+	// sign is set on a large operator, which is the one kind of token a page
+	// can draw a limit across rather than beside.
+	sign bool
 }
 
 // Render writes one line as Markdown with LaTeX mathematics.
 func Render(l Line) string {
 	toks := tokens(l)
+	toks = hoist(toks, l.Top, l.Bottom)
 	toks = restack(toks)
 	toks = extend(toks)
 	return statementHead(emit(toks), capsOpen(toks))
@@ -141,7 +145,7 @@ func tokens(l Line) []token {
 			if text == "" {
 				continue
 			}
-			toks = append(toks, token{text: text, class: ClassMath, level: r.Level,
+			toks = append(toks, token{text: text, class: ClassMath, level: r.Level, sign: cmexOps[text],
 				left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(), math: true})
 			continue
 		}

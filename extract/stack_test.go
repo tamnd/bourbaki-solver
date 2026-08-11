@@ -146,6 +146,11 @@ func TestAFlattenedMatrixIsLeftAlone(t *testing.T) {
 // so only the third question refuses them: they stand thirteen units apart,
 // which is the offset between the two products, and neither lies inside what
 // the other spans.
+//
+// The sign leads what is left, because hoist takes every script that clears the
+// band and stands across a sign to be its limit and there is nothing on the
+// line to say that two of these came off two different products. The levels
+// themselves are what is left alone, and they are still written out interleaved.
 const stolenLimitPage = `<?xml version="1.0" encoding="UTF-8"?>
 <pdf2xml>
 <page number="318" position="absolute" top="0" left="0" height="999" width="659">
@@ -191,7 +196,7 @@ func TestLimitsOffsetFromEachOtherAreLeftAlone(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	const want = `$\times^{x\in}_x^H_{\in}\prod^{\backslash}_H^G_{\backslash G}^{s(x)^{-1}}t(s(x)$`
+	const want = `$\times \prod^{x\in}_x^H_{\in}^{\backslash}_H^G_{\backslash G}^{s(x)^{-1}}t(s(x)$`
 	if got := Render(lines[0]); got != want {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
@@ -201,7 +206,8 @@ func TestLimitsOffsetFromEachOtherAreLeftAlone(t *testing.T) {
 // limits stand at the same place across the page rather than offset. Every box
 // of the one is a box of the other, which is what says the line gathering has
 // run two lines together: put back, the limit would be written out twice and
-// nothing would say why.
+// nothing would say why. Here too the sign leads what hoist read as its limit,
+// and the levels are left interleaved.
 const doubledLimitPage = `<?xml version="1.0" encoding="UTF-8"?>
 <pdf2xml>
 <page number="319" position="absolute" top="0" left="0" height="999" width="659">
@@ -247,7 +253,7 @@ func TestALimitAtTheSamePlaceAtBothLevelsIsLeftAlone(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	const want = `$\times^x_x^{\in}_{\in}\prod^H_H^{\backslash}_{\backslash}^G_G^{g_1s(x)^{-1}}c h(x)$`
+	const want = `$\times \prod^x_x^{\in}_{\in}^H_H^{\backslash}_{\backslash}^G_G^{g_1s(x)^{-1}}c h(x)$`
 	if got := Render(lines[0]); got != want {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
@@ -275,6 +281,72 @@ func TestOneOfEachScriptIsLeftAlone(t *testing.T) {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
 	const want = `$\theta^1_E$, we deduce a`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// French page 399 sets a sum over G against a sum over the dual of G, and the
+// bound of the first is written between the two signs. Walking left from the
+// second sign reaches it before it reaches anything that would stop the walk,
+// so what says to stop is that the bound stands eleven units from the first
+// sign and forty one from the second, and a limit belongs to the sign it is
+// centred on. The line is carried whole, since the sizes on it are what tell a
+// bound from the body of the formula.
+const doubleSumPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="399" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="2" size="14" family="LMRoman12" color="#131413"/>
+<fontspec id="3" size="14" family="LMMathItalic12" color="#131413"/>
+<fontspec id="4" size="14" family="LMMathSymbols10" color="#131413"/>
+<fontspec id="5" size="12" family="CMEX10" color="#131413"/>
+<fontspec id="6" size="9" family="LMRoman8" color="#131413"/>
+<fontspec id="7" size="9" family="LMMathItalic8" color="#131413"/>
+<fontspec id="8" size="9" family="LMMathSymbols8" color="#131413"/>
+<text top="706" left="80" width="24" height="12" font="2">(13)</text>
+<text top="706" left="200" width="7" height="12" font="3"><i>a</i></text>
+<text top="706" left="211" width="11" height="12" font="2">=</text>
+<text top="702" left="225" width="4" height="18" font="4"><i>|</i></text>
+<text top="706" left="229" width="11" height="12" font="2">G</text>
+<text top="702" left="240" width="4" height="18" font="4"><i>|</i></text>
+<text top="701" left="244" width="8" height="12" font="8"><i>&#8722;</i></text>
+<text top="703" left="251" width="5" height="8" font="6">1</text>
+<text top="693" left="265" width="17" height="15" font="5">X</text>
+<text top="723" left="264" width="5" height="8" font="7"><i>g</i></text>
+<text top="721" left="269" width="7" height="12" font="8"><i>&#8712;</i></text>
+<text top="723" left="275" width="8" height="8" font="6">G</text>
+<text top="693" left="291" width="17" height="15" font="5">X</text>
+<text top="726" left="290" width="6" height="8" font="7"><i>&#955;</i></text>
+<text top="724" left="295" width="7" height="12" font="8"><i>&#8712;</i></text>
+<text top="720" left="303" width="6" height="15" font="5">b</text>
+<text top="726" left="302" width="8" height="8" font="6">G</text>
+<text top="706" left="316" width="7" height="12" font="3"><i>d</i></text>
+<text top="712" left="323" width="6" height="8" font="7"><i>&#955;</i></text>
+<text top="706" left="336" width="19" height="12" font="2">Tr(</text>
+<text top="706" left="356" width="8" height="12" font="3"><i>&#960;</i></text>
+<text top="712" left="363" width="6" height="8" font="7"><i>&#955;</i></text>
+<text top="706" left="370" width="5" height="12" font="2">(</text>
+<text top="706" left="375" width="7" height="12" font="3"><i>a</i></text>
+<text top="706" left="382" width="5" height="12" font="2">)</text>
+<text top="706" left="387" width="8" height="12" font="3"><i>&#960;</i></text>
+<text top="712" left="395" width="6" height="8" font="7"><i>&#955;</i></text>
+<text top="706" left="401" width="5" height="12" font="2">(</text>
+<text top="706" left="406" width="6" height="12" font="3"><i>g</i></text>
+<text top="701" left="413" width="8" height="12" font="8"><i>&#8722;</i></text>
+<text top="703" left="421" width="5" height="8" font="6">1</text>
+<text top="706" left="426" width="10" height="12" font="2">))</text>
+<text top="706" left="441" width="6" height="12" font="3"><i>g</i></text>
+<text top="706" left="448" width="4" height="12" font="2">;</text>
+</page>
+</pdf2xml>
+`
+
+func TestEachSumOfADoubleSumKeepsItsOwnBound(t *testing.T) {
+	lines := parse(t, doubleSumPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `(13) $a=|G|^{-1}\sum_{g\in G}\sum_{\lambda\in\widehat{G}}d_{\lambda}$ Tr($\pi_{\lambda}(a)\pi_{\lambda}(g^{-1}))g$;`
 	if got := Render(lines[0]); got != want {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}

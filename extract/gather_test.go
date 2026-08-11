@@ -127,8 +127,8 @@ func TestALimitGoesToTheSignItIsCentredOn(t *testing.T) {
 		t.Fatalf("got %d lines, want 2", len(lines))
 	}
 	want := []string{
-		`$_{x\in}\prod_{H\backslash G}^{s(x)^{-1}}c(s(x)g_1s(x\cdot g_1)^{-1}, s(x\cdot g_1)g_2s(x\cdot g_1g_2)^{-1})$`,
-		`$=_{x\in}\prod_{H\backslash G}c(g_1s(x\cdot g_1)^{-1}, s(x\cdot g_1)g_2s(x\cdot g_1g_2)^{-1})$`,
+		`$\prod_{x\in H\backslash G}^{s(x)^{-1}}c(s(x)g_1s(x\cdot g_1)^{-1}, s(x\cdot g_1)g_2s(x\cdot g_1g_2)^{-1})$`,
+		`$=\prod_{x\in H\backslash G}c(g_1s(x\cdot g_1)^{-1}, s(x\cdot g_1)g_2s(x\cdot g_1g_2)^{-1})$`,
 	}
 	for i, w := range want {
 		if got := Render(lines[i]); got != w {
