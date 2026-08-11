@@ -207,6 +207,12 @@ func TestL08NamesTheFileASmallModelWrote(t *testing.T) {
 		// A model whose name merely contains the letters. The word has to be
 		// the suffix, or a model called minimax would be refused for its name.
 		"minimax-01": false,
+		// A section of fifteen chunks can be answered by two models, because
+		// the account can be moved down in the middle of one. The file names
+		// every model that answered it and half a section on the small one is
+		// as much worth doing again as all of it.
+		"gpt-5-6, gpt-5-6-mini": true,
+		"gpt-5-6, gpt-5-7":      false,
 	}
 	for model, want := range cases {
 		t.Run(model, func(t *testing.T) {

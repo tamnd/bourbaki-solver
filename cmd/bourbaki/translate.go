@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -385,7 +386,7 @@ func translateSection(ctx context.Context, root string, hosts []ocr.Host, g *glo
 	if ps := translate.Audit(lang, j.body, body); len(ps) > 0 {
 		return "", "", ps
 	}
-	return body, firstModel(models), nil
+	return body, modelsUsed(models), nil
 }
 
 // askChunk asks once, and asks again with the complaint if the first answer did
@@ -459,13 +460,25 @@ func translateQuestionWithNote(g *glossary.Glossary, lang, body, note string) (s
 	return prompt.Translate(lang, translate.GlossaryBlock(g, lang, body), note, body)
 }
 
-func firstModel(models []string) string {
+// modelsUsed is every model that answered a chunk of one section, in the order
+// the chunks are in and without repeats.
+//
+// It used to be the first one that came back, which was wrong in the one case
+// that matters. Nobody chooses the model: the ask goes to a browser profile and
+// whatever the account is being served answers, and an account can be moved down
+// in the middle of a section. Fifteen chunks over fifteen minutes is long enough
+// for that to happen, and a file that names the model of chunk one is a file
+// that says gpt-5-6 about a section half of which came back on the small one.
+// L08 reads this field, so the field deciding to mention only the good half is
+// the audit deciding not to look.
+func modelsUsed(models []string) string {
+	var out []string
 	for _, m := range models {
-		if m != "" {
-			return m
+		if m != "" && !slices.Contains(out, m) {
+			out = append(out, m)
 		}
 	}
-	return ""
+	return strings.Join(out, ", ")
 }
 
 // chunkID names the scratch directory on the host.
