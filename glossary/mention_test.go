@@ -137,7 +137,7 @@ func TestSaveMovesTheVersionWhenTheTermsChange(t *testing.T) {
 
 	// And re-ordering does not, because the file order is nobody's business.
 	g.Terms = append(g.Terms, Term{EN: "ring", VI: "vòng"})
-	if v, _, err = g.Save(path); err != nil {
+	if _, _, err = g.Save(path); err != nil {
 		t.Fatal(err)
 	}
 	g.Terms[0], g.Terms[1] = g.Terms[1], g.Terms[0]
