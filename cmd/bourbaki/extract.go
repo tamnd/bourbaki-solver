@@ -192,6 +192,12 @@ func extractRun(args []string) error {
 	if len(lay.Pages) == 0 {
 		return fmt.Errorf("%s has no pages in %d-%d", b.ID, *first, *last)
 	}
+	// The signs the book draws rather than sets are not in the text layer at
+	// all, so they come from a second pass over the same pages. It costs about
+	// sixty milliseconds a page: see pdfsrc/rule.go.
+	if err := src.WithRules(context.Background(), lay); err != nil {
+		return err
+	}
 	// The page map is what turns a PDF page into the label the volume prints.
 	// It is not required: a volume can be read before it has been mapped, and
 	// the running head carries the label on most pages anyway.
@@ -380,6 +386,9 @@ func extractPage(args []string) error {
 	}
 	if len(lay.Pages) == 0 {
 		return fmt.Errorf("%s has no pdf page %d", b.ID, *page)
+	}
+	if err := src.WithRules(context.Background(), lay); err != nil {
+		return err
 	}
 	if *runs {
 		for i, l := range extract.Lines(lay, lay.Pages[0]) {
