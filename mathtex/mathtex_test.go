@@ -292,6 +292,133 @@ func TestDropStray(t *testing.T) {
 	}
 }
 
+func TestUnstraddle(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+		n    int
+	}{
+		{
+			// The shape that cost a run: the name and its opening bracket are
+			// prose, the closing bracket was swept into the formula.
+			"a name in prose",
+			`the sum is Tr($u)$.`,
+			`the sum is Tr($u$).`,
+			1,
+		},
+		{
+			// The bracket in the middle, which is the other half of the corpus.
+			// What is left of the span goes back in delimiters of its own.
+			"the rest of the span stays mathematics",
+			`we have Tr($v\circ u) =$ Tr($u\circ v)$.`,
+			`we have Tr($v\circ u$) $=$ Tr($u\circ v$).`,
+			2,
+		},
+		{
+			// Two names nested, so two brackets come out together.
+			"nested names",
+			`then det(diag($a_1, a_n)) =\pi (a_1)$ holds`,
+			`then det(diag($a_1, a_n$)) $=\pi (a_1)$ holds`,
+			1,
+		},
+		{
+			// No more come out than the line has open, whatever the span holds.
+			"more closers than the line has openers",
+			`then f($x))) = 0$ holds`,
+			`then f($x$)$)) = 0$ holds`,
+			1,
+		},
+		{
+			// A bracket opened inside an earlier span counts, or the second of
+			// these two would only give one back.
+			"an opener inside an earlier span",
+			`then $\varphi ($A g($a_1, a_n)) = 0$ holds`,
+			`then $\varphi ($A g($a_1, a_n$)) $= 0$ holds`,
+			1,
+		},
+		{
+			// The two innocent straddles, which are most of them. A space
+			// between the bracket and the delimiter means the bracket belongs to
+			// the sentence and not to a name.
+			"resp",
+			`the ring $A$ (resp. $B)$ is one`,
+			`the ring $A$ (resp. $B)$ is one`,
+			0,
+		},
+		{
+			"a labelled item",
+			"$\\alpha$) the first case\n",
+			"$\\alpha$) the first case\n",
+			0,
+		},
+		{
+			"the brackets of the span are its own",
+			`we have f($g(x))$ here`,
+			`we have f($g(x)$) here`,
+			1,
+		},
+		{
+			// A display is set on its own lines and has no prose against it.
+			"a display",
+			"we have\n\n$$\nf(x) = y)\n$$\n\nas claimed",
+			"we have\n\n$$\nf(x) = y)\n$$\n\nas claimed",
+			0,
+		},
+		{
+			// Nothing but a bracket in front of it, so there is no formula to
+			// leave behind and the span is left alone.
+			"an empty span",
+			`the value f($)$ is odd`,
+			`the value f($)$ is odd`,
+			0,
+		},
+		{
+			// The space that held the delimiter off the bracket stays where it
+			// reads, which is outside the mathematics.
+			"a space before the bracket",
+			`the sum is Tr($u )$.`,
+			`the sum is Tr($u$ ).`,
+			1,
+		},
+		{
+			// The line is the unit, so a bracket left open on the line above
+			// does not license taking one out of this one.
+			"an opener on the line before",
+			"a paragraph f(\nand then g($x)) = 0$ here",
+			"a paragraph f(\nand then g($x$)$) = 0$ here",
+			1,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, n := Unstraddle(c.body)
+			if got != c.want || n != c.n {
+				t.Errorf("got %q (%d spans)\nwant %q (%d spans)", got, n, c.want, c.n)
+			}
+		})
+	}
+}
+
+// The proof the repair carries: it moves delimiters and it moves nothing else,
+// so the page after it says what the page before it said. Anything that fails
+// this is handed back untouched, and the corpus is what says whether the
+// property holds on real pages rather than on the ones written for a test.
+func TestUnstraddleMovesOnlyDelimiters(t *testing.T) {
+	for _, c := range []string{
+		`the sum is Tr($u)$.`,
+		`we have Tr($v\circ u) =$ Tr($u\circ v)$.`,
+		`then det(diag($a_1, a_n)) =\pi (a_1)$ holds`,
+		`then $\varphi ($A g($a_1, a_n)) = 0$ holds`,
+		`the ring $A$ (resp. $B)$ is one`,
+	} {
+		got, _ := Unstraddle(c)
+		if strings.ReplaceAll(got, "$", "") != strings.ReplaceAll(c, "$", "") {
+			t.Errorf("%q became %q, which is not the same text", c, got)
+		}
+	}
+}
+
 // Both repairs run over every page and most pages need neither, so the one
 // thing they must never do is come back with a body that is not the one they
 // were given.
@@ -302,5 +429,8 @@ func TestNothingToDoChangesNothing(t *testing.T) {
 	}
 	if got, ok := DropStray(body); got != body || ok {
 		t.Errorf("DropStray changed a body it had nothing to do to")
+	}
+	if got, n := Unstraddle(body); got != body || n != 0 {
+		t.Errorf("Unstraddle changed a body it had nothing to do to")
 	}
 }

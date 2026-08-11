@@ -156,6 +156,11 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
 		out.Body = body
 		out.flag(FlagStrayDelimiter)
 	}
+	// Then the bracket a name in prose left inside its own argument, which is
+	// 138 spans of chapter VIII and reads correctly on the page while saying
+	// something else in the Markdown. It goes before Repair so that Repair sees
+	// the spans as they will be rather than as they arrived.
+	out.Body, _ = mathtex.Unstraddle(out.Body)
 	out.Body, _, _ = mathtex.Repair(out.Body)
 	if strings.Count(out.Body, "$")%2 != 0 {
 		out.flag(FlagUnbalanced)

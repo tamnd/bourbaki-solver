@@ -32,12 +32,42 @@ Repairs the committed Markdown in the ways that need no PDF and no model.
 
 commands:
   stray     take out a delimiter that opens mathematics and closes nothing
+  parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
 
-Run stray before math: everything after an unclosed delimiter reads as
-mathematics, and math will not touch a span whose end it cannot see.
+Run them in that order. Everything after an unclosed delimiter reads as
+mathematics, so stray comes first and the other two will not touch a span whose
+end they cannot see, and parens comes before math so that math reads the spans
+as they will be rather than as they are.
 
 Run bourbaki fix <command> -h for the flags of a command.
+`
+
+const fixParensUsage = `usage: bourbaki fix parens [flags]
+
+Moves a closing bracket that belongs to the prose back out of the mathematics
+the text layer swept it into.
+
+It is the function whose name Bourbaki sets upright. The name and its opening
+bracket come through as prose and the closing one comes through inside the
+formula, so the page reads Tr($u)$ where it should read Tr($u$). The two print
+the same, which is why nobody catches it by reading, and they are not the same
+text: the mathematics of the first is "u)". A translator asked to copy the
+formulae hands back "u", correctly, and the audit refuses the section because a
+translation may not alter mathematics.
+
+It repairs only a bracket standing immediately before an opening delimiter with
+nothing in between, which is the shape that comes from a name. A straddle with
+a space in front of it is the sentence's own bracket, as in "(resp. $x$)", and
+is left alone. No more brackets come out of a span than the line has open, and
+the page with every delimiter removed has to be the page it started as, so this
+moves delimiters and never a character of prose or of mathematics.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
 `
 
 const fixStrayUsage = `usage: bourbaki fix stray [flags]
@@ -91,6 +121,8 @@ func runFix(args []string) error {
 		return fixMath(args[1:])
 	case "stray":
 		return fixStray(args[1:])
+	case "parens":
+		return fixParens(args[1:])
 	}
 	fmt.Fprint(os.Stderr, fixUsage)
 	os.Exit(2)
@@ -212,6 +244,54 @@ func corpusAndBooks() (string, *corpus.BooksManifest, error) {
 		return "", nil, err
 	}
 	return root, books, nil
+}
+
+func fixParens(args []string) error {
+	fs := flag.NewFlagSet("fix parens", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixParensUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, spans int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := mathtex.Unstraddle(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		spans += n
+		if *check {
+			word := "spans"
+			if n == 1 {
+				word = "span"
+			}
+			fmt.Printf("%s  %d %s\n", rel(root, path), n, word)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	verb := "repaired"
+	if *check {
+		verb = "would repair"
+	}
+	fmt.Printf("fix parens: %d pages read, %s %d spans in %d of them\n", pages, verb, spans, changed)
+	if changed > 0 && !*check {
+		fmt.Println("fix parens: run bourbaki fix math, then bourbaki assemble")
+	}
+	return nil
 }
 
 func fixMath(args []string) error {
