@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // Source is one PDF on disk.
@@ -238,12 +239,39 @@ const (
 // Classification is what Classify decided and the evidence it decided on, so a
 // wrong answer can be argued with instead of guessed at.
 type Classification struct {
-	Nature        Nature
-	SampledPages  int
-	PagesWithFull int // sampled pages carrying a full-page image
-	Images        []Image
-	Fonts         int
-	FontsEmbedded int
+	Nature                    Nature
+	First, Last               int // the band of pages sampled
+	SampledPages              int
+	PagesWithFull             int // sampled pages the images cover
+	PageWidthPt, PageHeightPt float64
+	Images                    []Image
+	Fonts                     int
+	FontsEmbedded             int
+}
+
+// pageArea is the page in square inches, or 1 when pdfinfo gave no page size,
+// which makes every coverage fraction small rather than infinite.
+func (c Classification) pageArea() float64 {
+	a := c.PageWidthPt * c.PageHeightPt / (72 * 72)
+	if a <= 0 {
+		return 1
+	}
+	return a
+}
+
+// coveredArea is how many square inches of each page the images on it take up.
+// An image with no resolution is skipped: there is no way to say how big it is
+// on the page, and guessing would be a decision dressed as a measurement.
+func (c Classification) coveredArea(images []Image) map[int]float64 {
+	out := map[int]float64{}
+	for _, im := range images {
+		if im.XPPI <= 0 || im.YPPI <= 0 {
+			continue
+		}
+		out[im.Page] += float64(im.Width) / float64(im.XPPI) *
+			float64(im.Height) / float64(im.YPPI)
+	}
+	return out
 }
 
 // Classify decides which extraction path a volume takes, from a sample of pages
@@ -256,6 +284,13 @@ type Classification struct {
 // embedded font" would call it born-digital and send 734 scanned pages down the
 // native text path.
 //
+// The sample is a band a quarter of the way in and not the first pages. Springer
+// reset the front matter of their French reprints in type and scanned only the
+// body, so the first ten pages of Algèbre chapters 1 to 3 hold one small colour
+// plate, three typeset pages and six scanned ones. Six of ten is under the
+// threshold, and reading the front of that file called a 645-page scan
+// born-digital.
+//
 // Blank pages have no image, so the threshold is a fraction rather than a
 // requirement that every sampled page have one.
 func (s *Source) Classify(ctx context.Context, samplePages int) (Classification, error) {
@@ -266,8 +301,9 @@ func (s *Source) Classify(ctx context.Context, samplePages int) (Classification,
 	if err != nil {
 		return Classification{}, err
 	}
-	last := min(samplePages, info.Pages)
-	images, err := s.Images(ctx, 1, last)
+	first := max(info.Pages/4, 1)
+	last := min(first+samplePages-1, info.Pages)
+	images, err := s.Images(ctx, first, last)
 	if err != nil {
 		return Classification{}, err
 	}
@@ -276,23 +312,29 @@ func (s *Source) Classify(ctx context.Context, samplePages int) (Classification,
 		return Classification{}, err
 	}
 
-	c := Classification{SampledPages: last, Images: images, Fonts: len(fonts)}
+	c := Classification{First: first, Last: last, SampledPages: last - first + 1,
+		Images: images, Fonts: len(fonts)}
 	for _, f := range fonts {
 		if f.Embedded {
 			c.FontsEmbedded++
 		}
 	}
-	// A page image covers the page, so it is large in both directions. Anything
-	// small is a figure or a publisher's logo and does not make a volume a scan.
+	// A scan covers its page with images. Counting pixels does not measure that
+	// across a library: Fonctions d'une variable réelle is scanned at 150 dpi,
+	// so a full page of it is 914 by 1386 and a pixel threshold reads it as a
+	// figure, and Algèbre chapter 10 draws every page as two dozen ccitt strips
+	// 2055 by 121 of which no single one is a page. Both are scans. So the
+	// images are measured in inches against the page and added up.
+	c.PageWidthPt, c.PageHeightPt = info.WidthPt, info.HeightPt
 	withFull := map[int]bool{}
-	for _, im := range images {
-		if im.Width >= 1000 && im.Height >= 1000 {
-			withFull[im.Page] = true
+	for p, a := range c.coveredArea(images) {
+		if a/c.pageArea() >= 0.5 {
+			withFull[p] = true
 		}
 	}
 	c.PagesWithFull = len(withFull)
 
-	if last > 0 && float64(c.PagesWithFull)/float64(last) >= 0.8 {
+	if c.SampledPages > 0 && float64(c.PagesWithFull)/float64(c.SampledPages) >= 0.8 {
 		c.Nature = NatureScanned
 	} else {
 		c.Nature = NatureBornDigital
@@ -300,13 +342,95 @@ func (s *Source) Classify(ctx context.Context, samplePages int) (Classification,
 	return c, nil
 }
 
+// TextSample is how much the native text layer yields on body pages. It is
+// what separates a scan somebody has already run OCR over, which prints a
+// legible running head and unusable mathematics, from a scan that carries no
+// text at all and cannot even be paged without vision OCR first.
+//
+// Front matter is not a fair sample. A half title page is nearly empty in every
+// volume of the series, so the pages come from the middle of the file.
+type TextSample struct {
+	Pages int   // pages sampled
+	Chars int   // non-space characters over those pages
+	At    []int // which pages, so a surprising answer can be checked by hand
+}
+
+// PerPage is the average over the sampled pages, or 0 when none were sampled.
+func (t TextSample) PerPage() int {
+	if t.Pages == 0 {
+		return 0
+	}
+	return t.Chars / t.Pages
+}
+
+// SampleText reads the text layer of n pages spread through the middle half of
+// the volume.
+func (s *Source) SampleText(ctx context.Context, n int) (TextSample, error) {
+	info, err := s.Info(ctx)
+	if err != nil {
+		return TextSample{}, err
+	}
+	var out TextSample
+	for _, p := range spreadPages(info.Pages, n) {
+		txt, err := s.Text(ctx, p, p, false)
+		if err != nil {
+			return TextSample{}, err
+		}
+		out.Pages++
+		out.At = append(out.At, p)
+		for _, r := range txt {
+			if !unicode.IsSpace(r) {
+				out.Chars++
+			}
+		}
+	}
+	return out, nil
+}
+
+// spreadPages picks n pages evenly through the middle half of a volume of the
+// given length, or every page there is when the volume is shorter than n.
+func spreadPages(pages, n int) []int {
+	if pages <= 0 || n <= 0 {
+		return nil
+	}
+	if pages <= n {
+		out := make([]int, pages)
+		for i := range out {
+			out[i] = i + 1
+		}
+		return out
+	}
+	lo, hi := max(pages/4, 1), pages*3/4
+	out := make([]int, 0, n)
+	for i := range n {
+		p := lo
+		if n > 1 {
+			p = lo + (hi-lo)*i/(n-1)
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
 // BodyImage returns the largest page image away from page 1, which is the one
 // that describes the body of a scan. Page 1 is excluded because in the 2003
 // volume it is a 300 dpi colour plate and nothing like the pages behind it.
+//
+// An image has to cover half its page on its own to count. A volume whose pages
+// are tiled out of strips, as Algèbre chapter 10 is, has no such image, and
+// then there is no one geometry to record and saying there is would be a
+// falsehood in a generated manifest.
 func (c Classification) BodyImage() (Image, bool) {
+	half := c.pageArea() / 2
 	var best Image
 	for _, im := range c.Images {
-		if im.Page > 1 && im.Width*im.Height > best.Width*best.Height {
+		if im.Page == 1 || im.XPPI <= 0 || im.YPPI <= 0 {
+			continue
+		}
+		if float64(im.Width)/float64(im.XPPI)*float64(im.Height)/float64(im.YPPI) < half {
+			continue
+		}
+		if im.Width*im.Height > best.Width*best.Height {
 			best = im
 		}
 	}

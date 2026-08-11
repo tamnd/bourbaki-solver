@@ -36,6 +36,7 @@ func booksAdd(args []string) error {
 	edition := fs.String("edition", "", "edition, for example \"2023, Springer Nature\"")
 	chapters := fs.String("chapters", "", "comma-separated Roman chapters, for example I,II,III")
 	book := fs.String("book", "alg", "book slug")
+	lang := fs.String("lang", "en", "language of this printing, en or fr")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "usage: bourbaki books add <pdf> --id <id> [flags]\n\nProbes the PDF and records it in manifests/books.yaml.\n\n")
 		fs.PrintDefaults()
@@ -83,10 +84,15 @@ func booksAdd(args []string) error {
 	if err != nil {
 		return err
 	}
+	sample, err := src.SampleText(ctx, 5)
+	if err != nil {
+		return err
+	}
 
 	b := corpus.Book{
 		ID:         *id,
 		Book:       *book,
+		Lang:       *lang,
 		Title:      *title,
 		Edition:    *edition,
 		PDF:        rel,
@@ -97,6 +103,7 @@ func booksAdd(args []string) error {
 		Producer:   info.Producer,
 		PageWidth:  info.WidthPt,
 		PageHeight: info.HeightPt,
+		TextLayer:  textLayer(cls.Nature, sample),
 	}
 	if b.Title == "" {
 		b.Title = strings.TrimSuffix(filepath.Base(path), ".pdf")
@@ -129,12 +136,15 @@ func booksAdd(args []string) error {
 	if err != nil {
 		return err
 	}
+	if old, ok := m.Get(b.ID); ok {
+		b = keepLearned(b, *old)
+	}
 	m.Upsert(b)
 	if err := m.Save(root); err != nil {
 		return err
 	}
 
-	fmt.Printf("%s  %d pages  %s  %s\n", b.ID, b.Pages, b.Nature, b.PDFSHA256[:16])
+	fmt.Printf("%s  %s  %d pages  %s  %s\n", b.ID, b.Lang, b.Pages, b.Nature, b.PDFSHA256[:16])
 	if b.Scan != nil {
 		fmt.Printf("  scan %s %dx%d at %d dpi, %d bpc %s\n",
 			b.Scan.Format, b.Scan.Width, b.Scan.Height, b.Scan.DPI, b.Scan.BPC, b.Scan.Color)
@@ -144,8 +154,39 @@ func booksAdd(args []string) error {
 	}
 	fmt.Printf("  %d of %d sampled pages carry a full-page image, %d of %d fonts embedded\n",
 		cls.PagesWithFull, cls.SampledPages, cls.FontsEmbedded, cls.Fonts)
+	fmt.Printf("  text layer %s, %d characters a page over pages %v\n",
+		b.TextLayer, sample.PerPage(), sample.At)
 	fmt.Printf("  written to %s\n", corpus.BooksPath(root))
 	return nil
+}
+
+// keepLearned carries into a freshly probed entry the fields that no probe can
+// know. The grammar and the pagination are read off the running heads by
+// pagemap build, and adding a volume a second time to correct its chapter list
+// or to give it a language is a normal thing to do, so re-probing must not
+// silently undo a page map.
+func keepLearned(fresh, old corpus.Book) corpus.Book {
+	fresh.Grammar, fresh.Pagination = old.Grammar, old.Pagination
+	return fresh
+}
+
+// textLayer names what a volume's own text is worth, which decides how much
+// work it is before anything can be read off it at all.
+//
+// A born-digital volume has real text. A scan either carries somebody else's
+// OCR, legible enough to read a running head off and useless for mathematics,
+// or carries nothing, and then even the page map has to come out of vision OCR.
+// The threshold is characters on a sampled body page: a full page of this
+// series runs to about two thousand, and a page with nothing but a stray label
+// on it to a few dozen.
+func textLayer(n pdfsrc.Nature, t pdfsrc.TextSample) string {
+	if n == pdfsrc.NatureBornDigital {
+		return "native"
+	}
+	if t.PerPage() >= 200 {
+		return "ocr"
+	}
+	return "none"
 }
 
 func booksList(args []string) error {
@@ -165,12 +206,12 @@ func booksList(args []string) error {
 		return fmt.Errorf("no books registered in %s", corpus.BooksPath(root))
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tCHAPTERS\tPAGES\tNATURE\tEDITION")
+	fmt.Fprintln(w, "ID\tLANG\tCHAPTERS\tPAGES\tNATURE\tTEXT\tEDITION")
 	for _, b := range m.Books {
-		fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\n",
-			b.ID, strings.Join(b.Chapters, ","), b.Pages, b.Nature, b.Edition)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+			b.ID, b.Lang, strings.Join(b.Chapters, ","), b.Pages, b.Nature, b.TextLayer, b.Edition)
 	}
-	fmt.Fprintf(w, "\t\t%d\t\t%d volumes\n", m.Pages(), len(m.Books))
+	fmt.Fprintf(w, "\t\t\t%d\t\t\t%d volumes\n", m.Pages(), len(m.Books))
 	return w.Flush()
 }
 

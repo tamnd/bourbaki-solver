@@ -56,6 +56,52 @@ func TestBooksRoundTrip(t *testing.T) {
 	}
 }
 
+// The manifest holds two printings of nine Books, so first chapter alone is no
+// longer an order. A reader looking for Algèbre commutative chapter 10 expects
+// it after chapters 1 to 4 of the same printing, and expects the whole of the
+// Book Algebra before the whole of Commutative Algebra.
+func TestSaveShelvesByBookThenLanguageThenChapter(t *testing.T) {
+	root := t.TempDir()
+	m := &BooksManifest{}
+	for _, b := range []Book{
+		{ID: "ac-x-fr", Book: "ac", Lang: "fr", Chapters: []string{"X"}},
+		{ID: "hist", Book: "hist", Lang: "en"},
+		{ID: "alg-i-iii-fr", Book: "alg", Lang: "fr", Chapters: []string{"I", "II", "III"}},
+		{ID: "ac-i-iv-fr", Book: "ac", Lang: "fr", Chapters: []string{"I", "II", "III", "IV"}},
+		{ID: "alg-viii", Book: "alg", Lang: "en", Chapters: []string{"VIII"}},
+		{ID: "alg-i-iii", Book: "alg", Lang: "en", Chapters: []string{"I", "II", "III"}},
+		{ID: "ens-i-iv", Book: "ens", Lang: "en", Chapters: []string{"I", "II", "III", "IV"}},
+		{ID: "var-fr", Book: "var", Lang: "fr"},
+	} {
+		m.Upsert(b)
+	}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	back, err := LoadBooks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"ens-i-iv", "alg-i-iii", "alg-viii", "alg-i-iii-fr",
+		"ac-i-iv-fr", "ac-x-fr", "var-fr", "hist"}
+	var got []string
+	for _, b := range back.Books {
+		got = append(got, b.ID)
+	}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("shelved as\n %v\nwant\n %v", got, want)
+	}
+}
+
+func TestBookTitleFallsBackToTheSlug(t *testing.T) {
+	if got := BookTitle("ts"); got != "Théories spectrales" {
+		t.Errorf("BookTitle(ts) = %q", got)
+	}
+	if got := BookTitle("nobody"); got != "nobody" {
+		t.Errorf("BookTitle of an unnamed Book = %q, want the slug back", got)
+	}
+}
+
 func TestUpsertReplaces(t *testing.T) {
 	m := &BooksManifest{}
 	m.Upsert(Book{ID: "alg-viii", Pages: 1})
