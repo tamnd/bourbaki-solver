@@ -269,6 +269,7 @@ func join(lines []Line) string {
 		}
 	}
 	lead := leading(lines)
+	opens := opener(lines, left)
 	var out []string
 	var cur strings.Builder
 	flush := func() {
@@ -292,7 +293,7 @@ func join(lines []Line) string {
 		// it. Both are read: the head where it is bold, the air where a line
 		// sits further below the one before it than the leading of the block.
 		apart := i > 0 && l.Top-lines[i-1].Top > lead+6
-		if apart || l.Left >= left+indent {
+		if apart || opens(l) {
 			if d, ok := display(text); ok {
 				flush()
 				out = append(out, d)
@@ -304,7 +305,7 @@ func join(lines []Line) string {
 			cur.WriteString(text)
 			continue
 		}
-		if l.Left >= left+indent || cur.Len() == 0 {
+		if opens(l) || cur.Len() == 0 {
 			flush()
 			cur.WriteString(text)
 			continue
@@ -370,6 +371,44 @@ func oneLetter(s string) bool {
 	}
 	c := rune(s[len(s)-2])
 	return !isLetter(c) && (c < '0' || c > '9')
+}
+
+// entryRE is the number a bibliography entry opens with, in square brackets at
+// the margin.
+var entryRE = regexp.MustCompile(`^\[\d+\]`)
+
+// opener says which lines of a block start a paragraph.
+//
+// Bourbaki indents the first line of a paragraph and sets the rest at the
+// margin, so an indented line is where a paragraph begins. The bibliography is
+// set the other way round: the entry opens at the margin with its number in
+// square brackets and the lines after it are indented under it. Read by the
+// ordinary rule every line of it becomes a paragraph of its own, which is what
+// the six pages of the bibliography looked like, hyphens left at the ends of
+// the lines and all. "of any group of linear sub-" was one paragraph and
+// "stitutions", Proc. Lond. Math. Soc." was the next.
+//
+// The number is what turns the rule over, and nothing else does. Leaning on the
+// geometry alone, on the grounds that a hanging indent has more indented lines
+// than not, reads the six enumerated properties of Proposition 4 on page 155 as
+// one paragraph and cuts a sentence of page 257 in half. The volume indents too
+// many things for the shape of the block to say what the block is.
+func opener(lines []Line, left int) func(Line) bool {
+	ordinary := func(l Line) bool { return l.Left >= left+indent }
+	labelled, in := 0, 0
+	for _, l := range lines {
+		if ordinary(l) {
+			in++
+			continue
+		}
+		if len(l.Runs) > 0 && entryRE.MatchString(strings.TrimSpace(l.Runs[0].Text)) {
+			labelled++
+		}
+	}
+	if labelled < 2 || in <= labelled {
+		return ordinary
+	}
+	return func(l Line) bool { return !ordinary(l) }
 }
 
 // displayRE is a line that is nothing but one formula, with the number the
