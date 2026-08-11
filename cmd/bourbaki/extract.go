@@ -250,7 +250,22 @@ func extractRun(args []string) error {
 		// has not changed since it was repaired, so re-reading it would put
 		// back exactly the fault that was repaired, and the repair is the one
 		// thing here that cost somebody reading the printed page.
-		if old, err := corpus.ReadFile[corpus.PageFrontMatter](path); err == nil && old.Meta.Manual {
+		//
+		// A page that will not parse is not a page that may be overwritten. It
+		// used to be: the read and the manual check were one condition, so a
+		// page the reader choked on fell through to the write as though it had
+		// said nothing, and a hand repair went under it without a word. That is
+		// how the generated stamp came out of the front matter and took seven
+		// repaired pages of chapter VIII with it, because dropping the field
+		// made every page written before it unreadable to a decoder that
+		// refuses an unknown key, and the seven were only got back because they
+		// were committed. So a page that is there and will not parse stops the
+		// run and says which one.
+		keep, err := repairedByHand(path)
+		if err != nil {
+			return err
+		}
+		if keep {
 			kept = append(kept, p.PDFPage)
 			continue
 		}
@@ -397,4 +412,27 @@ func extractPage(args []string) error {
 	fmt.Printf("head: %s [band %d]\nlines: %d  flags: %v\n\n%s\n",
 		p.Head, vol.HeadBand, p.Lines, p.Flags, p.Body)
 	return nil
+}
+
+// repairedByHand says whether the page already at path was repaired by hand and
+// must be left alone.
+//
+// A page that is there and will not parse is an error and not a false. It used
+// to be a false, because the read and the check were one condition, so a page
+// the reader choked on fell through to the write as though it had said nothing
+// and a repair went under it without a word. That is how dropping the generated
+// stamp from the front matter took seven repaired pages of chapter VIII with
+// it: the decoder refuses an unknown key, so every page written before the
+// change stopped parsing at once. They came back because they were committed,
+// which is luck and not a plan.
+func repairedByHand(path string) (bool, error) {
+	old, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+	if err == nil {
+		return old.Meta.Manual, nil
+	}
+	if os.IsNotExist(err) {
+		return false, nil // no page yet, which is every page of a first run
+	}
+	return false, fmt.Errorf("%s is on disk and will not parse, so this run "+
+		"cannot tell whether it was repaired by hand: %w", path, err)
 }
