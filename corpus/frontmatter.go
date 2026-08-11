@@ -57,6 +57,13 @@ type SectionFrontMatter struct {
 	TranslationModel string `yaml:"translation_model,omitempty"`
 	TranslationRun   string `yaml:"translation_run,omitempty"`
 	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
+	// GlossaryTerms is the digest of the terminology this section was shown,
+	// which is the glossary rows its English mentions and not the whole file.
+	// It is what staleness is decided on, because glossary_version moves for
+	// every edit anywhere and would restale a section over a phrase that does
+	// not occur in it. The version stays for the record and for files written
+	// before this field existed.
+	GlossaryTerms string `yaml:"glossary_terms_sha256,omitempty"`
 	// PromptSHA256 is the hash of the instructions this file was made with,
 	// the common half and the language half together. It is the third kind of
 	// staleness, beside the English changing and the glossary bumping: edit

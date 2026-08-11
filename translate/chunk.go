@@ -1,6 +1,8 @@
 package translate
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -185,4 +187,28 @@ func GlossaryBlock(g *glossary.Glossary, lang, body string) string {
 		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// GlossaryDigest is the terminology this section was actually shown, hashed.
+//
+// glossary_version was the wrong question to ask of a translated file. It moves
+// whenever any rendering anywhere moves, so pinning "common zero", a phrase that
+// occurs in one appendix, marked all 27 sections of chapter VIII stale and would
+// have bought 27 runs to fix 1 file. Measured on this corpus: the move from
+// version 2 to version 5 changes what 14 of the 27 sections are shown and leaves
+// the other 13 alone, and of the three edits in it, "common zero" reaches 1
+// section and "algebraic over" reaches 3.
+//
+// So the file records what it was shown rather than which glossary it came from,
+// and it is stale when what it would be shown today differs. A common word is
+// still expensive, and should be: taking "ring" out changes the block of 26 of
+// the 27 and "module" of 23, because those really are in nearly every section.
+//
+// The body hashed is the English, not the translation, because the question is
+// what the prompt carried and the prompt is built from the English. It is the
+// whole section rather than a chunk, so that re-cutting a section into different
+// chunks does not restale it.
+func GlossaryDigest(g *glossary.Glossary, lang, body string) string {
+	sum := sha256.Sum256([]byte(GlossaryBlock(g, lang, body)))
+	return hex.EncodeToString(sum[:])
 }
