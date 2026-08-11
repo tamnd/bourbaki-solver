@@ -233,3 +233,37 @@ func TestBodyLine(t *testing.T) {
 		t.Errorf("the finding is on line %d, want 16: body line 3 under 13 lines of front matter", got[0].Line)
 	}
 }
+
+func TestM09(t *testing.T) {
+	clean := doc("a.md", "the map $\\theta_E^{-1}$ and the sum $\\sum_{i=0}^{p-1}x_i$ and a prime $f'_1$")
+	if got := run(t, m09, clean); len(got) != 0 {
+		t.Errorf("mathematics that sets was reported: %v", got)
+	}
+
+	// The three shapes the linearised text layer leaves behind, one file each,
+	// written as the corpus writes them.
+	for _, tc := range []struct {
+		name, body, want string
+	}{
+		{"an inverse", "we deduce $\\theta^-_E^1$ from it", `^-_E^1`},
+		{"a matrix", "the matrix $(^X_0^0_I)$ is", `^X_0^0_I`},
+		{"a sum's bound", "the sum $\\sum^p_{i=0}^{-1}x_i$", `^p_{i=0}^{-1}`},
+		{"a prime", "the map $\\Gamma '_1^{\\pi'_1}$ is", `'_1^{\pi'_1}`},
+	} {
+		got := run(t, m09, doc("b.md", tc.body))
+		if len(got) != 1 {
+			t.Errorf("%s gave %d findings, want 1: %v", tc.name, len(got), got)
+			continue
+		}
+		if !strings.HasSuffix(got[0].Msg, tc.want) {
+			t.Errorf("%s was reported as %q, want it to name %q", tc.name, got[0].Msg, tc.want)
+		}
+	}
+
+	// A line carrying two of them is two findings. The repairs are separate and
+	// a reader who fixed one would take a single finding for done.
+	two := doc("c.md", "so that $\\varphi ^-_V^1$ and $\\psi ^-_W^1$ agree")
+	if got := run(t, m09, two); len(got) != 2 {
+		t.Errorf("got %d findings for two faults on one line, want 2: %v", len(got), got)
+	}
+}
