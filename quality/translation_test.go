@@ -177,6 +177,92 @@ terms:
 	}
 }
 
+// The corpus shipped this one: "Theo Corollary da dan" in the appendix on the
+// trace, where every other mention of the word in the same file is "hệ quả". L07
+// passes it because the sentence is Vietnamese and L06 passes it because the
+// rendering is there, nine times.
+func TestL10FindsATermLeftInEnglish(t *testing.T) {
+	root := glossaryRoot(t, `version: 1
+terms:
+    - en: corollary
+      vi: hệ quả
+    - en: semisimple ring
+      vi: vành nửa đơn
+`)
+	docs := pairDocs(
+		"By the corollary quoted above, A is a semisimple ring.",
+		"Theo corollary đã dẫn, A là một vành nửa đơn.")
+	out, err := l10(&Corpus{Root: root, Docs: docs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(out), out)
+	}
+	if !strings.Contains(out[0].Msg, "corollary") || !strings.Contains(out[0].Msg, "hệ quả") {
+		t.Errorf("the finding does not name the term and its rendering: %s", out[0].Msg)
+	}
+	if out[0].Line != 1 {
+		t.Errorf("the finding is on line %d, want the line the word is on", out[0].Line)
+	}
+}
+
+// The English word inside a formula is the mathematics, which the translator
+// was told to copy, so it is not a word left standing.
+func TestL10IgnoresATermInsideAFormula(t *testing.T) {
+	root := glossaryRoot(t, `version: 1
+terms:
+    - en: ring
+      vi: vành
+    - en: spec
+      vi: phổ
+`)
+	docs := pairDocs(
+		"The ring $\\operatorname{spec}(A)$ is closed.",
+		"Vành $\\operatorname{spec}(A)$ là đóng.")
+	out, err := l10(&Corpus{Root: root, Docs: docs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("a term inside a formula was read as English left standing: %v", out)
+	}
+}
+
+// A row whose rendering is the English word has nothing to leak. Vietnamese
+// keeps some of Bourbaki's vocabulary as it stands, and reporting those would
+// fail the build on the rendering the glossary itself asks for.
+func TestL10SkipsARowThatRendersToItself(t *testing.T) {
+	root := glossaryRoot(t, `version: 1
+terms:
+    - en: hausdorff
+      vi: Hausdorff
+`)
+	docs := pairDocs("The space is hausdorff.", "Không gian là Hausdorff.")
+	out, err := l10(&Corpus{Root: root, Docs: docs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("a term whose rendering is the English word was reported: %v", out)
+	}
+}
+
+// A term the English never mentions is not a term this section was shown, so a
+// word of the translation that happens to match one is not a leak. Mentioned is
+// what decides, the same way L06 decides.
+func TestL10OnlyAsksAboutTermsTheEnglishMentions(t *testing.T) {
+	root := glossaryRoot(t, testGlossary)
+	docs := pairDocs("Let A be a ring.", "Cho A là một vành field.")
+	out, err := l10(&Corpus{Root: root, Docs: docs})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Fatalf("a term the English does not mention was reported: %v", out)
+	}
+}
+
 // H07 lives in the hygiene group and is tested here because the file it was
 // written for is a translation. The corpus shipped one: a :::writing fence
 // around a retranslated section that every other rule passed.

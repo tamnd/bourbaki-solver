@@ -49,6 +49,8 @@ func init() {
 			Title: "no translation was written by a small model", Run: l08, Need: needTranslations},
 		Check{ID: "L09", Group: Translation, Hard: true,
 			Title: "the glossary version moves when the renderings do", Run: l09, Need: needGlossaryBase},
+		Check{ID: "L10", Group: Translation, Hard: true,
+			Title: "no English term was left standing", Run: l10, Need: needGlossary},
 	)
 }
 
@@ -650,6 +652,72 @@ func l08(c *Corpus) ([]Finding, error) {
 			Msg: fmt.Sprintf("was translated by %s, which is a cut down model, so the section is worth doing again", model)})
 	}
 	return out, nil
+}
+
+// L10. No English term was left standing.
+//
+// L07 catches a paragraph that came back in English. This catches a word.
+//
+// The two fail differently and only one of them is visible. A paragraph that
+// was not translated is obvious to anybody who opens the file; a single English
+// word inside a Vietnamese sentence is not, and it survives every rule the
+// corpus had. L07 asks whether the paragraph is written in the language, and a
+// sentence with one English noun in it is still written in the language, so it
+// passes. L06 asks whether the rendering is present, and a section that renders
+// the term correctly in nine places and leaves it in English in the tenth has
+// the rendering present, so it passes too. The corpus shipped exactly that:
+// "Theo Corollary da dan" in the appendix on the trace, where every other
+// mention of the word is "he qua".
+//
+// The test is the glossary read the other way round. L06 asks whether the
+// rendering is there; this asks whether the English is still there. A term the
+// glossary has a rendering for is a term the translator was shown the rendering
+// for, in the prompt, for the chunk it appears in, so the English standing in
+// the finished file is not a judgement call about vocabulary. It is the one
+// word the model did not do what it was told with.
+//
+// Hard, because there is nothing to weigh. A row whose rendering is the English
+// word is skipped, since there is nothing to leak, and the mathematics and the
+// heading attributes are out before the search starts, so what is left is prose
+// the translator was asked to write in another language and did not.
+//
+// It reaches as far as the glossary does and no further. The same appendix
+// opens a sentence with "Denote", which the glossary has no row for and so this
+// rule cannot see. The answer to that is a row, not a looser rule: a word list
+// of English guessed at from two translated files would be a guess, and this is
+// a measurement.
+func l10(c *Corpus) ([]Finding, error) {
+	g, err := glossary.Load(c.Root)
+	if err != nil {
+		return nil, err
+	}
+	ps, out := c.pairs()
+	for _, p := range ps {
+		tr := strings.ToLower(prose(p.tr.Body))
+		for _, t := range g.Mentioned(p.tr.Lang, strings.ToLower(prose(p.en.Body))) {
+			if strings.EqualFold(t.EN, t.In(p.tr.Lang)) {
+				continue
+			}
+			if !glossary.Mentions(tr, t.EN) {
+				continue
+			}
+			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(mentionLine(p.tr.Body, t.EN)),
+				Msg: fmt.Sprintf("%q is still in English, where the glossary writes %q",
+					t.EN, t.In(p.tr.Lang))})
+		}
+	}
+	return out, nil
+}
+
+// mentionLine is the first line of a body whose prose holds this term, so that
+// a finding points at the sentence and not at the front matter.
+func mentionLine(body, term string) int {
+	for i, line := range strings.Split(body, "\n") {
+		if glossary.Mentions(strings.ToLower(prose(line)), term) {
+			return i + 1
+		}
+	}
+	return 1
 }
 
 // baseGlossary reads manifests/glossary.yaml as it stood at a revision.
