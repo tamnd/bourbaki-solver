@@ -19,9 +19,11 @@ import (
 
 func runExtract(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("extract: want one of fonts, page, run")
+		return fmt.Errorf("extract: want one of audit, fonts, page, run")
 	}
 	switch args[0] {
+	case "audit":
+		return extractAudit(args[1:])
 	case "fonts":
 		return extractFonts(args[1:])
 	case "page":
