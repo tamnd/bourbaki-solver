@@ -536,6 +536,17 @@ func joinable(prev, next string) bool {
 	if itemOpen(next) {
 		return false
 	}
+	// A page that opens on a statement does not continue the paragraph before
+	// it, whatever the indent said. Bourbaki sets a statement flush left, so a
+	// page beginning with one looks exactly like a page beginning mid-paragraph
+	// and extraction reads continues: true off it. Joined, the statement ends up
+	// as prose inside the paragraph above and never gets a heading, a label or a
+	// tag, and nothing in the corpus can point at it. This was 36 statements of
+	// chapter VIII, found by the reference graph rather than by eye: the book
+	// cites Theorem 1 of § 7 thirteen times and there was no Theorem 1 of § 7.
+	if headRE.MatchString(next) {
+		return false
+	}
 	for _, s := range []string{prev, next} {
 		if strings.HasPrefix(s, "#") || strings.HasPrefix(s, "$$") ||
 			strings.HasSuffix(s, "$$") || noteRE.MatchString(s) {
