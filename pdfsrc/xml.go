@@ -70,6 +70,10 @@ type Page struct {
 	Number        int
 	Width, Height int
 	Spans         []Span
+	// Rules are the horizontal lines the page draws rather than sets in a
+	// font. pdftohtml never reports them, so they are filled in by WithRules
+	// from a second pass and are empty on a layout that did not ask for one.
+	Rules []Rule
 }
 
 // Layout is a whole document, or the page range that was asked for.

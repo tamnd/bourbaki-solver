@@ -68,6 +68,14 @@ const (
 	FlagStackedMatrix Flag = "stacked-matrix"
 	// FlagEmpty is a page with no text on it at all.
 	FlagEmpty Flag = "empty"
+	// FlagDrawnRule is a rule the page draws that could not be put back into
+	// the text. Bourbaki's set difference sign is drawn rather than set, so it
+	// is not in the text layer at all, and rule.go finds it in the page's own
+	// paths and writes it back where the geometry says it goes. Where the
+	// geometry does not say, the page is flagged: a sign written into the wrong
+	// place reads as mathematics the book does not contain, and the hole it
+	// would be filling at least leaves the operands right.
+	FlagDrawnRule Flag = "drawn-rule"
 )
 
 // Page is one page read.
@@ -83,6 +91,13 @@ type Page struct {
 	Lines   int
 	Columns bool // the page is set in two columns, as the index at the back is
 	Flags   []Flag
+
+	// Minus is how many drawn set difference signs were put back into the
+	// runs, and MinusLost how many the page draws that could not be placed.
+	// The two are counted rather than inferred from the body, because the sign
+	// is an ASCII hyphen once it is in and the page is full of those.
+	Minus     int
+	MinusLost int
 
 	// Continues says the body opens in the middle of the paragraph the page
 	// before it ended in. Nothing on this page can be assembled without it, and
@@ -111,11 +126,18 @@ func ReadPage(l *pdfsrc.Layout, p pdfsrc.Page) *Page { return ReadPageWith(l, p,
 // ReadPageWith reads one page with the volume it belongs to in hand.
 func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 	out := &Page{PDFPage: p.Number}
+	// The signs the page draws rather than sets go in before anything reads
+	// the runs, so that the rest of extraction sees a page with its operators
+	// on it. See rule.go.
+	p, out.Minus, out.MinusLost = Minus(l, p)
 	lines, columns := LinesColumns(l, p)
 	out.Columns = columns
 	if len(lines) == 0 {
 		out.flag(FlagEmpty)
 		return out
+	}
+	if out.MinusLost > 0 {
+		out.flag(FlagDrawnRule)
 	}
 	if lines[0].Top < v.HeadBand {
 		out.Head = plain(lines[0])
@@ -191,11 +213,9 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 // There is no test here for a glyph poppler dropped without saying so, and the
 // reason is worth writing down, because the test is the obvious thing to try.
 //
-// Some glyphs come out as nothing at all. The set difference of P and S is
-// printed as P \ S and arrives as two runs with a hole between them where the
-// backslash was, and neither pdftotext nor pdftohtml says a word about it. The
-// hole is about one em wide, which is what a dropped operator is worth, so
-// measuring the space between two runs looks like it would find them.
+// Some operators come out as nothing at all, and the hole they leave is about
+// one em wide, which is what an operator is worth, so measuring the space
+// between two runs looks like it would find them.
 //
 // It does not. pdftohtml reports one box per <text> element, and an element
 // holds several runs when the fonts change inside it, so the box of a run in
@@ -206,6 +226,13 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 // delimiter whose width pdftohtml gets wrong, and a flag that fires on half the
 // book tells the repair pass nothing. What is left is caught by the audit,
 // which reads the printed page against the extracted one.
+//
+// This note used to name Bourbaki's set difference as the example, and to say
+// it was a backslash poppler had dropped. It is not a dropped glyph and it is
+// not a backslash: it is a minus sign the book draws as a rule rather than
+// setting in a font, so there is no glyph for poppler to drop. Nothing has to
+// be measured to find it, because pdftocairo reports the rule with its own
+// geometry. rule.go does that, and it is why the example had to go.
 
 // The running head of this volume carries three things and never all three at
 // once. The outer edge carries the page label, A VIII.4. The inner edge carries
