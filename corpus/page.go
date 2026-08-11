@@ -59,8 +59,20 @@ type PageFrontMatter struct {
 	// read again after the source is replaced.
 	InputSHA256  string `yaml:"input_sha256"`
 	PromptSHA256 string `yaml:"prompt_sha256,omitempty"`
-	Generated    string `yaml:"generated"`
 	Tokens       int    `yaml:"tokens,omitempty"`
+
+	// There is no generated stamp here, and there used to be. It was written by
+	// every extraction and read by nothing, and what it cost was the ability to
+	// see a change: re-reading a volume rewrote the clock in all 505 pages, so
+	// the diff of a run that changed 7 of them was 505 files deep and the 7
+	// were not findable in it. The audit report says the same thing about
+	// itself at the top of every copy, and this is that rule applied to the
+	// pages.
+	//
+	// What the stamp was for is covered twice over. InputSHA256 says what was
+	// read, which is the question a stale page raises, and git says when, which
+	// is the question a clock answers badly anyway, since the clock records
+	// when the command ran and not when the reading changed.
 
 	// Lines is how many lines of the page were read, and Flags is why the page
 	// cannot be trusted as it stands. A page with flags is what the repair

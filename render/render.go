@@ -526,7 +526,7 @@ func writeBlanks(options Options, manifest Manifest) error {
 		file := corpus.PageFile{
 			Meta: corpus.PageFrontMatter{
 				Book: options.Book, PDFPage: page.Page, Method: corpus.MethodBlank,
-				InputSHA256: page.SHA256, Generated: manifest.Generated.Format(time.RFC3339),
+				InputSHA256: page.SHA256,
 			},
 			Body: "",
 		}

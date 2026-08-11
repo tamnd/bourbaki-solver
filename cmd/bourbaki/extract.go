@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/extract"
@@ -217,7 +216,6 @@ func extractRun(args []string) error {
 
 	res := &extract.Result{Book: b.ID}
 	var kept []int // the pages repaired by hand, which this run left alone
-	stamp := time.Now().UTC().Format(time.RFC3339)
 	for _, pg := range lay.Pages {
 		p := extract.ReadPageWith(lay, pg, vol)
 		res.Add(p)
@@ -232,7 +230,6 @@ func extractRun(args []string) error {
 			Continues:   p.Continues,
 			Method:      corpus.MethodNative,
 			InputSHA256: extract.InputSHA256(lay, pg),
-			Generated:   stamp,
 			Lines:       p.Lines,
 		}
 		if p.Section > 0 || p.Subsec > 0 {
