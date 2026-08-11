@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/tamnd/bourbaki-solver/mathtex"
 	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
 
@@ -37,6 +38,14 @@ const (
 	FlagDroppedGlyph Flag = "dropped-glyph"
 	// FlagUnbalanced is an odd number of dollar signs in the page.
 	FlagUnbalanced Flag = "unbalanced-math"
+	// FlagStrayDelimiter is a page that balanced only after a delimiter which
+	// opened nothing was taken out of it. It is what a numbered display flattened
+	// into one line of prose leaves behind, and taking the delimiter out makes
+	// the page read correctly while losing the one sign that the display was
+	// ever a display. So the flag stays on the page after the repair: the
+	// mathematics is right and the setting is not, and only the printed page can
+	// say what the setting was.
+	FlagStrayDelimiter Flag = "stray-delimiter"
 	// FlagWordInMath is an English word left inside dollar signs, which means
 	// a formula was cut in the wrong place.
 	FlagWordInMath Flag = "word-in-math"
@@ -122,6 +131,32 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
 	if len(notes) > 0 {
 		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes, c), "\n")
 	}
+	// A glyph is mapped to its TeX while the run's font is known, and a Greek
+	// capital is not in a font that says it is mathematics: Bourbaki sets those
+	// upright, in the text face, so the run is prose as far as Classify is
+	// concerned and comes through as the letter. It is only mathematics once
+	// the line is laid out and the letter is inside a pair of dollars, which is
+	// here. 360 characters of chapter VIII arrived this way.
+	//
+	// The refusals are not reported from here. They are two characters in the
+	// whole volume and M03 has them from the other side, with the file and the
+	// line, which is where somebody deciding between a sigma and a sum wants to
+	// be told about it.
+	//
+	// The stray delimiter goes first, because everything after one is a math
+	// span as far as the splitter is concerned and Repair will not touch it.
+	// Eight pages of chapter VIII need both, in that order.
+	//
+	// It is not run on a page that is already flagged. The flags at this point
+	// are the ones raised while the runs were being read, and every one of them
+	// means a formula arrived in pieces: on a page like that a delimiter is as
+	// likely to be the surviving half of a display as it is to be a leftover,
+	// and DropStray has no way to tell which.
+	if body, ok := mathtex.DropStray(out.Body); ok && len(out.Flags) == 0 {
+		out.Body = body
+		out.flag(FlagStrayDelimiter)
+	}
+	out.Body, _, _ = mathtex.Repair(out.Body)
 	if strings.Count(out.Body, "$")%2 != 0 {
 		out.flag(FlagUnbalanced)
 	}

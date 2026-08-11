@@ -241,7 +241,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		}
 		r := run
 		r.Number = next
-		return r, strings.TrimSpace(text[len(i[0]):]), true, nil
+		return r, afterMarker(i[0], text[len(i[0]):]), true, nil
 	}
 	// The head matched one of headRE's three branches and left the others empty.
 	word, num := m[1]+m[3]+m[5], m[2]+m[4]+m[6]
@@ -259,7 +259,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		// A run is headed by its kind in the plural and numbered inside:
 		// "Remarks. — 2)" is Remark 2 and the head carries no number of its own.
 		if i := exNumRE.FindStringSubmatch(rest); i != nil {
-			num, rest = i[3], rest[len(i[0]):]
+			num, rest = i[3], afterMarker(i[0], rest[len(i[0]):])
 		}
 	}
 	// An unnumbered statement has no number to be numbered under, so it is
@@ -385,7 +385,7 @@ func exercises(blocks []block) ([]corpus.Exercise, error) {
 				e.Meta.BookPage = l.String()
 			}
 			out = append(out, e)
-			text = strings.TrimSpace(text[i+len(m[0]):])
+			text = afterMarker(m[0], text[i+len(m[0]):])
 		}
 	}
 	return out, nil
@@ -442,6 +442,34 @@ func itemStart(text string, n int) (int, []string) {
 		off += loc[1]
 	}
 	return -1, nil
+}
+
+// afterMarker is what is left of a paragraph once the marker numbering it has
+// been taken off.
+//
+// It is not a slice, because the marker can be half of a math span. The text
+// layer sets the pilcrow and the number as mathematics and the run it puts them
+// in does not always stop where the number does, so the dollar that closes it
+// is a few letters into the prose:
+//
+//	$\P 18) A$ group G is called locally finite if every subgroup ...
+//
+// Take the marker off and what is left opens a math span that nothing closes,
+// which M01 reports against the exercise file and which makes the rest of the
+// paragraph read as a formula. So the dollar the marker opened is taken off
+// with it, wherever in the remainder it turns up. Four exercises of chapter
+// VIII are set this way, in § 5, § 9 and § 10.
+//
+// Nothing is guessed here. The count says the marker opened a span and did not
+// close it, and a span that is open has exactly one dollar that closes it,
+// which is the first one after it.
+func afterMarker(marker, rest string) string {
+	if strings.Count(marker, "$")%2 == 1 {
+		if i := strings.IndexByte(rest, '$'); i >= 0 {
+			rest = rest[:i] + rest[i+1:]
+		}
+	}
+	return strings.TrimSpace(rest)
 }
 
 // markOf is c when the marker carries it.

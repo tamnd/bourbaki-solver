@@ -33,7 +33,7 @@ func (res *Result) Reports(root string) ([]string, error) {
 	var wrote []string
 	for _, f := range files {
 		path := filepath.Join(root, "reports", f.name)
-		if err := os.WriteFile(path, []byte(f.body(ix)), 0o644); err != nil {
+		if err := os.WriteFile(path, []byte(tidy(f.body(ix))), 0o644); err != nil {
 			return nil, err
 		}
 		wrote = append(wrote, filepath.Join("reports", f.name))
@@ -64,12 +64,19 @@ func (res *Result) StaleReports(root string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if string(got) != f.body(res.Index) {
+		if string(got) != tidy(f.body(res.Index)) {
 			stale = append(stale, rel)
 		}
 	}
 	return stale, nil
 }
+
+// tidy is what every report goes out through. Each section ends by writing a
+// blank line so the next one is separated from it, which leaves the last
+// section of the file trailing one, and a file that ends in a blank line fails
+// H05 along with everything else that is committed. Doing it here rather than
+// in the four builders means the write and the staleness check cannot disagree.
+func tidy(s string) string { return strings.TrimRight(s, "\n") + "\n" }
 
 // header is the note every report opens with. It says the file is generated,
 // because a reader who edits one by hand will lose the edit on the next run and

@@ -363,3 +363,52 @@ func TestVerifyChecksTheContents(t *testing.T) {
 		t.Error("a no. on the wrong page should be an error")
 	}
 }
+
+// The text layer sets the pilcrow and the number of an exercise as mathematics,
+// and the run it puts them in does not always stop where the number does, so
+// the dollar that closes it is a few letters into the prose. Taking only the
+// marker off leaves a span that nothing closes and the rest of the exercise
+// reads as a formula, which is what M01 was reporting against four exercise
+// files of chapter VIII. The text here is invented; the shape is the volume's.
+func TestAfterMarker(t *testing.T) {
+	cases := []struct {
+		name   string
+		marker string
+		rest   string
+		want   string
+	}{
+		{
+			"the marker closes its own span",
+			`$\P 18)$ `,
+			"A group G is called locally finite.",
+			"A group G is called locally finite.",
+		},
+		{
+			// exNumRE stops at the space after the parenthesis, so the letter
+			// the closing dollar sits behind is the first thing in the rest.
+			"the span runs on into the prose",
+			`$\P 18) `,
+			`A$ group G is called locally finite.`,
+			"A group G is called locally finite.",
+		},
+		{
+			"no mathematics in the marker at all",
+			"18) ",
+			"A group G is called locally finite.",
+			"A group G is called locally finite.",
+		},
+		{
+			"the prose after it has mathematics of its own",
+			`$\P 18) `,
+			`A$ group $G$ is called locally finite.`,
+			`A group $G$ is called locally finite.`,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := afterMarker(c.marker, c.rest); got != c.want {
+				t.Errorf("afterMarker(%q, %q)\n = %q\nwant %q", c.marker, c.rest, got, c.want)
+			}
+		})
+	}
+}

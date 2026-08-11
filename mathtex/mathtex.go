@@ -1,0 +1,333 @@
+// Package mathtex is where the mathematics of a body starts and stops, and what
+// to do about a character that was left outside its TeX.
+//
+// It is a leaf package on purpose. Two things need it and they sit at opposite
+// ends of the pipeline: extract, which writes the pages, and quality, whose M
+// rules read them back and say whether the formulae survived. If each had its
+// own idea of where a math span begins they would disagree about the same file,
+// and an audit that disagrees with the tool that produced the corpus is worse
+// than no audit. So the splitter is written once, here, under both of them.
+package mathtex
+
+import (
+	"fmt"
+	"strings"
+)
+
+// A Span is one stretch of mathematics in a body, without its delimiters.
+type Span struct {
+	Text    string
+	Display bool
+	Line    int // the body line the opening delimiter sits on, counting from one
+
+	// Start and End are where the text sits in the body, counted in runes
+	// because Split walks it in runes. A rule needs only the text, but anything
+	// that repairs the mathematics has to put it back where it came from, and
+	// searching for the text again would find the wrong copy of a span that is
+	// written twice on a line.
+	Start, End int
+}
+
+// Split cuts a normalised body into its math spans.
+//
+// The rules are LaTeX's, which are not Markdown's: a backslash escapes the
+// character after it, so \$ is a dollar sign and not a delimiter, two dollars
+// open a display and one opens an inline span, and a display closes only on two.
+// The corpus has three \$ in it, all inside the same mangled region of § 21,
+// and getting them wrong is the difference between reporting that region and
+// reporting the whole file as balanced.
+//
+// unclosed is the span left open at the end of the body, and nil when there is
+// none. It carries the line the delimiter that opened it sits on, which is the
+// line somebody has to go and look at; the end of the file is where the problem
+// shows up and never where it is.
+func Split(body string) (spans []Span, unclosed *Span) {
+	const (
+		none = iota
+		inline
+		display
+	)
+	state := none
+	line := 1
+	var open Span
+	var start int
+	rs := []rune(body)
+	for i := 0; i < len(rs); i++ {
+		switch rs[i] {
+		case '\n':
+			line++
+			continue
+		case '\\':
+			// The escape takes the next character with it, whatever it is, and
+			// a newline still has to be counted.
+			if i+1 < len(rs) {
+				if rs[i+1] == '\n' {
+					line++
+				}
+				i++
+			}
+			continue
+		case '$':
+		default:
+			continue
+		}
+		double := i+1 < len(rs) && rs[i+1] == '$'
+		switch state {
+		case none:
+			open, start = Span{Display: double, Line: line}, i+1
+			if double {
+				state, start = display, i+2
+				i++
+			} else {
+				state = inline
+			}
+			open.Start = start
+		case inline:
+			open.Text, open.End = string(rs[start:i]), i
+			spans = append(spans, open)
+			state = none
+		case display:
+			if !double {
+				continue // a lone dollar inside a display is text
+			}
+			open.Text, open.End = string(rs[start:i]), i
+			spans = append(spans, open)
+			state = none
+			i++
+		}
+	}
+	if state != none {
+		open.Text, open.End = string(rs[start:]), len(rs)
+		return spans, &open
+	}
+	return spans, nil
+}
+
+// The repair is M03 read backwards. The rule says which characters are stranded
+// out of their TeX and this puts them back, over the same split, so the two
+// cannot disagree about where the mathematics is.
+//
+// A repair is not a rewrite. Every substitution here is one glyph for the TeX
+// that prints that same glyph, so the corpus after it says exactly what it said
+// before and compiles where it did not. Nothing here guesses at what the book
+// meant, and the two characters where a guess would be needed are refused and
+// handed back to whoever is running it. That is the difference between a repair
+// and an invention, and it is why this is a table and not a model call.
+
+// texOf is the glyph to TeX table, restricted to what M03 flags inside the
+// mathematics: the Greek block and the increment sign.
+//
+// extract has its own and larger table, unicodeMath, and this is deliberately
+// not that one. That table maps the glyphs the PDF fonts come out as and it
+// runs while the run's font is still known. This one runs over Markdown with no
+// font and no page behind it, so it holds only the characters somebody has
+// actually seen stranded in this corpus. A table of substitutions nobody has
+// checked against a printed page is a table that will be wrong somewhere and
+// nobody will know which entry.
+var texOf = map[rune]string{
+	'α': `\alpha`, 'β': `\beta`, 'γ': `\gamma`, 'δ': `\delta`, 'ε': `\varepsilon`,
+	'ζ': `\zeta`, 'η': `\eta`, 'θ': `\theta`, 'ϑ': `\vartheta`, 'ι': `\iota`,
+	'κ': `\kappa`, 'λ': `\lambda`, 'μ': `\mu`, 'ν': `\nu`, 'ξ': `\xi`,
+	'π': `\pi`, 'ρ': `\rho`, 'σ': `\sigma`, 'ς': `\varsigma`, 'τ': `\tau`,
+	'υ': `\upsilon`, 'φ': `\varphi`, 'ϕ': `\varphi`, 'χ': `\chi`, 'ψ': `\psi`,
+	'ω': `\omega`,
+	'Γ': `\Gamma`, 'Δ': `\Delta`, 'Θ': `\Theta`, 'Λ': `\Lambda`, 'Ξ': `\Xi`,
+	'Π': `\Pi`, 'Σ': `\Sigma`, 'Υ': `\Upsilon`, 'Φ': `\Phi`, 'Ψ': `\Psi`,
+	'Ω': `\Omega`,
+
+	// U+2206, the increment sign, which is not U+0394 and is what the text
+	// layer of the 2023 volume gives for a capital delta. Six of them are in
+	// § 16 and § 21, all naming the diagonal of a group.
+	'∆': `\Delta`,
+
+	// The compatibility characters, which are the same letters again at
+	// different code points and are what a census of the volume turned up once
+	// the Greek block was clear: 303 micro signs, U+00B5 rather than U+03BC,
+	// almost all of them the index µ of a family, and 42 ohm signs, U+2126
+	// rather than U+03A9, which is the Ω of an algebraically closed extension.
+	// Neither is in the Greek block, so neither was caught by looking there,
+	// and both print as the letter, so neither is visible by reading.
+	// They are written as escapes and not as themselves, because µ and the
+	// letter mu are the same shape in every font this source will be read in,
+	// and a table where two entries look identical is a table somebody will
+	// delete half of.
+	'\u00b5': `\mu`,    // the micro sign, not the Greek mu above
+	'\u2126': `\Omega`, // the ohm sign, not the Greek omega above
+
+	// U+0131, the dotless i, which is what an accented i is set as. Three of
+	// them, all \widetilde{ı} in § 16.
+	'\u0131': `\imath`,
+}
+
+// ambiguous are the two capitals that are also operators. A capital sigma with
+// a subscript under it is a sum and not the letter, a capital pi with one is a
+// product, and neither difference survives being written as the letter.
+//
+// The corpus has seven stranded sigmas. Six are the letter, a set named Σ in
+// § 11 and in the exercises of § 14, and one is the sum over σ in Γ in § 5, and
+// the only thing in the Markdown that tells them apart is the subscript. So the
+// shape decides: one of these followed by _ or ^ is refused and reported, and
+// everything else is the letter. No pi is stranded anywhere in the corpus yet,
+// and it is here because the next volume will have one.
+var ambiguous = map[rune]string{
+	'Σ': `\sum`,
+	'Π': `\prod`,
+}
+
+// A Refusal is a character the repair would not touch, and why.
+type Refusal struct {
+	File string
+	Line int
+	Rune rune
+	Why  string
+	Span string
+}
+
+func (r Refusal) String() string {
+	at := fmt.Sprintf("%s:%d", r.File, r.Line)
+	if r.File == "" {
+		at = fmt.Sprintf("line %d", r.Line)
+	}
+	what := fmt.Sprintf("%q ", r.Rune)
+	if r.Rune == 0 {
+		what = "" // the refusal is about a whole span rather than one character
+	}
+	return fmt.Sprintf("%s  %s%s: %s", at, what, r.Why, oneLine(r.Span, 50))
+}
+
+// Repair puts the stranded characters of one body back into their TeX and says
+// what it left alone.
+//
+// It returns the new body, how many characters it replaced, and the refusals. A
+// body it has nothing to do with comes back unchanged, rune for rune, so a
+// caller can compare and write only what moved.
+func Repair(body string) (string, int, []Refusal) {
+	spans, unclosed := Split(body)
+	rs := []rune(body)
+	var b strings.Builder
+	var refused []Refusal
+	n, at := 0, 0
+	if unclosed != nil {
+		// A span that never closes has no end, so from its opening dollar on
+		// there is no telling where the mathematics stops and the prose starts,
+		// and a repair that guessed would rewrite prose. Everything before it
+		// is closed and is repaired as usual: 15 pages of chapter VIII end in a
+		// display that runs onto the next page, and dropping the whole page for
+		// its last three lines would leave the other forty untouched for a
+		// fault M01 reports separately anyway.
+		refused = append(refused, Refusal{Line: unclosed.Line,
+			Why:  "is in a math span that never closes, so the repair cannot see where it ends",
+			Span: unclosed.Text})
+	}
+	for _, s := range spans {
+		b.WriteString(string(rs[at:s.Start]))
+		at = s.End
+		fixed, count, ref := repairSpan(rs[s.Start:s.End])
+		for i := range ref {
+			ref[i].Line, ref[i].Span = s.Line, s.Text
+		}
+		b.WriteString(fixed)
+		n += count
+		refused = append(refused, ref...)
+	}
+	b.WriteString(string(rs[at:]))
+	return b.String(), n, refused
+}
+
+// DropStray takes out a $$ that opens mathematics, closes nothing, and stands
+// against the punctuation at the end of a sentence.
+//
+// The fault it repairs is one the text layer makes over and over. A numbered
+// display set on its own line comes through as prose, with the pieces of it in
+// inline spans and the display's own closing delimiter carried along to the end
+// of the sentence:
+//
+//	(2) long$_A(M) =$ long(B) and long$_B(M) =$ long(A) $$.
+//
+// Nothing closes that $$, so everything after it on the page reads as
+// mathematics. M01 reports the file, the M rules read prose as formulae, and
+// Repair above will not touch a span whose end it cannot see.
+//
+// The three conditions are narrow on purpose, and each of them was put there by
+// a page it got wrong. Chapter VIII has fourteen pages carrying an unclosed
+// delimiter and only eight are this fault; the other six are pages where a
+// display lost its opening delimiter instead, and on those the first unclosed
+// delimiter the splitter meets is the closing one, so a repair that trusted the
+// count alone deleted the end of a display that was perfectly good.
+//
+//   - It must be a display delimiter. A single stray $ is an inline formula
+//     that was mangled far more often than it is a leftover: on VIII, p. 411 it
+//     is the closing $ of $f=a_\lambda\chi_\lambda$ and taking it out breaks a
+//     formula that reads correctly.
+//   - The next character must be a full stop or a comma. A $$ alone on its line
+//     is a display delimiter doing its job, as on VIII, p. 206.
+//   - The body must balance once it is gone, which is the check that the rest
+//     of the page was sound.
+//
+// The caller has the last condition, and it is the page's flags: this is not
+// run on a page the extractor has already said it could not read. Four of the
+// six carry tall-delimiter or dropped-glyph, which is a matrix or a bracket
+// that arrived in pieces, and on those the delimiters mean nothing.
+func DropStray(body string) (string, bool) {
+	_, un := Split(body)
+	if un == nil || !un.Display {
+		return body, false
+	}
+	rs := []rune(body)
+	if un.Start >= len(rs) || (rs[un.Start] != '.' && rs[un.Start] != ',') {
+		return body, false
+	}
+	at := un.Start - 2 // the $$ itself
+	if at < 0 {
+		return body, false
+	}
+	// The space in front of it goes too. It is there to hold the delimiter off
+	// the words, and left behind it is a gap before a full stop.
+	cut := at
+	for cut > 0 && rs[cut-1] == ' ' {
+		cut--
+	}
+	out := string(rs[:cut]) + string(rs[un.Start:])
+	if _, un := Split(out); un != nil {
+		return body, false
+	}
+	return out, true
+}
+
+// repairSpan rewrites the inside of one math span.
+func repairSpan(rs []rune) (string, int, []Refusal) {
+	var b strings.Builder
+	var refused []Refusal
+	n := 0
+	for i, r := range rs {
+		if op, ok := ambiguous[r]; ok && i+1 < len(rs) && (rs[i+1] == '_' || rs[i+1] == '^') {
+			refused = append(refused, Refusal{Rune: r,
+				Why: fmt.Sprintf("carries a subscript, so it is %s rather than %s", op, texOf[r])})
+			b.WriteRune(r)
+			continue
+		}
+		tex, ok := texOf[r]
+		if !ok {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteString(tex)
+		n++
+		// \Gamma written against a following letter names a command that does
+		// not exist, so the two are separated the way extract separates them.
+		if i+1 < len(rs) && isTeXLetter(rs[i+1]) {
+			b.WriteByte(' ')
+		}
+	}
+	return b.String(), n, refused
+}
+
+func isTeXLetter(r rune) bool { return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' }
+
+func oneLine(s string, n int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len([]rune(s)) <= n {
+		return s
+	}
+	return string([]rune(s)[:n]) + "…"
+}

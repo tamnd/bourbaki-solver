@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/quality"
 	"github.com/tamnd/bourbaki-solver/report"
 )
 
@@ -37,11 +38,62 @@ func runReport(args []string) error {
 	switch args[0] {
 	case "usage":
 		return reportUsageCmd(args[1:])
+	case "coverage":
+		return reportCoverageCmd(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, reportUsage)
 		return nil
 	}
-	return fmt.Errorf("unknown report %q, try: usage", args[0])
+	return fmt.Errorf("unknown report %q, try: usage, coverage", args[0])
+}
+
+const coverageUsage = `usage: bourbaki report coverage [-write-readme]
+
+Says what the corpus holds against what the table of contents says it should:
+one row per chapter of every volume, whether or not anything has been read in
+yet. A chapter with no row would be a chapter nobody notices is missing, which
+is why the empty ones are listed too.
+
+The README carries this table between two markers, and H01 to H06 check that it
+is the one the corpus has. -write-readme is what puts it there.
+
+flags:
+  -write-readme  write the table into README.md between its markers
+`
+
+func reportCoverageCmd(args []string) error {
+	fs := flag.NewFlagSet("report coverage", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, coverageUsage) }
+	write := fs.Bool("write-readme", false, "write the table into README.md")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	// The coverage table is a fact about the corpus and not about the rules, so
+	// it loads the corpus and runs nothing. -skip on every group would be the
+	// same thing said less clearly.
+	c, err := quality.Load(quality.Options{Root: root})
+	if err != nil {
+		return err
+	}
+	block := quality.Coverage(c)
+	if !*write {
+		fmt.Print(block)
+		return nil
+	}
+	changed, err := quality.WriteCoverage(root, block)
+	if err != nil {
+		return err
+	}
+	if !changed {
+		fmt.Println("report coverage: README.md is already the table the corpus has")
+		return nil
+	}
+	fmt.Println("report coverage: wrote the table into README.md")
+	return nil
 }
 
 func reportUsageCmd(args []string) error {

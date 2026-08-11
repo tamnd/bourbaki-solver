@@ -19,7 +19,7 @@ import (
 type Edge struct {
 	From      string  `json:"from"` // the tag of the statement the sentence is in
 	FromLabel string  `json:"from_label"`
-	To        *string `json:"to"` // the tag it points at, null when it points out of the corpus
+	To        *string `json:"to,omitempty"` // the tag it points at, absent when it points out of the corpus
 	ToLabel   string  `json:"to_label,omitempty"`
 	Kind      string  `json:"kind"`
 	Raw       string  `json:"raw"`
@@ -240,12 +240,39 @@ func (m *Manifest) Stale(root string) (bool, error) {
 	return !bytes.Equal(got, want), nil
 }
 
+// bytes renders the manifest one edge to a line.
+//
+// json.MarshalIndent gives 25710 lines and 704 KB for chapter VIII alone, over
+// the 512 KB H03 holds a tracked file to, and it diffs by field: an edge whose
+// line number moved shows as a dozen changed lines and a reference that was
+// added shifts everything under it. One edge to a line is 2100 lines and 510 KB
+// for the same 2098 edges, and it diffs by edge, which is the unit anybody
+// reading the change cares about.
+//
+// 510 KB is under the limit by a page and a half, so this buys room and not
+// headroom. The size is still linear in how much of the Éléments has been read
+// in and chapter VIII is one of eight chapters in scope, so H03 will fire again
+// and the answer then is a judgement about generated manifests rather than
+// another byte shaved off this one. See trackedMax in package quality.
+//
+// It is still one JSON document and json.Unmarshal reads it, so nothing that
+// consumes the manifest has to know how it is laid out.
 func (m *Manifest) bytes() ([]byte, error) {
-	b, err := json.MarshalIndent(m, "", "  ")
-	if err != nil {
-		return nil, err
+	var buf bytes.Buffer
+	buf.WriteString("{\"edges\": [\n")
+	for i, e := range m.Edges {
+		b, err := json.Marshal(e)
+		if err != nil {
+			return nil, err
+		}
+		buf.Write(b)
+		if i+1 < len(m.Edges) {
+			buf.WriteByte(',')
+		}
+		buf.WriteByte('\n')
 	}
-	return append(b, '\n'), nil
+	buf.WriteString("]}\n")
+	return buf.Bytes(), nil
 }
 
 func manifestPath(root string) string { return filepath.Join(root, "manifests", "refs.json") }

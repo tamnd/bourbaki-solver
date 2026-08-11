@@ -25,8 +25,11 @@ commands:
   render           rasterise a scanned volume to the page images OCR reads
   extract          read the pages of a volume into Markdown
   assemble         put the pages back into the sections the book is written in
+  fix              the repairs that need no PDF and no model
   tags             the permanent identifiers: assign, merge, retire, migrate, verify
   refs             the cross-reference graph over the tags
+  audit            every quality rule in spec 08, run over the committed corpus
+  repo             the checkout itself: point git at the hooks the corpus keeps
   ocr              read the pages of a scanned volume through a model, and check them
   label            parse a statement label, or a running head, and print what it means
   fleet            probe the hosts, and run the ssh tunnels that reach them
@@ -64,10 +67,16 @@ func main() {
 		err = runExtract(args[1:])
 	case "assemble":
 		err = runAssemble(args[1:])
+	case "fix":
+		err = runFix(args[1:])
 	case "refs":
 		err = runRefs(args[1:])
 	case "tags":
 		err = runTags(args[1:])
+	case "audit":
+		err = runAudit(args[1:])
+	case "repo":
+		err = runRepo(args[1:])
 	case "ocr":
 		err = runOCR(args[1:])
 	case "label":

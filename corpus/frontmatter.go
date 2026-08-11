@@ -218,8 +218,16 @@ func (f File[T]) Bytes() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.WriteString("---\n")
 	buf.Write(head)
-	buf.WriteString("---\n\n")
-	buf.WriteString(f.Body)
+	buf.WriteString("---\n")
+	// A blank page has front matter and nothing else, and the eleven blank
+	// versos of chapter VIII are eleven real files. The blank line that
+	// separates the fence from the text has no text to separate it from there,
+	// so writing it would leave every one of them ending in a blank line, which
+	// is what H05 is for.
+	if f.Body != "" {
+		buf.WriteString("\n")
+		buf.WriteString(f.Body)
+	}
 	return buf.Bytes(), nil
 }
 
