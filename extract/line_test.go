@@ -317,3 +317,43 @@ func number(t *testing.T, s string) int {
 	}
 	return n
 }
+
+// Equation (18) of § 21, off French page 400, whose display opens on the bound
+// of a sum. The bound stands a hundred units past the equation number, which is
+// as wide as the gap between a heading of the back index and the entries set
+// beside it, so the rule that keeps those entries off the heading read it as a
+// change of type rather than as a limit and the display came out as
+// "\lambda \sum_{\in\widehat{G}}e_{\lambda}". What the index has and this does
+// not is a sign to stand across.
+const openingLimitPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="400" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="2" size="14" family="LMRoman12" color="#131413"/>
+<fontspec id="3" size="14" family="LMMathItalic12" color="#131413"/>
+<fontspec id="5" size="12" family="CMEX10" color="#131413"/>
+<fontspec id="6" size="9" family="LMMathItalic8" color="#131413"/>
+<fontspec id="7" size="9" family="LMRoman8" color="#131413"/>
+<fontspec id="8" size="9" family="LMMathSymbols8" color="#131413"/>
+<text top="430" left="80" width="24" height="12" font="2">(18)</text>
+<text top="417" left="217" width="17" height="15" font="5">X</text>
+<text top="451" left="215" width="6" height="8" font="6"><i>&#955;</i></text>
+<text top="448" left="221" width="7" height="12" font="8"><i>&#8712;</i></text>
+<text top="445" left="228" width="6" height="15" font="5">b</text>
+<text top="451" left="228" width="8" height="8" font="7">G</text>
+<text top="430" left="242" width="6" height="12" font="3"><i>e</i></text>
+<text top="437" left="248" width="6" height="8" font="6"><i>&#955;</i></text>
+<text top="430" left="258" width="21" height="12" font="2">= 1</text>
+</page>
+</pdf2xml>
+`
+
+func TestALimitThatOpensADisplayIsStillALimit(t *testing.T) {
+	lines := parse(t, openingLimitPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `(18) $\sum_{\lambda\in\widehat{G}}e_{\lambda}= 1$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
