@@ -28,6 +28,7 @@ commands:
   fix              the repairs that need no PDF and no model
   tags             the permanent identifiers: assign, merge, retire, migrate, verify
   refs             the cross-reference graph over the tags
+  glossary         the terminology contract the translations are held to
   audit            every quality rule in spec 08, run over the committed corpus
   repo             the checkout itself: point git at the hooks the corpus keeps
   ocr              read the pages of a scanned volume through a model, and check them
@@ -73,6 +74,8 @@ func main() {
 		err = runRefs(args[1:])
 	case "tags":
 		err = runTags(args[1:])
+	case "glossary":
+		err = runGlossary(args[1:])
 	case "audit":
 		err = runAudit(args[1:])
 	case "repo":

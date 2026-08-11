@@ -1,0 +1,162 @@
+// Package glossary is the terminology contract between the four languages.
+//
+// It is what makes 1200 pages read as one translation instead of 120 unrelated
+// ones. Bourbaki's vocabulary is fixed and deliberate, and a translation that
+// renders "Artinian ring" three different ways across one chapter is a
+// translation nobody can search and nobody can trust, however good each of the
+// three renderings is on its own.
+//
+// The file is manifests/glossary.yaml in the corpus, and it is committed, read
+// by the audit and embedded in every translation prompt. The version number on
+// it is what makes a translation stale: bump it and every file that recorded an
+// earlier version is due to be done again.
+package glossary
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"gopkg.in/yaml.v3"
+)
+
+// Glossary is manifests/glossary.yaml.
+type Glossary struct {
+	Version int    `yaml:"version"`
+	Terms   []Term `yaml:"terms"`
+}
+
+// A Term is one English term and what it is called in each language.
+//
+// A language may be empty, and that is not an error: a term is curated one
+// language at a time and the Vietnamese pass runs first, so a glossary with 800
+// Vietnamese rows and no Chinese ones is what the middle of M7 looks like.
+type Term struct {
+	EN string `yaml:"en"`
+	VI string `yaml:"vi,omitempty"`
+	ZH string `yaml:"zh,omitempty"`
+	JA string `yaml:"ja,omitempty"`
+
+	// Note is for the term whose translation depends on something a translator
+	// cannot see in the phrase, which in these volumes is usually a Bourbaki
+	// convention: a ring is associative with a unit unless it says otherwise,
+	// and a translator who does not know that will reach for the wrong word.
+	Note string `yaml:"note,omitempty"`
+}
+
+// In is the term's rendering in one language, empty when it has none.
+func (t Term) In(lang string) string {
+	switch lang {
+	case "vi":
+		return t.VI
+	case "zh":
+		return t.ZH
+	case "ja":
+		return t.JA
+	case "en":
+		return t.EN
+	}
+	return ""
+}
+
+// Langs are the languages a glossary row carries, in the order M7 does them.
+var Langs = []string{"vi", "zh", "ja"}
+
+// Path is where the glossary lives.
+func Path(root string) string { return filepath.Join(root, "manifests", "glossary.yaml") }
+
+// CandidatesPath is where the mined candidates live. They are a working
+// document rather than a contract, which is why they are a separate file: the
+// glossary is what has been decided and this is what has been noticed.
+func CandidatesPath(root string) string {
+	return filepath.Join(root, "manifests", "glossary-candidates.yaml")
+}
+
+// Load reads the glossary. A corpus with no glossary yet is not an error, it is
+// an empty glossary, because everything that reads one has to work before M7
+// has written it.
+func Load(root string) (*Glossary, error) {
+	b, err := os.ReadFile(Path(root))
+	if os.IsNotExist(err) {
+		return &Glossary{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var g Glossary
+	dec := yaml.NewDecoder(strings.NewReader(string(b)))
+	dec.KnownFields(true)
+	if err := dec.Decode(&g); err != nil {
+		return nil, fmt.Errorf("%s: %w", Path(root), err)
+	}
+	if err := g.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", Path(root), err)
+	}
+	return &g, nil
+}
+
+// Validate catches the two ways a hand-edited glossary is wrong in a way that
+// would be silent: a duplicated English term, where the second row is dead and
+// nobody can see which one is being used, and an empty one.
+func (g Glossary) Validate() error {
+	seen := map[string]bool{}
+	for i, t := range g.Terms {
+		key := Key(t.EN)
+		if key == "" {
+			return fmt.Errorf("term %d has no en", i+1)
+		}
+		if seen[key] {
+			return fmt.Errorf("term %q appears twice", t.EN)
+		}
+		seen[key] = true
+	}
+	return nil
+}
+
+// Key is the form a term is compared in: lower case, single spaced. Bourbaki
+// writes "Artinian ring" at the head of a sentence and "artinian ring" inside
+// one, and those are one term.
+func Key(term string) string { return strings.Join(strings.Fields(strings.ToLower(term)), " ") }
+
+// In is every term that has a rendering in this language, keyed by Key(en).
+func (g Glossary) In(lang string) map[string]Term {
+	out := map[string]Term{}
+	for _, t := range g.Terms {
+		if t.In(lang) != "" {
+			out[Key(t.EN)] = t
+		}
+	}
+	return out
+}
+
+// Sorted is the terms longest first, then alphabetically.
+//
+// Longest first is what a scanner needs. "semisimple ring" and "ring" are both
+// terms, and a scan that met "ring" first would find it inside the longer one
+// and report the longer term as absent from a translation that renders it
+// perfectly well.
+func (g Glossary) Sorted() []Term {
+	out := append([]Term(nil), g.Terms...)
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := Key(out[i].EN), Key(out[j].EN)
+		if len(a) != len(b) {
+			return len(a) > len(b)
+		}
+		return a < b
+	})
+	return out
+}
+
+// Write renders the glossary to a path, creating the directory.
+func (g Glossary) Write(path string) error {
+	b, err := yaml.Marshal(g)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, b, 0o644)
+}
