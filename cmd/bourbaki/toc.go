@@ -5,11 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
-	"github.com/tamnd/bourbaki-solver/pdfsrc"
 	"github.com/tamnd/bourbaki-solver/toc"
 )
 
@@ -81,15 +79,11 @@ func tocBuild(args []string) error {
 			skipped++
 			continue
 		}
-		src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+		pages, err := volumeText(ctx, root, &b)
 		if err != nil {
 			return err
 		}
-		text, err := src.Text(ctx, 0, 0, true)
-		if err != nil {
-			return err
-		}
-		res, err := toc.Parse(pagemap.SplitPages(text), pm, toc.Options{
+		res, err := toc.Parse(pages, pm, toc.Options{
 			Book: b.ID, Chapters: b.Chapters})
 		if err != nil {
 			fmt.Printf("%s  %v\n", b.ID, err)
@@ -242,15 +236,11 @@ func tocVerify(args []string) error {
 		if !ok {
 			return fmt.Errorf("%s is in %s but not in %s", bt.ID, corpus.TOCPath(root), corpus.BooksPath(root))
 		}
-		src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
+		pages, err := volumeText(ctx, root, b)
 		if err != nil {
 			return err
 		}
-		text, err := src.Text(ctx, 0, 0, true)
-		if err != nil {
-			return err
-		}
-		r := toc.Verify(pagemap.SplitPages(text), bt)
+		r := toc.Verify(pages, bt)
 		fmt.Printf("%s  %d of %d headings on the page the contents names, %.1f%%\n",
 			r.Book, r.Matched, r.Checked, r.Rate())
 		list := r.Moved()

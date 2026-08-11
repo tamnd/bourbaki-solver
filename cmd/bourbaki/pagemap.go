@@ -5,13 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"text/tabwriter"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
-	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
 
 func runPagemap(args []string) error {
@@ -249,15 +247,7 @@ func pageText(ctx context.Context, root string, b corpus.Book) ([]string, error)
 	if b.TextLayer == "none" {
 		return readPageFiles(root, b)
 	}
-	src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
-	if err != nil {
-		return nil, err
-	}
-	text, err := src.Text(ctx, 0, 0, true)
-	if err != nil {
-		return nil, err
-	}
-	return pagemap.SplitPages(text), nil
+	return volumeText(ctx, root, &b)
 }
 
 // readPageFiles is the body of every page file of a volume, in page order, with

@@ -185,6 +185,12 @@ func CMEX(r rune) (latex string, accent, ok bool) {
 var combining = map[rune]string{
 	'̂': `\widehat`,
 	'̃': `\widetilde`,
+	// U+02C6, the circumflex that takes a width of its own instead of
+	// combining. It is what the French printing sets the hat of a Fourier
+	// transform in, out of the text face rather than out of an extension font,
+	// and it arrives welded to the run beside it. See unhat, which cuts it out
+	// before this is asked about it.
+	'ˆ': `\widehat`,
 }
 
 // Accent returns the LaTeX for a run that is an accent drawn over another run,

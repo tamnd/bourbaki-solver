@@ -41,9 +41,36 @@ var kindByHeading = map[string]Kind{
 	"exercise":    KindExercise,
 }
 
-// KindFromHeading resolves the printed word, in any case, to a Kind.
+// The French printing states the same results in its own words, and they
+// resolve to the same slugs, because a Lemme and a Lemma are one lemma of the
+// Éléments printed twice and the slug is what its permanent tag is named after.
+var frKindByHeading = map[string]Kind{
+	"définition":   KindDefinition,
+	"définitions":  KindDefinition,
+	"proposition":  KindProposition,
+	"propositions": KindProposition,
+	"théorème":     KindTheorem,
+	"théorèmes":    KindTheorem,
+	"lemme":        KindLemma,
+	"lemmes":       KindLemma,
+	"corollaire":   KindCorollary,
+	"corollaires":  KindCorollary,
+	"remarque":     KindRemark,
+	"remarques":    KindRemark,
+	"exemple":      KindExample,
+	"exemples":     KindExample,
+	"scholie":      KindScholium,
+	"exercice":     KindExercise,
+}
+
+// KindFromHeading resolves the printed word, in any case and in either
+// language, to a Kind.
 func KindFromHeading(s string) (Kind, bool) {
-	k, ok := kindByHeading[strings.ToLower(strings.TrimSpace(s))]
+	w := strings.ToLower(strings.TrimSpace(s))
+	if k, ok := kindByHeading[w]; ok {
+		return k, true
+	}
+	k, ok := frKindByHeading[w]
 	return k, ok
 }
 
@@ -72,6 +99,37 @@ func (k Kind) Heading() string {
 		return "Equation"
 	}
 	return string(k)
+}
+
+// HeadingIn returns the word printed for this Kind in a language. It is what a
+// reader sees over a statement, and nothing but that: the label under it, and
+// so the tag, is the same in every language.
+func (k Kind) HeadingIn(lang string) string {
+	if lang != "fr" {
+		return k.Heading()
+	}
+	switch k {
+	case KindDefinition:
+		return "Définition"
+	case KindTheorem:
+		return "Théorème"
+	case KindLemma:
+		return "Lemme"
+	case KindCorollary:
+		return "Corollaire"
+	case KindRemark:
+		return "Remarque"
+	case KindExample:
+		return "Exemple"
+	case KindScholium:
+		return "Scholie"
+	case KindExercise:
+		return "Exercice"
+	case KindEquation:
+		return "Formule"
+	}
+	// Proposition is spelt the same in both.
+	return k.Heading()
 }
 
 // Chapters of the Éléments are numbered in Roman. We keep them uppercase in

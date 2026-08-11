@@ -84,25 +84,17 @@ func (p Piece) Verify() error {
 	return nil
 }
 
-// headRE is a statement as the book prints it and extraction writes it: the
-// kind in bold, a number for most of them, a full stop inside the bold, and an
-// em dash before the statement itself.
-//
-// The plurals are the book's own. It sets "Remarks. —" over a run of remarks
-// and "Examples. —" over a run of examples, 51 times in chapter VIII, and each
-// of those is one statement rather than the first of several.
+// A statement as the book prints it and extraction writes it is the kind in
+// bold, a number for most of them, a full stop inside the bold, and an em dash
+// before the statement itself. The expression that reads one is per printing:
+// see printing.head, and the note there on the head with no bold on it.
 //
 // The second branch is the same head with the bold lost and an attribution in
 // its place: "Theorem 1 (Wedderburn). —". Bourbaki names the author of 18
 // statements in chapter VIII that way and extraction dropped the bold on every
 // one of them, while dropping it on none of the 631 heads that carry no
-// attribution, so the parenthesis is what threw it. The attribution is required
-// rather than optional here for exactly that reason: an undecorated "Theorem 1.
-// —" is a shape the pages never produce, and reading one as a head would put
-// the whole grammar at the mercy of a sentence that happens to open on a kind.
-// These 18 were the largest hole left in the reference graph after the page
-// joins were fixed, 55 unresolved references between them, headed by the
-// thirteen that ask for Theorem 1 of § 7.
+// attribution, so the parenthesis is what threw it. The French printing does
+// the same, for the same 18 statements.
 //
 // The third branch is the head of a statement set in small type. Bourbaki
 // brackets a passage that leans on a Book the reader has not reached with a
@@ -111,14 +103,6 @@ func (p Piece) Verify() error {
 // of them open on a statement. The star is put back at the front of the body
 // rather than dropped, both because it is the book's own mark and because the
 // one at the far end would otherwise be left without its pair.
-var headRE = regexp.MustCompile(
-	`^(?:\*\*(` + kindAlt + `)(?: (\d+))?\.\*\*|(` + kindAlt + `)(?: (\d+))? \([^)]*\)\.|` +
-		smallType + `(` + kindAlt + `)(?: (\d+))?\.)\s*—\s*`)
-
-// smallType is the mark that opens a passage set in small type.
-const smallType = `\$\*\$`
-
-const kindAlt = `Definitions?|Propositions?|Theorems?|Lemmas?|Corollary|Corollaries|Remarks?|Examples?|Scholium`
 
 // A run of remarks or examples is set under one head and numbered inside it, so
 // no. 7 of § 16 prints "Remarks. — 2)", then "3)" as a paragraph of its own,
@@ -159,7 +143,7 @@ const kindAlt = `Definitions?|Propositions?|Theorems?|Lemmas?|Corollary|Corollar
 // keeping track of here is the Corollary, which is numbered under the statement
 // it hangs from, so the last numbered Definition, Proposition, Theorem, Lemma
 // or Scholium is carried along as the run goes.
-func statements(blocks []block, id corpus.Ref) ([]block, []corpus.Statement, error) {
+func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.Statement, error) {
 	out := make([]block, 0, len(blocks)*2)
 	var found []corpus.Statement
 	seen := map[string]bool{}
@@ -180,7 +164,7 @@ func statements(blocks []block, id corpus.Ref) ([]block, []corpus.Statement, err
 			out = append(out, b)
 			continue
 		}
-		r, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ)
+		r, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, pr)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -206,7 +190,7 @@ func statements(blocks []block, id corpus.Ref) ([]block, []corpus.Statement, err
 			s.Page = l.Page
 		}
 		found = append(found, s)
-		out = append(out, block{text: heading(r, label), page: b.page, last: b.last, label: b.label})
+		out = append(out, block{text: heading(r, label, pr), page: b.page, last: b.last, label: b.label})
 		if body != "" {
 			out = append(out, block{text: body, page: b.page, last: b.last, label: b.label})
 		}
@@ -219,8 +203,8 @@ func statements(blocks []block, id corpus.Ref) ([]block, []corpus.Statement, err
 // The word is the corpus's singular, not the one printed: a run of remarks is
 // headed "Remarks. —" in the book and each of its members comes out as a Remark
 // of its own here, because each of them is one statement and has one label.
-func heading(r corpus.Ref, label string) string {
-	head := r.Kind.Heading()
+func heading(r corpus.Ref, label string, pr printing) string {
+	head := r.Kind.HeadingIn(pr.lang)
 	if r.Number > 0 {
 		head += fmt.Sprintf(" %d", r.Number)
 	}
@@ -230,8 +214,8 @@ func heading(r corpus.Ref, label string) string {
 // statementAt reads one block as a statement, and returns false if it is not
 // one. body is the statement with the head taken off.
 func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, next int,
-	occ map[corpus.Ref]int) (corpus.Ref, string, bool, error) {
-	m := headRE.FindStringSubmatch(text)
+	occ map[corpus.Ref]int, pr printing) (corpus.Ref, string, bool, error) {
+	m := pr.head.FindStringSubmatch(text)
 	if m == nil {
 		// A paragraph opening on the number the open run is up to is the next
 		// member of that run.
@@ -241,10 +225,13 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		}
 		r := run
 		r.Number = next
-		return r, afterMarker(i[0], text[len(i[0]):]), true, nil
+		return r, afterMarker(i[0], text[markerLen(i):]), true, nil
 	}
-	// The head matched one of headRE's three branches and left the others empty.
+	// The head matched one of the branches of pr.head and left the others empty.
 	word, num := m[1]+m[3]+m[5], m[2]+m[4]+m[6]
+	if len(m) > 7 {
+		word, num = word+m[7], num+m[8]
+	}
 	kind, ok := corpus.KindFromHeading(word)
 	if !ok {
 		return corpus.Ref{}, "", false, fmt.Errorf("nothing in the corpus is called a %q", word)
@@ -259,7 +246,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		// A run is headed by its kind in the plural and numbered inside:
 		// "Remarks. — 2)" is Remark 2 and the head carries no number of its own.
 		if i := exNumRE.FindStringSubmatch(rest); i != nil {
-			num, rest = i[3], afterMarker(i[0], rest[len(i[0]):])
+			num, rest = i[3], afterMarker(i[0], rest[markerLen(i):])
 		}
 	}
 	// An unnumbered statement has no number to be numbered under, so it is
@@ -290,20 +277,16 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	return r, strings.TrimSpace(rest), true, nil
 }
 
-// exercisesHead is the heading extraction writes over the exercises of a §,
-// which the book prints as EXERCISES.
-const exercisesHead = "### Exercises"
-
 // anchorExercises gives the block of exercises an anchor, so that a reference
 // to "VIII, p. 15, Exercise 9" has somewhere to point before the exercises are
 // split out into files of their own.
-func anchorExercises(blocks []block, id corpus.Ref) ([]block, bool) {
+func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool) {
 	found := false
 	for i, b := range blocks {
-		if b.text != exercisesHead {
+		if b.text != pr.exercises {
 			continue
 		}
-		blocks[i].text = fmt.Sprintf("%s {#%s-exercises}", exercisesHead, id.SectionLabel())
+		blocks[i].text = fmt.Sprintf("%s {#%s-exercises}", pr.exercises, id.SectionLabel())
 		found = true
 	}
 	return blocks, found
@@ -321,7 +304,38 @@ func anchorExercises(blocks []block, id corpus.Ref) ([]block, bool) {
 // Extraction writes them as the mathematics they were set in, "$\P 15)$" and
 // "$*19)$", because that is what the volume's text layer holds, and the
 // exercise is not found at all if they are not read.
-var exNumRE = regexp.MustCompile(`^(?:\$\s*(\*)?\s*(\\P)?\s*)?(\d+)\)\$?\s`)
+//
+// What follows the number is a space, or the a) of its first part run straight
+// on: the French printing sets four of its exercises as "$\P 3)$a) Soient K un
+// corps commutatif", with nothing between the marker and the part. The space is
+// what keeps a number inside a sentence from opening an exercise, so it is not
+// simply dropped, and a lettered part is the one other thing that can stand
+// there. Without this, § 14 of the French chapter reported three exercises
+// where the volume prints nineteen: the reader looks for one number and one
+// only, so a marker it cannot see stops the thread for the rest of the §.
+// An asterisk after the number is read too, and is not a mark on the exercise:
+// it closes the passage the exercise before it ended in, and it falls inside
+// the same math span as the number because the text layer opened the span at
+// the number. § 16 sets its fifteenth as "$15)*$a)", and the reader, which
+// looks for one number and one only, stopped there and lost 15, 16 and 17.
+//
+// The dollar that closes the marker's span is the third thing that can stand
+// after the number, and it is as good a separator as a space: § 6 of the French
+// chapter sets the second of its examples "$2)*$Soient A une $k$-algèbre", with
+// the number, the asterisk and the closing dollar run straight into the word.
+var exNumRE = regexp.MustCompile(`^(?:\$\s*(\*)?\s*(\\P)?\s*)?(\d+)\)(?:\*?\$|(\s|[a-z]\)))`)
+
+// markerLen is how much of a block the marker takes, which is not always the
+// whole of what matched: a lettered part is matched to prove the number opens
+// an item and then left where it stands, since it is the first line of the item
+// and not part of its number.
+func markerLen(m []string) int {
+	n := len(m[0])
+	if len(m) > 4 && strings.TrimSpace(m[4]) != "" {
+		n -= len(m[4])
+	}
+	return n
+}
 
 // itemOpen says a paragraph opens on a numbered item rather than on prose.
 func itemOpen(s string) bool { return exNumRE.MatchString(s) }
@@ -342,11 +356,11 @@ func itemOpen(s string) bool { return exNumRE.MatchString(s) }
 // each block is searched through rather than only looked at, and the search is
 // for one number and not for any number, which is what keeps the "13)" of a
 // cross-reference out of it.
-func exercises(blocks []block) ([]corpus.Exercise, error) {
+func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 	var out []corpus.Exercise
 	in := false
 	for _, b := range blocks {
-		if strings.HasPrefix(b.text, exercisesHead) {
+		if strings.HasPrefix(b.text, pr.exercises) {
 			in = true
 			continue
 		}
@@ -385,7 +399,7 @@ func exercises(blocks []block) ([]corpus.Exercise, error) {
 				e.Meta.BookPage = l.String()
 			}
 			out = append(out, e)
-			text = afterMarker(m[0], text[i+len(m[0]):])
+			text = afterMarker(m[0], text[i+markerLen(m):])
 		}
 	}
 	return out, nil
@@ -435,7 +449,7 @@ func itemStart(text string, n int) (int, []string) {
 				// exercise before it ended in, which is why the book prints
 				// "$*19)$" and never "$19)*$" when it means the mark.
 				raw, marks := text[at:off+loc[1]], text[at:off+loc[2]]
-				m = []string{raw, markOf(marks, "*"), markOf(marks, `\P`), strconv.Itoa(got)}
+				m = []string{raw, markOf(marks, "*"), markOf(marks, `\P`), strconv.Itoa(got), ""}
 			}
 			return at, m
 		}

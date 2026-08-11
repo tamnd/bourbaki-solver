@@ -266,11 +266,30 @@ func (m SectionFrontMatter) Stale(englishSHA256 string) bool {
 
 var slugStrip = regexp.MustCompile(`[^a-z0-9]+`)
 
+// fold is the letter an accented letter is filed under. Dropping the accent
+// instead of folding it loses the letter with it, and the French volumes are
+// full of them: § 13 of Algebra VIII is "Algèbres absolument semi-simples" and
+// came out as 13_s13_alg_bres_absolument_semi_simples. The table is the Latin-1
+// letters the Éléments are set in and the two ligatures, which is every letter
+// the French, and the German and Scandinavian names in the historical notes,
+// actually use.
+var fold = strings.NewReplacer(
+	"à", "a", "â", "a", "ä", "a", "á", "a", "ã", "a", "å", "a", "æ", "ae",
+	"ç", "c",
+	"è", "e", "é", "e", "ê", "e", "ë", "e",
+	"ì", "i", "í", "i", "î", "i", "ï", "i",
+	"ñ", "n",
+	"ò", "o", "ó", "o", "ô", "o", "ö", "o", "õ", "o", "ø", "o", "œ", "oe",
+	"ù", "u", "ú", "u", "û", "u", "ü", "u",
+	"ý", "y", "ÿ", "y",
+	"ß", "ss",
+)
+
 // Slug turns a printed title into the file-name part. It cuts on a word
 // boundary rather than mid-word, so the name stays readable, and it is
 // deterministic, so the same title always produces the same path.
 func Slug(title string, max int) string {
-	s := slugStrip.ReplaceAllString(strings.ToLower(title), "_")
+	s := slugStrip.ReplaceAllString(fold.Replace(strings.ToLower(title)), "_")
 	s = strings.Trim(s, "_")
 	if max <= 0 || len(s) <= max {
 		return s

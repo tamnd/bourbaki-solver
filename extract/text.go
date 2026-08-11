@@ -54,12 +54,47 @@ var headRE = regexp.MustCompile(`^(Definition|Proposition|Theorem|Lemma|Corollar
 // statement: its number, a full stop, and a dash.
 var capsTailRE = regexp.MustCompile(`^( [0-9]+)?\.(\s*(—|--))`)
 
-// capsOpen is the words a line opens with in small capitals, which is what
-// Bourbaki sets the name of a statement in.
+// capsOpen is the words a line opens with in the type Bourbaki sets the name of
+// a statement in, which is small capitals for a Proposition and italic for the
+// kinds the French volumes set plainly.
+//
+// The italic is only taken as a name when what follows it is roman and is the
+// number and dash of a head, because a statement is set in italic all through
+// and every line of one opens in italic too. The French chapter VIII sets
+// "Lemme " in italic, then "2. — " in roman, then the statement back in italic,
+// and the change of font at the dash is the whole of the evidence: no line of
+// prose in either volume opens in italic and returns to roman on a dash.
 func capsOpen(toks []token) string {
+	if s := openIn(toks, ClassHead); s != "" {
+		return s
+	}
+	s := openIn(toks, ClassEmph)
+	if s == "" {
+		return ""
+	}
+	i := 0
+	for i < len(toks) && toks[i].class == ClassEmph {
+		i++
+	}
+	var rest strings.Builder
+	for _, t := range toks[i:] {
+		rest.WriteString(t.text)
+	}
+	if headTailRE.MatchString(rest.String()) {
+		return s
+	}
+	return ""
+}
+
+// headTailRE is what the printing sets in roman between the italic name of a
+// statement and the statement itself.
+var headTailRE = regexp.MustCompile(`^\s*[0-9]*\s*\.\s*(—|--)`)
+
+// openIn is the run of text at the head of a line set in one class.
+func openIn(toks []token, c Class) string {
 	var b strings.Builder
 	for _, t := range toks {
-		if t.class != ClassHead {
+		if t.class != c {
 			break
 		}
 		b.WriteString(t.text)
@@ -91,7 +126,7 @@ func statementHead(s, caps string) string {
 func tokens(l Line) []token {
 	var toks []token
 	var accents []Run
-	for _, r := range l.Runs {
+	for _, r := range unhat(l.Runs) {
 		if _, ok := Accent(r.Spec, r.Text); ok {
 			accents = append(accents, r)
 			continue
@@ -132,6 +167,61 @@ func tokens(l Line) []token {
 	}
 	return place(toks, accents)
 }
+
+// unhat cuts the spacing circumflex out of the runs it arrived welded to, so
+// that it can be placed over the letter it was drawn over like any other
+// accent.
+//
+// The French printing sets the hat of the Fourier transform in the text face
+// rather than in the extension font, and poppler hands it back inside the run
+// beside it: "= ˆ" at 141 with the tau it covers at 156, or a run of one hat at
+// 250 with the tau at 249. Neither is an accent to Accent, which reads the
+// first character of a run, so both came through as themselves and the page
+// said "$\tau$ˆ$(...)$" where the book prints the transform of tau. Six of them
+// in § 21 of the French chapter, and they are the whole of what M03 has left to
+// say about that volume.
+//
+// The box of the piece is worked out by counting characters across the run,
+// which is the same estimate accent makes when it cuts a token, and it is good
+// enough here for the same reason: what it has to decide is which letter of the
+// line the hat sits over, and the letters are wider than the error.
+func unhat(runs []Run) []Run {
+	var out []Run
+	for _, r := range runs {
+		rs := []rune(r.Text)
+		if len(rs) < 2 || !strings.ContainsRune(r.Text, hat) {
+			out = append(out, r)
+			continue
+		}
+		w := r.Width
+		cut := func(from, to int) Run {
+			p := r
+			p.Text = string(rs[from:to])
+			p.Left = r.Left + w*from/len(rs)
+			p.Width = r.Left + w*to/len(rs) - p.Left
+			return p
+		}
+		last := 0
+		for i, c := range rs {
+			if c != hat {
+				continue
+			}
+			if i > last {
+				out = append(out, cut(last, i))
+			}
+			out = append(out, cut(i, i+1))
+			last = i + 1
+		}
+		if last < len(rs) {
+			out = append(out, cut(last, len(rs)))
+		}
+	}
+	return out
+}
+
+// hat is U+02C6, the circumflex that stands on its own rather than combining
+// with the letter before it.
+const hat = 'ˆ'
 
 // footnoteMark reports whether a run is a reference to a footnote, which this
 // volume sets as a parenthesised number raised above the line. Everything else
@@ -217,7 +307,7 @@ func accent(t token, a Run, latex string) []token {
 	// A token already rendered as LaTeX cannot be cut by character, since its
 	// characters are no longer the ones on the page.
 	if len(rs) < 2 || w <= 0 || strings.ContainsAny(t.text, `\{}`) {
-		t.text = latex + "{" + strings.TrimSpace(t.text) + "}"
+		t.text = latex + "{" + strings.TrimSpace(runes(t.text, nil)) + "}"
 		t.math, t.class = true, ClassMath
 		return []token{t}
 	}
@@ -248,7 +338,11 @@ func accent(t token, a Run, latex string) []token {
 		out = append(out, cut(0, lo))
 	}
 	mid := cut(lo, hi)
-	mid.text = latex + "{" + strings.TrimSpace(mid.text) + "}"
+	// The letter under the accent is being written as mathematics whatever it
+	// was read as, so it goes through the table on the way in. Bourbaki sets
+	// its capital Greek in the text face and page 114 puts a tilde over one of
+	// them, which came out as \widetilde{Λ} with the letter still Unicode.
+	mid.text = latex + "{" + strings.TrimSpace(runes(mid.text, nil)) + "}"
 	mid.math, mid.class = true, ClassMath
 	out = append(out, mid)
 	if hi < len(rs) {
@@ -498,6 +592,15 @@ func split(t token, before, after bool) []token {
 			depth: t.depth, left: t.left, right: t.right, math: math}
 		if math {
 			n.class = ClassMath
+			// The piece was read as prose and is being written as mathematics,
+			// so the characters in it have to be written as mathematics too.
+			// Bourbaki sets its capital Greek upright, in the text face, so the
+			// sum of page 95 of the French chapter arrived as the letter Σ in a
+			// run of prose and went inside the dollar signs as itself, where it
+			// prints nothing and says nothing. The same letter in an index goes
+			// through this table already, which is why the line read
+			// "Σ_{\sigma\in\Gamma}" with one of its two letters in TeX.
+			n.text = runes(n.text, nil)
 		}
 		out = append(out, n)
 	}
@@ -615,6 +718,9 @@ func emit(toks []token) string {
 	// hyphenated says the formula just closed ended in the hyphen of a compound
 	// word, so the word that follows joins on to it without a space.
 	hyphenated := false
+	// opened is where the dollar of the formula being written stands, so that a
+	// formula that turns out to hold nothing can take it back.
+	opened := 0
 	closeMath := func(compound bool) {
 		if !inMath {
 			return
@@ -641,6 +747,21 @@ func emit(toks []token) string {
 			tail = "-" + tail
 			hyphenated = true
 		}
+		// A formula with nothing left in it is not a formula, and the dollar
+		// that opened it has to come back off. Bourbaki sets the comma of
+		// "sous-(A, A)-bimodule" in the mathematics italic, which makes a run
+		// of one comma, and the rule above then takes the comma outside and
+		// leaves the two dollars against each other. That is not an empty
+		// formula to anything that reads the Markdown afterwards, it is the
+		// opening of a display: page 385 of the French chapter had the rest of
+		// its proof inside one, and the audit reported the display that never
+		// closes rather than the comma that opened it. Five pages of the two
+		// printings do this, all of them a comma or a full stop.
+		if strings.TrimSpace(out[opened+1:]) == "" {
+			out = strings.TrimRight(out[:opened], " ") + tail
+			inMath = false
+			return
+		}
 		out = strings.TrimRight(out, " ") + "$" + tail
 		inMath = false
 	}
@@ -666,6 +787,7 @@ func emit(toks []token) string {
 				out = strings.TrimRight(out, " ") + " "
 			}
 			text = strings.TrimLeft(text, " ")
+			opened = len(out)
 			out += "$"
 			inMath = true
 		}

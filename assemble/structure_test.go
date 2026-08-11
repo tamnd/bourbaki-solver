@@ -48,7 +48,7 @@ func TestStatementsReadsARun(t *testing.T) {
 		`$*3)$ We will see further on that the $\mathbf{Z}$-module $\mathbf{Z}$ is Noetherian and not Artinian.`,
 		"4) Let $p$ be a prime number and $M_p$ the $p$-primary component of the torsion module.",
 	)
-	_, got, err := statements(in, vii)
+	_, got, err := statements(in, vii, printings["en"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestStatementsCarriesARunAcrossAStatement(t *testing.T) {
 		"### 8. Cyclic Algebras",
 		"4) This paragraph opens on a number in a new no. and is not a remark.",
 	)
-	out, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 16})
+	out, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 16}, printings["en"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestStatementsNumbersByScope(t *testing.T) {
 		"**Corollary.** — The module M is semisimple.",
 		"**Remark.** — The converse is false.",
 	)
-	_, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 5})
+	_, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 5}, printings["en"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestStatementsReadsAHeadThatLostItsBold(t *testing.T) {
 		"Corollary (Schur’s lemma). — The endomorphism ring of a simple module is a field.",
 		`$*$Remark 1. — The morphisms define a complex of K-modules.$*$`,
 	)
-	out, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 7})
+	out, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 7}, printings["en"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestStatementsReadsAHeadThatLostItsBold(t *testing.T) {
 // statement to guess a number for.
 func TestStatementsRefusesAnOrphanCorollary(t *testing.T) {
 	in := blocks("### 1. Modules", "**Corollary 1.** — Every module is a module.")
-	if _, _, err := statements(in, vii); err == nil {
+	if _, _, err := statements(in, vii, printings["en"]); err == nil {
 		t.Fatal("a Corollary with no parent should be an error")
 	}
 }
@@ -163,19 +163,19 @@ func TestStatementsRefusesTwoStatementsAtOneLabel(t *testing.T) {
 		"**Proposition 3.** — The first one.",
 		"**Proposition 3.** — The second one.",
 	)
-	if _, _, err := statements(in, vii); err == nil {
+	if _, _, err := statements(in, vii, printings["en"]); err == nil {
 		t.Fatal("two statements at one label should be an error")
 	}
 }
 
 func TestHeadingCarriesTheLabel(t *testing.T) {
 	r := corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: corpus.KindProposition, Number: 6}
-	if got, want := heading(r, r.Label()),
+	if got, want := heading(r, r.Label(), printings["en"]),
 		"#### Proposition 6 {#alg-viii-s1-prop-6 .statement}"; got != want {
 		t.Errorf("heading() = %q, want %q", got, want)
 	}
 	u := corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: corpus.KindRemark, Subsec: 3, Occurrence: 2}
-	if got, want := heading(u, u.Label()),
+	if got, want := heading(u, u.Label(), printings["en"]),
 		"#### Remark {#alg-viii-s1-n3-rem-2 .statement}"; got != want {
 		t.Errorf("heading() = %q, want %q", got, want)
 	}
@@ -225,7 +225,7 @@ func TestItemStartOnRunTogetherExercises(t *testing.T) {
 	if i < 0 {
 		t.Fatal("exercise 15 of § 16 was not found")
 	}
-	if got := strings.TrimSpace(s16[i+len(m[0]):]); !strings.HasPrefix(got, "a) Let A") {
+	if got := strings.TrimSpace(s16[i+markerLen(m):]); !strings.HasPrefix(got, "a) Let A") {
 		t.Errorf("exercise 15 begins %q", first(got, 40))
 	}
 	// The asterisk after the number opens a starred passage and is not a mark
@@ -272,7 +272,7 @@ func TestExercisesReadsTheMarks(t *testing.T) {
 		`$\P 2)$ Let K be a commutative field.`,
 		`$*3)$ Let G be a finite group.`,
 	)
-	got, err := exercises(in)
+	got, err := exercises(in, printings["en"])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,14 +299,14 @@ func TestExercisesReadsTheMarks(t *testing.T) {
 // cut in the wrong place, and a wrong cut is not something to write out.
 func TestExercisesRefusesToOpenOnAnythingButOne(t *testing.T) {
 	in := blocks("### Exercises", "2) Let A be a ring.")
-	if _, err := exercises(in); err == nil {
+	if _, err := exercises(in, printings["en"]); err == nil {
 		t.Fatal("exercises opening on 2 should be an error")
 	}
 }
 
 func TestAnchorExercises(t *testing.T) {
 	in := blocks("### Exercises", "1) Let A be a ring.")
-	out, found := anchorExercises(in, vii)
+	out, found := anchorExercises(in, vii, printings["en"])
 	if !found {
 		t.Fatal("the exercises heading was not found")
 	}

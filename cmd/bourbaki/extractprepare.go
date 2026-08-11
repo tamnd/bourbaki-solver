@@ -9,6 +9,8 @@ import (
 	"sort"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/extract"
+	"github.com/tamnd/bourbaki-solver/pagemap"
 	"github.com/tamnd/bourbaki-solver/pdfglyph"
 	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
@@ -209,4 +211,29 @@ func readLayout(ctx context.Context, path string, first, last int) (*pdfsrc.Layo
 		return nil, err
 	}
 	return src.XML(ctx, first, last)
+}
+
+// volumeText is the text layer of a volume, one string per page, as the head
+// parsers and the contents reader want it.
+//
+// It goes through the prepared copy for the same reason extraction does: the
+// contents of the French printing names a subsection "Polynômes à coefficients
+// dans un anneau noethérien", and read off the file as it ships that title
+// arrives with the glyphs poppler could not name missing from it. The ligatures
+// are written out here too, since a title is what a tag is named after and what
+// a reader searches for, and nothing anybody searches for spells it coeﬃcients.
+func volumeText(ctx context.Context, root string, b *corpus.Book) ([]string, error) {
+	src, err := openPDF(root, b)
+	if err != nil {
+		return nil, err
+	}
+	text, err := src.Text(ctx, 0, 0, true)
+	if err != nil {
+		return nil, err
+	}
+	pages := pagemap.SplitPages(text)
+	for i, p := range pages {
+		pages[i] = extract.Unligature(p)
+	}
+	return pages, nil
 }
