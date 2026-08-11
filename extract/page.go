@@ -49,6 +49,23 @@ const (
 	// FlagWordInMath is an English word left inside dollar signs, which means
 	// a formula was cut in the wrong place.
 	FlagWordInMath Flag = "word-in-math"
+	// FlagStackedMatrix is a matrix the text layer flattened. A matrix is set
+	// as rows one above the other, and the layer reports the top row raised and
+	// the bottom row lowered, so a 2 by 2 arrives as a superscript holding one
+	// row and a subscript holding the other: the page prints the matrix with
+	// entries a b over c d and the Markdown says $(^{a b}_{c d})$.
+	//
+	// The geometry that would put it back is not in the layer. A raised run and
+	// a lowered run is what a matrix looks like and it is also what x^2_i looks
+	// like, and the only thing telling them apart is that the rows of a matrix
+	// line up, which is a fact about the boxes that pdftohtml divides by
+	// character count and gets wrong by about the width being measured. That is
+	// the same wall the dropped glyph test hit.
+	//
+	// So the page goes to the model with the image, which is the one way a
+	// born-digital volume is read through a model. Measured on Algebra VIII:
+	// 19 pages of the 992 in the two printings, 31 matrices in each.
+	FlagStackedMatrix Flag = "stacked-matrix"
 	// FlagEmpty is a page with no text on it at all.
 	FlagEmpty Flag = "empty"
 )
@@ -164,6 +181,9 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 	}
 	if wordInMath(out.Body) {
 		out.flag(FlagWordInMath)
+	}
+	if mathtex.StackedMatrices(out.Body) > 0 {
+		out.flag(FlagStackedMatrix)
 	}
 	return out
 }
