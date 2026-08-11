@@ -166,6 +166,8 @@ func Load(opt Options) (*Corpus, error) {
 	if c.Docs, err = readDocs(c.Root, c.Langs); err != nil {
 		return nil, err
 	}
+	// Before the pages, because which pages count is which pages git has.
+	c.Tracked, c.TrackedErr = tracked(c.Root)
 	if err := c.readPages(); err != nil {
 		return nil, err
 	}
@@ -181,7 +183,6 @@ func Load(opt Options) (*Corpus, error) {
 		}
 	}
 
-	c.Tracked, c.TrackedErr = tracked(c.Root)
 	c.TagsDiff, c.TagsDiffErr = tagsDiff(c.Root, opt.Base)
 	if c.Figures, err = figures(c.Root); err != nil {
 		return nil, err
@@ -379,7 +380,20 @@ func bodyStart(raw []byte) int {
 	return line
 }
 
-// readPages reads pages/<book>/*.md for every book the corpus has extracted.
+// readPages reads pages/<book>/*.md for every book the corpus has extracted,
+// counting the ones git has and skipping the ones it does not.
+//
+// An OCR run writes pages for hours and nothing commits them until it is done,
+// so a working tree in the middle of one holds pages the repository has never
+// seen. Counting those makes the audit report disagree with the same report
+// regenerated in CI, which is what CI diffs it against: a run that had read 49
+// of the 222 pages of Algebra X in French put 1046 extracted pages in the
+// summary line where CI computed 997, and the build went red over a partial
+// run in a directory it cannot see.
+//
+// When git does not answer at all, which is every test that builds a corpus in
+// a temporary directory, everything on disk counts. The alternative is a corpus
+// with no pages in it, which would be a worse answer than a generous one.
 func (c *Corpus) readPages() error {
 	c.Pages = map[string][]corpus.PageFile{}
 	c.PagePaths = map[string][]string{}
@@ -391,13 +405,17 @@ func (c *Corpus) readPages() error {
 		}
 		sort.Strings(names)
 		for _, name := range names {
+			rel, _ := filepath.Rel(c.Root, name)
+			rel = filepath.ToSlash(rel)
+			if c.TrackedErr == nil && !c.isTracked(rel) {
+				continue
+			}
 			f, err := corpus.ReadFile[corpus.PageFrontMatter](name)
 			if err != nil {
 				return err
 			}
-			rel, _ := filepath.Rel(c.Root, name)
 			c.Pages[b.ID] = append(c.Pages[b.ID], f)
-			c.PagePaths[b.ID] = append(c.PagePaths[b.ID], filepath.ToSlash(rel))
+			c.PagePaths[b.ID] = append(c.PagePaths[b.ID], rel)
 		}
 	}
 	return nil
