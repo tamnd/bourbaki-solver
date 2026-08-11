@@ -35,7 +35,7 @@ func init() {
 			Title: "displays per page within three sigma of the book mean", Run: m06},
 		Check{ID: "M07", Group: Mathematics, Hard: true,
 			Title: "no bracket from the prose closes inside the mathematics", Run: m07},
-		Check{ID: "M08", Group: Mathematics, Hard: false,
+		Check{ID: "M08", Group: Mathematics, Hard: true,
 			Title: "no matrix is left flattened into a pair of scripts", Run: m08},
 	)
 }
@@ -468,11 +468,27 @@ func m07(c *Corpus) ([]Finding, error) {
 // is the width being measured. So the page goes back to the model with the
 // printed image, which is extract.FlagStackedMatrix and the -flagged path.
 //
-// Soft, because a flattened matrix is a defect of the reading and not of the
-// corpus's structure, and because there are 62 of them across the two printings
-// of chapter VIII: making it hard would stop every build until a fleet with
-// image quota reads 19 pages, and the rule would then be a schedule rather than
-// a check. It goes hard when the count reaches zero.
+// Soft at first. A flattened matrix is a defect of the reading and not of the
+// corpus's structure, and there were 62 of them when this was written, later 22
+// after both printings were read again. Making it hard at either count would
+// have stopped every build until a fleet with image quota got through the
+// pages, so the rule would have been a schedule and not a check.
+//
+// Hard now, because the count is zero. The last 22 did not go through a model.
+// The printed pages were read and the matrices typed out as pmatrix by hand, 17
+// pages across the two printings of chapter VIII, because a 2 by 2 of digits is
+// quicker to read off the page than to queue behind an upload quota. Those
+// pages carry manual: true, so extraction leaves them alone. Hard is what keeps
+// them that way: the flattening comes straight back the moment anyone reads one
+// of those pages through the text layer again, and soft would let it back in
+// with the count going 0, 1, 2 and nobody looking.
+//
+// The count being zero is not the same as there being no flattened matrices
+// left. StackedRows wants a space inside both scripts, so ^{a b}_{0c} slipped
+// past it on one page, and a matrix whose braces the reader lost entirely
+// leaves nothing for it to match at all. Both kinds were found by reading the
+// printed pages beside the Markdown, and both were repaired in the same pass.
+// A rule for the brace-less kind needs a different signal and does not exist.
 func m08(c *Corpus) ([]Finding, error) {
 	var out []Finding
 	for _, d := range c.Docs {
