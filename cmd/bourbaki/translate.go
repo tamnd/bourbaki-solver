@@ -63,12 +63,21 @@ refuses any answer that is not the same section.
   -hosts LIST    comma separated route names
   -routes PATH   route file
   -dry           print the first question and stop, without asking anything
+  -stale         list what needs translating and why, and ask nothing
   -keep          leave the questions on the boxes, for debugging
 
 A section is skipped when its translation is there, its source_content_sha256
-is the English file's content_sha256, its glossary_version is the glossary's,
-and its prompt_sha256 is this binary's. Any of those four out of date is what
-stale means, and a stale file is translated again.
+is the English file's content_sha256, its glossary_terms_sha256 is the digest of
+the glossary rows its English mentions today, and its prompt_sha256 is this
+binary's. Any of those four out of date is what stale means, and a stale file is
+translated again.
+
+The terminology test is per file rather than on glossary_version, which moves
+for any edit anywhere. Pinning "common zero", a phrase that occurs in one
+appendix, moved the version and so marked all 27 sections of chapter VIII stale.
+Measured on this corpus, that row reaches 1 section and "algebraic over" reaches
+3, while "ring" reaches 26 and "module" 23, which is the difference the digest
+keeps and the version threw away.
 
 A section goes over in chunks, cut at blank lines, because the largest section
 in chapter VIII is 97,520 characters and no measurement here says a browser
@@ -94,6 +103,7 @@ func runTranslate(args []string) error {
 	hostList := fs.String("hosts", "", "comma separated route names")
 	routeFile := fs.String("routes", "", "route file")
 	dry := fs.Bool("dry", false, "print the first question and stop")
+	stale := fs.Bool("stale", false, "list what needs translating and why, and ask nothing")
 	keep := fs.Bool("keep", false, "leave the questions on the boxes")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -117,9 +127,12 @@ func runTranslate(args []string) error {
 	if err != nil {
 		return err
 	}
-	jobs, skipped, err := translateJobs(root, *lang, *book, *chapter, *file, g.Version, promptHash, *force)
+	jobs, skipped, err := translateJobs(root, g, *lang, *book, *chapter, *file, promptHash, *force)
 	if err != nil {
 		return err
+	}
+	if *stale {
+		return reportStale(jobs, skipped, *lang)
 	}
 	if len(jobs) == 0 {
 		fmt.Printf("translate: nothing to do, %d sections are already translated and current\n", skipped)
@@ -172,6 +185,7 @@ func runTranslate(args []string) error {
 		out.TranslationModel = model
 		out.TranslationRun = run
 		out.GlossaryVersion = g.Version
+		out.GlossaryTerms = job.terms
 		out.PromptSHA256 = promptHash
 		path := corpus.SectionPath(root, *lang, out)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -190,12 +204,29 @@ func runTranslate(args []string) error {
 	return ctx.Err()
 }
 
+// reportStale prints what a run would do, and asks nothing.
+//
+// The reason is printed beside every file, because "stale" on its own is not
+// actionable: the English changing means a section was re-extracted, the
+// instructions changing means every file is going again, and the terminology
+// changing means one glossary row reached this section. Those are three
+// different sizes of job and the count on its own hides which one this is.
+func reportStale(jobs []job, skipped int, lang string) error {
+	for _, j := range jobs {
+		fmt.Printf("%-64s %s\n", j.source, j.why)
+	}
+	fmt.Printf("translate: %d sections need %s, %d are current\n", len(jobs), lang, skipped)
+	return nil
+}
+
 // A job is one English section and the chunks it was cut into.
 type job struct {
 	source string // relative to the corpus root
 	meta   corpus.SectionFrontMatter
 	body   string
 	chunks []translate.Chunk
+	terms  string // digest of the glossary rows this section's English mentions
+	why    string // why the translation on disk is not the one this run would make
 }
 
 // translateJobs is the English that needs this language.
@@ -203,7 +234,7 @@ type job struct {
 // The walk is over content/en rather than over the sections manifest, because
 // the manifest records what the assembler produced and this has to translate
 // what is on disk. The two agree today and the file is the thing being read.
-func translateJobs(root, lang, book, chapter, only string, version int, promptHash string, force bool) ([]job, int, error) {
+func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only, promptHash string, force bool) ([]job, int, error) {
 	dir := filepath.Join(root, "content", "en")
 	var paths []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -242,7 +273,9 @@ func translateJobs(root, lang, book, chapter, only string, version int, promptHa
 		case chapter != "" && !strings.EqualFold(f.Meta.Chapter, chapter):
 			continue
 		}
-		if !force && current(root, lang, source, f.Meta, version, promptHash) {
+		terms := translate.GlossaryDigest(g, lang, f.Body)
+		ok, why := current(root, lang, source, f.Meta, g.Version, promptHash, terms)
+		if !force && ok {
 			skipped++
 			continue
 		}
@@ -250,30 +283,48 @@ func translateJobs(root, lang, book, chapter, only string, version int, promptHa
 		if len(chunks) == 0 {
 			continue
 		}
-		jobs = append(jobs, job{source: source, meta: f.Meta, body: f.Body, chunks: chunks})
+		jobs = append(jobs, job{source: source, meta: f.Meta, body: f.Body, chunks: chunks, terms: terms, why: why})
 	}
 	return jobs, skipped, nil
 }
 
-// current asks whether the translation on disk is the one this run would make.
+// current asks whether the translation on disk is the one this run would make,
+// and says why not when it is not.
 //
 // Four things have to hold and any one of them failing is what stale means: the
-// file is there, it was made from this English, it was made with this glossary,
-// and it was made with these instructions. Three of the four are the spec's
-// staleness; the fourth is the prompt hash, which the spec asks to be recorded
-// and does not say to check, and checking it is the only thing that makes
-// recording it worth doing.
-func current(root, lang, source string, en corpus.SectionFrontMatter, version int, promptHash string) bool {
+// file is there, it was made from this English, it was made with the same
+// terminology, and it was made with these instructions. Three of the four are
+// the spec's staleness; the fourth is the prompt hash, which the spec asks to be
+// recorded and does not say to check, and checking it is the only thing that
+// makes recording it worth doing.
+//
+// The terminology test is per file and not the glossary version. The version
+// moves for any edit anywhere, so pinning a phrase that occurs in one appendix
+// marked all 27 sections stale. What is compared is the digest of the rows this
+// section's English mentions, which is exactly what its prompt carried. A file
+// written before that digest existed has nothing to compare, so it falls back to
+// the version and is stale on any bump, which is where every file already was.
+func current(root, lang, source string, en corpus.SectionFrontMatter, version int, promptHash, terms string) (bool, string) {
 	meta := en
 	meta.Lang = lang
 	f, err := corpus.ReadFile[corpus.SectionFrontMatter](corpus.SectionPath(root, lang, meta))
-	if err != nil {
-		return false
+	switch {
+	case err != nil:
+		return false, "there is no translation"
+	case f.Meta.TranslatedFrom != source:
+		return false, "it was made from " + f.Meta.TranslatedFrom
+	case f.Meta.SourceSHA256 != en.ContentSHA256:
+		return false, "the English has changed since"
+	case f.Meta.PromptSHA256 != promptHash:
+		return false, "the instructions have changed since"
+	case f.Meta.GlossaryTerms == "":
+		if f.Meta.GlossaryVersion != version {
+			return false, fmt.Sprintf("it records no terminology and was made with glossary %d, which is now %d", f.Meta.GlossaryVersion, version)
+		}
+	case f.Meta.GlossaryTerms != terms:
+		return false, "the terminology it was shown has changed"
 	}
-	return f.Meta.TranslatedFrom == source &&
-		f.Meta.SourceSHA256 == en.ContentSHA256 &&
-		f.Meta.GlossaryVersion == version &&
-		f.Meta.PromptSHA256 == promptHash
+	return true, ""
 }
 
 // translateSection asks for every chunk and puts the answers together.
