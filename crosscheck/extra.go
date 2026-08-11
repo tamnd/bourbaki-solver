@@ -22,7 +22,7 @@ func Extra(ours, theirs string) []Lost {
 	// typesetter's hyphens where they fall, so the long words are the ones it
 	// breaks, and asking a raw page for "homomorphisms" is asking for a word it
 	// prints as "homo-" and "morphisms".
-	said := set(strings.Join(flow(theirs), "\n"))
+	said := set(strings.Join(flow(theirs, false), "\n"))
 	var out []Lost
 	seen := map[string]bool{}
 	for _, line := range strings.Split(ours, "\n") {

@@ -195,3 +195,28 @@ func TestTheMacrosAreNotWordsOfThePage(t *testing.T) {
 		t.Errorf("strip() = %q, want the words kept", got)
 	}
 }
+
+// Page 104 as pdftotext prints it. The typesetter broke "finite-dimensional" at
+// its own hyphen, which is where the second reading gives no help at all: it
+// leaves the hyphen where it fell and says nothing about whether the word keeps
+// it.
+const theirs104 = `Corollary. — Suppose that A is an algebra over an algebraically closed
+commutative field K and that M is a semisimple A-module that is finite-
+dimensional as a vector space over K. For every λ in SM , denote by eλ the
+projector of M with image Mλ and kernel ⊕λ6=µ Mµ . Then (eλ )λ∈SM is a basis`
+
+// The same passage as the extractor writes it, with the hyphen kept.
+const ours104 = `**Corollary.** — Suppose that A is an algebra over an algebraically closed commutative field K and that M is a semisimple A-module that is finite-dimensional as a vector space over K. For every $\lambda$ in $\mathscr{S}_M$, denote by $e_{\lambda}$ the projector of M with image $M_{\lambda}$ and kernel $\oplus_{\lambda\not=µ}M_µ$. Then $(e_{\lambda})_{\lambda\in\mathscr{S}_M}$ is a basis of the`
+
+func TestACompoundPdftotextGluesIsNotAReport(t *testing.T) {
+	// pdftotext puts the two halves back as "finitedimensional", which is a word
+	// of no language and is not in our reading, and the volume writes the word
+	// with the hyphen 171 times. Sixteen pages said so before the second reading
+	// was allowed to keep the hyphen it was given.
+	if lost := Page(ours104, theirs104); len(lost) != 0 {
+		t.Errorf("Page() = %v, want nothing: the hyphen is the book's own", lost)
+	}
+	if lost := Extra(ours104, theirs104); len(lost) != 0 {
+		t.Errorf("Extra() = %v, want nothing", lost)
+	}
+}

@@ -17,17 +17,21 @@
 // those were measured on Algebra VIII, and both are why the rules below are
 // written the way they are.
 //
-// Quiet: 494 pages of the volume as it stands come to 10 pages and 16 words. Of
-// those, four are pdftotext's own doing, six are words we broke or glued at a
-// formula, three are the two-column index, and every one of the sixteen is
-// explainable by reading the page.
+// Quiet: 494 pages of the volume as it stands come to 7 pages and 9 words. Four
+// of the nine are ours, where a word runs into the mathematics beside it and
+// leaves "longe" or "thatp"; two are the two-column index, which both readings
+// take apart differently; one is pdftotext's debris; one is a footnote set in
+// two columns; and one is the PDF itself, which writes "fromn" and "groupnK" on
+// page 203 and is the only line in the volume that does. Every one of the nine
+// is explainable by reading the page.
 //
-// Worth reading: run against the same volume at the commit before the accents
-// and the headings were fixed, it names pages 113, 114, 354, 424, 429, 431 and
-// 466, which is every page an accent was drawn on the wrong letters, and pages
-// 14, 306 and 456, where a heading came out one letter at a time inside dollar
-// signs. Neither defect changed the length of a page, unbalanced a dollar or
-// broke the front matter, and nothing else in the pipeline could see either.
+// Worth reading: run against the same volume three commits back, it names pages
+// 113, 114, 354, 424, 429, 431 and 466, which is every page an accent was drawn
+// on the wrong letters, pages 14, 306 and 456, where a heading came out one
+// letter at a time inside dollar signs, and pages 237, 377 and 497, where a word
+// was left broken in half at the end of a line. None of those changed the length
+// of a page, unbalanced a dollar or broke the front matter, and nothing else in
+// the pipeline could see any of them.
 //
 // The two directions are Page and Extra, and both are needed. Page asks which
 // of pdftotext's words we lost; Extra asks which of ours pdftotext has never
@@ -71,7 +75,11 @@ func Page(ours, theirs string) []Lost {
 	said := set(theirs)
 	var out []Lost
 	seen := map[string]bool{}
-	lines := flow(theirs)
+	// The hyphen a word was broken on is kept here rather than dropped, because
+	// which of the two it is, the typesetter's break or the hyphen of a compound
+	// word, is the question the extractor has to answer, and the two answers are
+	// compared against ours below.
+	lines := flow(theirs, true)
 	// The break falls at the top and the foot of the page, and the top of the
 	// page is the running head, so the first line of the body is the second
 	// line with letters on it.
@@ -83,6 +91,13 @@ func Page(ours, theirs string) []Lost {
 		ws := words(line)
 		for i, w := range ws {
 			if have[strings.ToLower(w)] {
+				continue
+			}
+			// The same word with the hyphen taken out. pdftotext keeps the
+			// hyphen wherever it fell and we decide: "commu-tative" of page 237
+			// is ours as "commutative", and "finite-dimensional" of page 104 is
+			// ours with the hyphen, which the line above has already passed.
+			if have[strings.ToLower(strings.ReplaceAll(w, "-", ""))] {
 				continue
 			}
 			for _, p := range strings.Split(w, "-") {
@@ -210,7 +225,7 @@ func joined(have map[string]bool, ws []string, i int) bool {
 // letter is not enough. Page 102 breaks "de-" and sets a lone subscript lambda
 // on the line below it, which is a letter, so the reading joined "de" to that
 // lambda and left "scription" standing on the line after as a word we had lost.
-func flow(s string) []string {
+func flow(s string, hyphen bool) []string {
 	lines := strings.Split(s, "\n")
 	out := make([]string, 0, len(lines))
 	for i := range lines {
@@ -218,7 +233,10 @@ func flow(s string) []string {
 		if j := word(lines, i); strings.HasSuffix(line, "-") && j > 0 {
 			head, rest, _ := strings.Cut(strings.TrimLeft(lines[j], " "), " ")
 			if head != "" {
-				line = strings.TrimSuffix(line, "-") + head
+				if !hyphen {
+					line = strings.TrimSuffix(line, "-")
+				}
+				line += head
 				lines[j] = rest
 			}
 		}
