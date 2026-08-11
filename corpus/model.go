@@ -25,6 +25,13 @@ type Chapter struct {
 	// Historical is where the chapter's Historical Note starts. Chapters I to
 	// III each carry one; chapter VIII carries none, so it stays nil.
 	Historical *Locator `yaml:"historical_note,omitempty"`
+
+	// Exercises is where the chapter's exercises begin, for the volumes that
+	// print one run for the whole chapter rather than one per §. Topologie
+	// algebrique does this: six §§ and then a single "Exercices" at page 139.
+	// Where the volume prints them per §, this stays nil and each Section
+	// carries its own.
+	Exercises *Locator `yaml:"exercises,omitempty"`
 }
 
 // Section is a § of a chapter.

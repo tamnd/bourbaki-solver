@@ -103,8 +103,12 @@ func (p Problem) String() string {
 const leader = `(?:(?:[.·•]\s*){2,}|\s{3,})`
 
 var (
+	// The trailing punctuation is what the scanner adds after the number, not
+	// what the volume prints: the English Theory of Sets sets no. 6 of III § 7
+	// at page 204 and the scan reads it as "204-", which without this drops the
+	// entry and renumbers every no. after it.
 	bareTailRe = regexp.MustCompile(
-		leader + `\s*([0-9IlO|]{1,3}(?:\s[0-9IlO|]{1,3})?)\s*\.?\s*$`)
+		leader + `\s*([0-9IlO|]{1,3}(?:\s[0-9IlO|]{1,3})?)\s*[.,\-\p{Pd}']?\s*$`)
 
 	// The 2003 scan splits and misreads the chapter numeral in the label as
 	// readily as it does in a running head: "V1. 10" for V.10, "v11.6" for
@@ -116,8 +120,11 @@ var (
 	// that opens chapter IV comes out "CHAP-1 ER IV." So the word is matched
 	// with room for junk where the scan put junk, and the numeral after it
 	// still has to be a Roman numeral before the line counts as a chapter.
+	//
+	// The French prints CHAPITRE, and sets an em dash between the numeral and
+	// the title: "CHAPITRE II. — GROUPES LOCALEMENT COMPACTS".
 	chapterRe = regexp.MustCompile(
-		`(?i)^\s*chap[^a-z]{0,4}(?:t[^a-z]{0,2})?er[^a-z]{0,2}\s*([IVXLCDM1l|]+)\s*[.,:]?\s*(.*)$`)
+		`(?i)^\s*chap[^a-z]{0,4}(?:i[^a-z]{0,2})?(?:t[^a-z]{0,2})?(?:er|re)[^a-z]{0,2}\s*([IVXLCDM1l|]+)\s*[.,:]?\s*[\p{Pd}]?\s*(.*)$`)
 
 	// "§ 11." and, where the scan split the number, "§ I 0." for § 10. The
 	// period is what makes the split safe to allow, so the form with a period
@@ -129,16 +136,30 @@ var (
 	// A no. line, and in the 2023 volume a § line too, told apart by indent.
 	numberRe = regexp.MustCompile(`^(\s*)([0-9IlO|](?:\s?[0-9IlO|])?)\s*[.,]\s*(.*)$`)
 
-	// "Appendix", "Appendix 1." Bourbaki closes chapters II, III and VIII with
+	// "Appendix", "Appendix 1.", "Appendix I - Polynomial maps", and the
+	// French "Appendice". Bourbaki closes chapters II, III and VIII with
 	// appendices that carry no. and exercises just as a § does, so they are
 	// held as sections with the appendix flag set rather than as a fourth kind
 	// of thing.
-	appendixRe = regexp.MustCompile(`(?i)^\s*appendix\s*([0-9IlO|]{1,2})?\s*[.,:]?\s*(.*)$`)
+	appendixRe = regexp.MustCompile(`(?i)^\s*appendi[xc]e?\s*([0-9IlO|]{1,2})?\s*[.,:]?\s*[\p{Pd}]?\s*(.*)$`)
 
-	// "Exercises", "Exercises for § 3", "Exercises on § 3".
-	exercisesRe = regexp.MustCompile(`(?i)^\s*exercises?\b[^0-9§]*(?:§\s*([0-9IlO|]{1,2}))?`)
+	// "Exercises", "Exercises for § 3", "Exercises on § 3", and the French
+	// "Exercices" and "Exercices du § 3". The number takes a space in the middle
+	// for the same reason the § lines do: the English Algebra sets the run for
+	// chapter II § 10 as "Exercises for § I 0", and read as a single token that
+	// is § 1, which quietly replaces the real run of § 1 with the run of § 10.
+	exercisesRe = regexp.MustCompile(
+		`(?i)^\s*exerci[cs]es?\b[^0-9§]*(?:§\s*([0-9IlO|](?:\s?[0-9IlO|])?))?`)
 
-	historicalRe = regexp.MustCompile(`(?i)^\s*historical\s+note\b`)
+	// "Exercises for Appendix I". The appendices carry their own run, and the
+	// line names one the same way the § lines name a §, so it has to be read
+	// before the § form or it comes out as the run of whatever § was listed
+	// last.
+	exercisesAppendixRe = regexp.MustCompile(
+		`(?i)^\s*exerci[cs]es?\b[^0-9§]*?appendi[xc]e?\s*([0-9IVXlO|]{1,4})?`)
+
+	// "Historical Note", and the French "Note historique".
+	historicalRe = regexp.MustCompile(`(?i)^\s*(?:historical\s+note|note\s+historique)\b`)
 )
 
 // digitFixer and romanFixer undo the substitutions the scanners make. As in the
@@ -165,6 +186,19 @@ func readRoman(s string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// readOrdinal reads a number that the volume may have set either way. The
+// English Lie volume numbers its appendices in roman, "Appendix II", where
+// Algebra numbers its own in arabic, "Appendix 1.", and the two forms overlap
+// at 1, where both readings give the same answer.
+func readOrdinal(s string) (int, bool) {
+	if r, ok := readRoman(s); ok {
+		if n, err := corpus.RomanOrder(r); err == nil {
+			return n, true
+		}
+	}
+	return readNumber(s)
 }
 
 // tail is the page a contents line points at.
@@ -200,6 +234,39 @@ func splitTail(line string, form PageForm) (text string, t tail, ok bool) {
 	return strings.TrimRight(line[:m[0]], " \t"), tail{page: p}, true
 }
 
+// tailNoLeaderRe is a page number at the end of a line with nothing but a space
+// in front of it.
+var tailNoLeaderRe = regexp.MustCompile(`\s([0-9IlO|]{1,3})\s*[.,\-\p{Pd}']?\s*$`)
+
+// noLeader reads the page off a line whose title ran the whole width, so the
+// leaders the reader relies on were never set. The French Topologie algebrique
+// prints "4. Produit d'un espace par un espace simplement connexe 129" with a
+// single space in front of the page, four times in its contents.
+//
+// Standing alone the pattern would read the last word of any title that ends in
+// a numeral as a page. Two things hold it in. The line has to have announced
+// itself as a chapter, a §, a no. or a run of exercises already, which a
+// wrapped second line does not, and taking the number off the end must not
+// change what it announced. What survives both is checked against the page map
+// and against the order of the contents like every other page here, so a title
+// that really does end in a numeral is caught downstream rather than believed.
+func noLeader(line, text string, e entry, mark SectionMark) (string, tail, bool, entry) {
+	m := tailNoLeaderRe.FindStringSubmatchIndex(line)
+	if m == nil {
+		return text, tail{}, false, e
+	}
+	p, ok := readNumber(line[m[2]:m[3]])
+	if !ok {
+		return text, tail{}, false, e
+	}
+	cut := strings.TrimRight(line[:m[0]], " \t")
+	got := classify(cut, mark)
+	if got.kind != e.kind || got.number != e.number || got.numeral != e.numeral {
+		return text, tail{}, false, e
+	}
+	return cut, tail{page: p}, true, got
+}
+
 // kind is what a contents line announces.
 type kind int
 
@@ -211,6 +278,7 @@ const (
 	kindAppendix
 	kindExercises
 	kindHistorical
+	kindPart
 )
 
 // classify reads the prefix. The 2023 volume marks a § with nothing but the
@@ -225,8 +293,12 @@ func classify(text string, mark SectionMark) entry {
 	if historicalRe.MatchString(text) {
 		return entry{kind: kindHistorical}
 	}
+	if m := exercisesAppendixRe.FindStringSubmatch(text); m != nil {
+		n, _ := readOrdinal(m[1])
+		return entry{kind: kindExercises, number: n, appendix: true}
+	}
 	if m := appendixRe.FindStringSubmatch(text); m != nil {
-		n, _ := readNumber(m[1])
+		n, _ := readOrdinal(m[1])
 		return entry{kind: kindAppendix, number: n, title: cleanTitle(m[2])}
 	}
 	if m := exercisesRe.FindStringSubmatch(text); m != nil {
@@ -250,15 +322,59 @@ func classify(text string, mark SectionMark) entry {
 		}
 		return entry{kind: kindSubsection, number: n, title: cleanTitle(m[3])}
 	}
+	if isPart(text) {
+		return entry{kind: kindPart, title: cleanTitle(text)}
+	}
 	return entry{}
+}
+
+// isPart reports whether the line is a heading set the way a chapter heading is
+// set, flush left and in capitals, without being a chapter.
+//
+// The English Theory of Sets closes with "SUMMARY OF RESULTS ... 347", which
+// carries eight §§ of its own. They are not chapter IV's, and nothing else in
+// the line says so: the page map runs chapter IV to the last page of the volume
+// because the back matter keeps the same foot numbering, and the §§ are
+// numbered from 1 like any other. What marks it is the typography, which is the
+// typography of a chapter line.
+func isPart(text string) bool {
+	if text == "" || text[0] == ' ' || text[0] == '\t' {
+		return false
+	}
+	// The running head over the contents itself is set the same way, flush left
+	// and in capitals, and closing the chapter on it would throw away every
+	// entry on the page it heads. The French Algebra chapter 8 prints one over
+	// each of its seven contents pages.
+	if contentsHeadRe.MatchString(text) {
+		return false
+	}
+	upper, letters := letterCase(text)
+	return letters >= 4 && upper*5 >= letters*4
+}
+
+// letterCase counts the capitals and the letters. The threshold everywhere here
+// is four fifths rather than all of them, because the 1998 scan reads the small
+// capitals Bourbaki sets its headings in as lowercase.
+func letterCase(s string) (upper, letters int) {
+	for _, r := range s {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			upper++
+			letters++
+		case r >= 'a' && r <= 'z':
+			letters++
+		}
+	}
+	return upper, letters
 }
 
 // entry is one recognised contents line before its page is attached.
 type entry struct {
-	kind    kind
-	number  int
-	numeral string // set for a chapter line
-	title   string
+	kind     kind
+	number   int
+	numeral  string // set for a chapter line
+	title    string
+	appendix bool // set on an exercise line that names an appendix
 }
 
 var (
@@ -274,16 +390,7 @@ var (
 // ALGEBRAS, ExTERIOR ALGEBRAs, SYMMETRIC ALGEBRAS". A title that is already
 // almost all capitals was set in capitals, so the few that are not are damage.
 func shout(s string) string {
-	upper, letters := 0, 0
-	for _, r := range s {
-		switch {
-		case r >= 'A' && r <= 'Z':
-			upper++
-			letters++
-		case r >= 'a' && r <= 'z':
-			letters++
-		}
-	}
+	upper, letters := letterCase(s)
 	if letters < 4 || upper*5 < letters*4 {
 		return s
 	}
@@ -293,7 +400,11 @@ func shout(s string) string {
 func cleanTitle(s string) string {
 	s = leaderRun.ReplaceAllString(s, " ")
 	s = spaceRun.ReplaceAllString(s, " ")
-	return strings.Trim(s, " .,:;")
+	// The dashes go because the French sets one between a chapter numeral and
+	// its title and the English Lie volume sets one after "Appendix I", and in
+	// both the dash is punctuation of the contents rather than part of what the
+	// chapter is called.
+	return strings.Trim(s, " .,:;-\u2010\u2011\u2012\u2013\u2014\u2015")
 }
 
 // pending is a contents line whose title wrapped, held until the line carrying
@@ -347,6 +458,9 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			if cur == nil {
 				return
 			}
+			if cur.Page == 0 {
+				cur.Page = t.page
+			}
 			cur.Sections = append(cur.Sections, corpus.Section{
 				Number: e.number, Title: e.title, Page: t.page,
 				Appendix: e.kind == kindAppendix})
@@ -365,7 +479,10 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			// current § owns them. Chapters I to VII gather them after the last
 			// § as "Exercises for § 3", which names the § instead.
 			target := curSec
-			if e.number > 0 {
+			switch {
+			case e.appendix:
+				target = appendixOf(cur, e.number)
+			case e.number > 0:
 				if s, ok := cur.Get(e.number); ok {
 					target = s
 				} else {
@@ -379,6 +496,15 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			if cur != nil {
 				cur.Historical = &corpus.Locator{Page: t.page}
 			}
+			// The French Theory of Spectra lists the parts of its historical
+			// note the way it lists the no. of a §, numbered from 1. They are
+			// the note's, not the last §'s, so the § is closed here.
+			curSec = nil
+		case kindPart:
+			// Whatever follows belongs to the part, not to the chapter that
+			// happened to be open, so nothing is collected again until the next
+			// chapter line.
+			cur, curSec = nil, nil
 		}
 	}
 
@@ -392,6 +518,9 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			}
 			text, t, hasPage := splitTail(line, g.Page)
 			e := classify(text, g.Mark)
+			if !hasPage && e.kind != kindNone && g.Page == Bare {
+				text, t, hasPage, e = noLeader(line, text, e, g.Mark)
+			}
 
 			if e.kind == kindNone {
 				if pend == nil {
@@ -408,6 +537,15 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 				continue
 			}
 
+			// A chapter whose line carries no page is not an error. The
+			// English Lie volume prints "CHAPTER VIII SPLIT SEMI-SIMPLE LIE
+			// ALGEBRAS" with no leaders and no number, because the chapter
+			// begins where its first § begins, and that page is on the next
+			// line. The page is filled in from that § below.
+			if pend != nil && pend.kind == kindChapter && e.kind == kindSection {
+				commit(pend.entry, tail{})
+				pend = nil
+			}
 			// A new prefix means the held line never found its page.
 			if pend != nil {
 				res.Problems = append(res.Problems, Problem{
@@ -415,7 +553,12 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 					Detail:  fmt.Sprintf("contents entry %q has no page", pend.title)})
 				pend = nil
 			}
-			if hasPage {
+			// A part heading is committed whether or not its page could be
+			// read. It contributes nothing but the fact that the chapter before
+			// it has ended, and the front matter of the English Theory of Sets
+			// numbers its pages in roman, "TO THE READER V", which the tail
+			// reader does not read and does not need to.
+			if hasPage || e.kind == kindPart {
 				commit(e, t)
 				continue
 			}
@@ -429,9 +572,115 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		}
 	}
 
+	res.Chapters = mergeChapters(res.Chapters)
+	chapterExercises(res)
 	resolve(res, pm)
 	res.Problems = append(res.Problems, res.validate(pm, opt)...)
 	return res, nil
+}
+
+// appendixOf is the chapter's nth appendix, or its only one where the line
+// named none, or nil where the chapter has no such appendix to hang the run on.
+func appendixOf(c *corpus.Chapter, n int) *corpus.Section {
+	var only *corpus.Section
+	seen := 0
+	for i := range c.Sections {
+		s := &c.Sections[i]
+		if !s.Appendix {
+			continue
+		}
+		seen++
+		only = s
+		if s.Number == n {
+			return s
+		}
+	}
+	if n == 0 && seen == 1 {
+		return only
+	}
+	return nil
+}
+
+// mergeChapters keeps one listing per chapter where the volume prints two.
+//
+// The French Springer volumes print a short SOMMAIRE at the front, chapters and
+// §§ and nothing else, and the full TABLE DES MATIÈRES at the back, every no.
+// with its page. Both are the volume's own contents and both parse, so the
+// chapters come out twice. The fuller listing wins, and anything it happens not
+// to carry is taken from the other, which is how the chapter's exercises
+// survive when only one of the two lists them.
+func mergeChapters(cs []corpus.Chapter) []corpus.Chapter {
+	var out []corpus.Chapter
+	at := map[string]int{}
+	for _, c := range cs {
+		i, ok := at[c.Numeral]
+		if !ok {
+			at[c.Numeral] = len(out)
+			out = append(out, c)
+			continue
+		}
+		keep, drop := out[i], c
+		if depth(drop) > depth(keep) {
+			keep, drop = drop, keep
+		}
+		if keep.Historical == nil {
+			keep.Historical = drop.Historical
+		}
+		if keep.Exercises == nil {
+			keep.Exercises = drop.Exercises
+		}
+		for j := range keep.Sections {
+			if keep.Sections[j].Exercises != nil {
+				continue
+			}
+			if s, ok := drop.Get(keep.Sections[j].Number); ok {
+				keep.Sections[j].Exercises = s.Exercises
+			}
+		}
+		out[i] = keep
+	}
+	return out
+}
+
+// depth is how much of a chapter a listing gives, no. lines first because that
+// is what separates the full contents from the summary.
+func depth(c corpus.Chapter) int {
+	n := 0
+	for _, s := range c.Sections {
+		n += len(s.Subsections)
+	}
+	return n*1000 + len(c.Sections)
+}
+
+// chapterExercises moves a single unnumbered exercise run up to the chapter it
+// belongs to.
+//
+// A contents line that says only "Exercices" does not say whose exercises they
+// are, and the volumes mean two different things by it. Algebra chapter 8
+// prints one after every § and means that §. Topologie algebrique prints one
+// after the last § of a chapter and means the whole chapter. What tells them
+// apart is the count: a volume that prints them per § prints more than one, so
+// a chapter with several §§ and exactly one run, sitting on the last of them,
+// is the second case.
+func chapterExercises(res *Result) {
+	for i := range res.Chapters {
+		c := &res.Chapters[i]
+		if len(c.Sections) < 2 {
+			continue
+		}
+		runs, last := 0, -1
+		for j := range c.Sections {
+			if c.Sections[j].Exercises != nil {
+				runs++
+				last = j
+			}
+		}
+		if runs != 1 || last != len(c.Sections)-1 {
+			continue
+		}
+		c.Exercises = c.Sections[last].Exercises
+		c.Sections[last].Exercises = nil
+	}
 }
 
 func chapterOf(c *corpus.Chapter) string {
@@ -441,13 +690,44 @@ func chapterOf(c *corpus.Chapter) string {
 	return c.Numeral
 }
 
+// contentsHeadRe is the running head a table of contents carries, in the two
+// languages the library is printed in.
+// The French Theory of Spectra runs the two words together in its text layer,
+// "334 CHAPITRETABLE DES MATIÈRES", so there is no word boundary in front of
+// the French form and none is asked for.
+var contentsHeadRe = regexp.MustCompile(`(?i)(?:\bcontents|table\s+des\s+mati)`)
+
+// announcesContents reports whether the page says at the top that it is the
+// table of contents. Only the head is read, so a body page that mentions the
+// contents in a sentence does not qualify.
+func announcesContents(pg string) bool {
+	seen := 0
+	for _, line := range strings.Split(pg, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if contentsHeadRe.MatchString(line) {
+			return true
+		}
+		if seen++; seen >= 2 {
+			return false
+		}
+	}
+	return false
+}
+
 // candidatePages are the pages the page map assigns to no chapter, which is
 // front matter and back matter, and one of those holds the contents.
+//
+// The French Algebra chapter 8 needs the second rule. It prints its contents at
+// the back and keeps the chapter's running head over it, "A VIII.484", so the
+// page map puts those seven pages inside chapter VIII along with the body and
+// the first rule leaves nothing to read.
 func candidatePages(pages []string, pm *pagemap.Map) []string {
 	var out []string
 	for i, pg := range pages {
 		e, ok := pm.Lookup(i + 1)
-		if !ok || e.Confidence == pagemap.Unknown {
+		if !ok || e.Confidence == pagemap.Unknown || announcesContents(pg) {
 			out = append(out, pg)
 		}
 	}
@@ -535,6 +815,9 @@ func resolve(res *Result, pm *pagemap.Map) {
 				s.Exercises.PDFPage, _ = pm.PDFPageOf(c.Numeral, s.Exercises.Page)
 			}
 		}
+		if c.Exercises != nil {
+			c.Exercises.PDFPage, _ = pm.PDFPageOf(c.Numeral, c.Exercises.Page)
+		}
 		if c.Historical != nil {
 			c.Historical.PDFPage, _ = pm.PDFPageOf(c.Numeral, c.Historical.Page)
 		}
@@ -546,6 +829,9 @@ func (r *Result) Counts() (chapters, sections, subsections, exercises int) {
 	chapters = len(r.Chapters)
 	for _, c := range r.Chapters {
 		sections += len(c.Sections)
+		if c.Exercises != nil {
+			exercises++
+		}
 		for _, s := range c.Sections {
 			subsections += len(s.Subsections)
 			if s.Exercises != nil {

@@ -106,6 +106,10 @@ func Verify(pages []string, b corpus.BookTOC) *Report {
 					PDFPage: s.Exercises.PDFPage}, s.Appendix)
 			}
 		}
+		if c.Exercises != nil {
+			r.exercises(pages, Check{Chapter: c.Numeral, Kind: "exercises",
+				PDFPage: c.Exercises.PDFPage}, false)
+		}
 		if c.Historical != nil {
 			r.check(norm, Check{Chapter: c.Numeral, Kind: "historical note",
 				Title: "historical note", PDFPage: c.Historical.PDFPage})
@@ -115,6 +119,9 @@ func Verify(pages []string, b corpus.BookTOC) *Report {
 }
 
 // exercises checks a page that a run of exercises is supposed to start on.
+//
+// The word is matched on its stem because the library is printed in two
+// languages and the French sets EXERCICES where the English sets EXERCISES.
 //
 // The word EXERCISES is not the marker to look for. The 2023 volume prints it
 // at the head of each §'s run, but the 1998 and 2003 volumes gather every run
@@ -134,8 +141,11 @@ func (r *Report) exercises(pages []string, c Check, appendix bool) {
 		}
 	}
 	c.Title = fmt.Sprintf("exercises for § %d", c.Section)
-	if appendix {
+	switch {
+	case appendix:
 		c.Title = "exercises for the appendix"
+	case c.Section == 0:
+		c.Title = "exercises for the chapter"
 	}
 	r.Misses = append(r.Misses, c)
 }
@@ -146,10 +156,10 @@ func exercisesOn(pages []string, page, section int, appendix bool) bool {
 	}
 	for _, l := range strings.Split(pages[page-1], "\n") {
 		l = strings.TrimSpace(l)
-		if strings.Contains(strings.ToLower(l), "exercise") {
+		if strings.Contains(strings.ToLower(l), "exerci") {
 			return true
 		}
-		if appendix && strings.EqualFold(l, "appendix") {
+		if appendix && appendixMarkRe.MatchString(l) {
 			return true
 		}
 		if m := runMarkRe.FindStringSubmatch(l); m != nil {
@@ -170,6 +180,11 @@ func exercisesOn(pages []string, page, section int, appendix bool) bool {
 var (
 	runMarkRe = regexp.MustCompile(`^§\s*([0-9IlOSZ|]{1,2})\.?$`)
 	runFixer  = strings.NewReplacer("S", "5", "Z", "2")
+
+	// The marker that opens an appendix's run of exercises carries the
+	// appendix's numeral where the chapter has more than one: the English Lie
+	// volume sets "Appendix I" on printed page 66 and "Appendix II" on 67.
+	appendixMarkRe = regexp.MustCompile(`(?i)^appendi[xc]e?\s*[0-9IVXL]{0,4}\.?$`)
 )
 
 // check looks for one heading and records it.

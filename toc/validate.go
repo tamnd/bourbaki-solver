@@ -54,7 +54,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 		// § are counted on their own, because the appendices that close
 		// chapters II, III and VIII are listed among them and carry their own
 		// numbering, or none at all.
-		last, nsec, napp := 0, 0, 0
+		last, nsec, napp, exlast := 0, 0, 0, 0
 		for _, s := range c.Sections {
 			switch {
 			case !s.Appendix:
@@ -91,10 +91,15 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 				add(c.Numeral, s.Number, "no title")
 			}
 
-			// Bourbaki always opens a § with its no. 1, on the same page. A
-			// disagreement here is the sharpest sign of a misread digit there
-			// is, because the two numbers come from two different lines.
-			if len(s.Subsections) > 0 && s.Subsections[0].Page != s.Page {
+			// Bourbaki opens a § with its no. 1, on the same page or on the
+			// next one, because a § heading that falls near the foot of a page
+			// leaves its first no. to the page after: chapter VII § 2 of the
+			// English Lie volume is headed at the foot of page 12 and its no. 1
+			// begins on 13. Anything wider than that is a misread digit, and it
+			// is the sharpest sign of one there is, because the two numbers come
+			// from two different lines.
+			if len(s.Subsections) > 0 && s.Subsections[0].Page-s.Page != 0 &&
+				s.Subsections[0].Page-s.Page != 1 {
 				add(c.Numeral, s.Number, "no. 1 starts at printed page %d but the § starts at %d",
 					s.Subsections[0].Page, s.Page)
 			}
@@ -131,6 +136,29 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 					add(c.Numeral, s.Number, "the exercises' printed page %d is on no pdf page",
 						s.Exercises.Page)
 				}
+				// The runs are printed in the order of the §§ they belong to,
+				// whether they follow each § or are gathered at the end of the
+				// chapter, so a run that goes backwards means a run has been
+				// hung on the wrong §. It is the only sign there is when the
+				// wrong § is a real one: the English Algebra sets the run for
+				// chapter II § 10 as "Exercises for § I 0", and read as § 1 it
+				// replaces the real run of § 1 with a page that is otherwise
+				// perfectly in range.
+				if s.Exercises.Page < exlast {
+					add(c.Numeral, s.Number, "the exercises start at printed page %d, before the previous §'s at %d",
+						s.Exercises.Page, exlast)
+				}
+				exlast = s.Exercises.Page
+			}
+		}
+		if c.Exercises != nil {
+			if !inChapter(sp, c.Exercises.Page) {
+				add(c.Numeral, 0, "the chapter's exercises start at printed page %d, outside the chapter",
+					c.Exercises.Page)
+			}
+			if c.Exercises.PDFPage == 0 {
+				add(c.Numeral, 0, "the chapter's exercises' printed page %d is on no pdf page",
+					c.Exercises.Page)
 			}
 		}
 		if c.Historical != nil {

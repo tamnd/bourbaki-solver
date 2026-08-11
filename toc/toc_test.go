@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
 )
 
@@ -37,7 +38,24 @@ func TestClassify(t *testing.T) {
 			entry{kind: kindAppendix, number: 1, title: "Algebras without Unit Element"}},
 		{"Exercises for § 1", Pilcrow, entry{kind: kindExercises, number: 1}},
 		{"Exercises on § 5", Pilcrow, entry{kind: kindExercises, number: 5}},
-		{"Exercise for the Appendix", Pilcrow, entry{kind: kindExercises}},
+		// Off the English Algebra, pdf page 16 line 41. Read as § 1 this run
+		// takes the place of the real run of § 1, and both pages are inside the
+		// chapter, so nothing else in the file looks wrong.
+		{"Exercises for § I 0", Pilcrow, entry{kind: kindExercises, number: 10}},
+		{"Exercises for § II", Pilcrow, entry{kind: kindExercises, number: 11}},
+		// The run is the appendix's, and saying so is what puts it there. The
+		// old reader gave it to whatever section was listed last, which was the
+		// appendix only because the appendix happens to close the chapter.
+		{"Exercise for the Appendix", Pilcrow,
+			entry{kind: kindExercises, appendix: true}},
+		{"Exercises for Appendix II", Pilcrow,
+			entry{kind: kindExercises, number: 2, appendix: true}},
+		{"Appendix II - A connectedness property", Pilcrow,
+			entry{kind: kindAppendix, number: 2, title: "A connectedness property"}},
+		{"SUMMARY OF RESULTS", Pilcrow,
+			entry{kind: kindPart, title: "SUMMARY OF RESULTS"}},
+		{"CONTENTS OF THE ELEMENTS OF MATHEMATICS SERIES", Pilcrow, entry{}},
+		{"XVlll", Pilcrow, entry{}},
 		{"Historical Note", Pilcrow, entry{kind: kindHistorical}},
 		{"   1. Regular Ideals", Column,
 			entry{kind: kindSubsection, number: 1, title: "Regular Ideals"}},
@@ -113,13 +131,15 @@ Historical Note. . . . . . . . . . . . . . . . . . . . . . . . . . . . . 15
 
 // testMap is a page map for a single chapter of 20 printed pages sitting at a
 // constant offset of 2, which is all the parser asks of one.
-func testMap() *pagemap.Map {
+func testMap() *pagemap.Map { return testMapFor("VIII") }
+
+func testMapFor(numeral string) *pagemap.Map {
 	m := &pagemap.Map{Book: "test", PDFPages: 22,
-		Chapters: []pagemap.Span{{Chapter: "VIII", FirstPDF: 3, LastPDF: 22, FirstPage: 1, LastPage: 20}}}
+		Chapters: []pagemap.Span{{Chapter: numeral, FirstPDF: 3, LastPDF: 22, FirstPage: 1, LastPage: 20}}}
 	for i := 1; i <= 22; i++ {
 		e := pagemap.Entry{PDFPage: i, Confidence: pagemap.Unknown}
 		if i >= 3 {
-			e.Chapter, e.Page, e.Confidence = "VIII", i-2, pagemap.FromHead
+			e.Chapter, e.Page, e.Confidence = numeral, i-2, pagemap.FromHead
 		}
 		m.Entries = append(m.Entries, e)
 	}
@@ -234,5 +254,198 @@ func TestShout(t *testing.T) {
 		if got := shout(tt.in); got != tt.want {
 			t.Errorf("shout(%q) = %q", tt.in, got)
 		}
+	}
+}
+
+// frenchContents is the head of the full table of contents the 2019 French
+// Topologie algebrique prints at the back, copied off pdf pages 507 and 509.
+// Every awkward thing in it is the volume's, not mine: the em dash after the
+// chapter numeral, the title that runs the whole width and leaves a single
+// space in front of its page, and the one run of exercises for the chapter.
+const frenchContents = `                     TABLE DES MATIÈRES
+
+CHAPITRE I. — REVÊTEMENTS . . . . . . . . . . . . . . . . . . . . . . 1
+    § 1. Produits fibrés et carrés cartésiens. . . . . . . . . . . . . 1
+          1. Structure de B-espace. . . . . . . . . . . . . . . . . . . 1
+          2. Opérations sur les B-espaces . . . . . . . . . . . . . . . 2
+    § 2. Applications étales. . . . . . . . . . . . . . . . . . . . . . 5
+          1. Applications séparées. . . . . . . . . . . . . . . . . . . 5
+          2. Produit d’un espace par un espace simplement connexe 8
+    Exercices. . . . . . . . . . . . . . . . . . . . . . . . . . . . . 13
+`
+
+// A French volume reads at all, and the three things that stopped it reading
+// are each checked: the chapter line, the page with no leaders in front of it,
+// and the single run of exercises that belongs to the chapter and not to § 2.
+func TestParseFrench(t *testing.T) {
+	res, err := Parse([]string{frenchContents}, testMapFor("I"),
+		Options{Book: "test", Chapters: []string{"I"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := res.Get("I")
+	if !ok {
+		t.Fatalf("no chapter I, problems %v", res.Problems)
+	}
+	if c.Title != "REVÊTEMENTS" || c.Page != 1 {
+		t.Errorf("chapter = %q printed %d", c.Title, c.Page)
+	}
+	if len(c.Sections) != 2 {
+		t.Fatalf("%d sections, want 2", len(c.Sections))
+	}
+	s, _ := c.Get(2)
+	if len(s.Subsections) != 2 {
+		t.Fatalf("§ 2 has %d no., want 2", len(s.Subsections))
+	}
+	if got := s.Subsections[1]; got.Page != 8 || got.Title != "Produit d’un espace par un espace simplement connexe" {
+		t.Errorf("no. 2 = %+v, want page 8 and the whole title", got)
+	}
+	if s.Exercises != nil {
+		t.Error("the exercises were left on § 2")
+	}
+	if c.Exercises == nil || c.Exercises.Page != 13 {
+		t.Errorf("chapter exercises = %+v, want page 13", c.Exercises)
+	}
+}
+
+// A title that ends in a numeral must not lose it to the page reader. The guard
+// is that taking the number off has to leave the line saying the same thing,
+// and here it does not: "2. Fonctions continues sur CΛ" is no. 2 either way,
+// but the number is part of the title and the line carries no page at all, so
+// the entry is held for the wrapped line that does.
+func TestNoLeaderKeepsAWrappedTitle(t *testing.T) {
+	const pg = `CHAPITRE I. — REVÊTEMENTS . . . . . . . . . . . . . . . . . . . . . . 1
+    § 1. Produits fibrés . . . . . . . . . . . . . . . . . . . . . . . 1
+          1. Structure de B-espace. . . . . . . . . . . . . . . . . . . 1
+          2. Fonctions continues sur un sous-ensemble compact
+             de CΛ . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+`
+	res, err := Parse([]string{pg}, testMapFor("I"), Options{Book: "test", Chapters: []string{"I"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := res.Get("I")
+	s, ok := c.Get(1)
+	if !ok || len(s.Subsections) != 2 {
+		t.Fatalf("§ 1 = %+v", s)
+	}
+	if got := s.Subsections[1]; got.Page != 3 {
+		t.Errorf("no. 2 starts at printed page %d, want 3", got.Page)
+	}
+}
+
+// The English Lie volume prints its chapter line with no page, because the
+// chapter begins where its first § begins.
+func TestChapterWithNoPageTakesItsFirstSection(t *testing.T) {
+	const pg = `CHAPTER I CARTAN SUBALGEBRAS AND REGULAR ELEMENTS
+§ 1. Primary decomposition . . . . . . . . . . . . . . . . . . . . . . 1
+      1. Decomposition of a family . . . . . . . . . . . . . . . . . . 1
+      2. The case of a linear family . . . . . . . . . . . . . . . . . 6
+`
+	res, err := Parse([]string{pg}, testMapFor("I"), Options{Book: "test", Chapters: []string{"I"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) > 0 {
+		t.Errorf("problems: %v", res.Problems)
+	}
+	c, ok := res.Get("I")
+	if !ok || c.Page != 1 {
+		t.Fatalf("chapter = %+v, want printed page 1", c)
+	}
+}
+
+// The English Theory of Sets closes with a part that carries §§ of its own,
+// numbered from 1. They are not the last chapter's.
+func TestPartEndsTheChapter(t *testing.T) {
+	const pg = `CHAPTER I STRUCTURES . . . . . . . . . . . . . . . . . . . . . . . . . 1
+§ 1. Structures and isomorphisms . . . . . . . . . . . . . . . . . . . 1
+§ 2. Morphisms . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+SUMMARY OF RESULTS . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+§ 1. Elements and subsets of a set . . . . . . . . . . . . . . . . . . 8
+§ 2. Functions . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+`
+	res, err := Parse([]string{pg}, testMapFor("I"), Options{Book: "test", Chapters: []string{"I"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) > 0 {
+		t.Errorf("problems: %v", res.Problems)
+	}
+	c, _ := res.Get("I")
+	if len(c.Sections) != 2 {
+		t.Errorf("%d sections, want the chapter's 2 and none of the part's", len(c.Sections))
+	}
+}
+
+// The running head over the contents is set flush left and in capitals, like a
+// part, and closing the chapter on it would throw the page away.
+func TestContentsRunningHeadIsNotAPart(t *testing.T) {
+	for _, head := range []string{"CONTENTS", "TABLE DES MATIÈRES",
+		"334                           CHAPITRETABLE DES MATIÈRES"} {
+		if isPart(head) {
+			t.Errorf("isPart(%q) = true", head)
+		}
+	}
+	if !isPart("SUMMARY OF RESULTS") {
+		t.Error(`isPart("SUMMARY OF RESULTS") = false`)
+	}
+	// The 1998 scan reads small capitals as lowercase, so a roman page number
+	// at the foot of a contents page comes out "XVlll" and is four fifths
+	// capitals by accident. It is too short to be a heading.
+	if isPart("XVlll") {
+		t.Error(`isPart("XVlll") = true, the foot page number ended a chapter`)
+	}
+}
+
+// The two printings of Algebra chapter 8 number their appendices differently.
+func TestReadOrdinalTakesRomanOrArabic(t *testing.T) {
+	for _, tt := range []struct {
+		in   string
+		want int
+	}{{"I", 1}, {"II", 2}, {"1", 1}, {"2", 2}, {"", 0}} {
+		got, ok := readOrdinal(tt.in)
+		if tt.want == 0 {
+			if ok {
+				t.Errorf("readOrdinal(%q) = %d, want no number", tt.in, got)
+			}
+			continue
+		}
+		if !ok || got != tt.want {
+			t.Errorf("readOrdinal(%q) = %d %v, want %d", tt.in, got, ok, tt.want)
+		}
+	}
+}
+
+// The scan of the English Theory of Sets sets no. 6 of III § 7 at "204-", and
+// dropping it renumbered every no. after it.
+func TestTailSurvivesTheScannersPunctuation(t *testing.T) {
+	line := "         6. Direct systems of mappings . . . . . . . . . . . . . . . . 204-"
+	text, tl, ok := splitTail(line, Bare)
+	if !ok || tl.page != 204 {
+		t.Fatalf("splitTail = %q %+v %v", text, tl, ok)
+	}
+}
+
+// A volume that prints a short summary at the front and the full contents at
+// the back yields every chapter twice, and the fuller listing is the one to
+// keep.
+func TestMergeChaptersKeepsTheFullerListing(t *testing.T) {
+	summary := corpus.Chapter{Numeral: "I", Page: 1,
+		Sections:  []corpus.Section{{Number: 1, Page: 1}, {Number: 2, Page: 5}},
+		Exercises: &corpus.Locator{Page: 13}}
+	full := corpus.Chapter{Numeral: "I", Page: 1, Sections: []corpus.Section{
+		{Number: 1, Page: 1, Subsections: []corpus.Subsection{{Number: 1, Page: 1}}},
+		{Number: 2, Page: 5, Subsections: []corpus.Subsection{{Number: 1, Page: 5}}},
+	}}
+	got := mergeChapters([]corpus.Chapter{summary, full})
+	if len(got) != 1 {
+		t.Fatalf("%d chapters, want 1", len(got))
+	}
+	if n := len(got[0].Sections[0].Subsections); n != 1 {
+		t.Errorf("§ 1 has %d no., want the full listing's 1", n)
+	}
+	if got[0].Exercises == nil || got[0].Exercises.Page != 13 {
+		t.Errorf("exercises = %+v, want the summary's page 13", got[0].Exercises)
 	}
 }
