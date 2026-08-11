@@ -121,16 +121,22 @@ func coverageRows(c *Corpus) []coverageRow {
 		}
 		for _, ch := range bt.Chapters {
 			key := work + "/" + ch.Numeral
+			// A chapter can be registered twice, because the library holds two
+			// printings of it: chapter VIII of Algebra is here in English and
+			// in French, and both are read into the table of contents. It is
+			// one chapter of one Book either way, so it gets one row, and the
+			// fuller listing of the two says how many § it has.
+			if r, ok := byKey[key]; ok {
+				if n := len(ch.Sections); n > r.want {
+					r.want = n
+				}
+				continue
+			}
 			n, _ := corpus.RomanOrder(ch.Numeral)
-			r := &coverageRow{
+			byKey[key] = &coverageRow{
 				book: work, bookTitle: corpus.BookTitle(work),
-				chapter: ch.Numeral, order: n,
+				chapter: ch.Numeral, order: n, want: len(ch.Sections),
 			}
-			for _, s := range ch.Sections {
-				_ = s
-				r.want++
-			}
-			byKey[key] = r
 			order = append(order, key)
 		}
 	}

@@ -66,11 +66,20 @@ func tocBuild(args []string) error {
 	}
 
 	ctx := context.Background()
-	failed := 0
+	failed, skipped := 0, 0
 	for _, b := range list {
 		pm, err := pagemap.Load(root, b.ID)
 		if err != nil {
-			return fmt.Errorf("%s: %w (run bourbaki pagemap build first)", b.ID, err)
+			// The contents is read off the pages the page map leaves out, so a
+			// volume that has not been mapped cannot be read yet. Naming one
+			// book is a request and is an error when it cannot be met; asking
+			// for every book is a sweep over a library that is mapped a few
+			// volumes at a time.
+			if *book != "" {
+				return fmt.Errorf("%s: %w (run bourbaki pagemap build first)", b.ID, err)
+			}
+			skipped++
+			continue
 		}
 		src, err := pdfsrc.Open(filepath.Join(root, b.PDF))
 		if err != nil {
@@ -83,16 +92,29 @@ func tocBuild(args []string) error {
 		res, err := toc.Parse(pagemap.SplitPages(text), pm, toc.Options{
 			Book: b.ID, Chapters: b.Chapters})
 		if err != nil {
-			return err
+			fmt.Printf("%s  %v\n", b.ID, err)
+			failed++
+			continue
 		}
 		printTOC(res)
 		if len(res.Problems) > 0 {
+			// A contents with a problem in it is not written. What the parser
+			// reports as a problem is a chapter it lost, a § it doubled or a
+			// page the volume does not have, and a manifest that carries those
+			// is worse than a manifest that says nothing: the coverage table
+			// would then count sections the volume never had, and every reader
+			// downstream would take the missing chapters for chapters nobody
+			// has extracted yet.
 			failed++
+			continue
 		}
 		if *dry {
 			continue
 		}
 		man.Upsert(corpus.BookTOC{ID: b.ID, Grammar: res.Grammar.String(), Chapters: res.Chapters})
+	}
+	if skipped > 0 {
+		fmt.Printf("%d volumes have no page map yet and were not read\n", skipped)
 	}
 	if !*dry {
 		if err := man.Save(root); err != nil {
@@ -101,7 +123,7 @@ func tocBuild(args []string) error {
 		fmt.Printf("written to %s\n", corpus.TOCPath(root))
 	}
 	if failed > 0 {
-		return fmt.Errorf("%d volumes have contents problems", failed)
+		return fmt.Errorf("%d volumes have contents problems and were not written", failed)
 	}
 	return nil
 }
