@@ -248,6 +248,9 @@ func runText(r Run) string {
 	case "LMMathSymbols":
 		return symbols(s)
 	}
+	if r.Class == ClassStrong {
+		return bold(s)
+	}
 	if r.Class == ClassBold {
 		return wrapLetters(s, `\mathbf`)
 	}
@@ -260,6 +263,18 @@ func runText(r Run) string {
 		return `\boldsymbol{` + runes(s, nil) + `}`
 	}
 	return runes(s, nil)
+}
+
+// bold marks a run as bold Markdown, keeping the space it was set with outside
+// the asterisks. Markdown reads a pair of asterisks with a space after it as
+// two literal asterisks, and a run of a heading often ends in one.
+func bold(s string) string {
+	t := strings.TrimSpace(s)
+	if t == "" {
+		return s
+	}
+	i := strings.Index(s, t)
+	return s[:i] + "**" + t + "**" + s[i+len(t):]
 }
 
 // symbols renders a run of the mathematics symbol font, where the letters are
@@ -354,7 +369,12 @@ func first(s string) rune {
 func extend(toks []token) []token {
 	out := make([]token, 0, len(toks))
 	for i, t := range toks {
-		if t.math || t.class == ClassHead {
+		// A statement head and a heading are prose whatever they sit beside.
+		// Page 438 opens its subsection on the star that marks it optional, and
+		// reading the number after the star as part of a formula turned "∗13.
+		// Complex Linear Representations" into $***13$ and left the asterisks
+		// of the heading open.
+		if t.math || t.class == ClassHead || t.class == ClassStrong {
 			out = append(out, t)
 			continue
 		}

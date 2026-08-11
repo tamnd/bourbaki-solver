@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
@@ -300,7 +301,7 @@ func join(lines []Line) string {
 				continue
 			}
 		}
-		if apart || strings.HasPrefix(text, "**") {
+		if apart || boldOpen(text) {
 			flush()
 			cur.WriteString(text)
 			continue
@@ -319,6 +320,22 @@ func join(lines []Line) string {
 	}
 	flush()
 	return strings.Join(out, "\n\n")
+}
+
+// boldOpen reports whether a line opens on bold words, which is where a
+// statement begins and where an entry of the table of contents does.
+//
+// A line opening on a bold number is neither. The bibliography sets the volume
+// number of a journal in bold, page 496 turned over onto one, and reading that
+// as an opening cut the entry for C. Hopkins in two and left "40 (1939), p.
+// 712-730." standing on its own.
+func boldOpen(text string) bool {
+	rest, ok := strings.CutPrefix(text, "**")
+	if !ok {
+		return false
+	}
+	i := strings.Index(rest, "**")
+	return i > 0 && letters(rest[:i]) > 0
 }
 
 // runOn joins a line that runs on into the next one, and says whether it did.
@@ -454,18 +471,20 @@ func leading(lines []Line) int {
 // and nothing else: the chapter, the §, the numbered subsection, the word
 // Exercises. A bold run inside a line of prose is one of the letters N, Z, Q, R
 // and C, or an indeterminate X, and is left to the renderer.
+//
+// Both bold classes are taken. The words of a heading are strong and the number
+// it opens on can be either, since § 16. carries punctuation and the 1. of a
+// subsection is short enough to be read as a symbol on its own.
+//
+// A heading may also carry mathematics, and twelve of them in this volume do:
+// "6. The Grothendieck Group R_K(A)" on page 211, "1. τ-Extensions of Groups"
+// on page 302. Such a line is read by the renderer and its bold marks taken off
+// again, so the mathematics in it comes out as mathematics.
 func heading(l Line) (string, bool) {
-	var b strings.Builder
-	for i, r := range l.Runs {
-		if r.Class != ClassBold {
-			return "", false
-		}
-		if i > 0 && r.Left-l.Runs[i-1].Right() >= 3 {
-			b.WriteString(" ")
-		}
-		b.WriteString(r.Text)
+	if !headed(l) {
+		return "", false
 	}
-	text := strings.Join(strings.Fields(b.String()), " ")
+	text := headingText(l)
 	if len([]rune(text)) < 3 {
 		return "", false
 	}
@@ -478,6 +497,86 @@ func heading(l Line) (string, bool) {
 		return "## " + text, true
 	}
 	return "### " + text, true
+}
+
+// headingText writes the words of a heading.
+//
+// A line that is bold from end to end is read straight off the runs, with a
+// space where the typesetter left one. The renderer is not asked, because it
+// answers questions a heading does not have: the title page sets "Chapter 8"
+// smaller and lower than "Algebra" above it, which is a subscript to the
+// renderer and the second half of the title to a reader.
+//
+// A line carrying mathematics has to go through the renderer, since that is
+// where the mathematics is written, and its bold marks come off afterwards.
+func headingText(l Line) string {
+	var b strings.Builder
+	for i, r := range l.Runs {
+		if r.Class != ClassBold && r.Class != ClassStrong {
+			text := strings.Join(strings.Fields(strings.ReplaceAll(Render(l), "**", "")), " ")
+			// The star that marks a subsection optional is a mark of the book
+			// and not a formula, so it comes out of the dollars and is escaped
+			// where it stands.
+			if rest, ok := strings.CutPrefix(text, "$*$"); ok {
+				text = `\*` + rest
+			}
+			return text
+		}
+		if i > 0 && r.Left-l.Runs[i-1].Right() >= 3 {
+			b.WriteString(" ")
+		}
+		b.WriteString(r.Text)
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
+// headed reports whether a line is a heading.
+//
+// A line set in bold from end to end is one, and that is most of them. The rest
+// carry the mathematics of their own title, so the test cannot be that every
+// run is bold, and it cannot be that any run is either: the historical note
+// sets its citation numbers bold and the bibliography sets the volume number of
+// a journal bold, so "an arbitrary base field ([51], p. 102)" has a bold run in
+// the middle of a sentence.
+//
+// What separates them is where the bold is and what it says. A heading opens on
+// its own words, so the line has to start on bold, and it has to carry a bold
+// run of four letters or more somewhere, which a citation number never is. A
+// line of the table of contents passes both and is not a heading, so the dot
+// leaders are read as well: nothing else in the volume prints a row of dots.
+func headed(l Line) bool {
+	if len(l.Runs) == 0 {
+		return false
+	}
+	runs := l.Runs
+	if r := runs[0]; r.Class == ClassMath && len([]rune(strings.TrimSpace(r.Text))) == 1 {
+		// The star that marks a subsection optional is drawn before its number.
+		runs = runs[1:]
+	}
+	if len(runs) == 0 || runs[0].Class != ClassBold && runs[0].Class != ClassStrong {
+		return false
+	}
+	words := false
+	for _, r := range l.Runs {
+		if strings.Contains(r.Text, ". . .") || strings.Contains(r.Text, "...") {
+			return false
+		}
+		if r.Class == ClassStrong && letters(r.Text) >= 4 {
+			words = true
+		}
+	}
+	return words
+}
+
+// letters counts the letters of a run.
+func letters(s string) int {
+	n := 0
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			n++
+		}
+	}
+	return n
 }
 
 // splitNotes takes the footnotes off the bottom of a page. A footnote opens on

@@ -14,7 +14,9 @@ import (
 // paragraph and "stitutions", Proc. Lond. Math. Soc." as the next.
 //
 // Entries [2] and [3] of page 493, as poppler prints them. Both readings were
-// checked against the printed page.
+// checked against the printed page, the volume number of the journal included:
+// it is set bold there, so it is bold here, and it shipped as $30$ for as long
+// as every bold run was read as a symbol.
 const bibliographyXML = `<?xml version="1.0" encoding="UTF-8"?>
 <pdf2xml>
 <page number="493" position="absolute" top="0" left="0" height="999" width="659">
@@ -43,8 +45,8 @@ const bibliographyXML = `<?xml version="1.0" encoding="UTF-8"?>
 func TestAnEntryOfTheBibliographyIsOneParagraph(t *testing.T) {
 	got := blocks(parse(t, bibliographyXML))
 	want := strings.Join([]string{
-		`[2] R. Brauer – “Über Systeme hypercomplexer Zahlen”, Math. Zeitschr. $30$ (1929), p. 79–107; Collected papers, vol. I, Cambridge, Massachusetts (The MIT Press), 1980, p. 40–68.`,
-		`[3] W. Burnside – “On the condition of reducibility of any group of linear substitutions”, Proc. Lond. Math. Soc. $3$ (1905), p. 430–434.`,
+		`[2] R. Brauer – “Über Systeme hypercomplexer Zahlen”, Math. Zeitschr. **30** (1929), p. 79–107; Collected papers, vol. I, Cambridge, Massachusetts (The MIT Press), 1980, p. 40–68.`,
+		`[3] W. Burnside – “On the condition of reducibility of any group of linear substitutions”, Proc. Lond. Math. Soc. **3** (1905), p. 430–434.`,
 	}, "\n\n")
 	if got != want {
 		t.Errorf("blocks:\n got %s\nwant %s", got, want)
