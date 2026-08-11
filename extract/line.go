@@ -213,6 +213,10 @@ func rows(runs []Run) []Line {
 // enough to miss the band and comes out as a line holding one letter. Such a
 // line is not a line: it is math, it is short, and it starts and ends inside a
 // line it overlaps. It goes back on whichever of its neighbours that is.
+//
+// An accent is asked about first and asked a different question, because the
+// general rule offers the line below before the line above and an accent is
+// drawn above the letter it belongs to.
 func gather(lines []Line) []Line {
 	out := lines[:0:0]
 	take := func(l *Line, from Line) {
@@ -221,6 +225,10 @@ func gather(lines []Line) []Line {
 		l.Right = max(l.Right, from.Right)
 	}
 	for i := 0; i < len(lines); i++ {
+		if n := len(out); n > 0 && accented(lines[i]) && over(lines[i], out[n-1]) {
+			take(&out[n-1], lines[i])
+			continue
+		}
 		if i+1 < len(lines) && stray(lines[i], lines[i+1]) {
 			take(&lines[i+1], lines[i])
 			continue
@@ -232,6 +240,42 @@ func gather(lines []Line) []Line {
 		out = append(out, lines[i])
 	}
 	return out
+}
+
+// accented reports whether a line is nothing but accents. CMEX draws a wide
+// tilde or a wide hat as a glyph of its own rather than as part of the letter,
+// and a row of them across a display often clears the band of every line and
+// arrives as a line of its own.
+func accented(l Line) bool {
+	for _, r := range l.Runs {
+		if _, acc := cmexText(r); !acc {
+			return false
+		}
+	}
+	return len(l.Runs) > 0
+}
+
+// over reports whether a line of accents was drawn over the line above it.
+//
+// The nearness test that finds the limit of a sum is no use here. A row of
+// tildes over a display sits within a few units of the prose on the line below
+// as well as of the letters it belongs to, so both neighbours answer to it and
+// the general rule takes the one it is offered first, which is the wrong one.
+//
+// Where poppler puts the accent settles it. An accent is reported inside the
+// band of the line it decorates, about ten units down from the top of it, and
+// well clear of the band of the next line: page 114 sets eight tildes at 387
+// over the display at 376, and the prose they were read as belonging to starts
+// at 406. That page came out with a tilde over eight letters of an English
+// sentence and nothing to show for it, since a page whose accents have wandered
+// still balances its dollars and reads as prose.
+func over(l, other Line) bool {
+	for _, r := range l.Runs {
+		if r.Top < other.Top || r.Top >= other.Bottom {
+			return false
+		}
+	}
+	return true
 }
 
 // stray reports whether a line is a piece of the line beside it. It is either a

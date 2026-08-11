@@ -24,9 +24,14 @@ type token struct {
 	class Class
 	level Level
 	depth int
-	left  int
-	right int
-	math  bool
+	// The box the run it came from was drawn in. Across the page it says
+	// where one token ends and the next begins; up and down it says which of
+	// them an accent was drawn over.
+	left   int
+	right  int
+	top    int
+	bottom int
+	math   bool
 }
 
 // Render writes one line as Markdown with LaTeX mathematics.
@@ -70,7 +75,7 @@ func tokens(l Line) []token {
 				continue
 			}
 			toks = append(toks, token{text: text, class: ClassMath, level: r.Level,
-				left: r.Left, right: r.Right(), math: true})
+				left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(), math: true})
 			continue
 		}
 		text := runText(r)
@@ -80,7 +85,7 @@ func tokens(l Line) []token {
 		if r.Level != Base && footnoteMark(r.Text) {
 			// A footnote reference is a superscript and is not an exponent.
 			toks = append(toks, token{text: "[^" + strings.Trim(r.Text, "()") + "]",
-				class: ClassText, left: r.Left, right: r.Right()})
+				class: ClassText, left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom()})
 			continue
 		}
 		level, depth := r.Level, r.Depth
@@ -92,7 +97,7 @@ func tokens(l Line) []token {
 			level, depth = Base, max(depth-1, 0)
 		}
 		toks = append(toks, token{text: text, class: r.Class, level: level, depth: depth,
-			left: r.Left, right: r.Right(), math: r.Class.Math() || r.Level != Base})
+			left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(), math: r.Class.Math() || r.Level != Base})
 	}
 	return place(toks, accents)
 }
@@ -116,19 +121,39 @@ func footnoteMark(s string) bool {
 // place puts each accent over the token it was drawn over. An accent is a glyph
 // of its own sitting at the position of the letter it decorates, so the letter
 // is the token it overlaps.
+//
+// Overlapping across the page is not enough on its own. A line gathers what is
+// drawn beside it as well as what is on it, and a display carries its accents
+// far enough above the letters that they can be gathered onto the wrong line;
+// when that happened on page 114 every tilde of the display found a letter of
+// the sentence below it at the same place across the measure and went over
+// that. So the accent has to be inside the token's band as well, which is where
+// poppler reports it and where the letters of another line are not.
+//
+// Across the page it is the token the accent covers most, not the first one it
+// touches. The boxes of a formula are set edge to edge, so the tilde over the
+// sigma of Θ ∘ (σ ⊗ 1_P) starts at exactly the right edge of the bracket before
+// it, and taking the first token that overlaps puts the tilde over the bracket.
 func place(toks []token, accents []Run) []token {
 	for _, a := range accents {
 		latex, _, ok := CMEX(first(a.Text))
 		if !ok {
 			continue
 		}
-		for i := range toks {
-			if toks[i].right < a.Left || toks[i].left > a.Right() {
+		at, best := -1, 0
+		for i, t := range toks {
+			over := min(t.right, a.Right()) - max(t.left, a.Left)
+			if over < 0 || a.Top < t.top || a.Top >= t.bottom {
 				continue
 			}
-			toks = append(toks[:i], append(accent(toks[i], a, latex), toks[i+1:]...)...)
-			break
+			if at < 0 || over > best {
+				at, best = i, over
+			}
 		}
+		if at < 0 {
+			continue
+		}
+		toks = append(toks[:at], append(accent(toks[at], a, latex), toks[at+1:]...)...)
 	}
 	return toks
 }
