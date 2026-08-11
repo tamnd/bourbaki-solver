@@ -33,8 +33,8 @@ func runPagemap(args []string) error {
 func pagemapBuild(args []string) error {
 	fs := flag.NewFlagSet("pagemap build", flag.ExitOnError)
 	book := fs.String("book", "", "book id, or empty for every book in the manifest")
-	grammar := fs.String("grammar", "", "override the detected grammar: head-label or foot-number")
-	minRun := fs.Int("min-run", pagemap.DefaultMinRun, "how many anchors must agree before a change of offset is believed")
+	grammar := fs.String("grammar", "", "override the detected grammar: head-label, head-number or foot-number")
+	minRun := fs.Int("min-run", 0, "how many anchors must agree before a change of offset is believed, 0 for per volume")
 	dry := fs.Bool("n", false, "print the result without writing anything")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "usage: bourbaki pagemap build [-book <id>] [flags]\n\nMaps PDF pages to the page numbers Bourbaki printed.\n\n")
@@ -82,12 +82,23 @@ func pagemapBuild(args []string) error {
 		if len(pages) != b.Pages {
 			fmt.Printf("%s: pdftotext gave %d pages, the manifest says %d\n", b.ID, len(pages), b.Pages)
 		}
+		// A born-digital volume has no misreads to guard against, so two anchors
+		// that agree are enough there and three are not needed. It matters at the
+		// back of the book, where a step can have only two numbered pages after
+		// it before the next one.
+		run := *minRun
+		if run == 0 {
+			run = pagemap.DefaultMinRun
+			if b.TextLayer == "native" {
+				run = pagemap.NativeMinRun
+			}
+		}
 		pm, err := pagemap.Build(pages, pagemap.Options{
 			Book:       b.ID,
 			Chapters:   b.Chapters,
 			Grammar:    pagemap.Grammar(*grammar),
 			Pagination: pagemap.Pagination(b.Pagination),
-			MinRun:     *minRun,
+			MinRun:     run,
 		})
 		if err != nil {
 			return err
