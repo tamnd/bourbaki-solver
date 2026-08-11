@@ -89,8 +89,12 @@ func Load(root, lang string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
+	source := englishPrintings(sections)
 	counts := map[string]int{}
 	for _, b := range ex.Books {
+		if !source[b.ID] {
+			continue
+		}
 		for _, ch := range b.Chapters {
 			for _, s := range ch.Section {
 				counts[s.Label] = s.Count
@@ -113,6 +117,9 @@ func Load(root, lang string) (*Index, error) {
 		}
 	}
 	for _, b := range sections.Books {
+		if !source[b.ID] {
+			continue
+		}
 		for _, ch := range b.Chapters {
 			for _, rec := range ch.Sections {
 				if rec.Label == "" {
@@ -129,6 +136,38 @@ func Load(root, lang string) (*Index, error) {
 	}
 	ix.index()
 	return ix, nil
+}
+
+// englishPrintings is the volumes the index is built over, by id.
+//
+// The graph is over one printing and that printing is the English, whatever
+// language the bodies are read in: a translation is the English file with the
+// language swapped in its path, so it carries the same labels, the same page
+// ranges and the same references.
+//
+// A second printing is not that. The corpus holds Algebra VIII twice, in
+// English and in French, and the two share their labels and their printed page
+// numbers on purpose, because they are the same chapter. Indexing both puts
+// every page of the chapter in two sections at once, and a citation to a page
+// then resolves to nothing: measured on this corpus, 979 references that
+// resolved stopped resolving the day the French was assembled, and the rate
+// fell from 91.7 per cent to 48.9.
+//
+// Which printing a record belongs to is in its path, which is where assembly
+// put it, and not in books.yaml, because the fixtures the tests build have
+// sections and no volumes.
+func englishPrintings(sections *corpus.SectionsManifest) map[string]bool {
+	out := map[string]bool{}
+	for _, b := range sections.Books {
+		for _, ch := range b.Chapters {
+			for _, rec := range ch.Sections {
+				if strings.HasPrefix(rec.Path, "content/en/") {
+					out[b.ID] = true
+				}
+			}
+		}
+	}
+	return out
 }
 
 // index wires the lookups up from the sections. It is separate from Load
