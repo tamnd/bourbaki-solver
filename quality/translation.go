@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/glossary"
 )
 
 // A translation of Bourbaki is a translation of the prose and a copy of the
@@ -364,26 +364,12 @@ func l07(c *Corpus) ([]Finding, error) {
 }
 
 // translatedInto asks whether this text carries the script of the language.
-func translatedInto(lang, text string) bool {
-	switch lang {
-	case "zh", "ja":
-		for _, r := range text {
-			if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) {
-				return true
-			}
-		}
-		return false
-	case "vi":
-		for _, r := range text {
-			if r > unicode.MaxASCII && unicode.IsLetter(r) {
-				return true
-			}
-		}
-		return false
-	}
-	// A language nobody has written a test for is not failed for it.
-	return true
-}
+//
+// The test itself lives in the glossary package, which is where the same
+// question gets asked one term at a time as renderings come back from a model.
+// One copy, because two would drift and the drift would show up as a paragraph
+// this rule passes and the glossary refuses.
+func translatedInto(lang, text string) bool { return glossary.WrittenIn(lang, text) }
 
 type para struct {
 	text string

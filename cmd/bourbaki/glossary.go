@@ -25,8 +25,9 @@ const glossaryUsage = `usage: bourbaki glossary <command> [arguments]
 The terminology contract between English and the three translations.
 
 commands:
-  extract   mine candidate terms out of the English corpus
-  status    what manifests/glossary.yaml holds, per language
+  extract     mine candidate terms out of the English corpus
+  translate   ask the fleet for the rendering of the terms that have none
+  status      what manifests/glossary.yaml holds, per language
 
 Run bourbaki glossary <command> -h for the flags of a command.
 `
@@ -39,6 +40,8 @@ func runGlossary(args []string) error {
 	switch args[0] {
 	case "extract":
 		return glossaryExtract(args[1:])
+	case "translate":
+		return glossaryTranslate(args[1:])
 	case "status":
 		return glossaryStatus(args[1:])
 	}

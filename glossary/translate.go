@@ -1,0 +1,381 @@
+package glossary
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+	"unicode"
+
+	"github.com/tamnd/bourbaki-solver/prompt"
+	"github.com/tamnd/bourbaki-solver/textguard"
+)
+
+// Asking a model for terminology, and refusing most of what it says.
+//
+// The glossary is the one artefact of this project that cannot be repaired
+// afterwards. A formula that came out wrong is one file to fix. A term rendered
+// wrong is every file that used it, in a language the person who ran the
+// pipeline very likely cannot read, and nobody finds out until a reader
+// searches for the right word and gets nothing.
+//
+// So the audit here is not a sanity check, it is the point. A batch goes out
+// with the terms numbered, and every line that comes back has to say which
+// number it answers, repeat the English character for character, and be one
+// short phrase in the script of the language. Anything else is dropped and
+// reported, and a dropped line is cheap: it is one term to ask about again or
+// to write by hand.
+//
+// The model is given a way to say it does not know, in as many words, and told
+// that saying so is the wanted answer. That is worth more than any check below.
+// A model with no way out invents, and an invented rendering is exactly the
+// failure that survives every mechanical test: it is one phrase, in the right
+// script, that no mathematician uses.
+
+// Language is the name of a language as a model should be told it.
+//
+// Spelled out rather than the code, because a code is a thing to guess at.
+func Language(lang string) string {
+	switch lang {
+	case "vi":
+		return "Vietnamese"
+	case "zh":
+		return "Chinese, written in simplified characters"
+	case "ja":
+		return "Japanese"
+	}
+	return lang
+}
+
+// DefaultBatch is how many terms go in one question.
+//
+// Forty because of two opposite failures. A long list is where a model starts
+// summarising, dropping the middle, or answering in a table; a short one pays
+// the fixed cost of a browser and a page load for a handful of terms, and the
+// fleet has three boxes and a daily quota. Forty is one screen of answer.
+const DefaultBatch = 40
+
+// Batch is one question: a slice of terms, numbered from 1 within the batch.
+type Batch struct {
+	Lang  string
+	Terms []string
+}
+
+// Batches cuts a list of terms into questions.
+func Batches(lang string, terms []string, size int) []Batch {
+	if size <= 0 {
+		size = DefaultBatch
+	}
+	var out []Batch
+	for i := 0; i < len(terms); i += size {
+		out = append(out, Batch{Lang: lang, Terms: terms[i:min(i+size, len(terms))]})
+	}
+	return out
+}
+
+// Prompt is the question this batch asks.
+func (b Batch) Prompt() string {
+	var list strings.Builder
+	for i, term := range b.Terms {
+		fmt.Fprintf(&list, "%d | %s\n", i+1, term)
+	}
+	return prompt.Glossary(Language(b.Lang), list.String())
+}
+
+// Row is one accepted rendering.
+type Row struct {
+	EN string
+	TR string
+}
+
+// Reject is one line that was not accepted, and why.
+//
+// The English is kept even when the line was unreadable, so that a rejected
+// term can be asked about again without working out which of the forty it was.
+type Reject struct {
+	EN     string
+	Line   string
+	Reason string
+}
+
+// Reply is what one answer came to.
+type Reply struct {
+	Rows []Row
+	// Unknown is the terms the model said it did not know. Not a failure: it
+	// was asked to say so, and a term nobody can render is a term for a person
+	// to write by hand rather than one to ask a second model about.
+	Unknown []string
+	// Suspect is the rows that were accepted and are worth a person's eye. Today
+	// that is one thing: a Vietnamese rendering with no diacritic in it, which
+	// is either a Vietnamese word that has none or an English word left where it
+	// stood, and nothing here can tell those apart.
+	Suspect []Row
+	Rejects []Reject
+	// Collisions are renderings that came back for more than one English term.
+	// Soft: two notions really can share a word, and the pair is worth a look
+	// rather than a refusal.
+	Collisions []Collision
+}
+
+// Collision is one rendering that answered more than one term.
+type Collision struct {
+	TR string
+	EN []string
+}
+
+// maxWords bounds a rendering.
+//
+// A term is a noun phrase. Six words is past anything a noun phrase needs in
+// any of the three languages and well short of a sentence, which is what a
+// model writes when it has decided to explain the notion instead of naming it.
+const maxWords = 6
+
+// Audit reads an answer against the batch that produced it.
+//
+// Every check here is on one line in isolation except the last, and every one
+// of them is a failure that has been seen from a browser: an answer that
+// renumbered itself, an answer that quietly corrected the English, an answer
+// that gave two renderings with a slash between them, an answer that added a
+// closing paragraph about how it had translated the terms.
+func (b Batch) Audit(answer string) Reply {
+	var reply Reply
+	seen := map[int]bool{}
+	byTR := map[string][]string{}
+
+	for _, raw := range strings.Split(textguard.Strip(answer), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		number, english, rendering, ok := parseRow(line)
+		if !ok {
+			// Not a row at all. A model that wrote a sentence is a model that
+			// ignored the instruction, and the sentence is worth reporting once
+			// rather than once per line, so only the first is kept.
+			if len(reply.Rejects) == 0 || reply.Rejects[len(reply.Rejects)-1].Reason != "not a row" {
+				reply.Rejects = append(reply.Rejects, Reject{Line: line, Reason: "not a row"})
+			}
+			continue
+		}
+		if number < 1 || number > len(b.Terms) {
+			reply.Rejects = append(reply.Rejects, Reject{EN: english, Line: line,
+				Reason: fmt.Sprintf("line %d, but this batch has %d terms", number, len(b.Terms))})
+			continue
+		}
+		term := b.Terms[number-1]
+		if seen[number] {
+			reply.Rejects = append(reply.Rejects, Reject{EN: term, Line: line, Reason: "answered twice"})
+			continue
+		}
+		seen[number] = true
+
+		// The English column is what ties a rendering to a term. A model that
+		// renumbered its answer, or that dropped a term and shifted everything
+		// after it up by one, produces lines that are individually plausible
+		// and attached to the wrong words; this is the check that catches it.
+		if Key(english) != Key(term) {
+			reply.Rejects = append(reply.Rejects, Reject{EN: term, Line: line,
+				Reason: fmt.Sprintf("line %d answers %q, not %q", number, english, term)})
+			continue
+		}
+		switch reason := badRendering(b.Lang, term, rendering); reason {
+		case "":
+		case unknown:
+			reply.Unknown = append(reply.Unknown, term)
+			continue
+		case suspect:
+			reply.Suspect = append(reply.Suspect, Row{EN: term, TR: rendering})
+		default:
+			reply.Rejects = append(reply.Rejects, Reject{EN: term, Line: line, Reason: reason})
+			continue
+		}
+		reply.Rows = append(reply.Rows, Row{EN: term, TR: rendering})
+		byTR[rendering] = append(byTR[rendering], term)
+	}
+
+	for i, term := range b.Terms {
+		if !seen[i+1] {
+			reply.Rejects = append(reply.Rejects, Reject{EN: term,
+				Reason: fmt.Sprintf("term %d was not answered", i+1)})
+		}
+	}
+	for _, row := range reply.Rows {
+		ens := byTR[row.TR]
+		if len(ens) > 1 && ens[0] == row.EN {
+			reply.Collisions = append(reply.Collisions, Collision{TR: row.TR, EN: ens})
+		}
+	}
+	return reply
+}
+
+// unknown is the reason that is not a rejection.
+const unknown = "the model said it does not know"
+
+// suspect is a Vietnamese rendering with no diacritic in it.
+//
+// The script test is right for Chinese and Japanese, where a rendering with no
+// Han and no kana in it is English that came back untouched, and it is right
+// for a Vietnamese paragraph, where the diacritics turn up in almost every
+// sentence. It is wrong for a Vietnamese term. The first real run of this,
+// forty terms into Vietnamese on 11 August 2026, produced exactly one: the
+// model rendered "generated" as "sinh", which is the correct word and carries
+// no diacritic, and a rule that threw it away would have been throwing away
+// correct terminology at about one term in forty.
+//
+// So it is a flag and not a refusal. The row is kept and the term is listed for
+// a person, because the thing this cannot tell apart is a diacritic-free
+// Vietnamese word from an English one left standing.
+const suspect = "no diacritic, which a Vietnamese term may or may not have"
+
+// badRendering is why a rendering cannot be used, or "".
+func badRendering(lang, term, tr string) string {
+	if tr == "" {
+		return "no rendering"
+	}
+	if strings.EqualFold(tr, "unknown") || strings.EqualFold(tr, "n/a") {
+		return unknown
+	}
+	if leaks := textguard.Check(tr); len(leaks) > 0 {
+		return "the rendering is not a rendering: " + leaks[0].Kind
+	}
+	if n := len(strings.Fields(tr)); n > maxWords {
+		return fmt.Sprintf("%d words, which is an explanation and not a term", n)
+	}
+	// One rendering was asked for. A slash, a semicolon or a bracket is the
+	// shape of two, and picking one of them here would be this program guessing
+	// at terminology, which is the one thing it must not do.
+	for _, bad := range []string{"/", ";", "(", ")", "[", "]", " or ", "、", "，"} {
+		if strings.Contains(tr, bad) {
+			return fmt.Sprintf("more than one rendering, or a gloss: %q", bad)
+		}
+	}
+	if Key(tr) == Key(term) {
+		return "the English came back unchanged"
+	}
+	if !WrittenIn(lang, tr) {
+		if lang == "vi" {
+			return suspect
+		}
+		return "nothing of " + lang + " in it"
+	}
+	// The mathematics in a term is not translated and not moved. "$A$-module"
+	// has to come back with the $A$ still in it, whatever happened to the word.
+	for _, math := range mathParts(term) {
+		if !strings.Contains(tr, math) {
+			return fmt.Sprintf("the mathematics %s is not in the rendering", math)
+		}
+	}
+	return ""
+}
+
+// mathParts is the inline formulas of a term.
+func mathParts(term string) []string {
+	var out []string
+	rest := term
+	for {
+		i := strings.Index(rest, "$")
+		if i < 0 {
+			return out
+		}
+		j := strings.Index(rest[i+1:], "$")
+		if j < 0 {
+			return out
+		}
+		out = append(out, rest[i:i+j+2])
+		rest = rest[i+j+2:]
+	}
+}
+
+// WrittenIn asks whether text carries the script of a language.
+//
+// Chinese and Japanese prose contains Han characters or kana. Vietnamese is
+// written in the Latin alphabet, so the test there is the diacritics, which
+// Vietnamese uses in almost every sentence and English uses in none.
+//
+// This lives here rather than in the audit rules because the audit will read
+// the glossary and not the other way round. A language nobody has written a
+// test for is not failed for it.
+func WrittenIn(lang, text string) bool {
+	switch lang {
+	case "zh", "ja":
+		for _, r := range text {
+			if unicode.Is(unicode.Han, r) || unicode.Is(unicode.Hiragana, r) || unicode.Is(unicode.Katakana, r) {
+				return true
+			}
+		}
+		return false
+	case "vi":
+		for _, r := range text {
+			if r > unicode.MaxASCII && unicode.IsLetter(r) {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
+// parseRow reads one answer line.
+//
+// The form asked for is "7 | left ideal | iđêan trái". What comes back is that,
+// mostly, wrapped in whatever the model felt was tidy: a markdown table row
+// with a leading and trailing bar, bold on one column, "7." for the number.
+// Those are all the same answer and it would be a poor reason to throw a term
+// away, so they are read. What is not read is a line with the columns in
+// another order or with a separator that was not asked for: a line that has to
+// be guessed at is a line that is dropped.
+func parseRow(line string) (number int, english, rendering string, ok bool) {
+	line = strings.TrimSpace(strings.Trim(strings.TrimSpace(line), "|"))
+	parts := strings.Split(line, "|")
+	if len(parts) != 3 {
+		return 0, "", "", false
+	}
+	head := strings.TrimSpace(parts[0])
+	head = strings.TrimRight(head, ".)")
+	n, err := strconv.Atoi(head)
+	if err != nil {
+		return 0, "", "", false
+	}
+	return n, clean(parts[1]), clean(parts[2]), true
+}
+
+// clean takes the decoration off a column.
+func clean(text string) string {
+	text = strings.TrimSpace(text)
+	for _, mark := range []string{"**", "*", "`", "_"} {
+		if len(text) > 2*len(mark) && strings.HasPrefix(text, mark) && strings.HasSuffix(text, mark) {
+			text = strings.TrimSpace(text[len(mark) : len(text)-len(mark)])
+		}
+	}
+	return strings.TrimSpace(strings.Trim(text, "\""))
+}
+
+// Merge puts accepted rows into a glossary, and says how many rows it changed.
+//
+// A rendering already in the glossary is left alone. Whatever is there was
+// either curated by a person or accepted by an earlier run, and a later run
+// silently overwriting it would make the file depend on the order the batches
+// happened to finish in.
+func (g *Glossary) Merge(lang string, rows []Row) (added, kept int) {
+	at := map[string]int{}
+	for i, t := range g.Terms {
+		at[Key(t.EN)] = i
+	}
+	for _, row := range rows {
+		i, ok := at[Key(row.EN)]
+		if !ok {
+			t := Term{EN: row.EN}
+			t.Set(lang, row.TR)
+			g.Terms = append(g.Terms, t)
+			at[Key(row.EN)] = len(g.Terms) - 1
+			added++
+			continue
+		}
+		if g.Terms[i].In(lang) != "" {
+			kept++
+			continue
+		}
+		g.Terms[i].Set(lang, row.TR)
+		added++
+	}
+	return added, kept
+}
