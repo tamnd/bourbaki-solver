@@ -40,6 +40,26 @@ type Book struct {
 	Pagination string `yaml:"pagination,omitempty"`
 }
 
+// bookTitles is what the Éléments call their Books, as against what a publisher
+// called a volume. Algebra is one Book printed as three volumes, and a section
+// belongs to the Book, so this is what its front matter records. There is no
+// field in books.yaml for it because a volume knows its own title and not the
+// Book's, and inventing one would mean writing "Algebra" into the manifest
+// three times and hoping the three stayed the same.
+var bookTitles = map[string]string{
+	"alg": "Algebra",
+}
+
+// BookTitle is the printed name of a Book of the Éléments. An id nobody has
+// named yet is returned as it stands, so adding a volume of a new Book does not
+// have to wait on this map.
+func BookTitle(book string) string {
+	if t, ok := bookTitles[book]; ok {
+		return t
+	}
+	return book
+}
+
 // Scan describes the page images of a scanned volume.
 type Scan struct {
 	Format string `yaml:"format"`

@@ -224,6 +224,7 @@ func extractRun(args []string) error {
 			PDFPage:     p.PDFPage,
 			PageLabel:   pageLabel(pm, p),
 			RunningHead: p.Title,
+			Continues:   p.Continues,
 			Method:      corpus.MethodNative,
 			InputSHA256: extract.InputSHA256(lay, pg),
 			Generated:   stamp,

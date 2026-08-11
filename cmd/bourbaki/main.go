@@ -24,6 +24,7 @@ commands:
   toc              read each volume's table of contents into manifests/toc.yaml
   render           rasterise a scanned volume to the page images OCR reads
   extract          read the pages of a volume into Markdown
+  assemble         put the pages back into the sections the book is written in
   ocr              read the pages of a scanned volume through a model, and check them
   label            parse a statement label, or a running head, and print what it means
   fleet            probe the hosts, and run the ssh tunnels that reach them
@@ -59,6 +60,8 @@ func main() {
 		err = runRender(args[1:])
 	case "extract":
 		err = runExtract(args[1:])
+	case "assemble":
+		err = runAssemble(args[1:])
 	case "ocr":
 		err = runOCR(args[1:])
 	case "label":

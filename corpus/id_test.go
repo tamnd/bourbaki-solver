@@ -63,7 +63,15 @@ func TestLabelRoundTrip(t *testing.T) {
 		{Ref{Book: "alg", Chapter: "I", Section: 2, Kind: KindExercise, Number: 7}, "alg-i-s2-ex-7"},
 		{Ref{Book: "alg", Chapter: "V", Section: 17, Kind: KindTheorem, Number: 1}, "alg-v-s17-thm-1"},
 		{Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: KindCorollary, Subsec: 3, Occurrence: 1}, "alg-viii-s1-n3-cor-1"},
-		{Ref{Book: "alg", Chapter: "IV", Section: 6, Kind: KindRemark, Subsec: 12, Occurrence: 2}, "alg-iv-s6-n12-rem-2"},
+		// A Remark and an Example are numbered inside the no., so the number in
+		// the label is the number the book prints, not an occurrence.
+		{Ref{Book: "alg", Chapter: "IV", Section: 6, Kind: KindRemark, Subsec: 12, Number: 2}, "alg-iv-s6-n12-rem-2"},
+		{Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: KindExample, Subsec: 2, Number: 5}, "alg-viii-s1-n2-exa-5"},
+		// A Corollary is numbered under the statement it hangs from.
+		{Ref{Book: "alg", Chapter: "VIII", Section: 5, Kind: KindCorollary, Number: 2,
+			ParentKind: KindTheorem, ParentNumber: 1}, "alg-viii-s5-thm-1-cor-2"},
+		{Ref{Book: "alg", Chapter: "VIII", Section: 2, Appendix: true, Kind: KindCorollary, Number: 1,
+			ParentKind: KindProposition, ParentNumber: 3}, "alg-viii-a2-prop-3-cor-1"},
 	}
 	for _, c := range cases {
 		if got := c.ref.Label(); got != c.label {
@@ -186,5 +194,59 @@ func TestSectionLocatorString(t *testing.T) {
 	}
 	if got := (SectionLocator{7, 0}).String(); got != "§7" {
 		t.Errorf("String() = %q", got)
+	}
+}
+
+// Bourbaki does not number his statements one way. Definitions, Propositions,
+// Theorems, Lemmas and the Scholium run through the section; Corollaries are
+// numbered under the statement they hang from and restart with it; Remarks and
+// Examples restart in every no. That is not a convention anyone declared, it is
+// what chapter VIII does, and it was measured before it was written down: under
+// section scope, Corollaries collide in 12 of the 25 sections, and under no.
+// scope in 2 of them, while under parent scope they are unique with no orphans.
+func TestKindScope(t *testing.T) {
+	cases := map[Kind]Scope{
+		KindDefinition:  ScopeSection,
+		KindProposition: ScopeSection,
+		KindTheorem:     ScopeSection,
+		KindLemma:       ScopeSection,
+		KindScholium:    ScopeSection,
+		KindCorollary:   ScopeParent,
+		KindRemark:      ScopeSubsec,
+		KindExample:     ScopeSubsec,
+	}
+	for k, want := range cases {
+		if got := k.Scope(); got != want {
+			t.Errorf("%s.Scope() = %v, want %v", k, got, want)
+		}
+	}
+}
+
+// One shape carries two meanings, and which one it is depends on the Kind. The
+// pair is not a round trip and is not meant to be: both readings point at the
+// same statement, and Label gives the same string back either way.
+func TestParseLabelReadsSubsecFormByScope(t *testing.T) {
+	rem, err := ParseLabel("alg-viii-s1-n1-rem-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rem.Number != 1 || rem.Occurrence != 0 {
+		t.Errorf("rem: Number = %d, Occurrence = %d; want 1, 0", rem.Number, rem.Occurrence)
+	}
+	cor, err := ParseLabel("alg-viii-s1-n1-cor-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cor.Number != 0 || cor.Occurrence != 1 {
+		t.Errorf("cor: Number = %d, Occurrence = %d; want 0, 1", cor.Number, cor.Occurrence)
+	}
+	for _, l := range []string{"alg-viii-s1-n1-rem-1", "alg-viii-s1-n1-cor-1"} {
+		r, err := ParseLabel(l)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Label() != l {
+			t.Errorf("Label() = %q, want %q", r.Label(), l)
+		}
 	}
 }
