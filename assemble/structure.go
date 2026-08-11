@@ -180,9 +180,9 @@ func statements(blocks []block, id corpus.Ref) ([]block, []corpus.Statement, err
 			s.Page = l.Page
 		}
 		found = append(found, s)
-		out = append(out, block{text: heading(r, label), page: b.page, label: b.label})
+		out = append(out, block{text: heading(r, label), page: b.page, last: b.last, label: b.label})
 		if body != "" {
-			out = append(out, block{text: body, page: b.page, label: b.label})
+			out = append(out, block{text: body, page: b.page, last: b.last, label: b.label})
 		}
 	}
 	return out, found, nil
@@ -284,11 +284,13 @@ func anchorExercises(blocks []block, id corpus.Ref) ([]block, bool) {
 //
 // Bourbaki marks two things about an exercise before it numbers it. A pilcrow
 // says it is one of the harder ones, and an asterisk says it draws on results
-// the reader has not reached yet. Chapter VIII carries 72 of the first, 8 of
-// the second, and one exercise, § 14 no. 12, with both. Extraction writes them
-// as the mathematics they were set in, "$\P 15)$" and "$*19)$", because that is
-// what the volume's text layer holds, and the exercise is not found at all if
-// they are not read.
+// the reader has not reached yet. Chapter VIII sets 84 markers this way: 75
+// with a pilcrow, 8 with an asterisk, and one with both. All 76 of the pilcrows
+// open an exercise; only 3 of the 9 asterisks do, the other 6 opening a member
+// of a run of Examples or Remarks, which the book marks the same way.
+// Extraction writes them as the mathematics they were set in, "$\P 15)$" and
+// "$*19)$", because that is what the volume's text layer holds, and the
+// exercise is not found at all if they are not read.
 var exNumRE = regexp.MustCompile(`^(?:\$\s*(\*)?\s*(\\P)?\s*)?(\d+)\)\$?\s`)
 
 // itemOpen says a paragraph opens on a numbered item rather than on prose.
@@ -334,6 +336,7 @@ func exercises(blocks []block) ([]corpus.Exercise, error) {
 					return nil, fmt.Errorf("the exercises open on %q, which is not exercise 1", first(text, 40))
 				}
 				out[len(out)-1].Body += "\n\n" + text
+				onPage(&out[len(out)-1], b)
 				break
 			}
 			if head := strings.TrimSpace(text[:i]); head != "" {
@@ -341,8 +344,9 @@ func exercises(blocks []block) ([]corpus.Exercise, error) {
 					return nil, fmt.Errorf("the exercises open on %q, which is not exercise 1", first(head, 40))
 				}
 				out[len(out)-1].Body += "\n\n" + head
+				onPage(&out[len(out)-1], b)
 			}
-			e := corpus.Exercise{}
+			e := corpus.Exercise{Pages: spanning(nil, b)}
 			e.Meta.Exercise = len(out) + 1
 			e.Meta.Supplementary = m[1] != ""
 			e.Meta.Starred = m[2] != ""
@@ -355,6 +359,12 @@ func exercises(blocks []block) ([]corpus.Exercise, error) {
 		}
 	}
 	return out, nil
+}
+
+// onPage records that an exercise runs on into another block, and so on to
+// whatever pages that block covers.
+func onPage(e *corpus.Exercise, b block) {
+	e.Pages = spanning(e.Pages, b)
 }
 
 // inlineNumRE is the number of an exercise set inside a paragraph rather than
@@ -389,9 +399,13 @@ func itemStart(text string, n int) (int, []string) {
 			if m == nil {
 				// The marker is set in mathematics the head-of-block form does
 				// not cover, "$15)*$", so take what the inline form matched and
-				// read the two marks straight off it.
-				raw := text[at : off+loc[1]]
-				m = []string{raw, markOf(raw, "*"), markOf(raw, `\P`), strconv.Itoa(got)}
+				// read the two marks straight off it. Only what stands in front
+				// of the number is a mark on this exercise: § 16 sets its
+				// fifteenth as "$15)*$" and that asterisk closes the passage the
+				// exercise before it ended in, which is why the book prints
+				// "$*19)$" and never "$19)*$" when it means the mark.
+				raw, marks := text[at:off+loc[1]], text[at:off+loc[2]]
+				m = []string{raw, markOf(marks, "*"), markOf(marks, `\P`), strconv.Itoa(got)}
 			}
 			return at, m
 		}

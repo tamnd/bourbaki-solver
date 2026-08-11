@@ -54,8 +54,9 @@ func smallChapter() (corpus.Chapter, map[int]corpus.PageFile) {
 		}, "\n\n")),
 		20: page(20, "A VIII.3", false, strings.Join([]string{
 			"### Exercises",
-			"1) Let A be a ring. Show that A is left Artinian.",
+			"1) Let A be a ring. Show that A is left Artinian[^1].",
 			`$\P 2)$ Let K be a field and V a K-vector space.`,
+			"[^1]: A ring here is a ring with unit element.",
 		}, "\n\n")),
 		21: page(21, "", false, "# BIBLIOGRAPHY"),
 	}
@@ -104,6 +105,69 @@ func TestChapter(t *testing.T) {
 	}
 	if !sec.HasExercise {
 		t.Error("§ 1 has exercises and does not say so")
+	}
+}
+
+// The exercises go out as one file each, so the section keeps the heading a
+// cross-reference points at and a line saying where they went, and none of the
+// text of them.
+func TestChapterSplitsTheExercises(t *testing.T) {
+	ch, pages := smallChapter()
+	got, err := Chapter("alg", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := got[1]
+	if !strings.Contains(sec.Body, "### Exercises {#alg-viii-s1-exercises}") {
+		t.Error("the anchored heading is gone from the section")
+	}
+	if !strings.Contains(sec.Body, "See the [exercises for § 1](exercises/s1/).") {
+		t.Errorf("the section does not say where its exercises went:\n%s", sec.Body)
+	}
+	for _, gone := range []string{"Show that A is left Artinian", "a K-vector space"} {
+		if strings.Contains(sec.Body, gone) {
+			t.Errorf("the section still carries the exercise text %q", gone)
+		}
+	}
+	if got, want := sec.Exercises[0].Body, "Let A be a ring. Show that A is left Artinian[^1]."; !strings.HasPrefix(got, want) {
+		t.Errorf("exercise 1 is %q", got)
+	}
+}
+
+// A footnote belongs in the file its mark is in. The note of exercise 1 is
+// marked in the exercise and printed at the foot of the page the exercise is
+// on, so it leaves the section with it, and both files number from one.
+func TestChapterPutsAFootnoteInTheFileThatMarksIt(t *testing.T) {
+	ch, pages := smallChapter()
+	got, err := Chapter("alg", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := got[1]
+	if strings.Contains(sec.Body, "a ring with unit element") {
+		t.Error("the section kept a note that belongs to an exercise")
+	}
+	if strings.Count(sec.Body, "\n[^") != 2 || !strings.Contains(sec.Body, "[^1]: The empty set") {
+		t.Errorf("the section's notes are wrong:\n%s", sec.Body)
+	}
+	ex := sec.Exercises[0].Body
+	if !strings.Contains(ex, "[^1]: A ring here is a ring with unit element.") {
+		t.Errorf("exercise 1 does not carry its note:\n%s", ex)
+	}
+	if !strings.Contains(ex, "left Artinian[^1].") {
+		t.Errorf("the mark in exercise 1 was not renumbered to one:\n%s", ex)
+	}
+}
+
+// A definition with nothing pointing at it is a mark extraction lost, and
+// putting it at the foot of the section anyway would hide that.
+func TestChapterRefusesAFootnoteNothingMarks(t *testing.T) {
+	ch, pages := smallChapter()
+	p := pages[19]
+	p.Body = strings.Replace(p.Body, "Artinian[^1]", "Artinian", 1)
+	pages[19] = p
+	if _, err := Chapter("alg", ch, pages); err == nil {
+		t.Fatal("a footnote nothing marks should be an error")
 	}
 }
 
@@ -292,6 +356,40 @@ func TestRenumber(t *testing.T) {
 		t.Errorf("body = %q, want %q", got, want)
 	}
 	same(t, out, []string{"[^2]: one", "[^3]: two", "[^4]: three"})
+}
+
+// A note is printed at the foot of the page its mark is on, so a body that
+// carries the mark but not the page has no claim on it. Without that rule a
+// subscript misread as a mark thirty pages away takes the note off the text
+// that really carries it, which is what page 449 of Algebra VIII does to § 21.
+func TestTakeNotesGoesByThePageAsWellAsTheMark(t *testing.T) {
+	defs := []note{{def: "[^1]: the note", page: 415}}
+	body, left := takeNotes("a stray mark[^1] on another page", []int{449}, defs)
+	if len(left) != 1 {
+		t.Errorf("the note went to a body that does not hold its page: %q", body)
+	}
+	body, left = takeNotes("the real mark[^1] here", []int{415}, defs)
+	if len(left) != 0 {
+		t.Fatal("the note did not go to the body that marks it on its own page")
+	}
+	if want := "the real mark[^1] here\n\n[^1]: the note"; body != want {
+		t.Errorf("body = %q, want %q", body, want)
+	}
+}
+
+func TestCutExercises(t *testing.T) {
+	in := []block{
+		{text: "some prose", page: 20, last: 20},
+		{text: "### Exercises {#alg-viii-a2-exercises}", page: 20, last: 20},
+		{text: "1) Let A be a ring.", page: 20, last: 21},
+	}
+	got := cutExercises(in, 2, true)
+	if len(got) != 3 {
+		t.Fatalf("got %d blocks, want the prose, the heading and the link", len(got))
+	}
+	if want := "See the [exercises for Appendix 2](exercises/a2/)."; got[2].text != want {
+		t.Errorf("the link is %q, want %q", got[2].text, want)
+	}
 }
 
 func TestCutNotes(t *testing.T) {

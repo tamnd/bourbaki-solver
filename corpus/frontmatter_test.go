@@ -158,6 +158,12 @@ func TestPaths(t *testing.T) {
 	if got, want := ExercisePath("/c", "vi", ex), "/c/content/vi/alg/VIII/exercises/s1/07.md"; got != want {
 		t.Errorf("ExercisePath = %s, want %s", got, want)
 	}
+	// Appendix 1 numbers its exercises from one as § 1 does, so the two sets
+	// would land on each other if the directory did not say which is which.
+	ex.Appendix = true
+	if got, want := ExercisePath("/c", "vi", ex), "/c/content/vi/alg/VIII/exercises/a1/07.md"; got != want {
+		t.Errorf("ExercisePath of an appendix = %s, want %s", got, want)
+	}
 	got, err := SolutionPath("/c", "en", "alg-viii-s1-ex-7")
 	if err != nil {
 		t.Fatal(err)

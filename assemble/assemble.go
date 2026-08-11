@@ -137,11 +137,22 @@ func Chapter(book string, ch corpus.Chapter, pages map[int]corpus.PageFile) ([]P
 			for i := range p.Exercises {
 				m := &p.Exercises[i].Meta
 				m.Book, m.Chapter, m.Section, m.Lang = id.Book, id.Chapter, id.Section, "en"
-				m.Label = corpus.Ref{Book: id.Book, Chapter: id.Chapter, Section: id.Section,
-					Appendix: id.Appendix, Kind: corpus.KindExercise, Number: m.Exercise}.Label()
+				m.Appendix = id.Appendix
+				m.Label = p.Exercises[i].Ref().Label()
+				body, left := takeNotes(corpus.NormalizeBody(p.Exercises[i].Body),
+					p.Exercises[i].Pages, notes)
+				p.Exercises[i].Body, notes = corpus.NormalizeBody(body), left
 			}
+			blocks = cutExercises(blocks, p.Number, p.Appendix)
 		}
-		p.Body = corpus.NormalizeBody(render(blocks) + notes)
+		body, left := takeNotes(render(blocks), pagesOf(blocks), notes)
+		// A definition nothing points at is a note whose mark was lost in
+		// extraction, and appending it to the section quietly would hide that.
+		if len(left) > 0 {
+			return nil, fmt.Errorf("chapter %s %s: pdf page %d defines the footnote %s and nothing marks it",
+				ch.Numeral, p.Name(), left[0].page, first(left[0].def, 40))
+		}
+		p.Body = corpus.NormalizeBody(body)
 		if err := p.Verify(); err != nil {
 			return nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
 		}
@@ -316,8 +327,13 @@ func slice(pages map[int]corpus.PageFile, from, to mark) ([]part, error) {
 // set on, and once the pages are joined into a section nothing else can say
 // which page a paragraph came off.
 type block struct {
-	text  string
-	page  int
+	text string
+	page int
+	// last is the page the block ends on, which is page unless a paragraph
+	// broken by the end of a page was joined back up here. A footnote is
+	// printed at the foot of the page its mark is on, so telling the two apart
+	// is what lets a note find the block that marks it.
+	last  int
 	label string
 }
 
@@ -333,8 +349,8 @@ func render(blocks []block) string {
 // line, one to a line, at the foot of the page it was printed on.
 var noteRE = regexp.MustCompile(`^\[\^([0-9a-zA-Z]+)\]:\s`)
 
-// join puts the parts of a piece back into one text, and returns the footnotes
-// gathered at the end of it.
+// join puts the parts of a piece back into one text, and returns the footnote
+// definitions gathered off the feet of its pages.
 //
 // Three things are put back here that a page cannot put back on its own. A
 // paragraph broken by the end of a page is joined up, on the word of the page
@@ -342,29 +358,130 @@ var noteRE = regexp.MustCompile(`^\[\^([0-9a-zA-Z]+)\]:\s`)
 // indent of the first line. A word broken across the break is joined with it. A
 // footnote is renumbered, because the book numbers them from one on each page
 // and § 2 of chapter VIII has two notes both called 1, on pages 48 and 53.
-func join(parts []part) ([]block, string) {
+//
+// The definitions come back as a slice rather than as text at the foot of the
+// piece, because the piece is not one file: the exercises are split off into
+// files of their own and eight notes of chapter VIII are marked inside an
+// exercise. Each note has to end up in the file that refers to it, which is
+// what takeNotes does once the pieces of the section are known.
+func join(parts []part) ([]block, []note) {
 	var blocks []block
-	var notes []string
+	var notes []note
 	for _, p := range parts {
 		body, defs := cutNotes(p.body)
 		body, defs = renumber(body, defs, len(notes)+1)
-		notes = append(notes, defs...)
+		for _, d := range defs {
+			notes = append(notes, note{def: d, page: p.page})
+		}
 		bs := split(body)
 		if len(bs) == 0 {
 			continue
 		}
 		if p.continues && len(blocks) > 0 && joinable(blocks[len(blocks)-1].text, bs[0]) {
 			blocks[len(blocks)-1].text = glue(blocks[len(blocks)-1].text, bs[0])
+			blocks[len(blocks)-1].last = p.page
 			bs = bs[1:]
 		}
 		for _, b := range bs {
-			blocks = append(blocks, block{text: b, page: p.page, label: p.label})
+			blocks = append(blocks, block{text: b, page: p.page, last: p.page, label: p.label})
 		}
 	}
-	if len(notes) == 0 {
-		return blocks, ""
+	return blocks, notes
+}
+
+// note is one footnote definition and the page it was printed at the foot of.
+type note struct {
+	def  string
+	page int
+}
+
+// takeNotes moves the footnotes belonging to this body out of defs and on to
+// the foot of it, numbered from one, and gives back the ones still to be
+// placed.
+//
+// A footnote belongs in the file its mark is in. Most of them are marked in the
+// prose of the §, but eight of chapter VIII are marked inside an exercise, in
+// §§ 1, 5, 7, 8, 9 and 21, and once the exercises are files of their own a
+// definition left behind in the section is a mark pointing at nothing.
+//
+// The mark is not enough on its own to say which file a note belongs to, and
+// pages says the rest. The book prints a footnote at the foot of the page its
+// mark is on, so a note can only go to a file that holds part of that page, and
+// without that rule a mark misread somewhere else in the § can take the note
+// away from the text that really carries it: a subscript on page 449 came out
+// as [^1] and walked off with the note of § 21, which is printed and marked
+// thirty-four pages earlier.
+//
+// Each file numbers its notes from one, which is also what the book does on
+// each page. The numbers join gave them are only there to keep the notes of one
+// page apart from the notes of the next while the pages are being joined.
+func takeNotes(body string, pages []int, defs []note) (string, []note) {
+	var mine []string
+	var rest []note
+	for _, n := range defs {
+		m := noteRE.FindStringSubmatch(n.def)
+		if m != nil && slices.Contains(pages, n.page) && strings.Contains(body, "[^"+m[1]+"]") {
+			mine = append(mine, n.def)
+			continue
+		}
+		rest = append(rest, n)
 	}
-	return blocks, "\n\n" + strings.Join(notes, "\n")
+	body, mine = renumber(body, mine, 1)
+	return body + tail(mine), rest
+}
+
+// tail is the footnote definitions as they are set at the foot of a file.
+func tail(defs []string) string {
+	if len(defs) == 0 {
+		return ""
+	}
+	return "\n\n" + strings.Join(defs, "\n")
+}
+
+// pagesOf is every page these blocks came off, which is what says whether a
+// footnote printed at the foot of a page belongs to them.
+func pagesOf(blocks []block) []int {
+	var out []int
+	for _, b := range blocks {
+		out = spanning(out, b)
+	}
+	return out
+}
+
+// spanning adds every page a block covers to pages.
+func spanning(pages []int, b block) []int {
+	for p := b.page; p <= max(b.page, b.last); p++ {
+		if !slices.Contains(pages, p) {
+			pages = append(pages, p)
+		}
+	}
+	return pages
+}
+
+// cutExercises takes the block of exercises out of the section body and leaves
+// a link to it.
+//
+// The exercises are written as one file each, so keeping them in the section as
+// well would put every exercise of the chapter in the corpus twice, and a
+// corpus with two copies of a text has two things to translate, two to tag and
+// two to keep in step. What stays behind is the anchored heading, which is what
+// a cross-reference to "VIII, p. 15, Exercise 9" points at, and one line under
+// it saying where the exercises went.
+func cutExercises(blocks []block, section int, appendix bool) []block {
+	for i, b := range blocks {
+		if !strings.HasPrefix(b.text, exercisesHead) {
+			continue
+		}
+		dir := corpus.ExerciseDir(section, appendix)
+		name := fmt.Sprintf("§ %d", section)
+		if appendix {
+			name = fmt.Sprintf("Appendix %d", section)
+		}
+		link := block{text: fmt.Sprintf("See the [exercises for %s](exercises/%s/).", name, dir),
+			page: b.page, label: b.label}
+		return append(blocks[:i+1:i+1], link)
+	}
+	return blocks
 }
 
 // split is the blocks of a body, a block being a paragraph, a heading or a

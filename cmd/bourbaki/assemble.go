@@ -70,6 +70,7 @@ func runAssemble(args []string) error {
 	}
 
 	rec := corpus.BookSections{ID: *book}
+	exrec := corpus.BookExercises{ID: *book}
 	files := map[string][]byte{}
 	var statements, exercises int
 	for _, ch := range bt.Chapters {
@@ -78,7 +79,11 @@ func runAssemble(args []string) error {
 			return err
 		}
 		cr := corpus.ChapterSections{Chapter: ch.Numeral, Title: ch.Title}
+		cx := corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
 		for _, p := range pieces {
+			if err := writeExercises(root, *lang, p, files, &cx); err != nil {
+				return err
+			}
 			f := sectionFile(*b, ch, p, *lang)
 			path := corpus.SectionPath(root, *lang, f.Meta)
 			out, err := f.Bytes()
@@ -111,6 +116,7 @@ func runAssemble(args []string) error {
 			}
 		}
 		rec.Chapters = append(rec.Chapters, cr)
+		exrec.Chapters = append(exrec.Chapters, cx)
 	}
 
 	sections, err := corpus.LoadSections(root)
@@ -123,6 +129,17 @@ func runAssemble(args []string) error {
 		return err
 	}
 	files[corpus.SectionsPath(root)] = manifest
+
+	exm, err := corpus.LoadExercises(root)
+	if err != nil {
+		return err
+	}
+	exm.Upsert(exrec)
+	exmanifest, err := exm.Bytes()
+	if err != nil {
+		return err
+	}
+	files[corpus.ExercisesPath(root)] = exmanifest
 
 	stale, err := staleFiles(root, *lang, b.Book, bt.Chapters, files)
 	if err != nil {
@@ -146,7 +163,54 @@ func runAssemble(args []string) error {
 		fmt.Printf("removed %s\n", rel(root, path))
 	}
 	fmt.Printf("%s: %d files, %d statements, %d exercises\n",
-		*book, len(files)-1, statements, exercises)
+		*book, len(files)-2, statements, exercises)
+	return nil
+}
+
+// writeExercises turns the exercises of one piece into one file each and
+// records what went out.
+//
+// A gap in the numbering stops the run. Bourbaki numbers the exercises of a §
+// from one straight through, so 1 to 12 and then 14 is not something the book
+// does; it is a page that never got read or a split that came apart, and
+// writing the manifest and carrying on would leave the corpus quietly short of
+// an exercise.
+func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte,
+	cx *corpus.ChapterExercises) error {
+	if len(p.Exercises) == 0 {
+		return nil
+	}
+	nums := make([]int, 0, len(p.Exercises))
+	sx := corpus.SectionExercise{
+		Section:  p.Number,
+		Appendix: p.Appendix,
+		Label:    p.Exercises[0].Ref().SectionLabel(),
+		Dir:      corpus.ExerciseDir(p.Number, p.Appendix),
+		Count:    len(p.Exercises),
+	}
+	for _, e := range p.Exercises {
+		f := corpus.ExerciseFile{Meta: e.Meta, Body: e.Body}
+		out, err := f.Bytes()
+		if err != nil {
+			return err
+		}
+		files[corpus.ExercisePath(root, lang, e.Meta)] = out
+		nums = append(nums, e.Meta.Exercise)
+		if e.Meta.Starred {
+			sx.Starred++
+		}
+		if e.Meta.Supplementary {
+			sx.Supplementary++
+		}
+	}
+	sx.First, sx.Last = nums[0], nums[len(nums)-1]
+	sx.Gaps = corpus.Gaps(nums)
+	if len(sx.Gaps) > 0 {
+		return fmt.Errorf("%s %s: the exercises run %d to %d and %v are missing",
+			cx.Chapter, p.Name(), sx.First, sx.Last, sx.Gaps)
+	}
+	cx.Total += len(p.Exercises)
+	cx.Section = append(cx.Section, sx)
 	return nil
 }
 
@@ -234,14 +298,15 @@ func readPages(root, book string) (map[int]corpus.PageFile, error) {
 	return out, nil
 }
 
-// staleFiles are the section files of these chapters that this run did not
-// write.
+// staleFiles are the files of these chapters that this run did not write.
 //
 // A section file is named for its title, so correcting a title renames the
 // file, and the old one would sit there for ever looking like a section of the
-// book. Only the top level of the chapter directory is swept: the exercises
-// under it belong to bourbaki split, and sweeping them here would delete a
-// stage's work every time this one ran.
+// book. An exercise file is named for its number, so a § that loses an exercise
+// to a corrected split leaves its last file behind, still numbered, still read
+// by anything that walks the directory. Both are swept, which is what taocp's
+// splitter calls --sync and has for the same reason: regenerating without it
+// keeps deleted files around for ever.
 func staleFiles(root, lang, book string, chapters []corpus.Chapter, written map[string][]byte) ([]string, error) {
 	var out []string
 	for _, ch := range chapters {
@@ -252,7 +317,11 @@ func staleFiles(root, lang, book string, chapters []corpus.Chapter, written map[
 		if err != nil {
 			return nil, err
 		}
-		for _, name := range names {
+		ex, err := filepath.Glob(filepath.Join(dir, "exercises", "*", "*.md"))
+		if err != nil {
+			return nil, err
+		}
+		for _, name := range append(names, ex...) {
 			if _, ok := written[name]; !ok {
 				out = append(out, name)
 			}

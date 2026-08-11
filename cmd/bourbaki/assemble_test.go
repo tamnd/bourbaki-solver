@@ -46,7 +46,8 @@ func smallCorpus(t *testing.T) string {
 			"### 1. Artinian Modules\n\n" +
 			"**Definition 1.** — An A-module M is said to be Artinian if every nonempty set of submodules has a minimal element.",
 		19: "**Proposition 1.** — Let A be a ring. The ring A is left Artinian.",
-		20: "### Exercises\n\n1) Let A be a ring. Show that A is left Artinian.",
+		20: "### Exercises\n\n1) Let A be a ring. Show that A is left Artinian.\n\n" +
+			`$\P 2)$ Let K be a field and V a K-vector space.`,
 		21: "# BIBLIOGRAPHY",
 	}
 	dir := corpus.PagesDir(root, "alg-viii")
@@ -93,8 +94,11 @@ func TestRunAssemble(t *testing.T) {
 	if sec.Meta.BookTitle != "Algebra" {
 		t.Errorf("book_title = %q, want the name of the Book and not of the volume", sec.Meta.BookTitle)
 	}
-	if sec.Meta.Statements != 2 || sec.Meta.Exercises != 1 {
+	if sec.Meta.Statements != 2 || sec.Meta.Exercises != 2 {
 		t.Errorf("§ 1 reports %d statements and %d exercises", sec.Meta.Statements, sec.Meta.Exercises)
+	}
+	if !strings.Contains(sec.Body, "See the [exercises for § 1](exercises/s1/).") {
+		t.Errorf("§ 1 does not say where its exercises went:\n%s", sec.Body)
 	}
 	if sec.Meta.PDFPages != "0018-0020" || sec.Meta.BookPages != "A VIII.1-A VIII.3" {
 		t.Errorf("§ 1 covers %q, %q", sec.Meta.PDFPages, sec.Meta.BookPages)
@@ -118,6 +122,34 @@ func TestRunAssemble(t *testing.T) {
 		t.Errorf("§ 1 is recorded as %+v", recs[1])
 	}
 
+	ex, err := corpus.ReadFile[corpus.ExerciseFrontMatter](
+		filepath.Join(dir, "exercises", "s1", "02.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ex.Meta.Label != "alg-viii-s1-ex-2" || !ex.Meta.Starred || ex.Meta.PDFPage != 20 {
+		t.Errorf("exercise 2 is %+v", ex.Meta)
+	}
+	if !strings.HasPrefix(ex.Body, "Let K be a field") {
+		t.Errorf("exercise 2 reads %q", ex.Body)
+	}
+
+	xm, err := corpus.LoadExercises(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(xm.Books) != 1 || len(xm.Books[0].Chapters) != 1 {
+		t.Fatalf("the exercise manifest is %+v", xm)
+	}
+	cx := xm.Books[0].Chapters[0]
+	if cx.Total != 2 || len(cx.Section) != 1 {
+		t.Fatalf("the chapter records %+v", cx)
+	}
+	if s := cx.Section[0]; s.Dir != "s1" || s.Count != 2 || s.First != 1 || s.Last != 2 ||
+		len(s.Gaps) != 0 || s.Starred != 1 {
+		t.Errorf("§ 1 is recorded as %+v", s)
+	}
+
 	// The whole stage is meant to be a pure function of the pages and the
 	// contents, and -check is how that is known rather than hoped.
 	if err := runAssemble([]string{"-book", "alg-viii", "-check", "-q"}); err != nil {
@@ -125,9 +157,9 @@ func TestRunAssemble(t *testing.T) {
 	}
 }
 
-// A section file is named for its title, so correcting a title renames the
-// file. The old one has to go, or it sits there for ever looking like a section
-// of the book.
+// A section file is named for its title and an exercise file for its number, so
+// correcting either renames or drops a file. The old one has to go, or it sits
+// there for ever looking like part of the book.
 func TestRunAssembleRemovesAFileItDidNotWrite(t *testing.T) {
 	root := smallCorpus(t)
 	t.Setenv("BOURBAKI_CORPUS", root)
@@ -139,9 +171,9 @@ func TestRunAssembleRemovesAFileItDidNotWrite(t *testing.T) {
 	if err := os.WriteFile(old, []byte("stale\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	// The exercises belong to the next stage and are not this one's to sweep.
-	ex := filepath.Join(dir, "exercises", "s1", "01.md")
-	if err := os.WriteFile(ex, []byte("exercise\n"), 0o644); err != nil {
+	// § 1 has two exercises, so a third file is one this run did not write.
+	ex := filepath.Join(dir, "exercises", "s1", "03.md")
+	if err := os.WriteFile(ex, []byte("an exercise the book does not print\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
@@ -150,8 +182,11 @@ func TestRunAssembleRemovesAFileItDidNotWrite(t *testing.T) {
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
 		t.Error("the file with the old name is still there")
 	}
-	if _, err := os.Stat(ex); err != nil {
-		t.Errorf("the exercise file was swept: %v", err)
+	if _, err := os.Stat(ex); !os.IsNotExist(err) {
+		t.Error("the exercise file nothing wrote is still there")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "exercises", "s1", "02.md")); err != nil {
+		t.Errorf("exercise 2 was swept: %v", err)
 	}
 }
 
@@ -204,6 +239,26 @@ func TestReadPagesRefusesTwoFilesForOnePage(t *testing.T) {
 	}
 	if _, err := readPages(root, "alg-viii"); err == nil {
 		t.Fatal("two files for one page should be an error")
+	}
+}
+
+// Bourbaki numbers the exercises of a § from one straight through, so a gap is
+// never something the book does. It is a page that never got read, and writing
+// the corpus round it would leave it quietly short of an exercise.
+func TestWriteExercisesRefusesAGap(t *testing.T) {
+	p := assemble.Piece{Section: corpus.Section{Number: 1}}
+	for _, n := range []int{1, 2, 4} {
+		e := corpus.Exercise{Body: "a body"}
+		e.Meta = corpus.ExerciseFrontMatter{Book: "alg", Chapter: "VIII", Section: 1, Exercise: n}
+		p.Exercises = append(p.Exercises, e)
+	}
+	cx := corpus.ChapterExercises{Chapter: "VIII"}
+	err := writeExercises(t.TempDir(), "en", p, map[string][]byte{}, &cx)
+	if err == nil {
+		t.Fatal("a § missing exercise 3 should be an error")
+	}
+	if !strings.Contains(err.Error(), "[3]") {
+		t.Errorf("the error does not say which is missing: %v", err)
 	}
 }
 
