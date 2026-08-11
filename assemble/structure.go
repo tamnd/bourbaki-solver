@@ -91,8 +91,34 @@ func (p Piece) Verify() error {
 // The plurals are the book's own. It sets "Remarks. —" over a run of remarks
 // and "Examples. —" over a run of examples, 51 times in chapter VIII, and each
 // of those is one statement rather than the first of several.
+//
+// The second branch is the same head with the bold lost and an attribution in
+// its place: "Theorem 1 (Wedderburn). —". Bourbaki names the author of 18
+// statements in chapter VIII that way and extraction dropped the bold on every
+// one of them, while dropping it on none of the 631 heads that carry no
+// attribution, so the parenthesis is what threw it. The attribution is required
+// rather than optional here for exactly that reason: an undecorated "Theorem 1.
+// —" is a shape the pages never produce, and reading one as a head would put
+// the whole grammar at the mercy of a sentence that happens to open on a kind.
+// These 18 were the largest hole left in the reference graph after the page
+// joins were fixed, 55 unresolved references between them, headed by the
+// thirteen that ask for Theorem 1 of § 7.
+//
+// The third branch is the head of a statement set in small type. Bourbaki
+// brackets a passage that leans on a Book the reader has not reached with a
+// star at each end, and extraction writes the star as $*$ because it is set as
+// a mathematical asterisk. Eight passages of chapter VIII open that way and two
+// of them open on a statement. The star is put back at the front of the body
+// rather than dropped, both because it is the book's own mark and because the
+// one at the far end would otherwise be left without its pair.
 var headRE = regexp.MustCompile(
-	`^\*\*(Definitions?|Propositions?|Theorems?|Lemmas?|Corollary|Corollaries|Remarks?|Examples?|Scholium)(?: (\d+))?\.\*\*\s*—\s*`)
+	`^(?:\*\*(` + kindAlt + `)(?: (\d+))?\.\*\*|(` + kindAlt + `)(?: (\d+))? \([^)]*\)\.|` +
+		smallType + `(` + kindAlt + `)(?: (\d+))?\.)\s*—\s*`)
+
+// smallType is the mark that opens a passage set in small type.
+const smallType = `\$\*\$`
+
+const kindAlt = `Definitions?|Propositions?|Theorems?|Lemmas?|Corollary|Corollaries|Remarks?|Examples?|Scholium`
 
 // A run of remarks or examples is set under one head and numbered inside it, so
 // no. 7 of § 16 prints "Remarks. — 2)", then "3)" as a paragraph of its own,
@@ -217,14 +243,18 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		r.Number = next
 		return r, strings.TrimSpace(text[len(i[0]):]), true, nil
 	}
-	kind, ok := corpus.KindFromHeading(m[1])
+	// The head matched one of headRE's three branches and left the others empty.
+	word, num := m[1]+m[3]+m[5], m[2]+m[4]+m[6]
+	kind, ok := corpus.KindFromHeading(word)
 	if !ok {
-		return corpus.Ref{}, "", false, fmt.Errorf("nothing in the corpus is called a %q", m[1])
+		return corpus.Ref{}, "", false, fmt.Errorf("nothing in the corpus is called a %q", word)
 	}
 	r := id
 	r.Kind = kind
 	rest := text[len(m[0]):]
-	num := m[2]
+	if m[5] != "" {
+		rest = "$*$" + rest
+	}
 	if num == "" && kind.Scope() == corpus.ScopeSubsec {
 		// A run is headed by its kind in the plural and numbered inside:
 		// "Remarks. — 2)" is Remark 2 and the head carries no number of its own.

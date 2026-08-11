@@ -117,6 +117,37 @@ func TestStatementsNumbersByScope(t *testing.T) {
 	})
 }
 
+// Two heads of chapter VIII in every twenty reach assembly without their bold,
+// and each one lost it to something printed inside it: an attribution, or the
+// star that opens a passage set in small type. Read as prose they end up inside
+// the paragraph above with no heading, no label and no tag, and the reference
+// graph found 55 references pointing at statements that were not there.
+func TestStatementsReadsAHeadThatLostItsBold(t *testing.T) {
+	in := blocks(
+		"### 1. Simple Rings",
+		"**Proposition 1.** — Let A be a ring.",
+		"Theorem 1 (Wedderburn). — A ring is simple if and only if it is a matrix ring.",
+		"Corollary (Schur’s lemma). — The endomorphism ring of a simple module is a field.",
+		`$*$Remark 1. — The morphisms define a complex of K-modules.$*$`,
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"alg-viii-s7-prop-1",
+		"alg-viii-s7-thm-1",
+		"alg-viii-s7-n1-cor-1", // unnumbered, so named by its no. and not by Theorem 1
+		"alg-viii-s7-n1-rem-1",
+	})
+	// The star that opens the small type is kept, because the one that closes it
+	// is still at the far end of the sentence and a lone $ is broken maths.
+	body := out[len(out)-1].text
+	if !strings.HasPrefix(body, "$*$") {
+		t.Errorf("the small-type mark was dropped: %q", body)
+	}
+}
+
 // A Corollary standing under nothing is a section boundary read wrong, not a
 // statement to guess a number for.
 func TestStatementsRefusesAnOrphanCorollary(t *testing.T) {

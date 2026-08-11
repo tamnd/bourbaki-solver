@@ -320,6 +320,15 @@ func TestJoinable(t *testing.T) {
 		{"$$x = y$$", "the table that follows", false},
 		{"the module is", "$$x = y$$", false},
 		{"the module is", "[^1]: The empty set.", false},
+		// Bourbaki sets a statement flush left, so a page that opens on one looks
+		// exactly like a page that opens mid-paragraph and extraction reads
+		// continues: true off the indent. Joined, the statement ends up as prose
+		// inside the paragraph above and never gets a heading, a label or a tag.
+		// That was 37 statements of chapter VIII, found by the reference graph
+		// rather than by eye: the book cites Theorem 1 of § 7 thirteen times and
+		// there was no Theorem 1 of § 7.
+		{"the module is", "**Proposition 7.** — Let A be a ring.", false},
+		{"the module is", "Theorem 1 (Wedderburn). — A ring is simple", false},
 	}
 	for _, c := range cases {
 		if got := joinable(c.prev, c.next); got != c.want {
