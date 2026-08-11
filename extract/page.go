@@ -57,6 +57,11 @@ type Page struct {
 	Lines   int
 	Columns bool // the page is set in two columns, as the index at the back is
 	Flags   []Flag
+
+	// Continues says the body opens in the middle of the paragraph the page
+	// before it ended in. Nothing on this page can be assembled without it, and
+	// nothing but this page can work it out: see continues below.
+	Continues bool
 }
 
 // Flagged reports whether the page needs repair.
@@ -112,6 +117,7 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, c Compounds) *Page {
 			}
 		}
 	}
+	out.Continues = continues(lines)
 	out.Body = blocks(lines, c)
 	if len(notes) > 0 {
 		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes, c), "\n")
@@ -351,6 +357,56 @@ func join(lines []Line, c Compounds) string {
 	return strings.Join(out, "\n\n")
 }
 
+// continues reports whether the body of a page opens in the middle of the
+// paragraph the page before it ended in.
+//
+// Assembly cannot tell from the text. A page that ends "…is nonzero." and one
+// that opens "For any λ ∈ S…" reads the same whether the second is a new
+// paragraph or the rest of the one above, and the volume breaks both ways: page
+// 363 opens "of scalars)" halfway through a sentence and page 159 opens a
+// paragraph of its own. Guessing at the capital letter after the full stop gets
+// the second right and the first wrong.
+//
+// The page itself knows, because Bourbaki indents the first line of a paragraph
+// and sets the rest at the margin, which is the same fact join already reads
+// inside a page. So it is read here too and written into the front matter, and
+// assembly, which never sees the PDF, is told rather than left to guess.
+//
+// Measured on Algebra VIII: 275 of the 475 pages of the chapter open at the
+// margin, and every one of the pages whose first character is lower case is
+// among them.
+//
+// What this reports is the indent, and the indent is not the whole answer in
+// the exercises, which the volume sets with no paragraph indent at all: 20 of
+// the 21 pages that open on a new exercise open at the margin and are counted
+// here as carrying on. Nothing on the page distinguishes them, so the rule is
+// left as the measurement it is, and assembly, which can see that a paragraph
+// opening "5) " is an item and not the tail of a sentence, declines to join
+// them. See joinable.
+func continues(lines []Line) bool {
+	if len(lines) == 0 {
+		return false
+	}
+	if _, ok := heading(lines[0]); ok {
+		return false
+	}
+	// The margin is the margin of the block, as it is in blocks and join. A
+	// remark in small type is indented as a whole, and the page that opens in
+	// the middle of one opens at the margin of the remark.
+	j := 1
+	for j < len(lines) && size(lines[j]) == size(lines[0]) {
+		j++
+	}
+	first := lines[:j]
+	left := first[0].Left
+	for _, l := range first {
+		if l.Left < left {
+			left = l.Left
+		}
+	}
+	return !opener(first, left)(lines[0])
+}
+
 // boldOpen reports whether a line opens on bold words, which is where a
 // statement begins and where an entry of the table of contents does.
 //
@@ -392,6 +448,14 @@ func runOn(s, next string, c Compounds) (string, bool) {
 	switch {
 	case strings.HasSuffix(s, "-$") && compoundWord(next):
 		return strings.TrimRight(strings.TrimSuffix(s, "-$"), " ") + "$-" + next, true
+	case strings.HasSuffix(s, "$-"):
+		// The same compound with the letter set as mathematics, "$(K,G)$-" and
+		// "$K(\mathbf{T})$-". There is no word before the hyphen to have been
+		// broken, only a close of mathematics, so the hyphen is the word's own
+		// and stays. Measured on Algebra VIII: four lines end this way, and
+		// dropping the hyphen gave $(K,G)$algebras on pages 324, 325 and 329
+		// and $K(\mathbf{T})$algebra on page 362.
+		return s + next, true
 	case strings.HasSuffix(s, "-") && oneLetter(s):
 		return s + next, true
 	case strings.HasSuffix(s, "-") && c.Keeps(s, next):

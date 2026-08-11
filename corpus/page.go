@@ -45,6 +45,12 @@ type PageFrontMatter struct {
 	RunningHead string       `yaml:"running_head,omitempty"`
 	Locator     *PageLocator `yaml:"locator,omitempty"`
 
+	// Continues says the first line of this page carries on the last paragraph
+	// of the page before it. It is written here because only the reader of the
+	// PDF can see it, in the indent of the first line, and assembly, which reads
+	// these files and never the PDF, has to have it.
+	Continues bool `yaml:"continues,omitempty"`
+
 	Method PageMethod `yaml:"method"`
 	Model  string     `yaml:"model,omitempty"`
 
