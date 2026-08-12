@@ -38,6 +38,7 @@ commands:
   label            parse a statement label, or a running head, and print what it means
   fleet            probe the hosts, and run the ssh tunnels that reach them
   queue            the durable work list: stats, reap, retry, drain, list
+  solve            the exercises: what a model is shown, and what it answers
   report           usage, coverage, and the two printings of a chapter against each other
   doctor           check that at least one route can take work, for use in cron
 
@@ -97,6 +98,8 @@ func main() {
 		err = runFleet(args[1:])
 	case "queue":
 		err = runQueue(args[1:])
+	case "solve":
+		err = runSolve(args[1:])
 	case "report":
 		err = runReport(args[1:])
 	case "doctor":
