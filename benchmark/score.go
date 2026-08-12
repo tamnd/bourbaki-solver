@@ -1,6 +1,13 @@
 package benchmark
 
-import "github.com/tamnd/bourbaki-solver/corpus"
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
+)
 
 // The targets of spec 07 §6, as fractions.
 const (
@@ -98,4 +105,55 @@ func (s Score) Met() (accept, reject, measured bool) {
 		return fa >= 0 && fa <= FalseAcceptTarget, fr >= 0 && fr <= FalseRejectTarget, false
 	}
 	return fa <= FalseAcceptTarget, fr <= FalseRejectTarget, true
+}
+
+// Run is one whole eval, as it is written down for other things to read.
+//
+// It goes in reports/eval.json in the corpus, one file, overwritten. It is the
+// current estimate and not a history: a scorecard quoting the best run the
+// corpus ever had would be quoting the weather.
+type Run struct {
+	Ran      string             `json:"ran"`
+	Set      string             `json:"set"`
+	Outcomes []Outcome          `json:"outcomes"`
+	Score    Score              `json:"score"`
+	Rates    map[string]float64 `json:"rates"`
+}
+
+// RunPath is where a run lives in the corpus.
+func RunPath(root string) string { return filepath.Join(root, "reports", "eval.json") }
+
+// Save writes the run, filling in the rates so that a reader that is not this
+// package does not have to know how they are worked out.
+func (r Run) Save(root string) error {
+	r.Rates = map[string]float64{
+		"false_accept": r.Score.FalseAcceptRate(),
+		"false_reject": r.Score.FalseRejectRate(),
+	}
+	body, err := json.MarshalIndent(r, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(RunPath(root)), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(RunPath(root), append(body, '\n'), 0o644)
+}
+
+// LastRun reads the run the corpus holds. The second return is false when
+// nothing has ever been measured, which is not an error and is the state every
+// corpus starts in.
+func LastRun(root string) (Run, bool, error) {
+	raw, err := os.ReadFile(RunPath(root))
+	if os.IsNotExist(err) {
+		return Run{}, false, nil
+	}
+	if err != nil {
+		return Run{}, false, err
+	}
+	var out Run
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return Run{}, false, fmt.Errorf("%s: %w", RunPath(root), err)
+	}
+	return out, true, nil
 }

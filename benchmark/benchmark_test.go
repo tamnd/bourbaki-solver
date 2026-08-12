@@ -115,6 +115,34 @@ func TestWhatTheReferenceStoppedIsCountedApart(t *testing.T) {
 	}
 }
 
+// The scorecard quotes the last run rather than recomputing it, so what is
+// written has to come back the way it went in.
+func TestARunComesBackTheWayItWentIn(t *testing.T) {
+	root := t.TempDir()
+	if _, measured, err := LastRun(root); err != nil || measured {
+		t.Fatalf("a corpus that has measured nothing reported a run, err %v", err)
+	}
+	var score Score
+	score.Add(Outcome{Case: Case{Expect: Reject}, Judged: true, Status: corpus.StatusVerified})
+	score.Add(Outcome{Case: Case{Expect: Accept}, Judged: true, Status: corpus.StatusVerified})
+	in := Run{Ran: "2026-08-13T02:00:00Z", Set: "the built-in set", Score: score}
+	if err := in.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	out, measured, err := LastRun(root)
+	if err != nil || !measured {
+		t.Fatalf("the run did not come back, err %v", err)
+	}
+	if out.Score != in.Score || out.Ran != in.Ran {
+		t.Errorf("got %+v, want %+v", out, in)
+	}
+	// The rates are filled in on the way out, so that a reader who is not this
+	// package does not have to know how they are worked out.
+	if out.Rates["false_accept"] != 1 {
+		t.Errorf("the saved rate was %v, want 1", out.Rates["false_accept"])
+	}
+}
+
 // The answers live in the corpus and this repository is public.
 func TestTheAnswerIsLookedForInTheCorpus(t *testing.T) {
 	c := Case{Label: "alg-viii-s1-ex-1", Variant: "flawed-induction"}

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tamnd/bourbaki-solver/benchmark"
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/solve"
 )
@@ -23,6 +24,12 @@ first exercise anybody solves, which is the one number this must never print.
 The second table is by §, so a § where the pipeline is doing badly can be found
 without reading three hundred files. The third is the parts, which is where a
 partial says what it is partial about.
+
+The verifier line is what the last bourbaki solve eval made of the judges, read
+out of reports/eval.json and quoted rather than recomputed. Believed means
+nothing without it: a corpus that says three hundred exercises are verified and
+cannot say how often its judges accept an answer somebody has already found
+wrong has reported a number and not a measurement.
 
 flags:
   -lang     which printing, en by default
@@ -48,6 +55,10 @@ type scorecard struct {
 	Corrections map[int]int    `json:"corrections"`
 	Models      map[string]int `json:"models"`
 	Sections    []sectionScore `json:"sections,omitempty"`
+	// Verifier is the last bourbaki solve eval run, or nil where nobody has
+	// ever measured what a verdict here is worth. It is quoted and not
+	// recomputed: this command reads the corpus and asks no host anything.
+	Verifier *benchmark.Run `json:"verifier,omitempty"`
 }
 
 type sectionScore struct {
@@ -85,6 +96,13 @@ func reportSolutionsCmd(args []string) error {
 	}
 
 	card := score(c.Exercises(), held, *lang)
+	last, measured, err := benchmark.LastRun(root)
+	if err != nil {
+		return err
+	}
+	if measured {
+		card.Verifier = &last
+	}
 	if *asJSON {
 		if !*sections {
 			card.Sections = nil
@@ -180,6 +198,7 @@ func printScorecard(card scorecard, sections bool) {
 			fmt.Printf("  %d rounds %5d\n", n, card.Corrections[n])
 		}
 	}
+	printVerifier(card.Verifier)
 	if len(card.Models) > 0 {
 		fmt.Println("\nanswered by")
 		for _, m := range sortedByCount(card.Models) {
@@ -201,6 +220,38 @@ func printScorecard(card scorecard, sections bool) {
 		}
 		fmt.Println()
 	}
+}
+
+// printVerifier is what the last eval run made of the judges.
+//
+// It is on the scorecard because believed is meaningless without it. A corpus
+// that says three hundred exercises are verified, and cannot say how often its
+// judges accept an answer somebody has already found wrong, has reported a
+// number and not a measurement.
+func printVerifier(run *benchmark.Run) {
+	fmt.Println()
+	if run == nil {
+		fmt.Println("verifier     nothing has measured it, run bourbaki solve eval")
+		return
+	}
+	s := run.Score
+	fmt.Printf("verifier     measured %s on %d cases\n", run.Ran, len(run.Outcomes))
+	fmt.Printf("  false accept %s\n", verifierRate(s.FalseAccepts, s.Rejects,
+		s.FalseAcceptRate(), benchmark.FalseAcceptTarget))
+	fmt.Printf("  false reject %s\n", verifierRate(s.FalseRejects, s.Accepts,
+		s.FalseRejectRate(), benchmark.FalseRejectTarget))
+}
+
+func verifierRate(n, of int, rate, target float64) string {
+	if of == 0 {
+		return "not measured, the set held no case to get wrong that way"
+	}
+	verdict := "over"
+	if rate <= target {
+		verdict = "inside"
+	}
+	return fmt.Sprintf("%d of %d, %.1f %%, %s the %.0f %% it is held to",
+		n, of, rate*100, verdict, target*100)
 }
 
 // printParts is the partials, part by part, with what the judges said.
