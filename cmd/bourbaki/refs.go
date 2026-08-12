@@ -17,7 +17,7 @@ func runRefs(args []string) error {
 		fmt.Fprint(os.Stderr, `usage: bourbaki refs build [-lang en] [-check] [-min 90]
 
 Reads the cross-references out of the committed Markdown and writes the graph
-to manifests/refs.json, with four reports under reports/.
+to manifests/refs/, one file to a §, with four reports under reports/.
 
 The prose is never rewritten. A citation stays the sentence Bourbaki wrote and
 the link to what it points at lives in the manifest, so the text on the page
@@ -57,13 +57,9 @@ Nothing here reads a PDF, so it runs in CI, where there are none.
 	}
 
 	if *check {
-		var out []string
-		stale, err := res.Manifest().Stale(root)
+		out, err := res.Manifest().Stale(root)
 		if err != nil {
 			return err
-		}
-		if stale {
-			out = append(out, "manifests/refs.json")
 		}
 		reports, err := res.StaleReports(root)
 		if err != nil {
@@ -85,7 +81,7 @@ Nothing here reads a PDF, so it runs in CI, where there are none.
 		}
 		fmt.Printf("refs build: %d references over %s, %d edges and %d unresolved, %.1f%% resolved\n",
 			total, *lang, len(res.Edges), len(res.Unresolved), rate)
-		fmt.Println("\tmanifests/refs.json")
+		fmt.Printf("\t%s/\n", refs.ManifestDir)
 		for _, w := range wrote {
 			fmt.Printf("\t%s\n", w)
 		}

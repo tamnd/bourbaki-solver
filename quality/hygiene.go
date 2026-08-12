@@ -88,18 +88,19 @@ func h02(c *Corpus) ([]Finding, error) {
 
 // trackedMax is the size a tracked file is held to.
 //
-// It is the number spec 08 gives, and the corpus went over it in one place:
-// manifests/refs.json, at 704 KB. That was answered by changing the file rather
+// It is the number spec 08 gives, and the corpus went over it in one place: the
+// reference graph, at 704 KB. That was answered by changing the file rather
 // than the rule, since nothing reads the manifest back except the byte
 // comparison that decides whether it is stale, so its layout was free to move.
-// One edge to a line instead of json.MarshalIndent is 510 KB for the same graph.
+// One edge to a line instead of json.MarshalIndent brought it to 510 KB.
 //
-// That is under by a page and a half, and the size is a linear function of how
-// much of the Éléments has been read in, so the limit as written will not
-// survive the whole corpus however the file is laid out. The rule is left alone
-// until it fires again, which is due around M9, when three more volumes are in
-// and the answer is a judgement about generated manifests rather than about the
-// bytes of one of them.
+// That was room and not headroom. The size of the graph is a linear function of
+// how much of the Éléments has been read in, chapter VIII is one of eight
+// chapters in scope, and 510 KB is under the limit by a page and a half, so the
+// next hundred references would have taken it over. The graph is now one file
+// to a §, whose size does not grow with the corpus: the largest of the
+// twenty-six is 42 KB. The limit is left where spec 08 put it, and it holds a
+// generated manifest to the same size as anything else, which is the point.
 const trackedMax = 512 << 10
 
 // H03. No tracked file over 512 KB.

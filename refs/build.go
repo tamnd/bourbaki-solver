@@ -29,6 +29,10 @@ type Edge struct {
 	Chapter   string  `json:"chapter,omitempty"` // only when the reference leaves the corpus
 	File      string  `json:"file"`
 	Line      int     `json:"line"`
+	// Section is the § the sentence stands in, which is which file of the
+	// manifest the edge is written to. It is not written into the edge, since it
+	// is the name of the file the edge is already in.
+	Section string `json:"-"`
 }
 
 // Problem is a reference that names something and does not find it. Almost
@@ -44,7 +48,7 @@ type Problem struct {
 	From   string `json:"from,omitempty"`
 }
 
-// Manifest is manifests/refs.json.
+// Manifest is the graph as it goes to manifests/refs/.
 type Manifest struct {
 	Edges []Edge `json:"edges"`
 }
@@ -165,6 +169,7 @@ func (res *Result) one(ix *Index, c Citation, at where, rel string) {
 	e := Edge{
 		From: at.tag, FromLabel: at.label, ToLabel: t.Label, Kind: "cites",
 		Raw: c.Raw, Form: c.Form, How: t.How, Book: t.Book, File: rel, Line: c.Line,
+		Section: at.section,
 	}
 	if at.label == "" {
 		e.FromLabel = at.section
@@ -209,70 +214,154 @@ func isExercise(path string) bool {
 	return strings.Contains(filepath.ToSlash(path), "/exercises/")
 }
 
-// Manifest is the edge list as it goes to manifests/refs.json.
+// Manifest is the edge list as it goes to manifests/refs/.
 func (res *Result) Manifest() *Manifest { return &Manifest{Edges: res.Edges} }
 
-// Save writes manifests/refs.json.
+// ManifestDir is where the graph is written, one file to a §.
+//
+// It was one file, manifests/refs.json, and chapter VIII alone brought it to
+// 510 KB against the 512 KB H03 holds a tracked file to. Laying it out more
+// tightly was the answer the first time it went over and it is not the answer
+// twice: the size is linear in how much of the Éléments has been read in, and
+// chapter VIII is one of eight chapters in scope.
+//
+// A § is the unit to break it on because it is the unit everything else is
+// already broken on: one file of content/, one file here, 42 KB at the largest
+// and not growing with the corpus. It reads better as a diff too. A change to
+// one section showed as a thousand lines in the middle of a file shared with
+// twenty-five others, and now shows as a change to that section's file. The
+// name is the § own label, so which file an edge belongs in is a question the
+// edge answers.
+const ManifestDir = "manifests/refs"
+
+// Save writes manifests/refs/, one file to a §.
+//
+// A file that was written by an earlier run and is not written by this one is
+// removed, which is what makes the directory the manifest rather than a place
+// manifests accumulate: a § that is renamed or dropped leaves nothing behind to
+// go stale.
 func (m *Manifest) Save(root string) error {
-	b, err := m.bytes()
+	want, err := m.shards()
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(manifestPath(root), b, 0o644)
+	dir := filepath.Join(root, filepath.FromSlash(ManifestDir))
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	old, err := shardFiles(dir)
+	if err != nil {
+		return err
+	}
+	for _, name := range old {
+		if _, ok := want[name]; ok {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return err
+		}
+	}
+	for name, b := range want {
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-// Stale is whether the committed manifest differs from this one, which is the
+// Stale is the files of the manifest that a rebuild would change, which is the
 // whole of the CI check: the graph is a pure function of the Markdown, so a
 // checkout that has one and disagrees with it has had one of the two edited by
-// hand.
-func (m *Manifest) Stale(root string) (bool, error) {
-	want, err := m.bytes()
+// hand. A file the build no longer writes counts as stale, since leaving it in
+// place is how a checkout comes to hold a graph of a § it does not have.
+func (m *Manifest) Stale(root string) ([]string, error) {
+	want, err := m.shards()
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	got, err := os.ReadFile(manifestPath(root))
-	if os.IsNotExist(err) {
-		return true, nil
-	}
+	dir := filepath.Join(root, filepath.FromSlash(ManifestDir))
+	old, err := shardFiles(dir)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
-	return !bytes.Equal(got, want), nil
-}
-
-// bytes renders the manifest one edge to a line.
-//
-// json.MarshalIndent gives 25710 lines and 704 KB for chapter VIII alone, over
-// the 512 KB H03 holds a tracked file to, and it diffs by field: an edge whose
-// line number moved shows as a dozen changed lines and a reference that was
-// added shifts everything under it. One edge to a line is 2100 lines and 510 KB
-// for the same 2098 edges, and it diffs by edge, which is the unit anybody
-// reading the change cares about.
-//
-// 510 KB is under the limit by a page and a half, so this buys room and not
-// headroom. The size is still linear in how much of the Éléments has been read
-// in and chapter VIII is one of eight chapters in scope, so H03 will fire again
-// and the answer then is a judgement about generated manifests rather than
-// another byte shaved off this one. See trackedMax in package quality.
-//
-// It is still one JSON document and json.Unmarshal reads it, so nothing that
-// consumes the manifest has to know how it is laid out.
-func (m *Manifest) bytes() ([]byte, error) {
-	var buf bytes.Buffer
-	buf.WriteString("{\"edges\": [\n")
-	for i, e := range m.Edges {
-		b, err := json.Marshal(e)
-		if err != nil {
+	var out []string
+	for _, name := range old {
+		if _, ok := want[name]; !ok {
+			out = append(out, ManifestDir+"/"+name)
+		}
+	}
+	for name, b := range want {
+		got, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil && !os.IsNotExist(err) {
 			return nil, err
 		}
-		buf.Write(b)
-		if i+1 < len(m.Edges) {
-			buf.WriteByte(',')
+		if !bytes.Equal(got, b) {
+			out = append(out, ManifestDir+"/"+name)
 		}
-		buf.WriteByte('\n')
 	}
-	buf.WriteString("]}\n")
-	return buf.Bytes(), nil
+	sort.Strings(out)
+	return out, nil
 }
 
-func manifestPath(root string) string { return filepath.Join(root, "manifests", "refs.json") }
+// shards renders the manifest one edge to a line, one file to a §.
+//
+// json.MarshalIndent gives 25710 lines and 704 KB for chapter VIII alone, and
+// it diffs by field: an edge whose line number moved shows as a dozen changed
+// lines and a reference that was added shifts everything under it. One edge to
+// a line diffs by edge, which is the unit anybody reading the change cares
+// about, and it is what makes a per-§ file readable at all.
+//
+// Each file is a JSON document of the same shape the single manifest had, so
+// nothing that consumes one has to know it is a shard.
+func (m *Manifest) shards() (map[string][]byte, error) {
+	by := map[string][]Edge{}
+	for _, e := range m.Edges {
+		s := e.Section
+		if s == "" {
+			// An edge the builder could not place in a §. There are none in the
+			// corpus as it stands, and one would be a fault in the builder rather
+			// than in the book, so it is kept and named rather than dropped.
+			s = "unplaced"
+		}
+		by[s] = append(by[s], e)
+	}
+	out := make(map[string][]byte, len(by))
+	for s, edges := range by {
+		var buf bytes.Buffer
+		buf.WriteString("{\"edges\": [\n")
+		for i, e := range edges {
+			b, err := json.Marshal(e)
+			if err != nil {
+				return nil, err
+			}
+			buf.Write(b)
+			if i+1 < len(edges) {
+				buf.WriteByte(',')
+			}
+			buf.WriteByte('\n')
+		}
+		buf.WriteString("]}\n")
+		out[s+".json"] = buf.Bytes()
+	}
+	return out, nil
+}
+
+// shardFiles is what the manifest directory holds now. A directory that is not
+// there yet is not an error: it is a checkout that has never built the graph.
+func shardFiles(dir string) ([]string, error) {
+	ents, err := os.ReadDir(dir)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range ents {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".json") {
+			out = append(out, e.Name())
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
