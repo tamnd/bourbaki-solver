@@ -7,7 +7,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -184,19 +183,17 @@ func runSolveEval(args []string) error {
 		score.Add(out)
 	}
 	if f.write {
-		if err := writeEval(root, where, outcomes, score); err != nil {
+		run := benchmark.Run{Ran: time.Now().UTC().Format(time.RFC3339), Set: where,
+			Outcomes: outcomes, Score: score}
+		if err := run.Save(root); err != nil {
 			return err
 		}
 	}
 	if f.asJSON {
 		e := json.NewEncoder(os.Stdout)
 		e.SetIndent("", "  ")
-		if err := e.Encode(struct {
-			Set      string              `json:"set"`
-			Outcomes []benchmark.Outcome `json:"outcomes"`
-			Score    benchmark.Score     `json:"score"`
-			Rates    map[string]float64  `json:"rates"`
-		}{where, outcomes, score, evalRates(score)}); err != nil {
+		if err := e.Encode(benchmark.Run{Set: where, Outcomes: outcomes, Score: score,
+			Rates: evalRates(score)}); err != nil {
 			return err
 		}
 		return ctx.Err()
@@ -340,27 +337,4 @@ func evalRates(s benchmark.Score) map[string]float64 {
 		"false_accept": s.FalseAcceptRate(),
 		"false_reject": s.FalseRejectRate(),
 	}
-}
-
-// writeEval puts the run where the scorecard of spec 07 §6 can read it.
-//
-// One file, overwritten. It is the current estimate and not a history: a
-// scorecard that quoted the best run the corpus ever had would be quoting the
-// weather.
-func writeEval(root, where string, outcomes []benchmark.Outcome, score benchmark.Score) error {
-	dir := filepath.Join(root, "reports")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	body, err := json.MarshalIndent(struct {
-		Ran      string              `json:"ran"`
-		Set      string              `json:"set"`
-		Outcomes []benchmark.Outcome `json:"outcomes"`
-		Score    benchmark.Score     `json:"score"`
-		Rates    map[string]float64  `json:"rates"`
-	}{time.Now().UTC().Format(time.RFC3339), where, outcomes, score, evalRates(score)}, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, "eval.json"), append(body, '\n'), 0o644)
 }
