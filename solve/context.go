@@ -59,13 +59,26 @@ type Piece struct {
 	Why Reason
 }
 
+// Reach is how the walk out from the exercise met something: how far out it was
+// met, and how many of the citations in the context point at it.
+//
+// Both are needed and neither is decoration. Exercise 17 of § 16 cites Exercise
+// 14 twice and Exercise 1 once, both at depth 1, both about 2 400 characters
+// long, and when only one of them can be kept the number of times the exercise
+// asked for it is the only thing that tells them apart.
+type Reach struct {
+	Depth, Times int
+}
+
 // Reason is why a reference is named rather than carried.
 //
-// The two reasons want different work done about them, which is why they are
-// told apart and counted apart. A reference the cap dropped is one somebody
-// could raise the cap for. A page citation that narrowed no further than a § is
-// one the resolver could be made to read better, and it is a fault in the
-// reference graph rather than a limit of the context.
+// The reasons want different work done about them, which is why they are told
+// apart and counted apart. A reference the cap dropped is one somebody could
+// raise the cap for. A page citation that narrowed no further than a § is one
+// the resolver could be made to read better, and it is a fault in the reference
+// graph rather than a limit of the context. One that did not fit in the whole
+// question is neither: it is the service refusing to read a long message, and it
+// is measured in RenderWithin and not here.
 type Reason string
 
 const (
@@ -81,6 +94,8 @@ func (r Reason) Sentence(max int) string {
 		return fmt.Sprintf("the context has a limit of %d characters on its references", max)
 	case SectionOnly:
 		return "the citation is to a page, and resolved no further than this §"
+	case OverAsk:
+		return "the whole question has a length limit and this did not fit in it"
 	}
 	return ""
 }
@@ -94,6 +109,12 @@ type Options struct {
 	// exercise, its earlier siblings and its § are what the exercise is, and a
 	// context that drops one of them to fit a cap is not a smaller context, it
 	// is a different question.
+	//
+	// It is not the limit on what can be sent. That is a property of the service
+	// rather than of the corpus, it is measured against the whole question
+	// including the instructions and whatever answer is being judged, and it is
+	// in RenderWithin. This one is a judgement about how much of the closure of
+	// the cross-references is worth carrying at all.
 	MaxChars int
 }
 
@@ -117,6 +138,15 @@ type Context struct {
 	Options Options
 
 	Pieces []Piece
+	// Cites is every label the walk out from the exercise reached, whether or
+	// not it was carried.
+	//
+	// It is the only record of some of what the exercise points at. A statement
+	// of the exercise's own § is never carried as a reference, since the § is
+	// there whole, and an earlier exercise it cites is carried as a sibling
+	// rather than as a citation, so in both cases the piece itself does not know
+	// the exercise asked for it.
+	Cites map[string]Reach
 	// Named are the references that are in the corpus and are not in the
 	// context: the ones the cap left out, and the ones that resolved no
 	// further than a whole §. Each carries the reason in its Why.
@@ -376,7 +406,8 @@ func (c *Corpus) Build(label string, o Options) (*Context, error) {
 	out.Pieces = append(out.Pieces, Piece{Kind: TheSection, Label: sf.label,
 		File: sf.path, Text: sf.body})
 
-	in, named, outside := c.closure(ex, o.Depth)
+	in, named, outside, reach := c.closure(ex, o.Depth)
+	out.Cites = reach
 	kept, dropped := fit(in, o.MaxChars)
 	out.Pieces = append(out.Pieces, kept...)
 	out.Pieces = append(out.Pieces, outside...)
@@ -393,8 +424,9 @@ func (c *Corpus) Build(label string, o Options) (*Context, error) {
 // handling of one chapter of a nine chapter Book in a series of ten: the model
 // is told what was cited, told that the corpus does not hold it, and told to
 // say so if it uses it.
-func (c *Corpus) closure(of *exerciseFile, depth int) (in, named, outside []Piece) {
+func (c *Corpus) closure(of *exerciseFile, depth int) (in, named, outside []Piece, reach map[string]Reach) {
 	seen := map[string]bool{of.label: true}
+	reach = map[string]Reach{}
 	said := map[string]bool{}
 	frontier := []string{of.tag}
 	for d := 1; d <= depth && len(frontier) > 0; d++ {
@@ -422,7 +454,19 @@ func (c *Corpus) closure(of *exerciseFile, depth int) (in, named, outside []Piec
 				if e.To != nil {
 					tagged = *e.To
 				}
-				if e.ToLabel == "" || seen[e.ToLabel] {
+				if e.ToLabel == "" {
+					continue
+				}
+				// Counted before the walk decides whether to follow it, since
+				// the second citation of a thing is a fact about the exercise
+				// and not a repeat of the first.
+				r := reach[e.ToLabel]
+				if r.Depth == 0 {
+					r.Depth = d
+				}
+				r.Times++
+				reach[e.ToLabel] = r
+				if seen[e.ToLabel] {
 					continue
 				}
 				seen[e.ToLabel] = true
@@ -447,7 +491,7 @@ func (c *Corpus) closure(of *exerciseFile, depth int) (in, named, outside []Piec
 		}
 		frontier = next
 	}
-	return in, named, outside
+	return in, named, outside, reach
 }
 
 // piece is the words of one thing a reference resolved to, statement or

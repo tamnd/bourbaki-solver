@@ -18,6 +18,7 @@ const fleetUsage = `usage: bourbaki fleet <command> [flags]
 
 commands:
   probe    ask every host what it has installed and how much of it is free
+  ask      put one question to one host and print what came back
   up       start the ssh tunnels and wait for each to answer
   down     stop the tunnels
   status   print the tunnels, the health of each route and what it can carry
@@ -82,6 +83,8 @@ func runFleet(args []string) error {
 	switch args[0] {
 	case "probe":
 		return runFleetProbe(args[1:])
+	case "ask":
+		return runFleetAsk(args[1:])
 	case "up":
 		return runFleetUp(args[1:])
 	case "down":

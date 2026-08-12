@@ -76,6 +76,18 @@ type Engine struct {
 	// Pause is how the retry waits. A service that has just said something went
 	// wrong is likelier than not to say it again a second later.
 	Pause func(ctx context.Context, d time.Duration) error
+	// Limit is the most that goes in one question, in characters, counting the
+	// instructions and everything carried with them. 32000 by default, which is
+	// under the ceiling measured on the live fleet with room for the material
+	// being denser in tokens than the material it was measured on. A negative
+	// Limit turns it off, which is what a service without a ceiling would want.
+	//
+	// It is on the engine and not on the context because the same context makes
+	// questions of different sizes: the candidate call carries the instructions
+	// and the context, and the truth judge carries the instructions, the
+	// context, a worked reference and a solution. The context is rendered to fit
+	// whatever is left after the rest of the question is counted.
+	Limit int
 
 	// Archive is given every question and every answer, before anything is
 	// judged. A solution goes into a book and the run that produced it is the
@@ -138,6 +150,13 @@ func (e Engine) retries() int {
 	return 3
 }
 
+func (e Engine) limit() int {
+	if e.Limit != 0 {
+		return e.Limit
+	}
+	return 32000
+}
+
 // pause waits between retries. The wait grows, because a service that is having
 // a bad minute is having a bad minute and not a bad second.
 func (e Engine) pause(ctx context.Context, n int) error {
@@ -178,7 +197,8 @@ func (e Engine) Solve(ctx context.Context, c *Context) (Result, error) {
 	parts := c.PartsOf()
 	run := &state{engine: e, ctx: c, parts: parts}
 
-	reference, err := run.ask(ctx, "reference", prompt.SolveReference(c.Render()), wantReference)
+	reference, err := run.ask(ctx, "reference",
+		run.within("reference", "", prompt.SolveReference), wantReference)
 	if err != nil {
 		return run.result(), err
 	}
@@ -236,7 +256,8 @@ type Review struct {
 // is right but whether the judges can tell.
 func (e Engine) Review(ctx context.Context, c *Context, solution string) (Review, error) {
 	run := &state{engine: e, ctx: c, parts: c.PartsOf()}
-	reference, err := run.ask(ctx, "reference", prompt.SolveReference(c.Render()), wantReference)
+	reference, err := run.ask(ctx, "reference",
+		run.within("reference", solution, prompt.SolveReference), wantReference)
 	if err != nil {
 		return Review{Calls: run.calls}, err
 	}
@@ -338,6 +359,35 @@ func (s *state) ask(ctx context.Context, stage, question string, want func(strin
 	return "", fmt.Errorf("%s %s: %w", s.ctx.Label, stage, last)
 }
 
+// within builds a question with as much of the context in it as will fit.
+//
+// build is given the rendered context and returns the whole question, so
+// build("") is the question with everything else in it already: the
+// instructions, the parts of the exercise, a reference, a solution. What is left
+// of the limit after that is what the context has to fit into, which is why this
+// takes a function rather than a string.
+//
+// cited is what the trimming reads the § against, and it is the answer the call
+// has in front of it. The candidate call has none, and its context is thinned by
+// length alone.
+func (s *state) within(stage string, cited string, build func(string) string) string {
+	limit := s.engine.limit()
+	if limit < 0 {
+		return build(s.ctx.Render())
+	}
+	room := limit - len(build(""))
+	question := build(s.ctx.RenderWithin(room, cited))
+	if n := len(question); n > limit {
+		// Everything that could go has gone. The question is sent anyway: an
+		// exercise whose own statement is over the ceiling is a fact worth having
+		// the service's answer to, and the alternative is failing it here without
+		// asking.
+		s.engine.logf("%s %s: %d characters against a limit of %d, sent anyway",
+			s.ctx.Label, stage, n, limit)
+	}
+	return question
+}
+
 // note is what the second ask says about the first.
 func note(err error) string {
 	return "Your previous answer to this could not be read: " + err.Error() +
@@ -358,8 +408,9 @@ func (s *state) write(ctx context.Context) ([]string, error) {
 	for i := 0; i < s.engine.candidates(); i++ {
 		angle := angles[i%len(angles)]
 		stage := "candidate-" + angle.Name
-		text, err := s.ask(ctx, stage,
-			prompt.SolveCandidateFor(s.ctx.Render(), angle, s.parts), wantSolution)
+		text, err := s.ask(ctx, stage, s.within(stage, "", func(context string) string {
+			return prompt.SolveCandidateFor(context, angle, s.parts)
+		}), wantSolution)
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, err
@@ -425,12 +476,16 @@ type Judgement struct {
 // what is written, and neither of those goes into a book as believed.
 func (s *state) judgeOnce(ctx context.Context, solution string) (Judgement, error) {
 	truth, err := s.ask(ctx, s.stage("truth"),
-		prompt.SolveTruth(s.ctx.Render(), s.reference, solution, s.parts), wantTruth)
+		s.within(s.stage("truth"), s.reference+"\n"+solution, func(context string) string {
+			return prompt.SolveTruth(context, s.reference, solution, s.parts)
+		}), wantTruth)
 	if err != nil {
 		return Judgement{}, err
 	}
 	audit, err := s.ask(ctx, s.stage("audit"),
-		prompt.SolveAudit(s.ctx.Render(), solution, s.parts), wantAudit)
+		s.within(s.stage("audit"), solution, func(context string) string {
+			return prompt.SolveAudit(context, solution, s.parts)
+		}), wantAudit)
 	if err != nil {
 		return Judgement{}, err
 	}
@@ -459,9 +514,11 @@ func (s *state) judge(ctx context.Context, solution string) (Result, error) {
 		}
 
 		s.fixes++
-		fixed, err := s.ask(ctx, fmt.Sprintf("correct-%d", s.fixes),
-			prompt.SolveCorrect(s.ctx.Render(), solution,
-				complaints(j.Truth, j.Audit, j.TruthPassed, j.AuditPassed), s.parts), wantSolution)
+		stage := fmt.Sprintf("correct-%d", s.fixes)
+		fixed, err := s.ask(ctx, stage, s.within(stage, solution, func(context string) string {
+			return prompt.SolveCorrect(context, solution,
+				complaints(j.Truth, j.Audit, j.TruthPassed, j.AuditPassed), s.parts)
+		}), wantSolution)
 		if err != nil {
 			// The correction call failed and the solution as it stands has been
 			// judged. Marking it on what the judges said beats losing the whole
