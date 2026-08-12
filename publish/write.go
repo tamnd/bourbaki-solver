@@ -65,6 +65,14 @@ func (s *Site) Build(out string) ([]string, error) {
 		return nil, err
 	}
 
+	about, err := s.about()
+	if err != nil {
+		return nil, err
+	}
+	if err := write("about/index.html", about); err != nil {
+		return nil, err
+	}
+
 	for _, sec := range s.Sections {
 		body, err := s.section(sec)
 		if err != nil {
@@ -259,6 +267,7 @@ type layout struct {
 	Lang   string
 	Home   string
 	Search string
+	About  string
 	CSS    string
 	KaTeX  string
 	// Canonical is set on a page that is a second copy of another one, which is
@@ -285,6 +294,12 @@ type langLink struct {
 func (s *Site) render(l layout) (string, error) {
 	l.Home = s.url()
 	l.Search = s.url("search")
+	// Every page links the about page, because every page of this site shows
+	// text a machine had a hand in and P07 is that such a page says so. The line
+	// at the foot says it for that page and the about page says it for the
+	// corpus, and a reader who lands on a tag page from somebody else's citation
+	// has to be one click from both.
+	l.About = s.url("about")
 	l.CSS = s.url() + "style.css"
 	// Every page of this site has mathematics on it, including the ones that
 	// only list statements, so the stylesheet is linked unconditionally rather
@@ -652,12 +667,6 @@ func (s *Site) tagTable() (string, error) {
 }
 
 func (s *Site) front() (string, error) {
-	count := map[string]int{}
-	stmts := map[string]int{}
-	for _, sec := range s.Sections {
-		count[sec.Lang]++
-		stmts[sec.Lang] += sec.Meta.Statements
-	}
 	var b strings.Builder
 	b.WriteString("<h1>Bourbaki, Éléments de mathématique</h1>\n")
 	b.WriteString("<p>A Markdown corpus of the <em>Éléments</em> with a permanent tag on every numbered " +
@@ -665,31 +674,42 @@ func (s *Site) front() (string, error) {
 		"and not Springer's.</p>\n")
 	b.WriteString("<h2>What is here</h2>\n<p>One chapter of one Book, and not the forty three volumes the " +
 		"library holds. The table is generated from the corpus and says what is actually in it.</p>\n")
-	b.WriteString("<table class=\"coverage\">\n<tr><th>language</th><th>sections</th><th>statements</th><th></th></tr>\n")
-	for _, lang := range s.Langs {
-		note := "transcribed from the printed volume"
-		if lang != "en" && lang != "fr" {
-			note = "machine translation, not checked by a person"
-		}
-		if s.Draft[lang] {
+	b.WriteString("<table class=\"coverage\">\n<tr><th>language</th><th>sections</th><th>statements</th>" +
+		"<th>exercises</th><th></th></tr>\n")
+	for _, n := range s.numbers() {
+		note := n.made()
+		if s.Draft[n.Lang] {
 			note += ", below the coverage floor"
 		}
-		fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a></td><td>%d</td><td>%d</td><td>%s</td></tr>\n",
-			s.langHome(lang), lang, count[lang], stmts[lang], note)
+		fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a> <span class=\"count\">%s</span></td>"+
+			"<td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>\n",
+			s.langHome(n.Lang), n.Lang, langName(n.Lang), n.Sections, n.Statements, n.Exercises, note)
 	}
 	b.WriteString("</table>\n")
 	// The floor is stated here because this table is the one place a language it
 	// applies to is offered at all. A reader who wants the two Vietnamese §§ can
 	// have them; what the floor stops is the rest of the site offering Vietnamese
-	// on twenty five pages that do not have it.
+	// on twenty five pages that do not have it. The rule itself is on the about
+	// page, with the share of the English that each language actually holds.
 	if s.drafted() {
-		fmt.Fprintf(&b, "<p>A language holding under %d per cent of the English is linked here with its "+
-			"real numbers and is left out of the switcher on the pages themselves, because a switcher that "+
-			"offers a language and then has nothing to switch to is worse than one that does not offer it.</p>\n",
-			int(coverageFloor*100))
+		fmt.Fprintf(&b, "<p>A language holding under %d per cent of the English is linked here and is "+
+			"left out of the switcher on the pages themselves, because a switcher that offers a language "+
+			"and then has nothing to switch to is worse than one that does not offer it. <a href=%q>About</a> "+
+			"has the real share each language holds.</p>\n", int(coverageFloor*100), s.url("about"))
 	}
-	fmt.Fprintf(&b, "<p><a href=%q>All %d tags</a>. %d references in the chapter do not resolve, "+
-		"which is the number worth watching.</p>\n", s.url("tags"), len(s.Statements), s.Unresolved)
+	// The tag count is the tag file's and not the number of statements. 317 of
+	// the tags are on an exercise, so a front page that counted the statements
+	// and called them tags would be out by a third.
+	set, err := s.TagSet()
+	if err != nil {
+		return "", err
+	}
+	fmt.Fprintf(&b, "<p><a href=%q>All %d tags</a>, <a href=%q>search</a> over the statements and the "+
+		"exercises, and <a href=%q>about</a> for how the text got here and what a machine wrote. Of the "+
+		"%d references the chapter makes, %d do not resolve, and %d of the %d tagged statements are cited "+
+		"by nothing. Those are the numbers worth watching.</p>\n",
+		s.url("tags"), len(set.Tags), s.url("search"), s.url("about"),
+		s.Edges, s.Unresolved, s.uncited(), len(s.Statements))
 	return s.render(layout{Title: "Bourbaki", Content: template.HTML(b.String())})
 }
 
@@ -714,7 +734,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
 <link rel="stylesheet" href="{{.CSS}}">
 <body>
 <header>
-<span class="site"><a class="home" href="{{.Home}}">Bourbaki</a> <a href="{{.Search}}">Search</a></span>
+<span class="site"><a class="home" href="{{.Home}}">Bourbaki</a> <a href="{{.Search}}">Search</a> <a href="{{.About}}">About</a></span>
 {{if .Langs}}<nav class="langs">{{range .Langs}}{{if .Here}}<span class="here">{{.Lang}}</span>{{else if .Draft}}<a class="draft" href="{{.URL}}" title="below the coverage floor">{{.Lang}}</a>{{else}}<a href="{{.URL}}">{{.Lang}}</a>{{end}}{{end}}</nav>{{end}}
 </header>
 <main>
@@ -781,6 +801,10 @@ ol.results { padding-left: 1.4rem; }
 ol.results li { margin: 1rem 0; }
 .snippet { margin: .2rem 0 0; font-size: .9rem; color: var(--thin); }
 table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+/* The language cell is a code and the name of the language and the two are one
+   thing, so they do not break across two lines while the rest of the row is
+   one. */
+.coverage td:first-child { white-space: nowrap; }
 th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid var(--rule); }
 code { font-family: ui-monospace, monospace; font-size: .9em; }
 `

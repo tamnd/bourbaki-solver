@@ -53,9 +53,12 @@ type Site struct {
 	CitedBy map[string][]*Edge
 	Cites   map[string][]*Edge
 
-	// Unresolved is how many references the graph could not follow, which the
-	// about page publishes rather than hides.
+	// Unresolved is how many references the graph could not follow, and Edges is
+	// how many it found. The about page publishes both rather than hiding the
+	// first, since a resolution rate is the one number that says what the
+	// reference graph is worth and it cannot be read off either half alone.
 	Unresolved int
+	Edges      int
 
 	// AllowBrokenMath builds a site with the formulae KaTeX refuses marked on
 	// the page instead of failing. It is off by default and the deploy never
@@ -433,6 +436,10 @@ func (s *Site) graph() error {
 		return err
 	}
 	s.Unresolved = len(res.Unresolved)
+	// Every edge the graph found, before the filtering below drops the self
+	// references and the § references. The about page prints it against the
+	// unresolved count and the two have to be counted over the same thing.
+	s.Edges = len(res.Edges)
 	for _, st := range s.Statements {
 		if in := res.Index.Statement(st.Label); in != nil {
 			st.Page = in.Page
@@ -506,12 +513,15 @@ func dedupe(list []*Edge, key func(*Edge) string) []*Edge {
 // statement the corpus has lost still shows, which is exactly the case somebody
 // needs to see.
 func (s *Site) Tags() ([]tagset.Entry, []tagset.Retired, error) {
-	set, err := tagset.Load(s.Root)
+	set, err := s.TagSet()
 	if err != nil {
 		return nil, nil, err
 	}
 	return set.Tags, set.Inactive, nil
 }
+
+// TagSet is the whole of it, which the about page counts the renames out of.
+func (s *Site) TagSet() (*tagset.Set, error) { return tagset.Load(s.Root) }
 
 // URL builders. Every one is absolute and ends in a slash. Absolute because a
 // tag page is three directories deep and the section it links at is four, and a
