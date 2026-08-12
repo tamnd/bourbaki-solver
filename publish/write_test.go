@@ -1,6 +1,7 @@
 package publish
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -404,6 +405,114 @@ func TestBrokenMathIsMarkedAndOnlyWhenAskedFor(t *testing.T) {
 	}
 	if len(s.Broken) == 0 {
 		t.Error("the build did not say what it marked")
+	}
+}
+
+// Spec 12 §6. The index is what the search is, and the one thing that is easy
+// to get wrong in it is the mathematics: dropped, and a great many statements
+// have nothing searchable left in them.
+func TestTheSearchIndexKeepsTheMathematicsAsItsSource(t *testing.T) {
+	for _, c := range []struct{ md, want string }{
+		{"Let $x^*\\otimes y$ be the image.", "Let x^*\\otimes y be the image."},
+		{"A **reduced** algebra over $k$.", "A reduced algebra over k ."},
+		{"See the [exercises for § 14](exercises/s14/).", "See the exercises for § 14."},
+		{"#### Theorem 1 {#alg-viii-s14-thm-1 .statement tag=00GJ}", "Theorem 1"},
+		{"$$\\sum_{i\\in I} a_i e_i$$", "\\sum_{i\\in I} a_i e_i"},
+		{"- one\n- two", "one two"},
+	} {
+		if got := plain(c.md); got != c.want {
+			t.Errorf("plain(%q) is\n%q\nwant\n%q", c.md, got, c.want)
+		}
+	}
+}
+
+// One entry per tagged statement and one per exercise, since the exercises are
+// a third of the tags and a search that could not find them would be a search of
+// two thirds of the site.
+func TestTheSearchIndexHoldsTheStatementsAndTheExercises(t *testing.T) {
+	s := testSite(t)
+	en := s.searchIndex("en")
+	if len(en) != 4 {
+		t.Fatalf("%d entries, want two statements and two exercises: %+v", len(en), en)
+	}
+	var stmt, ex *Entry
+	for i := range en {
+		switch en[i].Tag {
+		case "00GJ":
+			stmt = &en[i]
+		case "00H8":
+			ex = &en[i]
+		}
+	}
+	if stmt == nil || ex == nil {
+		t.Fatalf("the statement or the exercise is not in the index: %+v", en)
+	}
+	// A statement is found at its tag, which is the URL the tag scheme promises.
+	if stmt.URL != "/tag/00GJ/" || stmt.Heading != "Theorem 1" || stmt.Section != "§ 14. Reduced Algebras" {
+		t.Errorf("the statement entry is %+v", *stmt)
+	}
+	// An exercise is found at its own page rather than at the tag page, which is
+	// the same bytes and is the copy that declares the other canonical.
+	if ex.URL != "/en/alg/VIII/s14/ex/8/" || ex.Heading != "Exercise 8, § 14" {
+		t.Errorf("the exercise entry is %+v", *ex)
+	}
+	if !strings.Contains(stmt.Text, "x^*\\otimes y") {
+		t.Errorf("the mathematics is not in the text: %q", stmt.Text)
+	}
+
+	// One file per language and not one for the site, because three languages in
+	// one file is three megabytes fetched to search one of them.
+	dir := t.TempDir()
+	wrote, err := s.Build(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var jsons []string
+	for _, w := range wrote {
+		if strings.HasSuffix(w, ".json") {
+			jsons = append(jsons, w)
+		}
+	}
+	if strings.Join(jsons, " ") != "search/en.json search/fr.json" {
+		t.Errorf("the indexes written are %v", jsons)
+	}
+	var back []Entry
+	b, err := os.ReadFile(filepath.Join(dir, "search", "en.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &back); err != nil {
+		t.Fatalf("the index is not JSON: %v", err)
+	}
+	if len(back) != len(en) {
+		t.Errorf("%d entries were written and %d were built", len(back), len(en))
+	}
+}
+
+// The search page is reachable from everywhere, and it is the only page that
+// needs a script. A reader with scripts off is told that and is not left with a
+// box that does nothing.
+func TestSearchIsLinkedFromEveryPageAndSaysItNeedsAScript(t *testing.T) {
+	s := testSite(t)
+	for _, rel := range []string{"index.html", "en/alg/VIII/s14/index.html", "tag/00GJ/index.html",
+		"en/alg/VIII/s14/ex/8/index.html", "tags/index.html"} {
+		if got := s.mustPage(t, rel); !strings.Contains(got, `<a href="/search/">Search</a>`) {
+			t.Errorf("%s does not link the search page:\n%s", rel, got)
+		}
+	}
+	got := s.mustPage(t, "search/index.html")
+	if !strings.Contains(got, "<noscript>") {
+		t.Errorf("the search page does not say it needs a script:\n%s", got)
+	}
+	if !strings.Contains(got, `<script>`) || !strings.Contains(got, `const BASE = "/search/";`) {
+		t.Errorf("the search page does not know where its indexes are:\n%s", got)
+	}
+	// And nowhere else. Everything the site is for is plain HTML.
+	for _, rel := range []string{"en/alg/VIII/s14/index.html", "tag/00GJ/index.html",
+		"en/alg/VIII/s14/ex/8/index.html"} {
+		if strings.Contains(s.mustPage(t, rel), "<script") {
+			t.Errorf("%s carries a script", rel)
+		}
 	}
 }
 

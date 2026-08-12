@@ -150,6 +150,27 @@ func (s *Site) Build(out string) ([]string, error) {
 	if err := write("tags/index.html", table); err != nil {
 		return nil, err
 	}
+
+	// One index per language, fetched by the search page and by nothing else.
+	// They are the only files of the site that are not HTML a browser renders,
+	// and they are built here rather than by a step of the workflow so that the
+	// site in a directory is the whole site.
+	for _, lang := range s.Langs {
+		body, err := s.searchJSON(lang)
+		if err != nil {
+			return nil, err
+		}
+		if err := write(path.Join("search", lang+".json"), body); err != nil {
+			return nil, err
+		}
+	}
+	search, err := s.searchPage()
+	if err != nil {
+		return nil, err
+	}
+	if err := write("search/index.html", search); err != nil {
+		return nil, err
+	}
 	sort.Strings(wrote)
 	return wrote, nil
 }
@@ -235,10 +256,11 @@ type layout struct {
 	// language of the text on the page and not of the site, which matters here
 	// more than on most sites: a screen reader that says a Vietnamese page in
 	// English pronunciation reads it as noise.
-	Lang  string
-	Home  string
-	CSS   string
-	KaTeX string
+	Lang   string
+	Home   string
+	Search string
+	CSS    string
+	KaTeX  string
 	// Canonical is set on a page that is a second copy of another one, which is
 	// what an exercise's tag URL is. Empty everywhere else.
 	Canonical string
@@ -262,6 +284,7 @@ type langLink struct {
 
 func (s *Site) render(l layout) (string, error) {
 	l.Home = s.url()
+	l.Search = s.url("search")
 	l.CSS = s.url() + "style.css"
 	// Every page of this site has mathematics on it, including the ones that
 	// only list statements, so the stylesheet is linked unconditionally rather
@@ -691,7 +714,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
 <link rel="stylesheet" href="{{.CSS}}">
 <body>
 <header>
-<a class="home" href="{{.Home}}">Bourbaki</a>
+<span class="site"><a class="home" href="{{.Home}}">Bourbaki</a> <a href="{{.Search}}">Search</a></span>
 {{if .Langs}}<nav class="langs">{{range .Langs}}{{if .Here}}<span class="here">{{.Lang}}</span>{{else if .Draft}}<a class="draft" href="{{.URL}}" title="below the coverage floor">{{.Lang}}</a>{{else}}<a href="{{.URL}}">{{.Lang}}</a>{{end}}{{end}}</nav>{{end}}
 </header>
 <main>
@@ -728,6 +751,7 @@ h4.statement { font-variant: small-caps; }
    mistaken for a formula somebody meant to write this way. */
 .broken { font-family: ui-monospace, monospace; font-size: .85em; color: #a11;
   background: #fee; border: 1px solid #a11; border-radius: 3px; padding: 0 .2em; }
+.site a { margin-right: .7rem; }
 .langs a, .langs .here { margin-left: .5rem; }
 .langs .here { font-weight: bold; }
 .langs .draft { opacity: .55; }
@@ -748,6 +772,14 @@ details.solution[open] summary { border-bottom: 1px solid var(--rule); padding-b
 ul.refs, ul.toc { padding-left: 1.2rem; }
 ul.toc li { margin: .3rem 0; }
 .count, .out, .none { color: var(--thin); font-size: .85rem; }
+/* Search is the one page with a script on it, and the one page with a form. */
+#f { display: flex; gap: .5rem; margin: 1.5rem 0 1rem; font-family: system-ui, sans-serif; }
+#q { flex: 1; font: inherit; padding: .4rem .6rem; border: 1px solid var(--rule); border-radius: 3px; }
+#lang, #f button { font: inherit; padding: .4rem .6rem; border: 1px solid var(--rule);
+  border-radius: 3px; background: #fff; }
+ol.results { padding-left: 1.4rem; }
+ol.results li { margin: 1rem 0; }
+.snippet { margin: .2rem 0 0; font-size: .9rem; color: var(--thin); }
 table { border-collapse: collapse; width: 100%; font-size: .9rem; }
 th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid var(--rule); }
 code { font-family: ui-monospace, monospace; font-size: .9em; }
