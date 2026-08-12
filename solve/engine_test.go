@@ -96,7 +96,13 @@ func exercise(text string) *Context {
 		Options: Options{Depth: 2, MaxChars: 40000},
 		Pieces: []Piece{
 			{Kind: TheExercise, Label: "alg-viii-s1-ex-1", Tag: "000X", Text: text},
-			{Kind: TheSection, Label: "alg-viii-s1", Text: "## § 1. ARTINIAN MODULES"},
+			// The § carries its statements with their tags, the way a § does, so
+			// that a candidate here citing 0001 is citing something it was shown.
+			{Kind: TheSection, Label: "alg-viii-s1", Text: "## § 1. ARTINIAN MODULES\n\n" +
+				"#### Definition 1 {#alg-viii-s1-def-1 .statement tag=0001}\n\n" +
+				"A module is Artinian when every descending chain stops.\n\n" +
+				"#### Proposition 1 {#alg-viii-s1-prop-1 .statement tag=0002}\n\n" +
+				"A module is Noetherian if and only if every submodule is finitely generated.\n"},
 		}}
 }
 

@@ -408,9 +408,10 @@ func (s *state) write(ctx context.Context) ([]string, error) {
 	for i := 0; i < s.engine.candidates(); i++ {
 		angle := angles[i%len(angles)]
 		stage := "candidate-" + angle.Name
-		text, err := s.ask(ctx, stage, s.within(stage, "", func(context string) string {
+		question := s.within(stage, "", func(context string) string {
 			return prompt.SolveCandidateFor(context, angle, s.parts)
-		}), wantSolution)
+		})
+		text, err := s.ask(ctx, stage, question, wantSolutionFrom(question))
 		if err != nil {
 			if ctx.Err() != nil {
 				return nil, err
@@ -515,10 +516,11 @@ func (s *state) judge(ctx context.Context, solution string) (Result, error) {
 
 		s.fixes++
 		stage := fmt.Sprintf("correct-%d", s.fixes)
-		fixed, err := s.ask(ctx, stage, s.within(stage, solution, func(context string) string {
+		question := s.within(stage, solution, func(context string) string {
 			return prompt.SolveCorrect(context, solution,
 				complaints(j.Truth, j.Audit, j.TruthPassed, j.AuditPassed), s.parts)
-		}), wantSolution)
+		})
+		fixed, err := s.ask(ctx, stage, question, wantSolutionFrom(question))
 		if err != nil {
 			// The correction call failed and the solution as it stands has been
 			// judged. Marking it on what the judges said beats losing the whole
