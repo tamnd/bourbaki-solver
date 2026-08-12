@@ -215,6 +215,22 @@ func heading(r corpus.Ref, label string, pr printing) string {
 // one. body is the statement with the head taken off.
 func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, next int,
 	occ map[corpus.Ref]int, pr printing) (corpus.Ref, string, bool, error) {
+	// Extraction writes the dangerous bend at the head of the passage it marks,
+	// and a marked passage often opens on a statement: the French printing marks
+	// Remark 2 of § 7 no. 1, two of the Examples of § 9 no. 2 and the Remark of
+	// § 16 no. 8 that way. The sign is a mark on the whole statement and not part
+	// of its head, so it comes off before the head is read and goes back at the
+	// front of the body, the same as the star.
+	bent := false
+	if s, ok := strings.CutPrefix(text, corpus.Bend); ok {
+		bent, text = true, strings.TrimLeft(s, " ")
+	}
+	body := func(s string) string {
+		if !bent {
+			return s
+		}
+		return strings.TrimSpace(corpus.Bend + " " + s)
+	}
 	m := pr.head.FindStringSubmatch(text)
 	if m == nil {
 		// A paragraph opening on the number the open run is up to is the next
@@ -225,7 +241,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		}
 		r := run
 		r.Number = next
-		return r, afterMarker(i[0], text[markerLen(i):]), true, nil
+		return r, body(afterMarker(i[0], text[markerLen(i):])), true, nil
 	}
 	// The head matched one of the branches of pr.head and left the others empty.
 	word, num := m[1]+m[3]+m[5], m[2]+m[4]+m[6]
@@ -261,7 +277,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		key.Subsec = no
 		occ[key]++
 		r.Subsec, r.Occurrence = no, occ[key]
-		return r, strings.TrimSpace(rest), true, nil
+		return r, body(strings.TrimSpace(rest)), true, nil
 	}
 	r.Number, _ = strconv.Atoi(num)
 	switch kind.Scope() {
@@ -274,7 +290,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		}
 		r.ParentKind, r.ParentNumber = parent.Kind, parent.Number
 	}
-	return r, strings.TrimSpace(rest), true, nil
+	return r, body(strings.TrimSpace(rest)), true, nil
 }
 
 // anchorExercises gives the block of exercises an anchor, so that a reference

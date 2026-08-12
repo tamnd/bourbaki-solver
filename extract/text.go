@@ -5,6 +5,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
 // Rendering a line is deciding where the mathematics starts and stops and then
@@ -147,6 +149,16 @@ func tokens(l Line) []token {
 			}
 			toks = append(toks, token{text: text, class: ClassMath, level: r.Level, sign: cmexOps[text],
 				left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(), math: true})
+			continue
+		}
+		if bend(r) {
+			// The sign is a mark and not a formula. It went out as $\dbend$,
+			// a command out of a LaTeX package no renderer here loads, and
+			// KaTeX refused all seventeen of them, which is what kept the
+			// site from being published. Unicode has the sign, so the corpus
+			// writes the sign.
+			toks = append(toks, token{text: corpus.Bend, class: ClassText,
+				left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom()})
 			continue
 		}
 		text := runText(r)
@@ -399,14 +411,6 @@ func runText(r Run) string {
 		return wrapLetters(s, `\mathsf`)
 	case "LMMathSymbols":
 		return symbols(s)
-	case "BOUR":
-		// The font holds the brackets of a citation and the dangerous bend,
-		// which sits at the letter Z in it. Read as a letter it puts a stray
-		// capital at the head of the passage it marks, and the passages it
-		// marks are the ones a reader most wants to find again.
-		if bend(r) {
-			return `\dbend`
-		}
 	}
 	if r.Class == ClassStrong {
 		return bold(s)

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/mathtex"
 	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
@@ -376,11 +377,23 @@ func join(lines []Line, v Volume) string {
 	opens := opener(lines, left)
 	var out []string
 	var cur strings.Builder
+	// marked is the dangerous bend standing in the margin beside the paragraph
+	// being gathered. The sign is drawn against whichever line of the paragraph
+	// TeX put it against, which is not the first one and is not the start of a
+	// sentence either: French page 257 draws it beside the line that opens
+	// "morphisme de D", so the corpus shipped the word "automorphisme" with the
+	// sign inside it. The head of the paragraph is where the sign means, and it
+	// is where a reader looking for it will look.
+	marked := false
 	flush := func() {
 		if s := strings.TrimSpace(cur.String()); s != "" {
+			if marked {
+				s = corpus.Bend + " " + s
+			}
 			out = append(out, s)
 		}
 		cur.Reset()
+		marked = false
 	}
 	head := -1 // the line the last heading came off, for its continuation
 	for i, l := range lines {
@@ -402,7 +415,17 @@ func join(lines []Line, v Volume) string {
 			continue
 		}
 		text := Render(l)
+		// A sign at the head of a line is the one in the margin, since margin
+		// took it out of the extent of the line and everything else on the line
+		// is set to the right of it. The sign inside a sentence stays where it
+		// was written: the foreword says the passages are marked in the margin
+		// by the sign, and prints it there in the sentence.
+		mark := false
+		if s, ok := strings.CutPrefix(text, corpus.Bend); ok {
+			mark, text = true, strings.TrimLeft(s, " ")
+		}
 		if strings.TrimSpace(text) == "" {
+			marked = marked || mark
 			continue
 		}
 		// Bourbaki opens a statement at the margin and not on an indent, so
@@ -416,6 +439,9 @@ func join(lines []Line, v Volume) string {
 			if d, ok := display(text); ok {
 				flush()
 				out = append(out, d)
+				// A display cannot carry the sign at its head without ceasing
+				// to be a display, so it goes to the paragraph after it.
+				marked = mark
 				continue
 			}
 		}
@@ -430,20 +456,24 @@ func join(lines []Line, v Volume) string {
 			if joined, ok := runOn(cur.String(), text, v.Compounds); ok {
 				cur.Reset()
 				cur.WriteString(joined)
+				marked = marked || mark
 				continue
 			}
 		}
 		if apart || boldOpen(text) {
 			flush()
 			cur.WriteString(text)
+			marked = mark
 			continue
 		}
 		if opens(l) || cur.Len() == 0 {
 			flush()
 			cur.WriteString(text)
+			marked = mark
 			continue
 		}
 		cur.WriteString(" " + strings.TrimLeft(text, " "))
+		marked = marked || mark
 	}
 	flush()
 	return strings.Join(out, "\n\n")
