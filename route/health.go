@@ -59,6 +59,21 @@ type Health struct {
 	Catalogue []string `json:"catalogue,omitempty"`
 	// Drift is set when the configured model is absent from the catalogue.
 	Drift string `json:"drift,omitempty"`
+	// Answered is the model that came back on a deep probe, which is not always
+	// the one that was asked for. An account can be moved down between two runs
+	// and neither the route file nor the catalogue can see it: both say what is
+	// on offer, and this says what arrived.
+	Answered string `json:"answered,omitempty"`
+}
+
+// Downgraded reports that the route answered on a model other than the one it
+// was asked for.
+//
+// Only a deep probe can know, since it is the only one that asks a question. A
+// shallow probe leaves Answered empty and this is false, which is the honest
+// answer: not knowing is not the same as knowing it is fine.
+func (h Health) Downgraded() bool {
+	return h.Answered != "" && h.Model != "" && h.Answered != h.Model
 }
 
 // Signal is a classified provider response.
@@ -295,7 +310,18 @@ func (p Prober) Probe(ctx context.Context, value Route) Health {
 	if strings.TrimSpace(response.Text) == "" {
 		return finish(Signal{State: StateBroken, Detail: "completed with empty text"})
 	}
-	return finish(Signal{State: StateLive, Detail: fmt.Sprintf("%s, answered in %s", detail, response.Elapsed.Round(time.Second))})
+	result.Answered = response.Model
+	detail = fmt.Sprintf("%s, answered in %s", detail, response.Elapsed.Round(time.Second))
+	if result.Downgraded() {
+		// The route still works, so it is not broken and not gone: work sent to
+		// it will come back, on a lesser model. That is a thing a person decides
+		// about, and the only way anybody can decide is if it is said. A whole
+		// section came back on the cut down model with the board showing gpt-5,
+		// because the board was reading the route file and the catalogue and
+		// both of those describe what is on offer rather than what arrived.
+		detail = fmt.Sprintf("%s on %s, not %s", detail, response.Model, value.Model)
+	}
+	return finish(Signal{State: StateLive, Detail: detail})
 }
 
 // probePrompt is trivial on purpose. A deep probe of the fleet should cost a

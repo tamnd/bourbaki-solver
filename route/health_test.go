@@ -119,6 +119,49 @@ func TestProbeDeep(t *testing.T) {
 	}
 }
 
+// An account can be moved down between two runs, and neither the route file nor
+// the catalogue can see it: both say what is on offer, and only the answer says
+// what arrived. This went unnoticed for a whole section of chapter VIII with the
+// board reading gpt-5 the entire time.
+func TestProbeDeepSeesADowngrade(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/health":
+			_, _ = w.Write([]byte(server1Health))
+		case "/v1/models":
+			_, _ = w.Write([]byte(models))
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"c1","model":"gpt-5-mini","choices":[{"message":{"content":"ok"}}]}`))
+		}
+	}))
+	defer server.Close()
+
+	value := Route{Name: "server1", Wire: WireChat, BaseURL: server.URL, Model: "gpt-5"}
+	got := (Prober{Deep: true}).Probe(context.Background(), value)
+	// Still live. Work sent here comes back, on a lesser model, and what to do
+	// about that is a person's decision rather than the pool's.
+	if got.State != StateLive {
+		t.Fatalf("State = %s: %s", got.State, got.Detail)
+	}
+	if !got.Downgraded() || got.Answered != "gpt-5-mini" {
+		t.Fatalf("Answered = %q, downgraded = %v", got.Answered, got.Downgraded())
+	}
+	if !strings.Contains(got.Detail, "gpt-5-mini, not gpt-5") {
+		t.Errorf("Detail = %q, want it to say what answered and what was asked for", got.Detail)
+	}
+	if want := "gpt-5 -> gpt-5-mini"; !strings.Contains(Table([]Health{got}), want) {
+		t.Errorf("the board does not say %q", want)
+	}
+
+	// And a route that answers on what it was asked for says the one thing.
+	fine := got
+	fine.Answered = "gpt-5"
+	if fine.Downgraded() || strings.Contains(Table([]Health{fine}), "->") {
+		t.Error("a route answering on its own model is reported as downgraded")
+	}
+}
+
 func TestClassify(t *testing.T) {
 	for _, c := range []struct {
 		name   string

@@ -400,7 +400,7 @@ func Table(results []Health) string {
 	for _, row := range results {
 		widths[0] = max(widths[0], len(row.Route))
 		widths[1] = max(widths[1], len(string(row.State)))
-		widths[2] = max(widths[2], len(row.Model))
+		widths[2] = max(widths[2], len(modelColumn(row)))
 		widths[3] = max(widths[3], len(row.Transport))
 	}
 	var out strings.Builder
@@ -415,7 +415,20 @@ func Table(results []Health) string {
 			detail = fmt.Sprintf("%s, resets %s", detail, row.ResetsAt.UTC().Format("2006-01-02 15:04 UTC"))
 		}
 		line(row.Route, string(row.State), fmt.Sprintf("%.2fs", row.Latency.Seconds()),
-			row.Model, row.Transport, detail)
+			modelColumn(row), row.Transport, detail)
 	}
 	return out.String()
+}
+
+// modelColumn is what the board should say the route answers on.
+//
+// The configured model on its own is a claim about what was asked for, and a
+// reader takes it for what will arrive. When a deep probe has found out
+// otherwise, both are shown, because the difference between them is the whole
+// of the news.
+func modelColumn(row Health) string {
+	if row.Downgraded() {
+		return row.Model + " -> " + row.Answered
+	}
+	return row.Model
 }
