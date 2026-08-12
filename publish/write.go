@@ -1,0 +1,552 @@
+package publish
+
+import (
+	"bytes"
+	"fmt"
+	"html/template"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
+)
+
+// Build writes the whole site under out and returns the paths it wrote,
+// sorted.
+//
+// It does not remove what is already there, so a page left behind by an earlier
+// build under a name nothing writes any more survives. That is what the -clean
+// flag is for, and it is why the workflow builds into an empty directory.
+func (s *Site) Build(out string) ([]string, error) {
+	var wrote []string
+	write := func(rel, body string) error {
+		p := filepath.Join(out, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			return err
+		}
+		wrote = append(wrote, rel)
+		return nil
+	}
+	if err := write("style.css", styleCSS); err != nil {
+		return nil, err
+	}
+
+	page, err := s.front()
+	if err != nil {
+		return nil, err
+	}
+	if err := write("index.html", page); err != nil {
+		return nil, err
+	}
+
+	for _, sec := range s.Sections {
+		body, err := s.section(sec)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", sec.Path, err)
+		}
+		rel := filepath.ToSlash(filepath.Join(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug, "index.html"))
+		if err := write(rel, body); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, ch := range s.chapters() {
+		body, err := s.chapter(ch)
+		if err != nil {
+			return nil, err
+		}
+		rel := filepath.ToSlash(filepath.Join(ch.Lang, ch.Book, ch.Chapter, "index.html"))
+		if err := write(rel, body); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, st := range s.Statements {
+		body, err := s.tag(st)
+		if err != nil {
+			return nil, fmt.Errorf("tag %s: %w", st.Tag, err)
+		}
+		if err := write(filepath.ToSlash(filepath.Join("tag", st.Tag, "index.html")), body); err != nil {
+			return nil, err
+		}
+	}
+
+	table, err := s.tagTable()
+	if err != nil {
+		return nil, err
+	}
+	if err := write("tags/index.html", table); err != nil {
+		return nil, err
+	}
+	sort.Strings(wrote)
+	return wrote, nil
+}
+
+// chapterKey is one chapter of one Book in one language.
+type chapterKey struct{ Lang, Book, BookTitle, Chapter, Title string }
+
+func (s *Site) chapters() []chapterKey {
+	seen := map[chapterKey]bool{}
+	var out []chapterKey
+	for _, sec := range s.Sections {
+		k := chapterKey{sec.Lang, sec.Meta.Book, sec.Meta.BookTitle, sec.Meta.Chapter, sec.Meta.ChapterTitle}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Lang != b.Lang {
+			return a.Lang < b.Lang
+		}
+		if a.Book != b.Book {
+			return a.Book < b.Book
+		}
+		return a.Chapter < b.Chapter
+	})
+	return out
+}
+
+// renderer is how a body is turned into HTML, with the tag links pointed back
+// into this site and the body's own relative links resolved against the chapter
+// the body was written in.
+func (s *Site) renderer(sec *Section) Renderer {
+	r := Renderer{Link: s.TagURL}
+	if sec != nil {
+		r.Dir = s.ChapterURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)
+	}
+	return r
+}
+
+type layout struct {
+	Title string
+	// Lang is what goes in the lang attribute of the document. It is the
+	// language of the text on the page and not of the site, which matters here
+	// more than on most sites: a screen reader that says a Vietnamese page in
+	// English pronunciation reads it as noise.
+	Lang    string
+	Home    string
+	CSS     string
+	Crumbs  []crumb
+	Content template.HTML
+	Langs   []langLink
+	Note    string
+}
+
+type crumb struct {
+	Text string
+	URL  string
+}
+
+type langLink struct {
+	Lang  string
+	URL   string
+	Here  bool
+	Draft bool
+}
+
+func (s *Site) render(l layout) (string, error) {
+	l.Home = s.url()
+	l.CSS = s.url() + "style.css"
+	if l.Lang == "" {
+		l.Lang = "en"
+	}
+	var b bytes.Buffer
+	if err := pageTmpl.Execute(&b, l); err != nil {
+		return "", err
+	}
+	return b.String(), nil
+}
+
+func (s *Site) section(sec *Section) (string, error) {
+	body, err := s.renderer(sec).HTML(sec.Body)
+	if err != nil {
+		return "", err
+	}
+	var langs []langLink
+	for _, lang := range s.Langs {
+		other := s.sectionIn(lang, sec)
+		if other == nil {
+			continue
+		}
+		langs = append(langs, langLink{Lang: lang, URL: s.SectionURL(other),
+			Here: lang == sec.Lang, Draft: s.Draft[lang]})
+	}
+	return s.render(layout{
+		Title: heading(sec),
+		Lang:  sec.Lang,
+		Crumbs: []crumb{
+			{sec.Meta.BookTitle + ", Chapter " + sec.Meta.Chapter,
+				s.ChapterURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)},
+		},
+		Langs:   langs,
+		Note:    provenance(sec),
+		Content: template.HTML(body),
+	})
+}
+
+// sectionIn finds the same § in another language, by Book, chapter and slug.
+func (s *Site) sectionIn(lang string, sec *Section) *Section {
+	for _, o := range s.Sections {
+		if o.Lang == lang && o.Meta.Book == sec.Meta.Book && o.Meta.Chapter == sec.Meta.Chapter && o.Slug == sec.Slug {
+			return o
+		}
+	}
+	return nil
+}
+
+// provenance is the line every page carries saying who wrote the text on it. A
+// reader deciding whether to trust a sentence has more right to this than the
+// audit does.
+func provenance(sec *Section) string {
+	if sec.Meta.TranslatedFrom == "" {
+		// The French volume carries no edition in the books manifest, so the
+		// line says what is known and does not invent the rest.
+		if sec.Meta.SourceEdition == "" {
+			return "Transcribed from the printed volume. Not translated."
+		}
+		return fmt.Sprintf("Transcribed from the printed edition, %s. Not translated.", sec.Meta.SourceEdition)
+	}
+	note := fmt.Sprintf("Machine translation of the English, by %s", sec.Meta.TranslationModel)
+	if sec.Meta.GlossaryVersion > 0 {
+		note += fmt.Sprintf(", against glossary version %d", sec.Meta.GlossaryVersion)
+	}
+	return note + ". Not checked by a person."
+}
+
+func (s *Site) chapter(k chapterKey) (string, error) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<h1>%s, Chapter %s</h1>\n<p class=\"subtitle\">%s</p>\n<ul class=\"toc\">\n",
+		template.HTMLEscapeString(k.BookTitle), template.HTMLEscapeString(k.Chapter),
+		template.HTMLEscapeString(k.Title))
+	for _, sec := range s.Sections {
+		if sec.Lang != k.Lang || sec.Meta.Book != k.Book || sec.Meta.Chapter != k.Chapter {
+			continue
+		}
+		fmt.Fprintf(&b, "<li><a href=%q>%s</a> <span class=\"count\">%d statements, %d exercises</span></li>\n",
+			s.SectionURL(sec), template.HTMLEscapeString(heading(sec)), sec.Meta.Statements, sec.Meta.Exercises)
+	}
+	b.WriteString("</ul>\n")
+	var langs []langLink
+	for _, lang := range s.Langs {
+		langs = append(langs, langLink{Lang: lang, URL: s.ChapterURL(lang, k.Book, k.Chapter),
+			Here: lang == k.Lang, Draft: s.Draft[lang]})
+	}
+	return s.render(layout{Title: k.BookTitle + ", Chapter " + k.Chapter, Lang: k.Lang,
+		Langs: langs, Content: template.HTML(b.String())})
+}
+
+// printed is where the book puts a statement, written the way the book writes
+// it. Bourbaki cites itself as "VIII, p. 378", so a page that wants to be cited
+// alongside the volume says the same thing rather than inventing a form.
+func printed(sec *Section, st *Statement) string {
+	if st.Page == 0 {
+		return sec.Meta.BookTitle + ", chapter " + sec.Meta.Chapter
+	}
+	return fmt.Sprintf("%s, %s, p. %d", sec.Meta.BookTitle, sec.Meta.Chapter, st.Page)
+}
+
+// heading is how a § is named in a contents list.
+//
+// It comes out of the front matter, which the translations leave in English on
+// purpose so that the manifests join across languages. So a Vietnamese page is
+// headed in English here and in Vietnamese in the body below, where the printed
+// title is. That is the corpus as it stands rather than a decision taken here,
+// and it is the sort of thing the language switcher makes visible.
+func heading(sec *Section) string {
+	switch sec.Meta.Kind {
+	case "front", "historical":
+		return sec.Meta.SectionTitle
+	}
+	if sec.Meta.Appendix {
+		return fmt.Sprintf("Appendix %d. %s", sec.Meta.Section, sec.Meta.SectionTitle)
+	}
+	return fmt.Sprintf("§ %d. %s", sec.Meta.Section, sec.Meta.SectionTitle)
+}
+
+// short is the same name with the title left off.
+func short(sec *Section) string {
+	switch sec.Meta.Kind {
+	case "front", "historical":
+		return sec.Meta.SectionTitle
+	}
+	if sec.Meta.Appendix {
+		return fmt.Sprintf("Appendix %d", sec.Meta.Section)
+	}
+	return fmt.Sprintf("§ %d", sec.Meta.Section)
+}
+
+func (s *Site) tag(st *Statement) (string, error) {
+	en := st.Sections["en"]
+	var b strings.Builder
+	r := s.renderer(en)
+
+	lang := "en"
+	if en == nil {
+		// A tag with no English is not a shape the corpus has today. It is a
+		// shape it can have, since French is an extraction of its own, so the
+		// page picks whatever language holds it rather than failing the build.
+		for _, l := range s.Langs {
+			if st.Sections[l] != nil {
+				lang, en = l, st.Sections[l]
+				break
+			}
+		}
+	}
+	if en == nil {
+		return "", fmt.Errorf("no language holds it")
+	}
+	u := st.Units[lang]
+
+	fmt.Fprintf(&b, "<h1>%s</h1>\n", template.HTMLEscapeString(u.Heading.Text))
+	fmt.Fprintf(&b, "<p class=\"tagline\">Tag <code>%s</code>, permanent. "+
+		"Cite it as <code>[Bourbaki, Tag %s]</code>.</p>\n", st.Tag, st.Tag)
+	fmt.Fprintf(&b, "<p class=\"where\">%s, <a href=%q>%s</a></p>\n",
+		template.HTMLEscapeString(printed(en, st)), s.SectionURL(en)+"#"+st.Label,
+		template.HTMLEscapeString(heading(en)))
+
+	body, err := r.HTML(u.Body)
+	if err != nil {
+		return "", err
+	}
+	b.WriteString(`<div class="statement-body">` + body + "</div>\n")
+	b.WriteString("<p class=\"caveat\">Bourbaki sets the proof directly after the statement, and the corpus " +
+		"does not separate them, so what is above is the statement and its proof together.</p>\n")
+
+	s.list(&b, "Cited by", s.CitedBy[st.Tag], s.from)
+	s.list(&b, "Cites", s.Cites[st.Tag], s.to)
+
+	var langs []langLink
+	for _, l := range s.Langs {
+		if st.Sections[l] == nil {
+			continue
+		}
+		langs = append(langs, langLink{Lang: l, URL: s.SectionURL(st.Sections[l]) + "#" + st.Label,
+			Here: l == lang, Draft: s.Draft[l]})
+	}
+	// The corpus has 51 headings that read only "Corollary", so the title of the
+	// window and of a search result carries the § as well as the tag.
+	return s.render(layout{Title: fmt.Sprintf("%s, %s (%s)", u.Heading.Text, short(en), st.Tag),
+		Lang: lang, Langs: langs, Note: provenance(en), Content: template.HTML(b.String())})
+}
+
+// row is one line of a reference list. Title is what a reader gets on hover and
+// is the label, which is the string to paste into a search or a bug report.
+type row struct {
+	URL   string
+	Text  string
+	Title string
+	Note  string
+}
+
+// from is the citing end of an edge, which is what the cited-by list shows.
+func (s *Site) from(e *Edge) row {
+	if st := s.Tag(e.FromTag); st != nil {
+		return row{URL: s.TagURL(e.FromTag), Text: s.name(st), Title: e.FromLabel}
+	}
+	// A whole § can cite a statement, in prose that stands outside every
+	// statement of it. That is a real citation and it gets a real link, to the
+	// § rather than to a tag, because a § has no tag.
+	if sec := s.Section(e.FromLabel); sec != nil {
+		return row{URL: s.SectionURL(sec), Text: heading(sec), Title: e.FromLabel}
+	}
+	return row{Text: e.FromLabel, Note: note(e, e.FromLabel)}
+}
+
+// to is the cited end, which the cites list shows. The text is the reference as
+// Bourbaki wrote it, since what a proof says is the thing worth reading, and
+// where it lands is on the link.
+func (s *Site) to(e *Edge) row {
+	if st := s.Tag(e.ToTag); st != nil {
+		return row{URL: s.TagURL(e.ToTag), Text: e.Raw, Title: s.name(st) + " (" + e.ToLabel + ")"}
+	}
+	if sec := s.Section(e.ToLabel); sec != nil {
+		return row{URL: s.SectionURL(sec), Text: e.Raw, Title: heading(sec)}
+	}
+	return row{Text: e.Raw, Note: note(e, e.ToLabel)}
+}
+
+// name is how a statement is written when it is named on another page. The
+// label is machine-readable and unreadable, and there are 51 headings that say
+// only "Corollary", so it is the heading and the § together.
+func (s *Site) name(st *Statement) string {
+	for _, lang := range []string{"en", "fr"} {
+		if sec := st.Sections[lang]; sec != nil {
+			return st.Units[lang].Heading.Text + ", " + short(sec)
+		}
+	}
+	return st.Label
+}
+
+// list writes one of the two reference blocks of a tag page.
+func (s *Site) list(b *strings.Builder, title string, edges []*Edge, of func(*Edge) row) {
+	if len(edges) == 0 {
+		fmt.Fprintf(b, "<h2>%s</h2>\n<p class=\"none\">Nothing.</p>\n", title)
+		return
+	}
+	fmt.Fprintf(b, "<h2>%s</h2>\n<ul class=\"refs\">\n", title)
+	for _, e := range edges {
+		r := of(e)
+		text := template.HTMLEscapeString(r.Text)
+		if r.URL == "" {
+			fmt.Fprintf(b, "<li>%s <span class=\"out\">%s</span></li>\n", text, r.Note)
+			continue
+		}
+		if r.Title != "" {
+			fmt.Fprintf(b, "<li><a href=%q title=%q>%s</a></li>\n", r.URL, r.Title, text)
+			continue
+		}
+		fmt.Fprintf(b, "<li><a href=%q>%s</a></li>\n", r.URL, text)
+	}
+	b.WriteString("</ul>\n")
+}
+
+// note says why a reference has no link, which is not always the same reason. A
+// citation of a Book this corpus does not hold is a fact about the printed
+// volume and stays visible. An exercise is in the corpus and has no page yet,
+// and saying it is not here would be a lie the reader could check.
+func note(e *Edge, label string) string {
+	if e.Book != "" {
+		return template.HTMLEscapeString("not in this corpus: " + e.Book + " " + e.Chapter)
+	}
+	return missing(label)
+}
+
+// missing says why a label has no page of its own.
+func missing(label string) string {
+	if ref, err := corpus.ParseLabel(label); err == nil && ref.Kind == corpus.KindExercise {
+		return "an exercise, no page yet"
+	}
+	return "not in this corpus"
+}
+
+func (s *Site) tagTable() (string, error) {
+	entries, retired, err := s.Tags()
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "<h1>Tags</h1>\n<p>%d tags, %d retired. A tag is assigned once and never reused, "+
+		"so a citation of one stays good across every renumbering of the text.</p>\n",
+		len(entries), len(retired))
+	b.WriteString("<table class=\"tags\">\n<tr><th>tag</th><th>statement</th></tr>\n")
+	for _, e := range entries {
+		label := template.HTMLEscapeString(e.Label)
+		if st := s.Tag(string(e.Tag)); st != nil {
+			fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a></td><td>%s</td></tr>\n",
+				s.TagURL(string(e.Tag)), e.Tag, label)
+			continue
+		}
+		// A tag with no page is printed and marked rather than left out, since a
+		// tag table that quietly holds back a third of the tags is worse than no
+		// table. Which of the two reasons it is matters: 317 of these are
+		// exercises, which are in the corpus and are published by a later step,
+		// and a row that said they were missing would be wrong about a file the
+		// reader can open.
+		fmt.Fprintf(&b, "<tr><td>%s</td><td>%s <span class=\"out\">%s</span></td></tr>\n",
+			e.Tag, label, missing(e.Label))
+	}
+	b.WriteString("</table>\n")
+	return s.render(layout{Title: "Tags", Content: template.HTML(b.String())})
+}
+
+func (s *Site) front() (string, error) {
+	count := map[string]int{}
+	stmts := map[string]int{}
+	for _, sec := range s.Sections {
+		count[sec.Lang]++
+		stmts[sec.Lang] += sec.Meta.Statements
+	}
+	var b strings.Builder
+	b.WriteString("<h1>Bourbaki, Éléments de mathématique</h1>\n")
+	b.WriteString("<p>A Markdown corpus of the <em>Éléments</em> with a permanent tag on every numbered " +
+		"statement, in the manner of the Stacks Project. This is a study project and it is not Bourbaki's " +
+		"and not Springer's.</p>\n")
+	b.WriteString("<h2>What is here</h2>\n<p>One chapter of one Book, and not the forty three volumes the " +
+		"library holds. The table is generated from the corpus and says what is actually in it.</p>\n")
+	b.WriteString("<table class=\"coverage\">\n<tr><th>language</th><th>sections</th><th>statements</th><th></th></tr>\n")
+	for _, lang := range s.Langs {
+		note := "transcribed from the printed volume"
+		if lang != "en" && lang != "fr" {
+			note = "machine translation, not checked by a person"
+		}
+		if s.Draft[lang] {
+			note += ", below the coverage floor"
+		}
+		fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a></td><td>%d</td><td>%d</td><td>%s</td></tr>\n",
+			s.langHome(lang), lang, count[lang], stmts[lang], note)
+	}
+	b.WriteString("</table>\n")
+	fmt.Fprintf(&b, "<p><a href=%q>All %d tags</a>. %d references in the chapter do not resolve, "+
+		"which is the number worth watching.</p>\n", s.url("tags"), len(s.Statements), s.Unresolved)
+	return s.render(layout{Title: "Bourbaki", Content: template.HTML(b.String())})
+}
+
+// langHome is where the front page sends a language. One chapter is held, so it
+// is that chapter; when there is more than one this becomes a contents page.
+func (s *Site) langHome(lang string) string {
+	for _, sec := range s.Sections {
+		if sec.Lang == lang {
+			return s.ChapterURL(lang, sec.Meta.Book, sec.Meta.Chapter)
+		}
+	}
+	return s.url()
+}
+
+var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
+<html lang="{{.Lang}}">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}}</title>
+<link rel="stylesheet" href="{{.CSS}}">
+<body>
+<header>
+<a class="home" href="{{.Home}}">Bourbaki</a>
+{{if .Langs}}<nav class="langs">{{range .Langs}}{{if .Here}}<span class="here">{{.Lang}}</span>{{else if .Draft}}<a class="draft" href="{{.URL}}" title="below the coverage floor">{{.Lang}}</a>{{else}}<a href="{{.URL}}">{{.Lang}}</a>{{end}}{{end}}</nav>{{end}}
+</header>
+<main>
+{{if .Crumbs}}<nav class="crumbs">{{range .Crumbs}}<a href="{{.URL}}">{{.Text}}</a>{{end}}</nav>
+{{end}}{{.Content}}
+</main>
+{{if .Note}}<footer class="note">{{.Note}}</footer>{{end}}
+</body>
+</html>
+`))
+
+const styleCSS = `:root { --ink: #111; --thin: #666; --rule: #ddd; }
+* { box-sizing: border-box; }
+body { margin: 0 auto; max-width: 44rem; padding: 1rem 1.2rem 4rem;
+  font: 16px/1.6 Georgia, "Times New Roman", serif; color: var(--ink); }
+header { display: flex; justify-content: space-between; align-items: baseline;
+  border-bottom: 1px solid var(--rule); padding-bottom: .4rem; margin-bottom: 1.6rem;
+  font-family: system-ui, sans-serif; font-size: .85rem; }
+a { color: #10389a; }
+h1 { font-size: 1.5rem; line-height: 1.3; }
+h2 { font-size: 1.15rem; margin-top: 2rem; }
+h3 { font-size: 1rem; }
+h4 { font-size: 1rem; margin-top: 1.6rem; }
+h4.statement { font-variant: small-caps; }
+.tag { font-family: ui-monospace, monospace; font-size: .8em; text-decoration: none;
+  border: 1px solid var(--rule); border-radius: 3px; padding: 0 .25em; }
+.math.display { margin: 1rem 0; text-align: center; overflow-x: auto; }
+.math { font-family: ui-monospace, monospace; font-size: .92em; }
+.langs a, .langs .here { margin-left: .5rem; }
+.langs .here { font-weight: bold; }
+.langs .draft { opacity: .55; }
+.crumbs { font-family: system-ui, sans-serif; font-size: .8rem; margin-bottom: 1rem; }
+.tagline, .where, .caveat, .note, .subtitle { color: var(--thin); font-size: .88rem; }
+.caveat, .note { border-top: 1px solid var(--rule); padding-top: .6rem; margin-top: 2rem; }
+.statement-body { border-left: 3px solid var(--rule); padding-left: 1rem; }
+ul.refs, ul.toc { padding-left: 1.2rem; }
+ul.toc li { margin: .3rem 0; }
+.count, .out, .none { color: var(--thin); font-size: .85rem; }
+table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid var(--rule); }
+code { font-family: ui-monospace, monospace; font-size: .9em; }
+`

@@ -32,6 +32,7 @@ commands:
   glossary         the terminology contract the translations are held to
   translate        turn English sections into Vietnamese, Chinese or Japanese
   audit            every quality rule in spec 08, run over the committed corpus
+  publish          build the static site out of the committed Markdown
   repo             the checkout itself: point git at the hooks the corpus keeps
   ocr              read the pages of a scanned volume through a model, and check them
   label            parse a statement label, or a running head, and print what it means
@@ -84,6 +85,8 @@ func main() {
 		err = runTranslate(args[1:])
 	case "audit":
 		err = runAudit(args[1:])
+	case "publish":
+		err = runPublish(args[1:])
 	case "repo":
 		err = runRepo(args[1:])
 	case "ocr":
