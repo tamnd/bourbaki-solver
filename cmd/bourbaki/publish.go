@@ -15,7 +15,7 @@ func runPublish(args []string) error {
 	fs := flag.NewFlagSet("publish", flag.ExitOnError)
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: bourbaki publish [-out site] [-base /bourbaki] [-lang en,fr] [-clean]
-                        [-check] [-drafts]
+                        [-check] [-drafts] [-max-broken n]
 
 Builds the static site out of the committed Markdown. Every page is written
 from content/, tags/ and the reference manifests, and nothing else is opened:
@@ -39,6 +39,13 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
                        pages themselves. Never set by the deploy.
   -allow-broken-math   mark the formulae KaTeX refuses instead of stopping, for
                        looking at the site locally. Never set by the deploy.
+  -max-broken          the most refused formulae a build may carry before this
+                       exits 1. It marks them rather than stopping at the first,
+                       so one run names all of them. This is the pull request
+                       gate while the chapter still carries the damage the text
+                       layer did to it: the number is a ceiling that may only be
+                       lowered, never raised, and the deploy does not use it. Use
+                       -allow-broken-math to look at such a site.
 `)
 	}
 	out := fs.String("out", "site", "directory to write")
@@ -48,6 +55,7 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 	check := fs.Bool("check", false, "build in memory and write nothing")
 	drafts := fs.Bool("drafts", false, "offer the languages under the coverage floor in the switcher")
 	allowBroken := fs.Bool("allow-broken-math", false, "mark refused formulae instead of stopping")
+	maxBroken := fs.Int("max-broken", -1, "the most refused formulae this build may carry")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -65,7 +73,10 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		return err
 	}
 	site.Base = *base
-	site.AllowBrokenMath = *allowBroken
+	// A ceiling is a promise about a count, and a count nobody finished taking
+	// is not one. Stopping at the first refusal would give the number 1 on a
+	// corpus that has two hundred of them, so the ceiling marks and counts.
+	site.AllowBrokenMath = *allowBroken || *maxBroken >= 0
 	site.Drafts = *drafts
 
 	langs := map[string]int{}
@@ -120,6 +131,16 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		}
 		fmt.Fprintf(os.Stderr, "publish: %d formulae are marked broken across %d files, "+
 			"so this site is not publishable. Run bourbaki audit -only P04 for the list.\n", n, len(files))
+		if *maxBroken >= 0 && n > *maxBroken {
+			return fmt.Errorf("%d formulae are marked broken across %d files, over the ceiling of %d. "+
+				"The ceiling comes down as the pages are repaired and it does not go up",
+				n, len(files), *maxBroken)
+		}
+	}
+	if *maxBroken >= 0 {
+		// Said even at zero, because the run that clears the last one is the run
+		// worth reading, and it is the run that says the ceiling can be dropped.
+		fmt.Printf("publish: %d formulae marked broken, ceiling %d\n", len(site.Broken), *maxBroken)
 	}
 	if *check {
 		return nil
