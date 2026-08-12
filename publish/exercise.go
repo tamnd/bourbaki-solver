@@ -287,15 +287,12 @@ func (s *Site) exercisePage(ex *Exercise, canonical string) (string, error) {
 		s.list(&b, "Cites", s.Cites[ex.Meta.Tag], s.to)
 	}
 
-	var langs []langLink
-	for _, l := range s.Langs {
-		other := s.exerciseIn(l, ex)
-		if other == nil {
-			continue
+	langs := s.langLinks(ex.Lang, func(l string) string {
+		if other := s.exerciseIn(l, ex); other != nil {
+			return s.ExerciseURL(other)
 		}
-		langs = append(langs, langLink{Lang: l, URL: s.ExerciseURL(other),
-			Here: l == ex.Lang, Draft: s.Draft[l]})
-	}
+		return ""
+	})
 	return s.render(layout{Title: ex.Name(), Lang: ex.Lang, Canonical: canonical, Langs: langs,
 		Crumbs: s.exerciseCrumbs(ex, sec), Note: exerciseProvenance(ex), Content: template.HTML(b.String())})
 }
@@ -435,7 +432,7 @@ func exerciseProvenance(ex *Exercise) string {
 	if ex.Meta.TranslationModel != "" {
 		note += ", by " + ex.Meta.TranslationModel
 	}
-	return note + ". Not checked by a person."
+	return note + ". Not checked by a person." + cutDown(ex.Meta.TranslationModel)
 }
 
 // exerciseList is the page at <§>/ex/.
@@ -473,14 +470,12 @@ func (s *Site) exerciseList(set *exerciseSet) (string, error) {
 	}
 	b.WriteString("</ul>\n")
 
-	var langs []langLink
-	for _, l := range s.Langs {
+	langs := s.langLinks(set.Lang, func(l string) string {
 		if !s.hasExercises(l, set.Book, set.Chapter, set.Dir) {
-			continue
+			return ""
 		}
-		langs = append(langs, langLink{Lang: l, URL: s.ExercisesURL(l, set.Book, set.Chapter, set.Dir),
-			Here: l == set.Lang, Draft: s.Draft[l]})
-	}
+		return s.ExercisesURL(l, set.Book, set.Chapter, set.Dir)
+	})
 	crumbs := []crumb{{set.Chapter, s.ChapterURL(set.Lang, set.Book, set.Chapter)}}
 	if set.Section != nil {
 		crumbs[0].Text = set.Section.Meta.BookTitle + ", Chapter " + set.Chapter

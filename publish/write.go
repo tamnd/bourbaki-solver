@@ -14,6 +14,7 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/katex"
+	"github.com/tamnd/bourbaki-solver/quality"
 )
 
 // Build writes the whole site under out and returns the paths it wrote,
@@ -282,15 +283,12 @@ func (s *Site) section(sec *Section) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	var langs []langLink
-	for _, lang := range s.Langs {
-		other := s.sectionIn(lang, sec)
-		if other == nil {
-			continue
+	langs := s.langLinks(sec.Lang, func(lang string) string {
+		if other := s.sectionIn(lang, sec); other != nil {
+			return s.SectionURL(other)
 		}
-		langs = append(langs, langLink{Lang: lang, URL: s.SectionURL(other),
-			Here: lang == sec.Lang, Draft: s.Draft[lang]})
-	}
+		return ""
+	})
 	return s.render(layout{
 		Title: heading(sec),
 		Lang:  sec.Lang,
@@ -302,6 +300,16 @@ func (s *Site) section(sec *Section) (string, error) {
 		Note:    provenance(sec),
 		Content: template.HTML(body),
 	})
+}
+
+// hasChapter says whether a language holds any of a chapter.
+func (s *Site) hasChapter(lang, book, chapter string) bool {
+	for _, sec := range s.Sections {
+		if sec.Lang == lang && sec.Meta.Book == book && sec.Meta.Chapter == chapter {
+			return true
+		}
+	}
+	return false
 }
 
 // sectionIn finds the same § in another language, by Book, chapter and slug.
@@ -330,7 +338,22 @@ func provenance(sec *Section) string {
 	if sec.Meta.GlossaryVersion > 0 {
 		note += fmt.Sprintf(", against glossary version %d", sec.Meta.GlossaryVersion)
 	}
-	return note + ". Not checked by a person."
+	return note + ". Not checked by a person." + cutDown(sec.Meta.TranslationModel)
+}
+
+// cutDown is the extra sentence a page written by a smaller model carries.
+//
+// The rule is quality.SmallModel, which is L08's rule, because two answers to
+// "is this a cut down model" is one answer too many. The audit knows this and
+// records it as a soft finding, and the reader of the page has more right to it
+// than the audit does: nobody chose the model, the account was moved down
+// between one section and the next, and the only place that fact reaches
+// somebody reading the Vietnamese is here.
+func cutDown(model string) string {
+	if !quality.SmallModel(model) {
+		return ""
+	}
+	return " That model is a cut down version of the one the rest of this language was written by."
 }
 
 func (s *Site) chapter(k chapterKey) (string, error) {
@@ -356,11 +379,17 @@ func (s *Site) chapter(k chapterKey) (string, error) {
 		b.WriteString("</span></li>\n")
 	}
 	b.WriteString("</ul>\n")
-	var langs []langLink
-	for _, lang := range s.Langs {
-		langs = append(langs, langLink{Lang: lang, URL: s.ChapterURL(lang, k.Book, k.Chapter),
-			Here: lang == k.Lang, Draft: s.Draft[lang]})
-	}
+	// A language holds a chapter or it does not, and the switcher on a contents
+	// page was the one place that assumed every language holds every chapter.
+	// That is true of the corpus today, with one chapter in it, and it stops
+	// being true the first time a second chapter is transcribed in one language
+	// and not another.
+	langs := s.langLinks(k.Lang, func(lang string) string {
+		if !s.hasChapter(lang, k.Book, k.Chapter) {
+			return ""
+		}
+		return s.ChapterURL(lang, k.Book, k.Chapter)
+	})
 	return s.render(layout{Title: k.BookTitle + ", Chapter " + k.Chapter, Lang: k.Lang,
 		Langs: langs, Content: template.HTML(b.String())})
 }
@@ -452,14 +481,15 @@ func (s *Site) tag(st *Statement) (string, error) {
 	s.list(&b, "Cited by", s.CitedBy[st.Tag], s.from)
 	s.list(&b, "Cites", s.Cites[st.Tag], s.to)
 
-	var langs []langLink
-	for _, l := range s.Langs {
+	// Spec 12 §7: a tag is offered in a language only where a file in that
+	// language holds it. Vietnamese has two §§ of twenty seven, so it is on the
+	// switcher of the statements of those two and nowhere else.
+	langs := s.langLinks(lang, func(l string) string {
 		if st.Sections[l] == nil {
-			continue
+			return ""
 		}
-		langs = append(langs, langLink{Lang: l, URL: s.SectionURL(st.Sections[l]) + "#" + st.Label,
-			Here: l == lang, Draft: s.Draft[l]})
-	}
+		return s.SectionURL(st.Sections[l]) + "#" + st.Label
+	})
 	// The corpus has 51 headings that read only "Corollary", so the title of the
 	// window and of a search result carries the § as well as the tag.
 	return s.render(layout{Title: fmt.Sprintf("%s, %s (%s)", u.Heading.Text, short(en), st.Tag),
@@ -625,6 +655,16 @@ func (s *Site) front() (string, error) {
 			s.langHome(lang), lang, count[lang], stmts[lang], note)
 	}
 	b.WriteString("</table>\n")
+	// The floor is stated here because this table is the one place a language it
+	// applies to is offered at all. A reader who wants the two Vietnamese §§ can
+	// have them; what the floor stops is the rest of the site offering Vietnamese
+	// on twenty five pages that do not have it.
+	if s.drafted() {
+		fmt.Fprintf(&b, "<p>A language holding under %d per cent of the English is linked here with its "+
+			"real numbers and is left out of the switcher on the pages themselves, because a switcher that "+
+			"offers a language and then has nothing to switch to is worse than one that does not offer it.</p>\n",
+			int(coverageFloor*100))
+	}
 	fmt.Fprintf(&b, "<p><a href=%q>All %d tags</a>. %d references in the chapter do not resolve, "+
 		"which is the number worth watching.</p>\n", s.url("tags"), len(s.Statements), s.Unresolved)
 	return s.render(layout{Title: "Bourbaki", Content: template.HTML(b.String())})
