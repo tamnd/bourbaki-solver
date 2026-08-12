@@ -174,7 +174,7 @@ func TestBuildIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !stale {
+	if len(stale) == 0 {
 		t.Error("a corpus with no manifest was not reported stale")
 	}
 	if err := res.Manifest().Save(root); err != nil {
@@ -208,8 +208,69 @@ func TestBuildIsStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stale {
-		t.Error("a second run over an unchanged corpus disagreed with the first")
+	if len(stale) > 0 {
+		t.Errorf("a second run over an unchanged corpus disagreed with the first: %v", stale)
+	}
+}
+
+// A § that is dropped from the corpus takes its file of the manifest with it.
+// Without this a checkout ends up holding a graph of a § it no longer has, and
+// -check passes, since every file the build writes agrees with what is there.
+func TestSaveRemovesTheFileOfASectionThatIsGone(t *testing.T) {
+	root := fixture(t)
+	res, err := Build(root, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := res.Manifest().Save(root); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, filepath.FromSlash(ManifestDir))
+	gone := filepath.Join(dir, "alg-viii-s99.json")
+	if err := os.WriteFile(gone, []byte("{\"edges\": [\n]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := res.Manifest().Stale(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale) != 1 || stale[0] != ManifestDir+"/alg-viii-s99.json" {
+		t.Errorf("a file no build writes was reported as %v", stale)
+	}
+	if err := res.Manifest().Save(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(gone); !os.IsNotExist(err) {
+		t.Errorf("the file of a § that is gone survived a rebuild: %v", err)
+	}
+}
+
+// One file to a § and nothing spilling into the wrong one, which is the whole
+// of the layout: the name of the file says which § the edges in it are from.
+func TestTheManifestIsOneFileToASection(t *testing.T) {
+	root := fixture(t)
+	res, err := Build(root, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := res.Manifest().Save(root); err != nil {
+		t.Fatal(err)
+	}
+	names, err := shardFiles(filepath.Join(root, filepath.FromSlash(ManifestDir)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{}
+	for _, e := range res.Edges {
+		want[e.Section+".json"] = true
+	}
+	if len(names) != len(want) {
+		t.Errorf("%d files for %d sections: %v", len(names), len(want), names)
+	}
+	for _, name := range names {
+		if !want[name] {
+			t.Errorf("%s is a file of no §", name)
+		}
 	}
 }
 
