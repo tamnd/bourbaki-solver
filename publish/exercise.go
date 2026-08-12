@@ -392,6 +392,7 @@ func (s *Site) solution(b *strings.Builder, ex *Exercise) {
 	// The note is inside the disclosure and above the solution, so that it
 	// cannot be read past, and it is not dismissible.
 	fmt.Fprintf(b, "<p class=\"warn\">%s</p>\n", template.HTMLEscapeString(solutionNote(ex.Solution)))
+	parts(b, ex.Solution.Meta.Parts)
 	r := s.renderer(nil)
 	r.File, r.Line = ex.Solution.Path, ex.Solution.Head
 	body, err := r.HTML(ex.Solution.Body)
@@ -408,6 +409,27 @@ func (s *Site) solution(b *strings.Builder, ex *Exercise) {
 	b.WriteString("</details>\n")
 }
 
+// parts writes the per-part verdicts of a multi-part exercise.
+//
+// A Bourbaki exercise that runs to a) through h) gets one verdict per part,
+// because one verdict over the whole of it is either a lie about the parts that
+// failed or a waste of the parts that did not. The reason is printed beside the
+// part it belongs to: a reader who is about to spend an hour on part c) is owed
+// the sentence saying what the judge did not believe about it.
+func parts(b *strings.Builder, list []corpus.Part) {
+	if len(list) == 0 {
+		return
+	}
+	b.WriteString("<table class=\"parts\">\n<thead><tr><th>Part</th><th>Status</th>" +
+		"<th>Reason</th></tr></thead>\n<tbody>\n")
+	for _, p := range list {
+		fmt.Fprintf(b, "<tr><td>%s</td><td>%s</td><td>%s</td></tr>\n",
+			template.HTMLEscapeString(p.ID), template.HTMLEscapeString(p.Status),
+			template.HTMLEscapeString(p.Reason))
+	}
+	b.WriteString("</tbody>\n</table>\n")
+}
+
 // solutionNote is the standing note every solution carries.
 func solutionNote(sol *Solution) string {
 	who := "a machine"
@@ -416,10 +438,27 @@ func solutionNote(sol *Solution) string {
 	}
 	note := fmt.Sprintf("This solution was written by %s and judged by a machine. "+
 		"It is not Bourbaki's and it has not been checked by a person.", who)
-	if sol.Meta.Status != "" && sol.Meta.Status != corpus.StatusVerified {
-		note += fmt.Sprintf(" It did not pass that judgement: %s.", sol.Meta.Status)
+	return note + statusNote(sol.Meta.Status)
+}
+
+// statusNote is the sentence a status is worth to a reader.
+//
+// A status is not a grade and three of them are not failures. Printing the bare
+// word after "it did not pass that judgement" told a reader that an exercise
+// Bourbaki wrote as an open question had been marked wrong, which is a thing to
+// say about the corpus rather than about the mathematics.
+func statusNote(status string) string {
+	switch status {
+	case corpus.StatusPartial:
+		return " Some parts of it passed that judgement and others did not. The table below says which."
+	case corpus.StatusUnverified:
+		return " It did not pass that judgement, and it is printed so that the failure is visible rather than hidden."
+	case corpus.StatusBlocked:
+		return " It turns on a result of a Book this corpus does not hold, so it could not be carried through."
+	case corpus.StatusOpen:
+		return " The exercise asks for exploration rather than a proof, so there is nothing here for a judge to pass."
 	}
-	return note
+	return ""
 }
 
 // exerciseProvenance is the footer line, which says who wrote the text of the

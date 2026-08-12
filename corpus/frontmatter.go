@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -102,18 +103,41 @@ type ExerciseFrontMatter struct {
 
 // SolutionFrontMatter is the head of content/solutions/<lang>/....
 type SolutionFrontMatter struct {
-	Label       string  `yaml:"label"`
-	Tag         string  `yaml:"tag,omitempty"`
-	Lang        string  `yaml:"lang"`
-	Status      string  `yaml:"status"`
-	Model       string  `yaml:"model,omitempty"`
-	Route       string  `yaml:"route,omitempty"`
-	Generated   string  `yaml:"generated,omitempty"`
-	Candidates  int     `yaml:"candidates,omitempty"`
-	TruthJudge  string  `yaml:"truth_judge,omitempty"`
-	AuditJudge  string  `yaml:"audit_judge,omitempty"`
-	Corrections int     `yaml:"corrections"`
-	Tokens      *Tokens `yaml:"tokens,omitempty"`
+	Label  string `yaml:"label"`
+	Tag    string `yaml:"tag,omitempty"`
+	Lang   string `yaml:"lang"`
+	Status string `yaml:"status"`
+	// Parts is the per-part verdict of a multi-part exercise, and it is what
+	// makes partial mean something. A Bourbaki exercise runs to a) through h)
+	// often enough that one verdict over the whole of it would be either a lie
+	// about the parts that failed or a waste of the parts that did not.
+	Parts []Part `yaml:"parts,omitempty"`
+	// Uses is the tags of the results the solution leans on, which is how the
+	// corpus learns which of its statements are load-bearing. It is checked:
+	// a tag that is in no line of tags is a result the solution invented.
+	Uses        []string `yaml:"uses,omitempty"`
+	Model       string   `yaml:"model,omitempty"`
+	Route       string   `yaml:"route,omitempty"`
+	Generated   string   `yaml:"generated,omitempty"`
+	Candidates  int      `yaml:"candidates,omitempty"`
+	TruthJudge  string   `yaml:"truth_judge,omitempty"`
+	AuditJudge  string   `yaml:"audit_judge,omitempty"`
+	Corrections int      `yaml:"corrections"`
+	Tokens      *Tokens  `yaml:"tokens,omitempty"`
+	// PromptSHA256 identifies the instructions the solution was written under,
+	// as it does for a translated section. A prompt that gets better is a
+	// reason to solve an exercise again, and a solution that cannot say which
+	// prompt made it cannot be told apart from one made under the new rules.
+	PromptSHA256 string `yaml:"prompt_sha256,omitempty"`
+}
+
+// Part is one lettered part of a multi-part exercise, a) or b), with the
+// verdict that part alone got. Reason is why it did not pass, in a sentence,
+// and it is empty on a part that did.
+type Part struct {
+	ID     string `yaml:"id"`
+	Status string `yaml:"status"`
+	Reason string `yaml:"reason,omitempty"`
 }
 
 // Tokens is what one solution cost.
@@ -123,12 +147,36 @@ type Tokens struct {
 	Total      int `yaml:"total"`
 }
 
-// Solution status values.
+// Solution status values, spec 07 §3.2.
+//
+// There is no "failed". A solution can fail to be written, fail to be believed,
+// or fail to be possible, and those are three different facts about the corpus.
+// An exercise that cites a Book this corpus does not hold is blocked and that is
+// the fault of the corpus; an exercise that asks the reader to explore is open
+// and that is the fault of nobody; a solution a judge threw out is unverified
+// and that one is the model's. Folding the three into one word would let a
+// scorecard round them all up as tried and failed, and a scorecard that claims
+// every Bourbaki exercise was either solved or flunked would be a lie whichever
+// way it leaned.
 const (
-	StatusVerified    = "verified"
-	StatusFailed      = "failed"
-	StatusUnattempted = "unattempted"
+	StatusVerified    = "verified"    // both judges passed
+	StatusPartial     = "partial"     // some parts passed and others did not
+	StatusUnverified  = "unverified"  // a judge rejected it after the correction budget
+	StatusBlocked     = "blocked"     // it turns on a Book the corpus does not hold
+	StatusOpen        = "open"        // it asks for exploration rather than a proof
+	StatusUnattempted = "unattempted" // not yet run
 )
+
+// Statuses is every status a solution may carry, in the order a scorecard
+// reads best: what worked, then what worked in part, then the three ways it did
+// not, then what was never tried.
+var Statuses = []string{
+	StatusVerified, StatusPartial, StatusUnverified,
+	StatusBlocked, StatusOpen, StatusUnattempted,
+}
+
+// ValidStatus reports whether s is one of them.
+func ValidStatus(s string) bool { return slices.Contains(Statuses, s) }
 
 // File is a content file: a front matter block and the Markdown under it.
 type File[T any] struct {
@@ -388,12 +436,18 @@ func ExerciseDir(section int, appendix bool) string {
 // SolutionPath is where a solution belongs. It is keyed by the exercise's
 // permanent label, so a solution follows its exercise even if the exercise
 // moves between editions.
+//
+// The directory is named the way the label is, s1 for § 1 and a1 for Appendix
+// 1, as the exercises themselves are. Naming both s1 would file the solution to
+// Exercise 1 of Appendix 1 of chapter VIII over the solution to Exercise 1 of
+// its § 1, and the corpus would hold one solution to two exercises with nothing
+// to say which one it answered.
 func SolutionPath(root, lang, label string) (string, error) {
 	r, err := ParseLabel(label)
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(root, "content", "solutions", lang, r.Book,
-		strings.ToUpper(r.Chapter), fmt.Sprintf("s%d", r.Section),
+		strings.ToUpper(r.Chapter), ExerciseDir(r.Section, r.Appendix),
 		fmt.Sprintf("%02d.md", r.Number)), nil
 }
