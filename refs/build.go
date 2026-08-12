@@ -134,8 +134,19 @@ func (res *Result) file(ix *Index, root, path string) error {
 	at := where{section: sec}
 	lines := strings.Split(f.Body, "\n")
 	res.lines(ix, rel, f.Body, headLines(b, f.Body), func(i int) where {
-		if m := statementRE.FindStringSubmatch(lines[i]); m != nil {
+		switch m := statementRE.FindStringSubmatch(lines[i]); {
+		case m != nil:
 			at = where{section: sec, label: m[1], tag: m[2]}
+		case headingRE.MatchString(lines[i]):
+			// Any other heading ends the statement and puts the § back in force.
+			// Bourbaki sets the proof directly after the statement with nothing
+			// between them, so a statement holds until something closes it, and
+			// the only thing that closes one is a heading: the next statement, or
+			// the subsection the next statement is under. Without this a statement
+			// held to the end of the § and the prose opening subsection 2 was
+			// attributed to the last lemma of subsection 1, which made its "(Lemma
+			// 1)" read as the lemma citing itself.
+			at = where{section: sec}
 		}
 		return at
 	})
