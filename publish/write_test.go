@@ -22,7 +22,7 @@ func testSite(t *testing.T) *Site {
 			Book: "alg", BookTitle: "Algebra", Chapter: "VIII",
 			ChapterTitle: "Semisimple Modules and Rings",
 			Section:      n, SectionTitle: title, Lang: lang, Statements: 2,
-			SourceEdition: "2023, Springer Nature",
+			SourceEdition: "2023, Springer Nature", Extraction: "native",
 		}
 	}
 	body := strings.Join([]string{
@@ -661,6 +661,130 @@ func TestALanguageTheCorpusLacksIsAnError(t *testing.T) {
 	// was asked for.
 	if strings.Join(got, ",") != "en,vi" {
 		t.Errorf("-lang reordered the languages: %v", got)
+	}
+}
+
+// Spec 12 §4.4: the coverage table is generated and not typed. The way to test
+// that is to move the corpus and watch the number move, since a page with the
+// right number hard coded in it passes every assertion about the right number.
+func TestTheAboutPageCountsTheCorpusRatherThanClaimingIt(t *testing.T) {
+	s := withDraft(t, testSite(t))
+	got := s.mustPage(t, "about/index.html")
+	// One § of the two the English holds.
+	if !strings.Contains(got, "<td>50%</td>") {
+		t.Errorf("the coverage table does not hold the share of the English:\n%s", got)
+	}
+
+	en := *s.Sections[0]
+	en.Meta.Section = 16
+	en.Slug = slug(en.Meta)
+	s.Sections = append(s.Sections, &en)
+	if err := s.index(); err != nil {
+		t.Fatal(err)
+	}
+	got = s.mustPage(t, "about/index.html")
+	if strings.Contains(got, "<td>50%</td>") || !strings.Contains(got, "<td>33%</td>") {
+		t.Errorf("the share did not follow the corpus:\n%s", got)
+	}
+}
+
+// Spec 12 §7: a language under the floor is listed on /about/ with its real
+// numbers. It is kept out of the switcher, and a language kept out of the
+// switcher and off the about page as well would be a language the site holds
+// and nobody can find.
+func TestALanguageUnderTheFloorIsListedOnAboutWithItsNumbers(t *testing.T) {
+	s := withDraft(t, testSite(t))
+	got := s.mustPage(t, "about/index.html")
+	if !strings.Contains(got, `<a href="/vi/alg/VIII/">vi</a>`) {
+		t.Errorf("a language under the floor is not linked from the about page:\n%s", got)
+	}
+	if !strings.Contains(got, "under the coverage floor") ||
+		!strings.Contains(got, "20 per cent") {
+		t.Errorf("the about page does not say what the floor is:\n%s", got)
+	}
+}
+
+// Spec 12 §7 again, gathered: the model that wrote a translation and the
+// glossary it was held to. The pages say it one at a time and this says it for
+// the corpus, which is the only place a reader sees that two models were used.
+func TestTheAboutPageNamesEveryModelThatWroteAPage(t *testing.T) {
+	s := withDraft(t, testSite(t))
+	// A second Vietnamese §, written in a later run by the full model, which is
+	// what the corpus itself holds.
+	vi := *s.Sections[len(s.Sections)-1]
+	vi.Meta.Section = 15
+	vi.Meta.TranslationModel = "gpt-5-6"
+	vi.Meta.GlossaryVersion = 14
+	vi.Slug = slug(vi.Meta)
+	s.Sections = append(s.Sections, &vi)
+	if err := s.index(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := s.mustPage(t, "about/index.html")
+	for _, want := range []string{"gpt-5-6 and gpt-5-6-mini", "versions 5 and 14", "cut down version"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the about page does not say %q:\n%s", want, got)
+		}
+	}
+	// And the transcriptions are not described as anything a model wrote, which
+	// is the distinction the whole section is for.
+	if !strings.Contains(got, "No model wrote those sentences") {
+		t.Errorf("the about page does not separate the transcription from the translation:\n%s", got)
+	}
+}
+
+// The claim about where the text came from is counted out of the front matter
+// rather than asserted, because the day a file is extracted some other way the
+// sentence has to change with it.
+func TestTheAboutPageDoesNotCallAnOCRedSectionNative(t *testing.T) {
+	s := testSite(t)
+	s.Sections[0].Meta.Extraction = "ocr"
+	s.Sections[0].Meta.ExtractionModel = "gpt-5-6"
+	got := s.mustPage(t, "about/index.html")
+	if strings.Contains(got, "with no model in the path at all") {
+		t.Errorf("a section a model read is counted as native:\n%s", got)
+	}
+	if !strings.Contains(got, "3 native and 1 ocr") {
+		t.Errorf("the about page does not count the extraction methods:\n%s", got)
+	}
+}
+
+// The unflattering numbers go up with the rest, which is the rule spec 12 §4.4
+// takes from design principle 6 of spec 00 and points at the public.
+func TestTheAboutPagePublishesTheNumbersThatDoNotFlatterIt(t *testing.T) {
+	s := testSite(t)
+	s.Edges, s.Unresolved = 2122, 149
+	s.CitedBy["00GJ"] = []*Edge{{FromTag: "00GO", FromLabel: "alg-viii-s14-lem-2",
+		ToTag: "00GJ", ToLabel: "alg-viii-s14-thm-1"}}
+
+	got := s.mustPage(t, "about/index.html")
+	for _, want := range []string{
+		"<td>2122</td>",   // references found
+		"<td>149</td>",    // and the ones that do not resolve
+		"<td>1 of 2</td>", // cited by nothing: 00GJ is cited, 00GO is not
+		"<td>2 of 2</td>", // and neither has a printed page in the fixture
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the about page does not publish %q:\n%s", want, got)
+		}
+	}
+	if got := s.mustPage(t, "index.html"); !strings.Contains(got, "149 do not resolve") {
+		t.Errorf("the front page does not publish the references that do not resolve:\n%s", got)
+	}
+}
+
+// P07 is that every page showing machine-written text says so. The line at the
+// foot says it for the page and the about page says it for the corpus, so every
+// page has to reach it in one click.
+func TestTheAboutPageIsLinkedFromEveryPage(t *testing.T) {
+	s := withDraft(t, testSite(t))
+	for _, rel := range []string{"index.html", "about/index.html", "search/index.html",
+		"tags/index.html", "en/alg/VIII/index.html", "en/alg/VIII/s14/index.html",
+		"tag/00GJ/index.html", "en/alg/VIII/s14/ex/8/index.html", "vi/alg/VIII/s14/index.html"} {
+		if got := s.mustPage(t, rel); !strings.Contains(got, `<a href="/about/">About</a>`) {
+			t.Errorf("%s does not link the about page:\n%s", rel, got)
+		}
 	}
 }
 
