@@ -834,6 +834,10 @@ table { border-collapse: collapse; width: 100%; font-size: .9rem; }
    is not right aligned is a column nobody can compare down. */
 table.report .num { text-align: right; white-space: nowrap; }
 table.report td:first-child { white-space: nowrap; }
+/* The parts of a multi-part solution. The part letter and its status are short
+   and fixed, and the reason is a sentence, so the sentence gets the width. */
+table.parts { margin-bottom: 1rem; }
+table.parts td:first-child, table.parts td:nth-child(2) { white-space: nowrap; width: 1%; }
 th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid var(--rule); }
 code { font-family: ui-monospace, monospace; font-size: .9em; }
 `

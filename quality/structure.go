@@ -206,16 +206,27 @@ func requireExercise(d Doc) []Finding {
 func requireSolution(d Doc) []Finding {
 	var out []Finding
 	m := d.Solution
-	switch m.Status {
-	case corpus.StatusVerified, corpus.StatusFailed, corpus.StatusUnattempted:
-	case "":
+	switch {
+	case m.Status == "":
 		out = append(out, Finding{File: d.Path, Line: 1, Msg: "status is empty"})
-	default:
+	case !corpus.ValidStatus(m.Status):
 		out = append(out, Finding{File: d.Path, Line: 1,
-			Msg: fmt.Sprintf("status %q is not one of verified, failed, unattempted", m.Status)})
+			Msg: fmt.Sprintf("status %q is not one of %s", m.Status,
+				strings.Join(corpus.Statuses, ", "))})
 	}
 	if m.Label == "" {
 		out = append(out, Finding{File: d.Path, Line: 1, Msg: "label is empty"})
+	}
+	for i, p := range m.Parts {
+		switch {
+		case p.ID == "":
+			out = append(out, Finding{File: d.Path, Line: 1,
+				Msg: fmt.Sprintf("part %d has no id", i+1)})
+		case !corpus.ValidStatus(p.Status):
+			out = append(out, Finding{File: d.Path, Line: 1,
+				Msg: fmt.Sprintf("part %s has status %q, which is not one of %s",
+					p.ID, p.Status, strings.Join(corpus.Statuses, ", "))})
+		}
 	}
 	return out
 }
