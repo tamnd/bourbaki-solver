@@ -34,7 +34,10 @@ flags:
   -lang CODE     vi, zh or ja, required
   -note TEXT     the same note on every row set here, which is where the reason
                  goes: a note is written for a person, never reaches a model,
-                 and is what stops the next pass from undoing this by hand
+                 and is what stops the next pass from undoing this by hand. A
+                 row whose rendering is already right takes the note anyway,
+                 and that on its own is not a new version, since nothing
+                 translated against this file is stale because of a note
   -corpus DIR    the checkout, default $BOURBAKI_CORPUS
   -write         write the file, which nothing does without it
 
@@ -76,11 +79,18 @@ func glossarySet(args []string) error {
 	type change struct {
 		at           int
 		en, was, now string
+		// noteOnly is a row whose rendering already reads the way it is asked
+		// to and whose note is being written or changed. It is a real edit and
+		// it is not a new version: a note is written for a person and never
+		// reaches a model, so nothing translated against this file is stale
+		// because of one.
+		noteOnly bool
 	}
 	index := map[string]int{}
 	for i, t := range g.Terms {
 		index[glossary.Key(t.EN)] = i
 	}
+	reason := strings.TrimSpace(*note)
 	changes := make([]change, 0, len(rest))
 	same := 0
 	for _, arg := range rest {
@@ -94,14 +104,23 @@ func glossarySet(args []string) error {
 			return fmt.Errorf("no row for %q, and set does not add rows", en)
 		}
 		was := g.Terms[at].In(*lang)
-		if was == rendering {
+		switch {
+		case was != rendering:
+			changes = append(changes, change{at: at, en: g.Terms[at].EN, was: was, now: rendering})
+		case reason != "" && reason != g.Terms[at].Note:
+			changes = append(changes, change{at: at, en: g.Terms[at].EN, was: was, now: rendering, noteOnly: true})
+		default:
 			same++
-			continue
 		}
-		changes = append(changes, change{at: at, en: g.Terms[at].EN, was: was, now: rendering})
 	}
 
+	renderings := 0
 	for _, c := range changes {
+		if c.noteOnly {
+			fmt.Printf("\t%-34s %s, and the note\n", c.en, c.now)
+			continue
+		}
+		renderings++
 		was := c.was
 		if was == "" {
 			was = "(none)"
@@ -115,7 +134,7 @@ func glossarySet(args []string) error {
 		fmt.Println("glossary set: nothing to change")
 		return nil
 	}
-	fmt.Printf("glossary set: %d renderings in %s\n", len(changes), *lang)
+	fmt.Printf("glossary set: %d renderings in %s, %d notes\n", renderings, *lang, len(changes)-renderings)
 	if !*write {
 		fmt.Println("nothing was written, run again with -write")
 		return nil
@@ -123,8 +142,8 @@ func glossarySet(args []string) error {
 
 	for _, c := range changes {
 		g.Terms[c.at].Set(*lang, c.now)
-		if strings.TrimSpace(*note) != "" {
-			g.Terms[c.at].Note = strings.TrimSpace(*note)
+		if reason != "" {
+			g.Terms[c.at].Note = reason
 		}
 	}
 	version, bumped, err := g.Save(glossary.Path(root))
