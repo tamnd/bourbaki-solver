@@ -117,7 +117,7 @@ const (
 		"COMPLETE: YES\nSELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: YES\nSCORE: 7/7\n"
 	fail = "The third step is asserted.\n\nVERDICT: FAIL\nTRUTH: FALSE\n" +
 		"COMPLETE: NO\nSELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: NO\nSCORE: 3/7\n"
-	work      = "CHECKED: the chain stops, it would fail if the chain were infinite, ruled out\n" +
+	work = "CHECKED: the chain stops, it would fail if the chain were infinite, ruled out\n" +
 		"TRIED: $M = \\mathbf{Z}$, the argument still runs\n\n"
 	auditPass = work + "I could not break it.\n\nVERDICT: PASS\nTRUTH: TRUE\n"
 	auditFail = work + "The case $n = 0$ is not covered.\n\nVERDICT: FAIL\nTRUTH: FALSE\n"
