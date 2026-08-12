@@ -730,6 +730,25 @@ func emit(toks []token) string {
 	// opened is where the dollar of the formula being written stands, so that a
 	// formula that turns out to hold nothing can take it back.
 	opened := 0
+	// primed says the base being written carries a prime, and baseAt is where
+	// that base begins. A prime is a superscript to TeX, so a base that carries
+	// one and then takes a superscript of its own is two superscripts against
+	// one base and TeX refuses it by name. The French chapter on the Brauer
+	// group writes \Gamma '_1^{\pi'_1} for the group of a subextension and
+	// KaTeX set none of them. The base and whatever index it has go inside
+	// braces, which is what the printed page shows and what anybody writing it
+	// out would do.
+	primed, baseAt := false, 0
+	brace := func() {
+		// baseAt has to be inside the formula being written. A prime is a mark
+		// on the base it is drawn against and nothing outside that formula, so
+		// a stale one would put a brace around the sentence in between.
+		if !primed || baseAt >= len(out) || baseAt <= opened {
+			return
+		}
+		out = out[:baseAt] + "{" + strings.TrimRight(out[baseAt:], " ") + "}"
+		primed = false
+	}
 	closeMath := func(compound bool) {
 		if !inMath {
 			return
@@ -780,6 +799,7 @@ func emit(toks []token) string {
 		gap := prev.right >= 0 && t.left-prev.right >= spaceGap(t)
 		if !t.math {
 			closeMath(!gap && compoundWord(text))
+			primed = false
 			switch {
 			case hyphenated:
 				text = strings.TrimLeft(text, " ")
@@ -812,11 +832,17 @@ func emit(toks []token) string {
 		}
 		if t.depth > len(open) {
 			for len(open) < t.depth {
+				if len(open) == 0 && t.level == Sup {
+					brace()
+				}
 				out = strings.TrimRight(out, " ") + mark(t.level) + "{"
 				open, at = append(open, t.level), append(at, len(out)-1)
 			}
 		} else if t.depth > 0 && open[len(open)-1] != t.level {
 			closeGroups(t.depth - 1)
+			if len(open) == 0 && t.level == Sup {
+				brace()
+			}
 			out += mark(t.level) + "{"
 			open, at = append(open, t.level), append(at, len(out)-1)
 		}
@@ -825,6 +851,13 @@ func emit(toks []token) string {
 		}
 		if openMacro(out) && startsWord(text) {
 			out += " "
+		}
+		if t.depth == 0 {
+			if strings.Trim(strings.TrimSpace(text), "'") == "" {
+				primed = true
+			} else {
+				primed, baseAt = false, len(out)
+			}
 		}
 		out += text
 		prev = t
