@@ -101,58 +101,101 @@ type Citation struct {
 	Line int
 }
 
-// The Books of the Éléments as the Springer translations title them. A citation
-// that opens with one of these leaves the corpus, which is not an error: it is
+// The Books of the Éléments as a citation can name them, with the code an edge
+// records when the reference leaves the corpus, which is not an error: it is
 // the list of what to ingest next.
-var books = []string{
-	"Set Theory",
-	"Theory of Sets",
-	"General Topology",
-	"Commutative Algebra",
-	"Topological Vector Spaces",
-	"Functions of a Real Variable",
-	"Differentiable and Analytic Manifolds",
-	"Lie Groups and Lie Algebras",
-	"Spectral Theories",
-	"Integration",
-	"Algebra",
+//
+// The book prints the table itself, in "To the Reader" on A VIII.v and A
+// VIII.vi: the French title, the English title, the code, and in brackets the
+// abbreviation the English printing uses when it cites. So both spellings are
+// the book's own and not a guess about how it might write them.
+//
+//	Théorie des ensembles (Theory of Sets)          E    (Set Theory)
+//	Algèbre (Algebra)                               A    (Alg.)
+//	Topologie générale (General Topology)           TG   (Gen. Top.)
+//	Fonctions d'une variable réelle
+//	  (Functions in One Real Variable)              FVR  (FRV)
+//	Espaces vectoriels topologiques
+//	  (Topological Vector Spaces)                   EVT  (Top. Vect. Sp.)
+//	Intégration (Integration)                       INT  (Int.)
+//	Algèbre commutative (Commutative Algebra)       AC   (Comm. Alg.)
+//	Variétés différentiables et analytiques         VAR
+//	Groupes et algèbres de Lie
+//	  (Lie Groups and Lie Algebras)                 LIE  (Lie)
+//	Théories spectrales                             TS
+//	Topologie Algébrique                            TA
+//
+// The abbreviations are not decoration. Chapter VIII cites another Book by its
+// abbreviation 37 times, and without them the citation does not fail, it
+// succeeds wrongly: "Gen. Top., III, §6, No. 5, p. 276" comes out as chapter
+// III of Algebra, because the chapter in Roman is all the locator can see. So
+// every one of those was an edge that named the wrong Book of the Éléments in
+// the report that says what to read in next.
+//
+// The bare codes are here because the exercises use them, and the single
+// letters A and E are not, because a letter followed by a Roman numeral is a
+// shape that mathematics writes for its own reasons.
+var books = []struct{ Name, Code string }{
+	{"Set Theory", "E"},
+	{"Theory of Sets", "E"},
+	{"General Topology", "TG"},
+	{"Gen. Top.", "TG"},
+	{"Commutative Algebra", "AC"},
+	{"Comm. Alg.", "AC"},
+	{"AC", "AC"},
+	{"Topological Vector Spaces", "EVT"},
+	{"Top. Vect. Sp.", "EVT"},
+	{"EVT", "EVT"},
+	{"Functions of a Real Variable", "FVR"},
+	{"Functions in One Real Variable", "FVR"},
+	{"FRV", "FVR"},
+	{"Differentiable and Analytic Manifolds", "VAR"},
+	{"VAR", "VAR"},
+	{"Lie Groups and Lie Algebras", "LIE"},
+	{"Lie", "LIE"},
+	{"Spectral Theories", "TS"},
+	{"TS", "TS"},
+	{"Integration", "INT"},
+	{"Int.", "INT"},
+	{"Algebra", "A"},
+	{"Alg.", "A"},
 }
 
 // Code is the letter Bourbaki gives a Book, which is what an edge records when
 // the citation leaves the corpus. They are the French initials, because that is
-// what the Éléments use in every language.
+// what the Éléments use in every language: the English printing of chapter VIII
+// cites Commutative Algebra as AC and not as CA.
 func Code(book string) string {
-	switch book {
-	case "Set Theory", "Theory of Sets":
-		return "E"
-	case "Algebra":
-		return "A"
-	case "General Topology":
-		return "TG"
-	case "Functions of a Real Variable":
-		return "FVR"
-	case "Topological Vector Spaces":
-		return "EVT"
-	case "Integration":
-		return "INT"
-	case "Lie Groups and Lie Algebras":
-		return "LIE"
-	case "Commutative Algebra":
-		return "AC"
-	case "Spectral Theories":
-		return "TS"
-	case "Differentiable and Analytic Manifolds":
-		return "VAR"
+	for _, b := range books {
+		if b.Name == book {
+			return b.Code
+		}
 	}
 	return ""
 }
 
-// bookAlt is the Books in the order the alternation tries them, which is why
-// Algebra comes last: at a given position the first alternative that matches
-// wins, and Algebra would take the tail of Commutative Algebra.
-var bookAlt = strings.Join(books, "|")
+// bookAlt is the Books in the order the alternation tries them, longest
+// spelling of a Book before its shortest, since at a given position the first
+// alternative that matches wins. The names are quoted, so the dot in "Comm.
+// Alg." is a dot and not any character, which is also what keeps that
+// alternative off the front of "Commutative Algebra".
+var bookAlt = bookNames()
 
-const part = `(?:,\s*[a-z]\))?`
+func bookNames() string {
+	out := make([]string, len(books))
+	for i, b := range books {
+		out[i] = regexp.QuoteMeta(b.Name)
+	}
+	return strings.Join(out, "|")
+}
+
+// part is the piece of a statement being pointed at, which the book writes into
+// the reference and which has to be read past rather than read: a part carries
+// no tag of its own, and a reference that stops at the number comes apart into
+// a bare statement and a page, of which the bare half is what the resolver
+// guesses at. Both shapes the chapter writes are here, "Corollary 1, c)" and
+// "Proposition 16, (ii)".
+const part = `(?:,\s*(?:[a-z]\)|\([ivx]+\)))?`
 
 const kindAlt = `Proposition|Theorem|Corollary|Lemma|Definition|Remark|Example|Exercise|Scholium`
 
@@ -162,6 +205,17 @@ const kindAlt = `Proposition|Theorem|Corollary|Lemma|Definition|Remark|Example|E
 // combinations in use, and the page is not, because it is the anchor the whole
 // scheme is built on.
 //
+// The no. is written either way round. "No. 4" is the English printing and
+// `n$^o4$` is the French, which the printing keeps whenever it cites a volume
+// that has not been translated: Algebra X, Spectral Theories, Topological
+// Vector Spaces, and chapter VIII of Commutative Algebra. There are 22 of them
+// and the kind that follows is in French too, "p. 9, exemple 1". The kind is
+// left unread, because every one of these leaves the corpus and a reference
+// that leaves the corpus is answered by its locator alone; the locator is not,
+// because without it the whole citation is invisible. That is worse than
+// unresolved: "Proposition 6 of X, §8, n$^o4$, p. 140" came apart into a bare
+// Proposition 6, which § 8 has, and the edge pointed at it.
+//
 // The optional dollar is a transcription artefact and not a form the book has.
 // Six pages of chapter VIII run the page number into the maths that follows it,
 // so "p. 213, θ is bijective" comes out as `p. $213,\theta$`. Six references is
@@ -169,7 +223,8 @@ const kindAlt = `Proposition|Theorem|Corollary|Lemma|Definition|Remark|Example|E
 // bare kind and number is the one thing the resolver is willing to guess at, so
 // each of these turns into a confident edge pointing at the wrong statement of
 // the wrong Book. Tolerating the dollar is cheaper than the guess.
-var locator = `(?:(` + bookAlt + `),\s*)?\b([IVX]+)(?:,\s*§\s*(\d+))?(,\s*Appendix)?(?:,\s*[Nn]o\.\s*(\d+))?,\s*p\.\s*\$?(\d+)`
+var locator = `(?:(` + bookAlt + `),\s*)?\b([IVX]+)(?:,\s*§\s*(\d+))?(,\s*Appendix)?` +
+	`(?:,\s*(?:[Nn]o\.\s*|n\$\^o)(\d+)\$?)?,\s*p\.\s*\$?(\d+)`
 
 // The forms, in the order they are tried. Order is the whole of the
 // difference between reading "Proposition 25 of II, §1, No. 13, p. 222" as one
@@ -185,12 +240,8 @@ var (
 	// because falling through reads it as two references, a bare Remark 1 of the
 	// § in hand and a page of chapter VIII that nothing points at.
 	//
-	// The optional letter is the part of a statement being pointed at, which the
-	// book writes into the reference: "Corollary 1, c) of VIII, p. 152" means
-	// part c) of that Corollary. There are 29 in the chapter. Nothing is done
-	// with the letter, since a part of a statement carries no tag of its own, but
-	// it has to be read past: left out, the reference comes apart into a bare
-	// Corollary 1 and a page, and the bare half is what the resolver guesses at.
+	// "Corollary 1, c) of VIII, p. 152" points at part c) of that Corollary and
+	// the chapter writes 29 of them, which is what part is for.
 	namedRE = regexp.MustCompile(`\b(` + kindAlt + `)\s+(\d+)` + part + `\s+(?:of\s+|\()` + locator)
 	// The locator on the end is what says which § the parent stands in, and
 	// leaving it out was the single largest fault in the graph. "the corollary
@@ -212,7 +263,17 @@ var (
 	leadRE    = regexp.MustCompile(locator + `,\s*[Cc]orollary\s*(\d*)` + part + `\s+(?:of|to)\s+(` + kindAlt + `)\s+(\d+)`)
 	pageRE    = regexp.MustCompile(locator + `(?:,\s*(` + kindAlt + `)\s*(\d+))?`)
 	formulaRE = regexp.MustCompile(`formula\s*\((\d+)\)`)
-	locCitRE  = regexp.MustCompile(`(loc\. cit\.)`)
+	// A statement of whatever was cited last: "follow the proof of Proposition
+	// 14 of loc. cit.". This has to be read whole and before the local form,
+	// which takes the head of it and hands the resolver a bare Proposition 14 to
+	// look for in the § the sentence stands in. The chapter writes it twice and
+	// neither reading survives being checked. One is an exercise of § 2 whose
+	// loc. cit. is Algebra II, and § 2 has no Proposition 14, so it was reported
+	// as a hole in the corpus that is not there. The other did resolve, and only
+	// because the work cited last happens to be the appendix the sentence is
+	// already standing in, which is luck and not a rule.
+	namedLocCitRE = regexp.MustCompile(`(\b(?:` + kindAlt + `)\s+\d+` + part + `\s+of\s+loc\. cit\.)`)
+	locCitRE      = regexp.MustCompile(`(loc\. cit\.)`)
 	// A second page in the same bracket does not repeat the chapter: the book
 	// writes "(VIII, p. 190, Corollary and p. 401, Corollary 1)" and means
 	// chapter VIII both times. Five references of the chapter are written this
@@ -233,7 +294,7 @@ var (
 // scanner is the alternation of them all, tried in that order. Go's regexp
 // prefers the earliest match and, among matches at the same place, the first
 // alternative that matches, which is exactly the precedence wanted here.
-var forms = []*regexp.Regexp{namedRE, attachedRE, leadRE, pageRE, formulaRE, locCitRE, contRE, localRE}
+var forms = []*regexp.Regexp{namedRE, attachedRE, leadRE, pageRE, formulaRE, namedLocCitRE, locCitRE, contRE, localRE}
 
 var scanner = regexp.MustCompile(alternation(forms))
 
@@ -256,7 +317,8 @@ var (
 	atLead     = atAttached + attachedRE.NumSubexp()
 	atPage     = atLead + leadRE.NumSubexp()
 	atFormula  = atPage + pageRE.NumSubexp()
-	atLocCit   = atFormula + formulaRE.NumSubexp()
+	atNamedLoc = atFormula + formulaRE.NumSubexp()
+	atLocCit   = atNamedLoc + namedLocCitRE.NumSubexp()
 	atCont     = atLocCit + locCitRE.NumSubexp()
 	atLocal    = atCont + contRE.NumSubexp()
 )
@@ -304,7 +366,8 @@ func blank(s string) string { return strings.Repeat(" ", len(s)) }
 // number the corollary.
 func citation(m []string, at Citation) (Citation, bool) {
 	named, attached, lead := atNamed, atAttached, atLead
-	page, formula, locCit, cont, local := atPage, atFormula, atLocCit, atCont, atLocal
+	page, formula, cont, local := atPage, atFormula, atCont, atLocal
+	namedLoc, locCit := atNamedLoc, atLocCit
 	switch {
 	case m[named] != "":
 		c := Citation{Raw: m[0], Form: FormNamed}
@@ -333,7 +396,7 @@ func citation(m []string, at Citation) (Citation, bool) {
 		return c, true
 	case m[formula] != "":
 		return Citation{Raw: m[0], Form: FormFormula, Kind: corpus.KindEquation, Number: atoi(m[formula])}, true
-	case m[locCit] != "":
+	case m[namedLoc] != "", m[locCit] != "":
 		return Citation{Raw: m[0], Form: FormLocCit}, true
 	case m[cont] != "":
 		// The chapter is whatever the last citation on this line named. Without

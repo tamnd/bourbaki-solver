@@ -187,6 +187,60 @@ func TestParse(t *testing.T) {
 		want: []Citation{{Raw: "II, §1, No. 9, p. 210, Corollary of Proposition 13", Form: FormAttached,
 			Chapter: "II", Section: 1, Subsec: 9, Page: 210,
 			Kind: corpus.KindCorollary, ParentKind: corpus.KindProposition, ParentNumber: 13}},
+	}, {
+		// Without the abbreviation this does not fail, it succeeds wrongly, as
+		// chapter III of Algebra: the Roman numeral is all the locator can see.
+		name: "a Book cited by its abbreviation",
+		in:   "Suppose that the ring A is Hausdorff and complete (Gen. Top., III, §6, No. 5, p. 276) for this",
+		want: []Citation{{Raw: "Gen. Top., III, §6, No. 5, p. 276", Form: FormPage,
+			Book: "Gen. Top.", Chapter: "III", Section: 6, Subsec: 5, Page: 276}},
+	}, {
+		name: "a Book cited by its abbreviation with the statement said first",
+		in:   "By Theorem 3 of Comm. Alg., II, §5, No. 4, p. 114, the following properties are equivalent:",
+		want: []Citation{{Raw: "Theorem 3 of Comm. Alg., II, §5, No. 4, p. 114", Form: FormNamed,
+			Book: "Comm. Alg.", Chapter: "II", Section: 5, Subsec: 4, Page: 114,
+			Kind: corpus.KindTheorem, Number: 3}},
+	}, {
+		// The exercises write the code instead, and FRV is the English
+		// printing's own spelling of the code of FVR.
+		name: "a Book cited by its code",
+		in:   "and therefore $\\sum_i|\\chi_i(g)|^2\\geqslant s($FRV, III, §1, No. 1, p. 93, Proposition 2).",
+		want: []Citation{{Raw: "FRV, III, §1, No. 1, p. 93, Proposition 2", Form: FormPage,
+			Book: "FRV", Chapter: "III", Section: 1, Subsec: 1, Page: 93,
+			Kind: corpus.KindProposition, Number: 2}},
+	}, {
+		// The second shape a part takes. Left unread the reference comes apart
+		// into a bare Proposition 16, which § 20 does not have, and a page of
+		// chapter II that nothing points at.
+		name: "a part written in roman numerals",
+		in:   "By Proposition 16, (ii) of II, §7, No. 7, p. 308, the mapping $j_n$ is injective.",
+		want: []Citation{{Raw: "Proposition 16, (ii) of II, §7, No. 7, p. 308", Form: FormNamed,
+			Chapter: "II", Section: 7, Subsec: 7, Page: 308,
+			Kind: corpus.KindProposition, Number: 16}},
+	}, {
+		// One reference to the work cited last, not a local Proposition 14 and a
+		// loc. cit. beside it.
+		name: "a statement of the work cited last",
+		in:   "such that we have PXQ = diag(1$, . . . ,1, \\delta )$ (follow the proof of Proposition 14 of loc. cit.).",
+		want: []Citation{{Raw: "Proposition 14 of loc. cit.", Form: FormLocCit}},
+	}, {
+		// The printing keeps the French no. whenever it cites a volume that has
+		// not been translated. The kind that follows is French too and is left
+		// unread, which costs nothing: chapter X is not in the corpus and the
+		// locator alone answers the reference.
+		name: "the no. written in French",
+		in:   "hence flat (X, §1, n$^o3$, p. 9, exemple 1), the A-module Hom$_B(Q,V)$ is injective",
+		want: []Citation{{Raw: "X, §1, n$^o3$, p. 9", Form: FormPage,
+			Chapter: "X", Section: 1, Subsec: 3, Page: 9}},
+	}, {
+		// The same, with a statement said first. Read without the French no. the
+		// locator fails and a bare Proposition 6 is left behind, which § 8 has,
+		// so the edge pointed at a statement of this chapter.
+		name: "the no. written in French with the statement said first",
+		in:   "For other characterizations of semisimple rings, see Proposition 6 of X, §8, n$^o4$, p. $140.*$",
+		want: []Citation{{Raw: "Proposition 6 of X, §8, n$^o4$, p. $140", Form: FormNamed,
+			Chapter: "X", Section: 8, Subsec: 4, Page: 140,
+			Kind: corpus.KindProposition, Number: 6}},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Parse(tc.in, 1)
@@ -215,6 +269,62 @@ func TestParsePrefersTheLongerBookTitle(t *testing.T) {
 	}
 	if Code(got[0].Book) != "AC" {
 		t.Errorf("the code came out as %q", Code(got[0].Book))
+	}
+}
+
+// Every spelling of a Book that is not this one leaves the corpus under the
+// code the Éléments give it, which is what the report that says what to ingest
+// next is counted on. Before the abbreviations were read, 37 references of the
+// chapter were counted against a chapter of Algebra instead.
+func TestABookCitedByAnythingButItsFullTitleStillLeavesTheCorpus(t *testing.T) {
+	for _, tc := range []struct{ in, book, code string }{
+		{"complete (Gen. Top., III, §6, No. 5, p. 276) for this topology", "Gen. Top.", "TG"},
+		{"By Theorem 3 of Comm. Alg., II, §5, No. 4, p. 114, the following", "Comm. Alg.", "AC"},
+		{"$\\geqslant s($FRV, III, §1, No. 1, p. 93, Proposition 2).", "FRV", "FVR"},
+		{"the bracket (Lie, I, §2, No. 7, p. 21) is then", "Lie", "LIE"},
+		{"the ring A is regular (AC, X, §4, n$^o2$, p. 55), then", "AC", "AC"},
+		{"By TS, II, §3, n$^o2$, p. 252, the mapping", "TS", "TS"},
+		{"is closed in D (EVT, I, §2, n$^o3$, p. 14), we obtain", "EVT", "EVT"},
+	} {
+		t.Run(tc.book, func(t *testing.T) {
+			got := Parse(tc.in, 1)
+			if len(got) != 1 {
+				t.Fatalf("read %d citations: %+v", len(got), got)
+			}
+			if got[0].Book != tc.book {
+				t.Fatalf("the Book came out as %q, want %q", got[0].Book, tc.book)
+			}
+			// The index is empty on purpose: a reference that leaves the corpus is
+			// answered before anything is looked up in one.
+			target, err := (&Index{}).Resolve(got[0], Site{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if target.How != OutOfCorpus || target.Book != tc.code {
+				t.Errorf("resolved by %s to Book %q, want %s to %q",
+					target.How, target.Book, OutOfCorpus, tc.code)
+			}
+		})
+	}
+}
+
+// Algebra is this Book under either spelling, so neither of them may be sent
+// out of the corpus the way the Books above are.
+func TestThisBookIsNotSentOutOfTheCorpusByItsOwnName(t *testing.T) {
+	for _, name := range []string{"Algebra", "Alg."} {
+		if code := Code(name); code != "A" {
+			t.Fatalf("%q has code %q, want A", name, code)
+		}
+		c := Citation{Book: name, Chapter: "III", Page: 100, Form: FormPage}
+		target, err := (&Index{}).Resolve(c, Site{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Chapter III of Algebra is out of the corpus because the corpus holds
+		// one chapter, not because the Book is another Book.
+		if target.Book != "A" {
+			t.Errorf("%q resolved to Book %q, want A", name, target.Book)
+		}
 	}
 }
 

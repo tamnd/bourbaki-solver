@@ -67,7 +67,11 @@ type Site struct {
 
 // Resolve looks a citation up.
 func (ix *Index) Resolve(c Citation, at Site) (Target, error) {
-	if code := Code(c.Book); code != "" && c.Book != "Algebra" {
+	// Tested on the code and not on the name, since a Book has more than one
+	// spelling and this one has two, Algebra and Alg. Comparing the name would
+	// take every reference the chapter makes to itself under the second of them
+	// out of the corpus.
+	if code := Code(c.Book); code != "" && code != "A" {
 		return Target{How: OutOfCorpus, Book: code}, nil
 	}
 	from := at.Section
