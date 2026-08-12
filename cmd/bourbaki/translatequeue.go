@@ -1,0 +1,221 @@
+package main
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/tamnd/bourbaki-solver/queue"
+	"github.com/tamnd/bourbaki-solver/translate"
+)
+
+// The durable half of translating.
+//
+// A section is fifteen chunks and eleven minutes, and the largest section in
+// chapter VIII is a hundred thousand characters, which is over two hours. A run
+// that keeps its answers in memory and writes the file at the end throws all of
+// that away when a tunnel drops, and the chapter is twenty six sections. So each
+// chunk is a job on the queue and each accepted answer is a file, and a run that
+// is killed halfway costs the chunk it was holding and nothing else.
+//
+// The unit is the chunk and not the section, because the section is what cannot
+// be partly written. Half a translated § is worse than none: the audit counts it
+// as translated and a reader has no way to see where the English stopped being
+// carried over. A chunk has no such problem, since it is only ever joined back
+// with the others and audited whole before anything reaches content/.
+//
+// What the queue adds over the answers on disk is the bound. A chunk the model
+// cannot get right is asked three times across three runs and is then dead, and
+// dead is a state somebody reads, rather than a section that quietly refuses
+// itself every night for a week.
+
+// translateGroup names the queue group a section's chunks belong to.
+//
+// Lease takes a group so that a worker cannot pick up work from somewhere else,
+// and here somewhere else is another section: this run asks for the chunks of
+// one section at a time and joins them, so a chunk of the next section leased
+// into this one would be a chunk nobody puts anywhere. The name is the language
+// and the source, which is what chunkID already names a box's scratch directory
+// with, so the two line up when somebody is reading both.
+func translateGroup(lang, source string) string {
+	sum := sha256.Sum256([]byte(source))
+	return fmt.Sprintf("%s-%s", lang, hex.EncodeToString(sum[:])[:6])
+}
+
+func translateTarget(lang, source string, index int) string {
+	return fmt.Sprintf("%s/%03d", translateGroup(lang, source), index)
+}
+
+// chunkInput is the content address of one chunk of work.
+//
+// The terminology is in it as well as the text. A glossary row that reaches this
+// section changes the question, so it has to change the job: without it, the
+// chunk is done, the queue says so, and the next run reads back an answer made
+// under terminology nobody uses any more. This is the same fact the front matter
+// records as glossary_terms_sha256, one level down.
+func chunkInput(body, terms string) string {
+	sum := sha256.Sum256([]byte(body + "\x00" + terms))
+	return hex.EncodeToString(sum[:])
+}
+
+// accepted is a chunk's answer, kept because the run that asked for it may not
+// be the run that writes the section.
+type accepted struct {
+	Source string `json:"source"`
+	Chunk  int    `json:"chunk"`
+	Of     int    `json:"of"`
+	Input  string `json:"input_sha256"`
+	Model  string `json:"model"`
+	Text   string `json:"text"`
+}
+
+// acceptedPath is beside the questions and the answers of every attempt, under
+// work, which is not in the repository.
+func acceptedPath(root, lang, source string, index int) string {
+	dir := filepath.Join(root, "work", "translate", lang, strings.ReplaceAll(source, "/", "_"))
+	return filepath.Join(dir, fmt.Sprintf("%03d.accepted.json", index))
+}
+
+// writeAccepted puts the answer down by temp file and rename, so a reader sees
+// the whole of one answer or none of it.
+func writeAccepted(root, lang string, a accepted) error {
+	path := acceptedPath(root, lang, a.Source, a.Chunk)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(a, "", "  ")
+	if err != nil {
+		return err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), "accepted.*.tmp")
+	if err != nil {
+		return err
+	}
+	name := file.Name()
+	defer os.Remove(name)
+	if _, err := file.Write(append(raw, '\n')); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
+}
+
+// readAccepted is the answer already on disk for this exact chunk, if there is
+// one.
+//
+// The input hash is compared rather than trusted. work/ is not in the repository
+// and nothing stops a person from re-extracting the English underneath it, and
+// an answer to a question nobody would ask today is not an answer.
+func readAccepted(root, lang, source string, index int, input string) (accepted, bool) {
+	raw, err := os.ReadFile(acceptedPath(root, lang, source, index))
+	if err != nil {
+		return accepted{}, false
+	}
+	var a accepted
+	if err := json.Unmarshal(raw, &a); err != nil {
+		return accepted{}, false
+	}
+	if a.Input != input || strings.TrimSpace(a.Text) == "" {
+		return accepted{}, false
+	}
+	return a, true
+}
+
+// chunkLease is how long a worker says it will be. A chunk of six thousand
+// characters has measured between forty and seventy seconds, and a chunk that
+// does not pass is asked a second time inside the same lease, so this is three
+// minutes and the queue adds its own slack on top.
+const chunkLease = 3 * time.Minute
+
+// chunkOf finds the chunk a leased job is for.
+//
+// By the number in the target rather than by the order jobs come back in, since
+// two lanes are leasing at once and the answer has to go back where it came
+// from.
+func chunkOf(j job, item queue.Job) (int, translate.Chunk, bool) {
+	_, number, ok := strings.Cut(item.Target, "/")
+	if !ok {
+		return 0, translate.Chunk{}, false
+	}
+	index, err := strconv.Atoi(number)
+	if err != nil {
+		return 0, translate.Chunk{}, false
+	}
+	for _, c := range j.chunks {
+		if c.Index == index {
+			return index, c, true
+		}
+	}
+	return 0, translate.Chunk{}, false
+}
+
+// plan decides, for every chunk of one section, whether the answer is in hand,
+// whether the chunk goes on the queue, and whether it is out of attempts.
+//
+// The four cases are worth naming because three of them are quiet failures if
+// they are left out. A chunk whose answer is on disk must not be asked again, or
+// the queue buys nothing. A chunk the queue calls done whose answer is not on
+// disk must be asked again, or the section can never be written: work/ is
+// scratch and gets cleaned, and a record that says done when the answer is gone
+// is a record that has to follow the answer. A chunk that is dead must not be
+// quietly retried, because three attempts that fail the same way are what dead
+// means and a person is meant to read it. And -force must reach a chunk that is
+// done, which is the whole of what -force is for: the answer is there and it was
+// written on a cut down model.
+func plan(q *queue.Queue, root, lang, promptHash string, j job, force bool) (have map[int]accepted, queued int, stuck map[int][]translate.Problem, err error) {
+	have, stuck = map[int]accepted{}, map[int][]translate.Problem{}
+	for _, c := range j.chunks {
+		input := chunkInput(c.Body, j.terms)
+		target := translateTarget(lang, j.source, c.Index)
+		id := queue.NewID(queue.StageTranslate, target, input, promptHash)
+
+		if !force {
+			if a, ok := readAccepted(root, lang, j.source, c.Index, input); ok {
+				have[c.Index] = a
+				continue
+			}
+		}
+		_, state, findErr := q.Find(queue.StageTranslate, id)
+		switch {
+		case findErr != nil && !os.IsNotExist(findErr):
+			return nil, 0, nil, findErr
+		case state == queue.Dead && !force:
+			stuck[c.Index] = []translate.Problem{{Rule: "queue", Msg: "it is dead after every attempt, " +
+				"read it with bourbaki queue list -stage translate -state dead and put it back with bourbaki queue retry -stage translate"}}
+			continue
+		case state == queue.Leased:
+			stuck[c.Index] = []translate.Problem{{Rule: "queue",
+				Msg: "it is leased by another run, so this one is not asking for it"}}
+			continue
+		case state == queue.Done || state == queue.Failed || force:
+			// Done with no answer beside it, or a person asking again. Either
+			// way the work is the same work, so it keeps its id and its history
+			// rather than arriving as something new.
+			if _, err := q.Reset(queue.StageTranslate, id); err != nil {
+				return nil, 0, nil, err
+			}
+		}
+		item := queue.New(queue.StageTranslate, target, input, promptHash)
+		item.Meta = map[string]string{
+			"lang": lang, "source": j.source,
+			"chunk": strconv.Itoa(c.Index), "of": strconv.Itoa(c.Of),
+		}
+		if _, err := q.Add(item); err != nil {
+			return nil, 0, nil, err
+		}
+		queued++
+	}
+	return have, queued, stuck, nil
+}

@@ -528,6 +528,41 @@ func (q *Queue) Retry(stage Stage, states ...State) (int, error) {
 	return moved, nil
 }
 
+// Reset puts one job back in pending wherever it is, with its attempts cleared,
+// and says whether it found it.
+//
+// Retry is the same idea over a whole state, for after a fix. This is for one
+// job that is done and is wanted again anyway, which is what translate -force
+// asks for. The id is the content address of the work, so a chunk that is asked
+// again is the same job and not a new one: the history of what the last answer
+// was and which host gave it stays on the file, and that is the point of doing
+// it this way rather than by writing a fresh id nobody can line up with the old
+// one.
+//
+// A leased job is left alone. Resetting one would hand the same work to a second
+// worker while the first is still holding it, and the lease is there to expire
+// on its own.
+func (q *Queue) Reset(stage Stage, id string) (bool, error) {
+	for _, state := range []State{Done, Failed, Dead} {
+		job, err := q.read(state, stage, id)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		job.Attempts, job.Lease = 0, nil
+		if err := q.write(Pending, job); err != nil {
+			return false, err
+		}
+		if err := os.Remove(q.path(stage, state, id)); err != nil && !os.IsNotExist(err) {
+			return false, err
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
 // Drain removes pending jobs. Done, failed and dead stay: they are the record
 // of what happened, and a queue that forgets its dead jobs is a queue that
 // reports a clean run.

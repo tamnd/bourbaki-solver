@@ -418,6 +418,52 @@ func TestRetryAndDrain(t *testing.T) {
 	}
 }
 
+// A done job asked for again is the same job. That is what -force wants: the
+// answer is there and somebody wants another one anyway, usually because the
+// account was being served a cut down model when the first one was written.
+func TestResetAsksForDoneWorkAgain(t *testing.T) {
+	q := open(t)
+	job := add(t, q, "alg-i-iii/0045")
+	leased, err := q.Lease(StageOCR, "server3", "", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Finish(leased, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	if added, err := q.Add(job); err != nil || added {
+		t.Fatalf("Add of a done job = %v %v, want it left alone", added, err)
+	}
+
+	found, err := q.Reset(StageOCR, job.ID)
+	if err != nil || !found {
+		t.Fatalf("Reset = %v %v", found, err)
+	}
+	stats, _ := q.Stats(StageOCR)
+	if stats.Counts[Pending] != 1 || stats.Counts[Done] != 0 {
+		t.Fatalf("counts after reset = %+v", stats.Counts)
+	}
+	back, err := q.Lease(StageOCR, "server3", "", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Attempts != 1 {
+		t.Errorf("attempts = %d, want the count cleared", back.Attempts)
+	}
+	if len(back.History) == 0 {
+		t.Error("reset threw away the history of the answer that was there")
+	}
+
+	// The one it is holding belongs to a worker that has not come back yet, and
+	// handing the same work out twice is what the lease is there to prevent.
+	if found, err := q.Reset(StageOCR, back.ID); err != nil || found {
+		t.Errorf("Reset of a leased job = %v %v, want it left alone", found, err)
+	}
+	if found, err := q.Reset(StageOCR, "no such job"); err != nil || found {
+		t.Errorf("Reset of a job that is not there = %v %v", found, err)
+	}
+}
+
 func TestRetryFromPendingIsRefused(t *testing.T) {
 	q := open(t)
 	if _, err := q.Retry(StageOCR, Done); err == nil {

@@ -612,6 +612,15 @@ func stripMath(s string) string {
 // says so in the suffix.
 var smallModel = regexp.MustCompile(`(?i)[-_](mini|nano|lite|small|flash|turbo)\b`)
 
+// SmallModel is the same test, for the run rather than for the audit.
+//
+// L08 finds a cut down model after the file is written, which for a section of
+// fifteen chunks is eleven minutes too late and for a chapter of twenty six
+// sections is a night of it. The run says so on the first chunk that comes back
+// that way, and it is the same rule saying it, because two answers to "is this a
+// small model" is one answer too many.
+func SmallModel(name string) bool { return smallModel.MatchString(name) }
+
 // L08. No translation was written by a small model.
 //
 // Nobody chooses the model here. The ask goes to a browser profile signed in to
@@ -645,7 +654,7 @@ func l08(c *Corpus) ([]Finding, error) {
 		case d.Exercise != nil:
 			model = d.Exercise.TranslationModel
 		}
-		if !smallModel.MatchString(model) {
+		if !SmallModel(model) {
 			continue
 		}
 		out = append(out, Finding{File: d.Path, Line: 1,
