@@ -141,3 +141,31 @@ func TestANoteWithAColonInItStillParses(t *testing.T) {
 		t.Fatalf("the file does not parse: %v", err)
 	}
 }
+
+// Writing down why a row reads the way it does is an edit in its own right, and
+// the first version of this refused it, because the rendering was already what
+// it was being set to. It is also not a new version: a note never reaches a
+// model, so nothing translated against this file is stale because of one.
+func TestANoteOnARowThatIsAlreadyRightIsStillAnEdit(t *testing.T) {
+	root := setCorpus(t)
+	args := []string{"-corpus", root, "-lang", "vi", "-write",
+		"-note", "The ring is written in front and its letter is a capital.",
+		"free A-module=môđun tự do trên a"}
+	if err := glossarySet(args); err != nil {
+		t.Fatal(err)
+	}
+	g := loaded(t, root)
+	if g.Terms[0].Note == "" {
+		t.Fatal("the note was refused because the rendering was already right")
+	}
+	if g.Version != 11 {
+		t.Errorf("version = %d, want it left alone, since a note stales nothing", g.Version)
+	}
+	// And the same note twice is nothing at all.
+	if err := glossarySet(args); err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded(t, root).Version; got != 11 {
+		t.Errorf("version = %d after writing the same note twice", got)
+	}
+}
