@@ -167,6 +167,14 @@ func (a Ask) Do(ctx context.Context) (Answer, error) {
 	if err != nil {
 		return Answer{}, fmt.Errorf("read the answer from %s: %w", a.Host.Name, err)
 	}
+	// The service answers its own failures in the same place it answers
+	// questions, with nothing else to say it did. Read as an answer, that page is
+	// a judge with no verdict in it, and the caller files the exercise as failed
+	// for a reason that has nothing to do with the exercise.
+	if why := ProviderFailure(text); why != "" {
+		return Answer{}, fmt.Errorf("question %s on %s: the service answered with its own error page: %s",
+			a.ID, a.Host.Name, why)
+	}
 	out := Answer{Text: text, Elapsed: time.Since(started)}
 	// The metadata is a convenience and its absence is not a failure. An older
 	// tool does not write it, and the answer is the answer either way.

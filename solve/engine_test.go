@@ -23,6 +23,10 @@ type asker struct {
 	// asked is every question put, in order, with its id.
 	asked []struct{ id, question string }
 	err   map[string]error
+	// fails is how many times a stage does not come back at all before it
+	// answers, which is a host dropping the connection and not a model saying
+	// something unreadable.
+	fails map[string]int
 }
 
 func (a *asker) Ask(_ context.Context, id, question string) (Answer, error) {
@@ -30,6 +34,10 @@ func (a *asker) Ask(_ context.Context, id, question string) (Answer, error) {
 	stage := stageOf(id)
 	if err, ok := a.err[stage]; ok {
 		return Answer{}, err
+	}
+	if n := a.fails[stage]; n > 0 {
+		a.fails[stage] = n - 1
+		return Answer{}, errNo
 	}
 	answers, ok := a.by[stage]
 	if !ok {
@@ -109,7 +117,8 @@ const (
 )
 
 func engine(a *asker) Engine {
-	return Engine{Ask: a, Now: func() time.Time { return time.Unix(1700000000, 0) }}
+	return Engine{Ask: a, Now: func() time.Time { return time.Unix(1700000000, 0) },
+		Pause: func(context.Context, time.Duration) error { return nil }}
 }
 
 func TestAnExerciseSolvedAndBelieved(t *testing.T) {
@@ -502,6 +511,49 @@ func TestTheSelectorIsGivenTheObligationsAndNoMore(t *testing.T) {
 	// The audit judge is not, which is the whole of why there are two.
 	if strings.Contains(a.question(t, "audit"), "Falsification Checks") {
 		t.Error("the audit judge was given the reference")
+	}
+}
+
+// A call that did not come back at all is not an answer that could not be read.
+// The service answers its own failures in the same place it answers questions,
+// and an exercise with five calls already spent on it is not worth losing to a
+// bad minute on somebody's account.
+func TestACallThatDidNotComeBackIsTriedAgain(t *testing.T) {
+	a := &asker{by: map[string][]string{
+		"reference": {reference}, "candidate-direct": {answer},
+		"candidate-contrapositive": {answer}, "candidate-elementary": {answer},
+		"select": {"SELECTED: 1"}, "truth": {pass}, "audit": {auditPass},
+	}, fails: map[string]int{"truth": 2}}
+	got, err := engine(a).Solve(context.Background(), exercise("Prove it."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Solution.Meta.Status != corpus.StatusVerified {
+		t.Errorf("status %q", got.Solution.Meta.Status)
+	}
+	var truth []string
+	for _, q := range a.asked {
+		if stageOf(q.id) == "truth" {
+			truth = append(truth, q.id)
+			// No note. A host that dropped the connection was not told anything
+			// and did not misread it, and a complaint about an answer nobody sent
+			// is a complaint the next model has to work out is not about it.
+			if strings.HasPrefix(q.question, "Your previous answer") {
+				t.Errorf("%s was sent a note about a call that never landed", q.id)
+			}
+		}
+	}
+	// Three asks, numbered apart, so the archive keeps them apart too.
+	if want := []string{"alg-viii-s1-ex-1-truth-1", "alg-viii-s1-ex-1-truth-2",
+		"alg-viii-s1-ex-1-truth-3"}; !equal(truth, want) {
+		t.Errorf("the truth judge was asked %v", truth)
+	}
+	// And the two that did not come back are not in the call log, because
+	// nothing was said and nothing was charged.
+	for _, c := range got.Calls {
+		if c.Stage == "truth" && c.Attempt != 3 {
+			t.Errorf("the log carries a call that never landed: %+v", c)
+		}
 	}
 }
 
