@@ -63,6 +63,19 @@ type Engine struct {
 	// first, and it is for an answer that did not carry its decision lines
 	// rather than for one that decided something unwelcome.
 	Attempts int
+	// Retries is how many times a call that did not come back at all is tried
+	// again, 3 by default, with a pause between.
+	//
+	// This is not Attempts, and the two are counted apart because they are two
+	// different things gone wrong. An answer that did not carry its decision has
+	// been thought about, and asking again is asking the same model the same
+	// question. A host that dropped the connection, or a service that answered
+	// with its own error page, has not answered at all, and the exercise behind
+	// it may have five calls already spent on it.
+	Retries int
+	// Pause is how the retry waits. A service that has just said something went
+	// wrong is likelier than not to say it again a second later.
+	Pause func(ctx context.Context, d time.Duration) error
 
 	// Archive is given every question and every answer, before anything is
 	// judged. A solution goes into a book and the run that produced it is the
@@ -116,6 +129,30 @@ func (e Engine) attempts() int {
 		return e.Attempts
 	}
 	return 2
+}
+
+func (e Engine) retries() int {
+	if e.Retries > 0 {
+		return e.Retries
+	}
+	return 3
+}
+
+// pause waits between retries. The wait grows, because a service that is having
+// a bad minute is having a bad minute and not a bad second.
+func (e Engine) pause(ctx context.Context, n int) error {
+	d := time.Duration(n) * 30 * time.Second
+	if e.Pause != nil {
+		return e.Pause(ctx, d)
+	}
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (e Engine) now() time.Time {
@@ -248,17 +285,29 @@ type state struct {
 // mistake, and it worked until a section was long enough that it did not.
 func (s *state) ask(ctx context.Context, stage, question string, want func(string) error) (string, error) {
 	var last error
-	for attempt := 1; attempt <= s.engine.attempts(); attempt++ {
+	// unread is answers that came back and could not be read, retries is calls
+	// that did not come back at all, and they are counted apart because they are
+	// two different things gone wrong. Only the first is worth a note: a host
+	// that dropped the connection was not told anything and did not misread it.
+	unread, retries := 0, 0
+	for attempt := 1; ; attempt++ {
 		asked := question
-		if attempt > 1 {
+		if unread > 0 {
 			asked = note(last) + question
 		}
 		id := fmt.Sprintf("%s-%s-%d", s.ctx.Label, stage, attempt)
 		answer, err := s.engine.Ask.Ask(ctx, id, asked)
 		if err != nil {
 			last = err
-			s.engine.logf("%s %s attempt %d: %v", s.ctx.Label, stage, attempt, err)
+			retries++
+			s.engine.logf("%s %s attempt %d did not come back: %v", s.ctx.Label, stage, attempt, err)
 			if ctx.Err() != nil {
+				return "", err
+			}
+			if retries >= s.engine.retries() {
+				break
+			}
+			if err := s.engine.pause(ctx, retries); err != nil {
 				return "", err
 			}
 			continue
@@ -277,7 +326,11 @@ func (s *state) ask(ctx context.Context, stage, question string, want func(strin
 		text := textguard.Strip(answer.Text)
 		if err := want(text); err != nil {
 			last = err
+			unread++
 			s.engine.logf("%s %s attempt %d: %v", s.ctx.Label, stage, attempt, err)
+			if unread >= s.engine.attempts() {
+				break
+			}
 			continue
 		}
 		return text, nil
