@@ -11,7 +11,9 @@ import (
 	"html"
 	"regexp"
 	"strings"
+	"sync"
 
+	"github.com/tamnd/bourbaki-solver/katex"
 	"github.com/tamnd/bourbaki-solver/mathtex"
 )
 
@@ -60,23 +62,90 @@ func mask(body string) (string, []mathtex.Span, error) {
 
 var placeholderRE = regexp.MustCompile("\x00m(\\d+)\x00")
 
-// unmask puts the mathematics back, as markup rather than as source.
+// mathEngine is the one KaTeX engine the package uses.
 //
-// The TeX is written out with its delimiters, which is not decoration: KaTeX is
-// not run yet, so what a reader sees today is the source, and the source is
-// what a reader can check against the printed page. When KaTeX lands it
-// replaces the contents of these elements and the elements themselves do not
-// move.
-func unmask(s string, spans []mathtex.Span) string {
+// It is package state, which is worth a word. Loading katex.min.js costs about
+// a fifth of a second and rendering a span costs a fraction of a millisecond,
+// and the corpus has 20 thousand spans, so building an engine per Renderer
+// would be a fifth of a second per section for nothing. The engine holds no
+// corpus state, is safe to call from several goroutines, and answers the same
+// TeX with the same bytes for the life of the process, so sharing it cannot
+// make two builds differ.
+var mathEngine = sync.OnceValues(katex.New)
+
+// unmask puts the mathematics back, rendered.
+//
+// A span KaTeX refuses stops the build. There is a tempting fallback here, of
+// writing the TeX source out and letting the reader see it, and it is the wrong
+// one: the site would then publish a formula the extraction got wrong in a form
+// that looks deliberate, and nobody would ever fix it. The error names the file,
+// the line and the span, which is what somebody needs to open the page and
+// compare it against the book.
+func (r Renderer) unmask(s string, spans []mathtex.Span) (string, error) {
+	if len(spans) == 0 {
+		return s, nil
+	}
+	eng, err := mathEngine()
+	if err != nil {
+		return "", err
+	}
+	out := make([]string, len(spans))
+	for i, sp := range spans {
+		m, err := eng.Render(sp.Text, sp.Display)
+		if err != nil {
+			ref := Refusal{At: r.at(sp.Line), Span: sp.Text, Why: err.Error(), Display: sp.Display}
+			if r.OnRefusal == nil {
+				return "", ref
+			}
+			out[i] = r.OnRefusal(ref)
+			continue
+		}
+		// The wrapper stays even though KaTeX brings its own. It is what the
+		// stylesheet of this site hangs the scroll on a display too wide for a
+		// phone, and keeping it means the rest of the page does not change
+		// shape when KaTeX does.
+		if sp.Display {
+			out[i] = `<div class="math display">` + m + `</div>`
+			continue
+		}
+		out[i] = `<span class="math">` + m + `</span>`
+	}
 	return placeholderRE.ReplaceAllStringFunc(s, func(m string) string {
 		var i int
 		fmt.Sscanf(m, "\x00m%d\x00", &i)
-		sp := spans[i]
-		if sp.Display {
-			return `<div class="math display">$$` + html.EscapeString(sp.Text) + `$$</div>`
-		}
-		return `<span class="math">$` + html.EscapeString(sp.Text) + `$</span>`
-	})
+		return out[i]
+	}), nil
+}
+
+// A Refusal is one span KaTeX would not set, and where it is.
+type Refusal struct {
+	At      string // file:line, or line N when the body came from nowhere
+	Span    string // the TeX as the corpus has it
+	Why     string // KaTeX's own message, which names the character it stopped at
+	Display bool
+}
+
+func (r Refusal) Error() string {
+	return fmt.Sprintf("%s: %s: %s", r.At, r.Why, oneLine(r.Span))
+}
+
+// at is where a body line is in the corpus, in the file:line form an editor and
+// a CI annotation both take.
+func (r Renderer) at(line int) string {
+	if r.File == "" {
+		return fmt.Sprintf("line %d", line)
+	}
+	return fmt.Sprintf("%s:%d", r.File, r.Line+line-1)
+}
+
+// oneLine puts a span on one line and cuts it, so that a display of fifteen
+// lines does not bury the sentence that names it.
+func oneLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len([]rune(s)) > 60 {
+		s = string([]rune(s)[:60]) + "..."
+	}
+	return s
 }
 
 // headingRE reads a heading and the attribute block assembly writes on it:
@@ -157,6 +226,20 @@ type Renderer struct {
 	// Dir is the URL that a relative link in the body resolves against, ending
 	// in a slash. Empty leaves relative links alone.
 	Dir string
+	// File and Line say where the body came from: the path as committed, and
+	// the file line the body's first line sits on. They are for the one message
+	// this renderer can produce, a formula KaTeX will not read, and a message
+	// that cannot be turned back into a place in a file is a message that gets
+	// ignored.
+	File string
+	Line int
+	// OnRefusal is what to put on the page in place of a formula KaTeX will not
+	// set. Nil, which is the default and what every deploy uses, makes a
+	// refusal an error and stops the build. It exists so that somebody working
+	// on the site can look at the other twenty thousand formulae while the
+	// hundred and thirty five broken ones wait on a repair pass that needs the
+	// printed page open.
+	OnRefusal func(Refusal) string
 }
 
 // HTML renders one body.
@@ -181,7 +264,7 @@ func (r Renderer) HTML(body string) (string, error) {
 		}
 		b.WriteString("<p>" + r.inline(strings.ReplaceAll(block, "\n", " ")) + "</p>\n")
 	}
-	return unmask(b.String(), spans), nil
+	return r.unmask(b.String(), spans)
 }
 
 // blocks cuts a masked body into headings and paragraphs. A heading is its own
@@ -254,7 +337,12 @@ func (r Renderer) inline(s string) string {
 	s = boldRE.ReplaceAllString(s, "<strong>$1</strong>")
 	s = linkRE.ReplaceAllStringFunc(s, func(m string) string {
 		p := linkRE.FindStringSubmatch(m)
-		return fmt.Sprintf(`<a href=%q>%s</a>`, r.href(p[2]), p[1])
+		// The URL is already escaped, since the whole line was escaped before
+		// this ran, so it is written between quotes rather than through %q.
+		// Escaping it twice would turn the & of a query string into &amp;amp;,
+		// and %q would escape a backslash in it the way Go writes a string
+		// literal, which is not what a browser reads.
+		return fmt.Sprintf(`<a href="%s">%s</a>`, r.href(p[2]), p[1])
 	})
 	return s
 }

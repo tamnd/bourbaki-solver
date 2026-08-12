@@ -21,16 +21,23 @@ from content/, tags/ and the reference manifests, and nothing else is opened:
 no PDF, no work/ directory, no network. Anyone with a clone can run this and
 get the same bytes, which is the point of it.
 
-  -out     where to write the site, site/ by default
-  -base    the path the site is served under, empty for the root of a domain
-  -clean   remove -out first, so a page a rename orphaned does not survive
-  -check   build and report, write nothing
+The mathematics is set by KaTeX here rather than in the browser, so a formula
+KaTeX will not read stops the build and names the file, the line and the span.
+Run bourbaki audit -only P04 for the whole list of them in one go.
+
+  -out                 where to write the site, site/ by default
+  -base                the path the site is served under, empty for a domain root
+  -clean               remove -out first, so a page a rename orphaned does not survive
+  -check               build and report, write nothing
+  -allow-broken-math   mark the formulae KaTeX refuses instead of stopping, for
+                       looking at the site locally. Never set by the deploy.
 `)
 	}
 	out := fs.String("out", "site", "directory to write")
 	base := fs.String("base", "", "path the site is served under")
 	clean := fs.Bool("clean", false, "remove the output directory first")
 	check := fs.Bool("check", false, "build in memory and write nothing")
+	allowBroken := fs.Bool("allow-broken-math", false, "mark refused formulae instead of stopping")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -44,6 +51,7 @@ get the same bytes, which is the point of it.
 		return err
 	}
 	site.Base = *base
+	site.AllowBrokenMath = *allowBroken
 
 	langs := map[string]int{}
 	for _, sec := range site.Sections {
@@ -80,6 +88,17 @@ get the same bytes, which is the point of it.
 		return err
 	}
 	fmt.Printf("publish: %d pages\n", len(wrote))
+	if n := len(site.Broken); n > 0 {
+		// On standard error and named a site that cannot be published, because
+		// this is the one build whose output looks finished and is not.
+		files := map[string]bool{}
+		for _, ref := range site.Broken {
+			file, _, _ := strings.Cut(ref.At, ":")
+			files[file] = true
+		}
+		fmt.Fprintf(os.Stderr, "publish: %d formulae are marked broken across %d files, "+
+			"so this site is not publishable. Run bourbaki audit -only P04 for the list.\n", n, len(files))
+	}
 	if *check {
 		return nil
 	}
@@ -90,6 +109,8 @@ get the same bytes, which is the point of it.
 		switch {
 		case strings.HasPrefix(w, "tag/"):
 			byKind["tag pages"]++
+		case strings.HasPrefix(w, "katex/"):
+			byKind["KaTeX stylesheet and fonts"]++
 		case w == "index.html", w == "tags/index.html", w == "style.css":
 			byKind["site pages"]++
 		default:
