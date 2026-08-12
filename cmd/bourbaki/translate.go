@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -22,6 +23,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/quality"
+	"github.com/tamnd/bourbaki-solver/queue"
 	"github.com/tamnd/bourbaki-solver/report"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
@@ -71,6 +73,7 @@ refuses any answer that is not the same section.
                  by term, and ask nothing
   -all           with -check-glossary, every term and not only the missed ones
   -keep          leave the questions on the boxes, for debugging
+  -queue PATH    the work list, default $BOURBAKI_WORK/queue
 
 A section is skipped when its translation is there, its source_content_sha256
 is the English file's content_sha256, its glossary_terms_sha256 is the digest of
@@ -94,6 +97,24 @@ again after the join.
 Every question and every answer is kept under work/translate, which is not in
 the repository. What goes in the repository is the file, and the file is only
 written when the audit found nothing.
+
+Every chunk is a job on the queue and every accepted answer is a file beside the
+questions, so a run that is killed costs the chunks in flight and nothing else:
+the next run reads the answers that are there and asks only for the rest. That
+matters at this size. A section of fifteen chunks is eleven minutes and the
+largest section in chapter VIII is over two hours, and a run that held its
+answers in memory threw all of it away when a tunnel dropped.
+
+A chunk that fails is asked again on the next run, three times in all, and is
+then dead. Dead is a state somebody reads: bourbaki queue list -stage translate
+-state dead says which chunks and why, and bourbaki queue retry -stage translate
+puts them back. Until then the section they belong to is refused, and refused
+with the reason rather than in silence.
+
+-force reaches the answers as well as the file. A section that is not stale is
+translated again, and its chunks are asked again rather than read back off disk,
+which is what -force is for: the section is there and it was written while the
+account was being served a cut down model.
 `
 
 func runTranslate(args []string) error {
@@ -113,6 +134,7 @@ func runTranslate(args []string) error {
 	checkGlossary := fs.Bool("check-glossary", false, "hold what is on disk to the glossary and ask nothing")
 	all := fs.Bool("all", false, "with -check-glossary, every term and not only the missed ones")
 	keep := fs.Bool("keep", false, "leave the questions on the boxes")
+	queueRoot := fs.String("queue", defaultQueueRoot(), "queue directory")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -187,10 +209,25 @@ func runTranslate(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Anything a worker was holding when it died comes back before this run
+	// starts, or the chunks it had sit in leased until their deadline passes and
+	// this run reports a section it never asked half of.
+	q, err := queue.Open(*queueRoot)
+	if err != nil {
+		return err
+	}
+	reaped, err := q.Reap(queue.StageTranslate)
+	if err != nil {
+		return err
+	}
+	if len(reaped) > 0 {
+		logf("%d chunks came back from a run that did not finish", len(reaped))
+	}
+
 	run := runID(*lang, promptHash, jobs)
 	var written, refused int
 	for _, job := range jobs {
-		body, model, problems := translateSection(ctx, root, hosts, g, *lang, job, *keep, logf)
+		body, model, problems := translateSection(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *keep, logf)
 		if len(problems) > 0 {
 			refused++
 			logf("%s: refused, nothing written", job.source)
@@ -386,22 +423,24 @@ func current(root, lang, source string, en corpus.SectionFrontMatter, version in
 // partial write: half a translated § is worse than none, because the audit
 // counts it as a translated file and a reader has no way to see where the
 // English stopped being carried over.
-func translateSection(ctx context.Context, root string, hosts []ocr.Host, g *glossary.Glossary, lang string, j job, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
-	answers := make([]string, len(j.chunks))
-	models := make([]string, len(j.chunks))
-	bad := make([][]translate.Problem, len(j.chunks))
+//
+// What is asked for is what the queue hands out, and what is written down is
+// every accepted answer as it arrives. A run that is killed at chunk twelve
+// costs chunk twelve, and the next run asks for that one and joins it to the
+// eleven already on disk.
+func translateSection(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
+	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force)
+	if err != nil {
+		return "", "", []translate.Problem{{Rule: "queue", Msg: err.Error()}}
+	}
+	if len(have) > 0 {
+		logf("%s: %d of %d chunks were answered by an earlier run", j.source, len(have), len(j.chunks))
+	}
+	if queued > 0 {
+		logf("%s: %d chunks to ask for", j.source, queued)
+	}
 
-	next := make(chan int)
-	go func() {
-		defer close(next)
-		for i := range j.chunks {
-			select {
-			case <-ctx.Done():
-				return
-			case next <- i:
-			}
-		}
-	}()
+	group := translateGroup(lang, j.source)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	for _, host := range hosts {
@@ -409,10 +448,68 @@ func translateSection(ctx context.Context, root string, hosts []ocr.Host, g *glo
 			wg.Add(1)
 			go func(host ocr.Host) {
 				defer wg.Done()
-				for i := range next {
-					text, model, problems := askChunk(ctx, root, host, g, lang, j, j.chunks[i], keep, logf)
+				for ctx.Err() == nil {
+					item, err := q.Lease(queue.StageTranslate, host.Name, group, chunkLease)
+					if errors.Is(err, queue.ErrEmpty) {
+						return
+					}
+					if err != nil {
+						logf("%s: %v", host.Name, err)
+						return
+					}
+					index, c, ok := chunkOf(j, item)
+					if !ok {
+						// The target is built from the section and the chunk
+						// number, so this is a job from a corpus that has moved
+						// under the queue. It is nobody's to run.
+						if _, err := q.Fail(item, "no chunk of this section answers to "+item.Target); err != nil {
+							logf("%s: %v", host.Name, err)
+						}
+						continue
+					}
+					text, model, bad := askChunk(ctx, root, host, g, lang, j, c, keep, logf)
+					if len(bad) > 0 && ctx.Err() != nil {
+						// Somebody pressed Ctrl-C while this chunk was out. The
+						// model did not get it wrong, so the attempt is given
+						// back: three attempts are for three bad answers, and a
+						// chunk that loses one every time a run is interrupted is
+						// a chunk that dies of being interrupted.
+						if err := q.Release(item, "the run was interrupted"); err != nil {
+							logf("%s: %v", host.Name, err)
+						}
+						return
+					}
+					if len(bad) > 0 {
+						state, err := q.Fail(item, bad[0].String())
+						if err != nil {
+							logf("%s: %v", host.Name, err)
+						}
+						if state == queue.Dead {
+							bad = append(bad, translate.Problem{Rule: "queue",
+								Msg: "and that was its last attempt, so it is dead until bourbaki queue retry -stage translate puts it back"})
+						}
+						mu.Lock()
+						stuck[index] = bad
+						mu.Unlock()
+						continue
+					}
+					a := accepted{Source: j.source, Chunk: index, Of: c.Of,
+						Input: item.InputSHA256, Model: model, Text: text}
+					if err := writeAccepted(root, lang, a); err != nil {
+						// The answer is in hand and cannot be put down, so the
+						// job goes back rather than counting as done: the
+						// alternative is a queue that says done and a section
+						// that can never be joined.
+						if _, err := q.Fail(item, "the answer could not be written: "+err.Error()); err != nil {
+							logf("%s: %v", host.Name, err)
+						}
+						continue
+					}
+					if _, err := q.Finish(item, true, model); err != nil {
+						logf("%s: %v", host.Name, err)
+					}
 					mu.Lock()
-					answers[i], models[i], bad[i] = text, model, problems
+					have[index] = a
 					mu.Unlock()
 				}
 			}(host)
@@ -420,10 +517,23 @@ func translateSection(ctx context.Context, root string, hosts []ocr.Host, g *glo
 	}
 	wg.Wait()
 
+	// The complaints are collected in chunk order and not in the order the lanes
+	// came back in, so that two runs of the same broken section print the same
+	// thing and a person can tell whether anything moved.
+	answers := make([]string, len(j.chunks))
+	models := make([]string, len(j.chunks))
 	var problems []translate.Problem
-	for i, ps := range bad {
-		for _, p := range ps {
-			p.Msg = fmt.Sprintf("chunk %d of %d: %s", i+1, len(j.chunks), p.Msg)
+	for i, c := range j.chunks {
+		if a, ok := have[c.Index]; ok {
+			answers[i], models[i] = a.Text, a.Model
+			continue
+		}
+		bad, ok := stuck[c.Index]
+		if !ok && ctx.Err() == nil {
+			bad = []translate.Problem{{Rule: "queue", Msg: "it was never answered"}}
+		}
+		for _, p := range bad {
+			p.Msg = fmt.Sprintf("chunk %d of %d: %s", c.Index, c.Of, p.Msg)
 			problems = append(problems, p)
 		}
 	}
@@ -463,6 +573,13 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		if err != nil {
 			logf("%s chunk %d on %s: %v", j.source, c.Index, host.Name, err)
 			last = []translate.Problem{{Rule: "transport", Msg: err.Error()}}
+			if ctx.Err() != nil {
+				// The first ask did not fail, it was stopped. Asking a second
+				// time down a context that is already cancelled costs another
+				// two minutes of ssh timeouts and cannot answer, and both of
+				// those minutes are spent after the person has pressed Ctrl-C.
+				break
+			}
 			continue
 		}
 		// Both halves are kept before either is judged, for the reason the
@@ -474,7 +591,17 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		}
 		problems := translate.Audit(lang, c.Body, answer.Text)
 		if len(problems) == 0 {
-			logf("%s chunk %d of %d on %s: accepted", j.source, c.Index, c.Of, host.Name)
+			// Said here rather than left to L08, which reads the file after it is
+			// written. Nobody chooses the model, so this is not a refusal; it is
+			// the difference between finding out in the first minute and finding
+			// out after a chapter. An account was moved down between two runs of
+			// the same section and the whole of the second one came back on the
+			// small model, which nobody knew until the audit ran.
+			note := ""
+			if quality.SmallModel(answer.Model) {
+				note = ", on " + answer.Model + ", which is a cut down model"
+			}
+			logf("%s chunk %d of %d on %s: accepted%s", j.source, c.Index, c.Of, host.Name, note)
 			return answer.Text, answer.Model, nil
 		}
 		logf("%s chunk %d of %d on %s: %d problems on attempt %d", j.source, c.Index, c.Of, host.Name, len(problems), attempt)
