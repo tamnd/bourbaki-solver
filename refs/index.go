@@ -58,6 +58,8 @@ type Statement struct {
 	// content/, which is what pages.go is for.
 	Page int
 	Line int
+	// Path is the file this statement was read out of, relative to the corpus
+	// root and in the language the index was loaded for.
 	Path string
 
 	// Named is whether the label carries the statement this one hangs from,
@@ -93,7 +95,7 @@ func Load(root, lang string) (*Index, error) {
 	if err != nil {
 		return nil, err
 	}
-	source := englishPrintings(sections)
+	source, swap := printings(sections, lang)
 	counts := map[string]int{}
 	for _, b := range ex.Books {
 		if !source[b.ID] {
@@ -129,7 +131,7 @@ func Load(root, lang string) (*Index, error) {
 				if rec.Label == "" {
 					continue // front matter, the historical note, the index
 				}
-				s, err := section(root, lang, rec)
+				s, err := section(root, lang, rec, swap)
 				if err != nil {
 					return nil, err
 				}
@@ -142,36 +144,55 @@ func Load(root, lang string) (*Index, error) {
 	return ix, nil
 }
 
-// englishPrintings is the volumes the index is built over, by id.
+// printings is the volumes the index is built over, by id, and whether their
+// paths have to have the language swapped into them.
 //
-// The graph is over one printing and that printing is the English, whatever
-// language the bodies are read in: a translation is the English file with the
-// language swapped in its path, so it carries the same labels, the same page
-// ranges and the same references.
-//
-// A second printing is not that. The corpus holds Algebra VIII twice, in
-// English and in French, and the two share their labels and their printed page
-// numbers on purpose, because they are the same chapter. Indexing both puts
-// every page of the chapter in two sections at once, and a citation to a page
-// then resolves to nothing: measured on this corpus, 979 references that
-// resolved stopped resolving the day the French was assembled, and the rate
-// fell from 91.7 per cent to 48.9.
+// The graph is over one printing, and indexing two is what has to be avoided.
+// The corpus holds Algebra VIII twice, in English and in French, and the two
+// share their labels and their printed page numbers on purpose, because they
+// are the same chapter. Indexing both puts every page of the chapter in two
+// sections at once, and a citation to a page then resolves to nothing:
+// measured on this corpus, 979 references that resolved stopped resolving the
+// day the French was assembled, and the rate fell from 91.7 per cent to 48.9.
 //
 // Which printing a record belongs to is in its path, which is where assembly
 // put it, and not in books.yaml, because the fixtures the tests build have
 // sections and no volumes.
-func englishPrintings(sections *corpus.SectionsManifest) map[string]bool {
-	out := map[string]bool{}
+//
+// There are two ways a language gets into this corpus and they want opposite
+// things here. A translation is the English file with the language swapped in
+// its path: content/vi holds the same file names as content/en, carrying the
+// same labels and the same page ranges, so it is indexed off the English
+// records with the path rewritten. A second printing is a volume of its own
+// that assembly read out of its own PDF, with its own file names in the
+// manifest, and rewriting an English path towards it names a file that does
+// not exist.
+//
+// So the manifest is asked rather than assumed. Where it holds records under
+// content/<lang>, those are the printing and their paths stand. Where it holds
+// none, the language is a translation and the English records are rewritten.
+// This was the second: -lang fr had opened
+// content/fr/alg/VIII/01_s1_artinian_modules_and_noetherian_modules.md and
+// failed on it since the day the French was assembled, and nothing caught it
+// because the audit only ever built the graph over the English.
+func printings(sections *corpus.SectionsManifest, lang string) (source map[string]bool, swap bool) {
+	own, english := map[string]bool{}, map[string]bool{}
 	for _, b := range sections.Books {
 		for _, ch := range b.Chapters {
 			for _, rec := range ch.Sections {
+				if strings.HasPrefix(rec.Path, "content/"+lang+"/") {
+					own[b.ID] = true
+				}
 				if strings.HasPrefix(rec.Path, "content/en/") {
-					out[b.ID] = true
+					english[b.ID] = true
 				}
 			}
 		}
 	}
-	return out
+	if len(own) > 0 {
+		return own, false
+	}
+	return english, true
 }
 
 // index wires the lookups up from the sections. It is separate from Load
@@ -198,18 +219,25 @@ func (ix *Index) index() {
 // its label, because the label of a Corollary says which statement it hangs
 // from and not which no. it stands in, and narrowing a Corollary down to a no.
 // is exactly what a page-based citation to one needs.
-func section(root, lang string, rec corpus.SectionRecord) (*Section, error) {
-	path := filepath.Join(root, filepath.FromSlash(rec.Path))
-	if lang != "en" {
-		path = strings.Replace(path, "/content/en/", "/content/"+lang+"/", 1)
+// A statement records the file it was read out of and not the file the
+// manifest named, which for a translation are two different files. The two are
+// compared: the rule that reads a bare "Corollary 1" as the nearest one above
+// the citing line asks whether the statement and the citation stand in the same
+// file, and the citation carries the path the walk gave it, which is the
+// translated one. Recording the English path there meant the rule could not
+// fire in any language but English.
+func section(root, lang string, rec corpus.SectionRecord, swap bool) (*Section, error) {
+	rel := rec.Path
+	if swap {
+		rel = strings.Replace(rel, "content/en/", "content/"+lang+"/", 1)
 	}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 	if err != nil {
 		return nil, err
 	}
 	f, err := corpus.ParseFile[corpus.SectionFrontMatter](b)
 	if err != nil {
-		return nil, fmt.Errorf("%s: %w", rec.Path, err)
+		return nil, fmt.Errorf("%s: %w", rel, err)
 	}
 	s := &Section{Label: rec.Label, Chapter: f.Meta.Chapter}
 	if m := pageRangeRE.FindAllStringSubmatch(rec.BookPages, -1); len(m) > 0 {
@@ -240,7 +268,7 @@ func section(root, lang string, rec corpus.SectionRecord) (*Section, error) {
 		}
 		st := &Statement{
 			Label: m[1], Tag: m[2], Kind: r.Kind, Number: r.Number,
-			Subsec: no, Line: offset + i + 1, Path: rec.Path,
+			Subsec: no, Line: offset + i + 1, Path: rel,
 			Named:       r.ParentNumber != 0,
 			FollowsKind: follows.Kind, FollowsNumber: follows.Number,
 		}
