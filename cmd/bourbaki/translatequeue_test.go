@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/glossary"
@@ -266,7 +267,10 @@ func TestGroupsSeparateTheLanguages(t *testing.T) {
 	if translateGroup("vi", source) == translateGroup("zh", source) {
 		t.Error("Vietnamese and Chinese share a group")
 	}
-	if translateGroup("vi", source) != translateGroup("vi", source) {
+	// A second run is a second process, so the group has to come out of the name
+	// alone and not out of anything the run happens to be holding.
+	again := strings.Join([]string{"content", "en", "alg", "VIII", "03_s3_simple_modules.md"}, "/")
+	if translateGroup("vi", source) != translateGroup("vi", again) {
 		t.Error("the group is not a function of the section")
 	}
 }
