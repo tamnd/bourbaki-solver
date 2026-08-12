@@ -60,6 +60,12 @@ var (
 	natureLine        = line("NATURE", `PROOF|EXPLORATION`)
 	reachLine         = line("REACH", `IN_CORPUS|OUT_OF_CORPUS`)
 	usesLine          = regexp.MustCompile(`(?mi)^` + mark + `USES` + mark + `:[ \t]*(.*)$`)
+	// The two lines the audit judge writes its work on. They take anything after
+	// the colon and only ask that there is something, because what a step is and
+	// what breaking it would take are the judge's words and not a vocabulary this
+	// package has any business fixing.
+	checkedLine = regexp.MustCompile(`(?mi)^` + mark + `CHECKED` + mark + `:[ \t]*\S.*$`)
+	triedLine   = regexp.MustCompile(`(?mi)^` + mark + `TRIED` + mark + `:[ \t]*\S.*$`)
 	// A part decision names the part first, because that is how the exercise
 	// names it and because a judge that has to write the letter out is a judge
 	// that has to look at which part it is deciding.
@@ -87,6 +93,17 @@ type Decision struct {
 
 	HasTruth   bool
 	HasQuality bool // all four of the publication fields were answered
+
+	// Checked and Tried are how many steps the audit judge says it went through
+	// and how many things it says it substituted. They are counts and not
+	// content: nothing here reads what was written on those lines, and what they
+	// are for is telling a judgement from an assertion. Both audits of exercise 2
+	// of § 1 came back as four lines and fifty one bytes, PART a PASS, PART b
+	// PASS, VERDICT PASS, TRUTH TRUE, on a solution the truth judge had just
+	// written four thousand characters against, while exercise 1 an hour earlier
+	// went through eight steps and found a false citation in the sixth. A judge
+	// that shows no work cannot be told from a judge that did none.
+	Checked, Tried int
 
 	// Parts is the per-part verdict of a multi-part exercise, keyed by the
 	// letter the book prints. It is empty for an exercise that has no parts,
@@ -124,6 +141,8 @@ func Read(review string) Decision {
 	d.Complete, d.SelfContained = complete, selfContained
 	d.HumanReadable, d.Verifiable = humanReadable, verifiable
 	d.HasQuality = hasComplete && hasSelfContained && hasHumanReadable && hasVerifiable
+	d.Checked = len(checkedLine.FindAllString(review, -1))
+	d.Tried = len(triedLine.FindAllString(review, -1))
 	d.Parts = parts(review)
 	return d
 }

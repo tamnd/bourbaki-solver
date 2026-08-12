@@ -142,6 +142,7 @@ func TestEveryKeyAPromptAsksForIsOneTheParserReads(t *testing.T) {
 		"VERDICT": true, "TRUTH": true, "COMPLETE": true, "SELF_CONTAINED": true,
 		"HUMAN_READABLE": true, "VERIFIABLE": true, "SCORE": true,
 		"SELECTED": true, "NATURE": true, "REACH": true, "USES": true,
+		"CHECKED": true, "TRIED": true,
 	}
 	for name, text := range built() {
 		for _, m := range keyLine.FindAllStringSubmatch(text, -1) {
@@ -241,5 +242,17 @@ func TestPartsAreNamedTheWayAPersonWouldNameThem(t *testing.T) {
 	}
 	if got := list(nil); got != "" {
 		t.Errorf("list(nil) = %q", got)
+	}
+}
+
+// The audit judge is asked to write down what it checked and what it tried,
+// and it is asked for those on lines because a prompt that asks for the work in
+// prose gets a verdict and no work. The lines it is shown are the ones the
+// parser counts.
+func TestTheAuditIsShownTheWorkLinesTheParserCounts(t *testing.T) {
+	d := textguard.Read(built()["audit"])
+	if d.Checked == 0 || d.Tried == 0 {
+		t.Errorf("the audit prompt's own examples read as %d checked and %d tried",
+			d.Checked, d.Tried)
 	}
 }

@@ -754,6 +754,24 @@ func wantTruth(text string) error {
 	return nil
 }
 
+// wantAudit reads the audit judge's answer, and it asks for the work as well as
+// for the verdict.
+//
+// The verdict alone was what this asked for until exercise 2 of § 1 came back
+// twice with fifty one bytes: PART a PASS, PART b PASS, VERDICT PASS, TRUTH
+// TRUE, and nothing else, on a solution the truth judge had just written four
+// thousand characters against and failed. Exercise 1 of the same § and the same
+// prompt on the same fleet an hour earlier came back with three thousand eight
+// hundred characters, eight steps gone through one at a time, and a false
+// citation found in the sixth. The prompt asked both of them for the steps and
+// for what they tried. What it did not do was ask for them on lines, and what is
+// not on a line is not checked here, and what is not checked here is what a
+// model may or may not do depending on the day.
+//
+// So the lines are asked for and counted. It is the shape of an answer and not
+// the content of a judgement, which is why a missing CHECKED line is a retry
+// here rather than a FAIL in Audited: the judge is being asked to write down
+// what it did, not to change its mind.
 func wantAudit(text string) error {
 	d := textguard.Read(text)
 	switch {
@@ -761,6 +779,12 @@ func wantAudit(text string) error {
 		return fmt.Errorf("there is no VERDICT line in it")
 	case !d.HasTruth:
 		return fmt.Errorf("there is no TRUTH line in it")
+	case d.Checked == 0:
+		return fmt.Errorf("there is no CHECKED line in it, and a step with no line " +
+			"against it is a step nobody checked")
+	case d.Tried == 0:
+		return fmt.Errorf("there is no TRIED line in it, and a verdict reached without " +
+			"substituting anything is a verdict about how the solution reads")
 	}
 	return nil
 }
