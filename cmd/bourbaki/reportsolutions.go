@@ -1,0 +1,249 @@
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/solve"
+)
+
+const solutionsUsage = `usage: bourbaki report solutions [flags]
+
+The scorecard: what the corpus holds an answer to, and how well it believes it.
+
+An exercise with no file is unattempted, and it is counted here rather than left
+out. A scorecard that only counts what was run says 100 per cent verified on the
+first exercise anybody solves, which is the one number this must never print.
+
+The second table is by §, so a § where the pipeline is doing badly can be found
+without reading three hundred files. The third is the parts, which is where a
+partial says what it is partial about.
+
+flags:
+  -lang     which printing, en by default
+  -sections the per-§ table as well
+  -parts    the parts of every partial, with the reason each failed
+  -json     the scorecard as JSON
+`
+
+// scorecard is the whole of what this reports, and it is the JSON shape too.
+type scorecard struct {
+	Lang      string         `json:"lang"`
+	Exercises int            `json:"exercises"`
+	Status    map[string]int `json:"status"`
+	// Answered is everything that is not unattempted, which is what coverage is
+	// of. Blocked and open are answers: somebody asked and the corpus now says
+	// why there is no proof under it.
+	Answered int `json:"answered"`
+	Believed int `json:"believed"` // verified, whole
+	Parts    struct {
+		Total    int `json:"total"`
+		Verified int `json:"verified"`
+	} `json:"parts"`
+	Corrections map[int]int    `json:"corrections"`
+	Models      map[string]int `json:"models"`
+	Sections    []sectionScore `json:"sections,omitempty"`
+}
+
+type sectionScore struct {
+	Section   int            `json:"section"`
+	Exercises int            `json:"exercises"`
+	Status    map[string]int `json:"status"`
+}
+
+func reportSolutionsCmd(args []string) error {
+	fs := flag.NewFlagSet("report solutions", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, solutionsUsage) }
+	lang := fs.String("lang", "en", "printing to read")
+	sections := fs.Bool("sections", false, "the per-§ table as well")
+	parts := fs.Bool("parts", false, "the parts of every partial")
+	asJSON := fs.Bool("json", false, "the scorecard as JSON")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	c, err := solve.Read(root, *lang)
+	if err != nil {
+		return err
+	}
+	store := solve.Store{Root: root}
+	held := map[string]solve.Solution{}
+	list, err := store.List(*lang)
+	if err != nil {
+		return err
+	}
+	for _, sol := range list {
+		held[sol.Meta.Label] = sol
+	}
+
+	card := score(c.Exercises(), held, *lang)
+	if *asJSON {
+		if !*sections {
+			card.Sections = nil
+		}
+		e := json.NewEncoder(os.Stdout)
+		e.SetIndent("", "  ")
+		return e.Encode(card)
+	}
+	printScorecard(card, *sections)
+	if *parts {
+		printParts(c.Exercises(), held)
+	}
+	return nil
+}
+
+// score counts one printing.
+func score(exercises []string, held map[string]solve.Solution, lang string) scorecard {
+	card := scorecard{Lang: lang, Exercises: len(exercises),
+		Status: map[string]int{}, Corrections: map[int]int{}, Models: map[string]int{}}
+	bySection := map[int]*sectionScore{}
+	for _, label := range exercises {
+		status := corpus.StatusUnattempted
+		sol, have := held[label]
+		if have {
+			status = sol.Meta.Status
+		}
+		card.Status[status]++
+		if status != corpus.StatusUnattempted {
+			card.Answered++
+		}
+		if status == corpus.StatusVerified {
+			card.Believed++
+		}
+		if have {
+			card.Corrections[sol.Meta.Corrections]++
+			for _, model := range strings.Split(sol.Meta.Model, ", ") {
+				if model = strings.TrimSpace(model); model != "" {
+					card.Models[model]++
+				}
+			}
+			for _, p := range sol.Meta.Parts {
+				card.Parts.Total++
+				if p.Status == corpus.StatusVerified {
+					card.Parts.Verified++
+				}
+			}
+		}
+		r, err := corpus.ParseLabel(label)
+		if err != nil {
+			continue
+		}
+		row, ok := bySection[r.Section]
+		if !ok {
+			row = &sectionScore{Section: r.Section, Status: map[string]int{}}
+			bySection[r.Section] = row
+		}
+		row.Exercises++
+		row.Status[status]++
+	}
+	for _, row := range bySection {
+		card.Sections = append(card.Sections, *row)
+	}
+	sort.Slice(card.Sections, func(i, j int) bool {
+		return card.Sections[i].Section < card.Sections[j].Section
+	})
+	return card
+}
+
+func printScorecard(card scorecard, sections bool) {
+	fmt.Printf("%d exercises in the %s printing\n\n", card.Exercises, card.Lang)
+	for _, status := range corpus.Statuses {
+		n := card.Status[status]
+		if n == 0 && status != corpus.StatusVerified {
+			continue
+		}
+		fmt.Printf("%-12s %5d  %5.1f %%\n", status, n, percent(n, card.Exercises))
+	}
+	fmt.Printf("\nanswered     %5d  %5.1f %%\n", card.Answered, percent(card.Answered, card.Exercises))
+	fmt.Printf("believed     %5d  %5.1f %%\n", card.Believed, percent(card.Believed, card.Exercises))
+	if card.Parts.Total > 0 {
+		fmt.Printf("parts        %5d  %5.1f %% of them verified\n",
+			card.Parts.Total, percent(card.Parts.Verified, card.Parts.Total))
+	}
+
+	if len(card.Corrections) > 0 {
+		var rounds []int
+		for n := range card.Corrections {
+			rounds = append(rounds, n)
+		}
+		sort.Ints(rounds)
+		fmt.Println("\ncorrections")
+		for _, n := range rounds {
+			fmt.Printf("  %d rounds %5d\n", n, card.Corrections[n])
+		}
+	}
+	if len(card.Models) > 0 {
+		fmt.Println("\nanswered by")
+		for _, m := range sortedByCount(card.Models) {
+			fmt.Printf("  %-24s %5d\n", m, card.Models[m])
+		}
+	}
+	if !sections || len(card.Sections) == 0 {
+		return
+	}
+	fmt.Printf("\n%-4s %6s", "§", "total")
+	for _, status := range corpus.Statuses {
+		fmt.Printf(" %10s", status)
+	}
+	fmt.Println()
+	for _, row := range card.Sections {
+		fmt.Printf("%-4d %6d", row.Section, row.Exercises)
+		for _, status := range corpus.Statuses {
+			fmt.Printf(" %10d", row.Status[status])
+		}
+		fmt.Println()
+	}
+}
+
+// printParts is the partials, part by part, with what the judges said.
+//
+// This is the table that says whether partial is being used honestly. A run
+// where every partial fails its last part is a run whose judges are tiring, not
+// a book whose last parts are hard.
+func printParts(exercises []string, held map[string]solve.Solution) {
+	fmt.Println()
+	shown := 0
+	for _, label := range exercises {
+		sol, have := held[label]
+		if !have || len(sol.Meta.Parts) == 0 {
+			continue
+		}
+		if sol.Meta.Status == corpus.StatusVerified {
+			continue
+		}
+		shown++
+		fmt.Printf("%s  %s\n", label, sol.Meta.Status)
+		for _, p := range sol.Meta.Parts {
+			reason := p.Reason
+			if reason != "" {
+				reason = "  " + reason
+			}
+			fmt.Printf("  %-3s %-11s%s\n", p.ID, p.Status, reason)
+		}
+	}
+	if shown == 0 {
+		fmt.Println("no solution carries a part that did not pass")
+	}
+}
+
+func sortedByCount(counts map[string]int) []string {
+	out := make([]string, 0, len(counts))
+	for k := range counts {
+		out = append(out, k)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if counts[out[i]] != counts[out[j]] {
+			return counts[out[i]] > counts[out[j]]
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
