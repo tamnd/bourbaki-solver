@@ -37,6 +37,30 @@ const restackGap = 2
 // uses for two pieces of one word.
 const hoistGap = 8
 
+// overhang is how far one script may stand outside what the other spans and
+// still be read as lying across it, in the pixel units of the page.
+//
+// The two scripts of a stack are set at one size but out of different glyphs,
+// and a glyph box is not the ink inside it. \varepsilon_M^{-1} of exercise 19
+// of § 1 is the whole of the trouble: M is a wide letter and 1 is a narrow one,
+// so the index starts five units inside the exponent laid across it and ends
+// two units past the end of it, and strict containment refused a stack that is
+// plainly a stack.
+//
+// Chapter VIII measures 2 at the widest across every cluster of both printings,
+// and at 3 nothing more is taken, so 2 is a measurement rather than a licence.
+// It is well inside the 4 of the narrowest matrix column, which is the gap
+// touching already refuses on, so a flattened matrix comes back flattened.
+//
+// Three clusters a printing turn on this, and one of the three is not a stack
+// at all: the derivation of exercise 23 of § 1 is the fraction \partial P over
+// \partial T_i, and TeX sets the two halves of an inline fraction at the size
+// and the height a superscript and a subscript are set at, so nothing in a text
+// layer tells them apart. The rule of the fraction is a drawn path and there is
+// no reading of the runs that would find it. That page is repaired by hand in
+// both printings and carries manual: true.
+const overhang = 2
+
 // hoist puts a large operator in front of the limit written across it.
 //
 // TeX centres the limit of an operator on the sign, so the first half of the
@@ -320,8 +344,9 @@ func span(us []unit, level Level) [2]int {
 	return out
 }
 
-// within reports whether the first span lies inside the second.
-func within(a, b [2]int) bool { return a[0] >= b[0] && a[1] <= b[1] }
+// within reports whether the first span lies inside the second, give or take
+// the overhang one glyph box carries past the other.
+func within(a, b [2]int) bool { return a[0] >= b[0]-overhang && a[1] <= b[1]+overhang }
 
 func flip(l Level) Level {
 	if l == Sup {
