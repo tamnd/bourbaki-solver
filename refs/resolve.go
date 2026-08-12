@@ -17,6 +17,11 @@ const (
 	// Corollary, a Remark and an Example need, since those three are not
 	// numbered straight through the §.
 	ByPageAndNo = "page-map+no"
+	// ByStatementPage is the page the statement itself is printed on, read back
+	// out of pages/. It is what settles the ones the no. cannot: two statements
+	// of one number in one no., or a page that starts a no. and carries the tail
+	// of the one before it.
+	ByStatementPage = "statement-page"
 	// BySection is a reference to a page and nothing on it. It resolves to a §
 	// and to no statement, because there is no statement in it to resolve to.
 	BySection = "section"
@@ -192,10 +197,10 @@ func (ix *Index) exercise(s *Section, n int) (Target, error) {
 	return Target{Label: label, Tag: ix.Tag(label), How: ByExercise}, nil
 }
 
-// inSection finds the statement of a kind and number in one §, bringing the no.
-// in only when the § holds more than one candidate. Nothing is narrowed that
-// does not need narrowing, so a wrong no. cannot turn a lookup that would have
-// worked into one that does not.
+// inSection finds the statement of a kind and number in one §, bringing the
+// page and then the no. in only when the § holds more than one candidate.
+// Nothing is narrowed that does not need narrowing, so a wrong no. cannot turn
+// a lookup that would have worked into one that does not.
 func (ix *Index) inSection(c Citation, section, how string, no int, at Site) (Target, error) {
 	if section == "" {
 		return Target{}, fmt.Errorf("the sentence is in no §")
@@ -206,6 +211,9 @@ func (ix *Index) inSection(c Citation, section, how string, no int, at Site) (Ta
 		return Target{}, fmt.Errorf("%s has no %s %d", section, c.Kind.Heading(), c.Number)
 	case 1:
 		return Target{Label: cand[0].Label, Tag: cand[0].Tag, How: how}, nil
+	}
+	if t, ok := onPage(cand, c.Page); ok {
+		return t, nil
 	}
 	if no == 0 {
 		// Only for a reference that carries no page. One that does has said
@@ -233,6 +241,38 @@ func (ix *Index) inSection(c Citation, section, how string, no int, at Site) (Ta
 			section, len(cand), c.Kind.Heading(), c.Number, len(hit), no)
 	}
 	return Target{Label: hit[0].Label, Tag: hit[0].Tag, How: ByPageAndNo}, nil
+}
+
+// onPage takes the candidate the book prints on the page the citation names.
+//
+// This is what a reader does, and it is more nearly what the citation says than
+// the no. is: "Corollary 1 of VIII, p. 215" is the Corollary 1 printed on page
+// 215, and whether page 215 belongs to no. 2 or to no. 3 is a question the
+// sentence never asked. It settles the two shapes the no. cannot: a page that
+// starts a no. and carries the tail of the one before it, and two statements of
+// one number standing in one no.
+//
+// Every candidate has to have a known page for this to fire. A statement that
+// could not be placed has page 0, and letting that stand as a page would let a
+// gap in the placement quietly rule a candidate out and hand back a confident
+// wrong answer. Better to fall through to the no. and, failing that, to report.
+func onPage(cand []*Statement, page int) (Target, bool) {
+	if page == 0 {
+		return Target{}, false
+	}
+	var hit []*Statement
+	for _, st := range cand {
+		if st.Page == 0 {
+			return Target{}, false
+		}
+		if st.Page == page {
+			hit = append(hit, st)
+		}
+	}
+	if len(hit) != 1 {
+		return Target{}, false
+	}
+	return Target{Label: hit[0].Label, Tag: hit[0].Tag, How: ByStatementPage}, true
 }
 
 // nearest takes the candidate printed nearest above the sentence, and is what

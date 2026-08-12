@@ -53,8 +53,12 @@ type Statement struct {
 	Kind   corpus.Kind
 	Number int
 	Subsec int // the no. it stands in, 0 when the label does not say
-	Line   int
-	Path   string
+	// Page is the page of the chapter the book prints it on, 0 when it could
+	// not be placed. It is read back out of pages/ rather than written down in
+	// content/, which is what pages.go is for.
+	Page int
+	Line int
+	Path string
 
 	// Named is whether the label carries the statement this one hangs from,
 	// which for a corollary it does when the book numbered it. An unnumbered
@@ -220,6 +224,7 @@ func section(root, lang string, rec corpus.SectionRecord) (*Section, error) {
 	offset := strings.Count(strings.TrimSuffix(string(b), f.Body), "\n")
 	no := 0
 	var follows corpus.Ref
+	var headings []lead
 	for i, line := range strings.Split(f.Body, "\n") {
 		if n, ok := subsecHeading(line); ok {
 			no = n
@@ -240,11 +245,49 @@ func section(root, lang string, rec corpus.SectionRecord) (*Section, error) {
 			FollowsKind: follows.Kind, FollowsNumber: follows.Number,
 		}
 		s.Statements = append(s.Statements, st)
+		headings = append(headings, printedAs(line, r))
 		if fathers(r) {
 			follows = r
 		}
 	}
+	if first, last, ok := pdfRange(f.Meta.PDFPages); ok {
+		placePages(s, headings, readLeads(root, f.Meta.Source, first, last))
+	}
 	return s, nil
+}
+
+var stmtHeadingRE = regexp.MustCompile(`^#+ ([A-Za-zé]+)\s*(\d*)`)
+
+// printedAs is a statement as its own Markdown heads it, which is what lines up
+// against the leads printed on the pages.
+//
+// The number here is the one the book printed and not the one in the label. A
+// Remark the book set with no number is labelled rem-1, because a no. can hold
+// several remarks and each of them needs an address, and the lead on the page
+// says only "Remark". Lining the labels up against the leads instead left 49 of
+// the chapter's 709 statements unplaced, all of them remarks and examples.
+func printedAs(line string, r corpus.Ref) lead {
+	m := stmtHeadingRE.FindStringSubmatch(line)
+	if m == nil {
+		return lead{kind: r.Kind, number: r.Number}
+	}
+	n, _ := strconv.Atoi(m[2])
+	return lead{kind: r.Kind, number: n}
+}
+
+var pdfRangeRE = regexp.MustCompile(`^(\d+)-(\d+)$`)
+
+// pdfRange is the run of PDF pages a § was assembled from, which is where its
+// statement leads are to be read. It is written in the front matter as
+// "0228-0245".
+func pdfRange(s string) (int, int, bool) {
+	m := pdfRangeRE.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return 0, 0, false
+	}
+	first, _ := strconv.Atoi(m[1])
+	last, _ := strconv.Atoi(m[2])
+	return first, last, first > 0 && last >= first
 }
 
 // fathers says whether a statement is one an unnumbered corollary below it can
