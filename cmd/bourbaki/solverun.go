@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -136,54 +135,12 @@ func runSolveRun(args []string) error {
 	if len(hosts) == 0 {
 		return errors.New("no host is up, run bourbaki fleet up")
 	}
-	// One lane to a host whatever the host says it can take. A lane here is
-	// seven serial calls to one account over an hour or more, and the lane count
-	// the OCR path uses is a count of how many images a box can hold at once,
-	// which is a different question with the same name.
-	names := make([]string, len(hosts))
-	for i, h := range hosts {
-		names[i] = h.Name
-	}
-	fmt.Printf("%d exercises over %s\n", len(work), strings.Join(names, ", "))
+	fmt.Printf("%d exercises over %s\n", len(work), strings.Join(hostNames(hosts), ", "))
 
-	var mu sync.Mutex
-	next := 0
-	counts := map[string]int{}
-	var wg sync.WaitGroup
-	for _, host := range hosts {
-		wg.Add(1)
-		go func(host ocr.Host) {
-			defer wg.Done()
-			for ctx.Err() == nil {
-				mu.Lock()
-				if next >= len(work) {
-					mu.Unlock()
-					return
-				}
-				label := work[next]
-				next++
-				mu.Unlock()
-
-				status, err := solveOne(ctx, c, store, root, host, o, f, label, logf)
-				mu.Lock()
-				if err != nil {
-					logf("%s on %s: %v", label, host.Name, err)
-					counts["failed"]++
-				} else {
-					counts[status]++
-				}
-				mu.Unlock()
-			}
-		}(host)
-	}
-	wg.Wait()
-
-	fmt.Println()
-	for _, status := range append(append([]string{}, corpus.Statuses...), "failed") {
-		if counts[status] > 0 {
-			fmt.Printf("%-12s %d\n", status, counts[status])
-		}
-	}
+	counts := overHosts(ctx, hosts, work, func(ctx context.Context, host ocr.Host, label string) (string, error) {
+		return solveOne(ctx, c, store, root, host, o, f, label, logf)
+	}, logf)
+	printCounts(counts)
 	return ctx.Err()
 }
 
@@ -318,7 +275,7 @@ func solveOne(ctx context.Context, c *solve.Corpus, store solve.Store, root stri
 		Ask:         fleetAsker{host: host, keep: f.keep},
 		Candidates:  f.candidates,
 		Corrections: f.fixes,
-		Archive:     solveArchive(root, f.lang, label),
+		Archive:     solveArchive(root, "solve", f.lang, label),
 		Logf:        logf,
 	}
 	result, err := engine.Solve(ctx, cx)
@@ -379,8 +336,12 @@ func (a fleetAsker) Ask(ctx context.Context, id, question string) (solve.Answer,
 // lost is the evidence that the selector had something to choose between, and a
 // judgement that failed is the only place the reason a solution is marked
 // unverified is written out in full.
-func solveArchive(root, lang, label string) func(id, question, answer string) error {
-	dir := filepath.Join(root, "work", "solve", lang, label)
+//
+// The kind is solve or review, and it is a directory of its own because the two
+// name their calls the same. A re-judging filed over the run it re-judged would
+// destroy the evidence it was called to weigh.
+func solveArchive(root, kind, lang, label string) func(id, question, answer string) error {
+	dir := filepath.Join(root, "work", kind, lang, label)
 	return func(id, question, answer string) error {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err

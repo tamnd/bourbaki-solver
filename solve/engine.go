@@ -175,6 +175,55 @@ func (e Engine) Solve(ctx context.Context, c *Context) (Result, error) {
 	return run.judge(ctx, chosen)
 }
 
+// Review is a solution judged and not rewritten.
+type Review struct {
+	Judgement
+	// Judged says whether the two judges were asked at all. They are not, where
+	// the reference reads the exercise as out of corpus or as an exploration, and
+	// a caller that reads Status without reading this would take a blocked
+	// exercise for a solution both judges threw out.
+	Judged    bool
+	Reference string
+	Calls     []Call
+}
+
+// Review runs the judging half of the pipeline over a solution somebody else
+// wrote: the reference call, then both judges, and no candidates and no
+// corrections.
+//
+// Two things need it. bourbaki solve review reads a solution the corpus already
+// holds and asks the judges again, which is how a run made under an older prompt
+// or on a cut down model gets rechecked without being rewritten. And the
+// benchmark of spec 07 §6 needs it, where the answers are written by hand and
+// some of them are wrong on purpose, and the question is not whether the answer
+// is right but whether the judges can tell.
+func (e Engine) Review(ctx context.Context, c *Context, solution string) (Review, error) {
+	run := &state{engine: e, ctx: c, parts: c.PartsOf()}
+	reference, err := run.ask(ctx, "reference", prompt.SolveReference(c.Render()), wantReference)
+	if err != nil {
+		return Review{Calls: run.calls}, err
+	}
+	run.reference = reference
+	out := Review{Reference: reference, Calls: run.calls}
+
+	if reach, ok := textguard.Reach(reference); ok && reach == "OUT_OF_CORPUS" {
+		out.Status = corpus.StatusBlocked
+		return out, nil
+	}
+	if nature, ok := textguard.Nature(reference); ok && nature == "EXPLORATION" {
+		out.Status = corpus.StatusOpen
+		return out, nil
+	}
+
+	j, err := run.judgeOnce(ctx, solution)
+	out.Calls = run.calls
+	if err != nil {
+		return out, err
+	}
+	out.Judgement, out.Judged = j, true
+	return out, nil
+}
+
 // state is one run of the pipeline, and it exists so that the stages can be
 // written as methods rather than as one function with eleven locals.
 type state struct {
@@ -299,7 +348,21 @@ func (s *state) choose(ctx context.Context, written []string) (string, error) {
 	return written[n-1], nil
 }
 
-// judge runs the two judges and the correction loop.
+// Judgement is one solution read by both judges, once.
+type Judgement struct {
+	Status string
+	Parts  []corpus.Part
+	// Truth and Audit are what the two judges wrote, whole and unsummarised.
+	// They are what goes to the correction call and what a person reads when a
+	// verdict is not obvious.
+	Truth, Audit             string
+	TruthPassed, AuditPassed bool
+	// WhyTruth and WhyAudit are the one line each judge's verdict comes down to,
+	// which is what a log can carry and the whole judgement cannot.
+	WhyTruth, WhyAudit string
+}
+
+// judgeOnce runs both judges over one solution and reads the two verdicts.
 //
 // Both have to pass. They are not two opinions averaged: the truth judge reads
 // the solution beside a worked reference and asks whether it is right, and the
@@ -307,41 +370,51 @@ func (s *state) choose(ctx context.Context, written []string) (string, error) {
 // Passing one and failing the other is a solution that is either persuasive
 // about a step it did not take or correct in a way that cannot be seen from
 // what is written, and neither of those goes into a book as believed.
+func (s *state) judgeOnce(ctx context.Context, solution string) (Judgement, error) {
+	truth, err := s.ask(ctx, s.stage("truth"),
+		prompt.SolveTruth(s.ctx.Render(), s.reference, solution, s.parts), wantTruth)
+	if err != nil {
+		return Judgement{}, err
+	}
+	audit, err := s.ask(ctx, s.stage("audit"),
+		prompt.SolveAudit(s.ctx.Render(), solution, s.parts), wantAudit)
+	if err != nil {
+		return Judgement{}, err
+	}
+	td, ad := textguard.Read(truth), textguard.Read(audit)
+	okTruth, whyTruth := td.Passed()
+	okAudit, whyAudit := ad.Audited()
+	status, parts := outcome(td, ad, s.parts, okTruth, okAudit)
+	return Judgement{Status: status, Parts: parts, Truth: truth, Audit: audit,
+		TruthPassed: okTruth, AuditPassed: okAudit,
+		WhyTruth: whyTruth, WhyAudit: whyAudit}, nil
+}
+
+// judge runs the judges and the correction loop.
 func (s *state) judge(ctx context.Context, solution string) (Result, error) {
 	for {
-		truth, err := s.ask(ctx, s.stage("truth"),
-			prompt.SolveTruth(s.ctx.Render(), s.reference, solution, s.parts), wantTruth)
+		j, err := s.judgeOnce(ctx, solution)
 		if err != nil {
 			return s.result(), err
 		}
-		audit, err := s.ask(ctx, s.stage("audit"),
-			prompt.SolveAudit(s.ctx.Render(), solution, s.parts), wantAudit)
-		if err != nil {
-			return s.result(), err
-		}
-		td, ad := textguard.Read(truth), textguard.Read(audit)
-		okTruth, whyTruth := td.Passed()
-		okAudit, whyAudit := ad.Audited()
-		status, parts := outcome(td, ad, s.parts, okTruth, okAudit)
-
-		if status == corpus.StatusVerified || s.fixes >= s.engine.corrections() {
-			if status != corpus.StatusVerified {
+		if j.Status == corpus.StatusVerified || s.fixes >= s.engine.corrections() {
+			if j.Status != corpus.StatusVerified {
 				s.engine.logf("%s: %s after %d corrections, truth %v, audit %v",
-					s.ctx.Label, status, s.fixes, whyTruth, whyAudit)
+					s.ctx.Label, j.Status, s.fixes, j.WhyTruth, j.WhyAudit)
 			}
-			return s.finish(status, parts, solution, okTruth, okAudit), nil
+			return s.finish(j, solution), nil
 		}
 
 		s.fixes++
 		fixed, err := s.ask(ctx, fmt.Sprintf("correct-%d", s.fixes),
 			prompt.SolveCorrect(s.ctx.Render(), solution,
-				complaints(truth, audit, okTruth, okAudit), s.parts), wantSolution)
+				complaints(j.Truth, j.Audit, j.TruthPassed, j.AuditPassed), s.parts), wantSolution)
 		if err != nil {
 			// The correction call failed and the solution as it stands has been
 			// judged. Marking it on what the judges said beats losing the whole
 			// exercise over a host that would not answer the eighth call.
 			s.engine.logf("%s: the correction call failed, keeping what was judged: %v", s.ctx.Label, err)
-			return s.finish(status, parts, solution, okTruth, okAudit), nil
+			return s.finish(j, solution), nil
 		}
 		solution = fixed
 	}
@@ -357,12 +430,12 @@ func (s *state) stage(name string) string {
 }
 
 // finish turns a judged solution into a file.
-func (s *state) finish(status string, parts []corpus.Part, solution string, okTruth, okAudit bool) Result {
+func (s *state) finish(j Judgement, solution string) Result {
 	uses, body := textguard.Uses(solution)
-	m := s.meta(status)
-	m.Parts = parts
+	m := s.meta(j.Status)
+	m.Parts = j.Parts
 	m.Uses = uses
-	m.TruthJudge, m.AuditJudge = verdict(okTruth), verdict(okAudit)
+	m.TruthJudge, m.AuditJudge = verdict(j.TruthPassed), verdict(j.AuditPassed)
 	m.Candidates = s.engine.candidates()
 	m.Corrections = s.fixes
 	out := s.result()
