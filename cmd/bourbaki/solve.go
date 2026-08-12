@@ -8,6 +8,7 @@ import (
 	"sort"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/solve"
 )
 
@@ -47,6 +48,9 @@ bourbaki solve run, which is where the seven calls of the pipeline are made.
   -label   one exercise, printed in full
   -depth   how far to follow the cross-references, 2 by default
   -max     the cap on the references, in characters, 40000 by default
+  -ask     the most that goes in one question, 32000 characters by default,
+           which is what -label is rendered inside of and what the measurement
+           counts the contexts against
   -json    the measurement as JSON rather than a table
 `)
 	}
@@ -54,6 +58,7 @@ bourbaki solve run, which is where the seven calls of the pipeline are made.
 	label := fs.String("label", "", "one exercise, printed in full")
 	depth := fs.Int("depth", 2, "how far to follow the cross-references")
 	max := fs.Int("max", 40000, "cap on the references, in characters")
+	ask := fs.Int("ask", 32000, "the most that goes in one question, in characters")
 	asJSON := fs.Bool("json", false, "write the measurement as JSON")
 	pos, err := parseFlags(fs, args)
 	if err != nil {
@@ -78,10 +83,14 @@ bourbaki solve run, which is where the seven calls of the pipeline are made.
 		if err != nil {
 			return err
 		}
-		fmt.Print(ctx.Render())
+		// What the model is shown, and not what the assembler put together, which
+		// on this corpus are different things for 250 of the 317 exercises. The
+		// room is the limit less the instructions the reference call wraps the
+		// context in, since that call is the one that reads the context alone.
+		fmt.Print(ctx.RenderWithin(*ask-len(prompt.SolveReference("")), ""))
 		return nil
 	}
-	return measure(c, o, *asJSON)
+	return measure(c, o, *ask, *asJSON)
 }
 
 // row is one exercise's context, measured.
@@ -93,6 +102,16 @@ type row struct {
 	Outside  int    `json:"outside"`
 	OverCap  int    `json:"over_cap"`
 	Coarse   int    `json:"section_only"`
+	// By is the characters each kind of piece contributes, which is what a cap
+	// on the whole question is chosen from. Knowing a context is 130 000
+	// characters says it will not be sent; knowing that 96 000 of them are
+	// references says what to drop.
+	By map[string]int `json:"by_kind"`
+	// Ask is how long the context is once it has been trimmed to fit a
+	// question, which is the number that says whether the exercise can be put
+	// to a model at all. Chars is what the corpus holds for it and Ask is what
+	// the model gets to read.
+	Ask int `json:"ask_chars"`
 }
 
 // measure builds every context in the printing and says what came out.
@@ -101,16 +120,22 @@ type row struct {
 // written before there was a corpus to try them on, and a cap nobody has
 // measured is a guess with a number on it. This says how many exercises reach
 // the cap, how much the median one carries, and what the tail looks like.
-func measure(c *solve.Corpus, o solve.Options, asJSON bool) error {
+func measure(c *solve.Corpus, o solve.Options, ask int, asJSON bool) error {
+	// The room the reference call leaves the context, which is the tightest of
+	// the five calls to fit and so the one worth measuring.
+	room := ask - len(prompt.SolveReference(""))
 	var rows []row
 	for _, label := range c.Exercises() {
 		ctx, err := c.Build(label, o)
 		if err != nil {
 			return err
 		}
-		r := row{Label: label, Chars: ctx.Chars(),
+		r := row{Label: label, Chars: ctx.Chars(), By: map[string]int{},
 			Siblings: ctx.Count(solve.Sibling), Refs: ctx.Count(solve.Reference),
 			Outside: ctx.Count(solve.Outside)}
+		for _, p := range ctx.Pieces {
+			r.By[string(p.Kind)] += len(p.Text) + len(p.Raw)
+		}
 		for _, p := range ctx.Named {
 			switch p.Why {
 			case solve.OverCap:
@@ -119,6 +144,7 @@ func measure(c *solve.Corpus, o solve.Options, asJSON bool) error {
 				r.Coarse++
 			}
 		}
+		r.Ask = len(ctx.RenderWithin(room, ""))
 		rows = append(rows, r)
 	}
 	if asJSON {
@@ -131,11 +157,21 @@ func measure(c *solve.Corpus, o solve.Options, asJSON bool) error {
 		return nil
 	}
 
-	chars := make([]int, len(rows))
-	var totalRefs, totalOutside, totalCoarse, capped, biggest int
+	chars, asked := make([]int, len(rows)), make([]int, len(rows))
+	by := map[string]int{}
+	var totalRefs, totalOutside, totalCoarse, capped, biggest, overAsk, overRoom int
 	big := rows[0]
 	for i, r := range rows {
-		chars[i] = r.Chars
+		chars[i], asked[i] = r.Chars, r.Ask
+		if r.Ask > room {
+			overRoom++
+		}
+		for k, n := range r.By {
+			by[k] += n
+		}
+		if r.Chars > ask {
+			overAsk++
+		}
 		totalRefs += r.Refs
 		totalOutside += r.Outside
 		totalCoarse += r.Coarse
@@ -147,6 +183,7 @@ func measure(c *solve.Corpus, o solve.Options, asJSON bool) error {
 		}
 	}
 	sort.Ints(chars)
+	sort.Ints(asked)
 	fmt.Printf("%d exercises\n", len(rows))
 	fmt.Printf("context  median %s, mean %s, largest %s (%s)\n",
 		kb(chars[len(chars)/2]), kb(mean(chars)), kb(biggest), big.Label)
@@ -158,6 +195,13 @@ func measure(c *solve.Corpus, o solve.Options, asJSON bool) error {
 	fmt.Printf("         %d named and not carried, a page citation that "+
 		"narrowed only to a §\n", totalCoarse)
 	fmt.Printf("capped   %d exercises reach the %s limit on references\n", capped, kb(o.MaxChars))
+	for _, k := range []solve.Kind{solve.TheExercise, solve.Sibling, solve.TheSection, solve.Reference} {
+		fmt.Printf("%-10s%s an exercise on average\n", k, kb(by[string(k)]/len(rows)))
+	}
+	fmt.Printf("over ask %d of %d contexts are over %s on their own, before the "+
+		"instructions\n", overAsk, len(rows), kb(ask))
+	fmt.Printf("trimmed  median %s, largest %s, %d still over the %s a question "+
+		"leaves them\n", kb(asked[len(asked)/2]), kb(asked[len(asked)-1]), overRoom, kb(room))
 	return nil
 }
 

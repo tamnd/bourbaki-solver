@@ -47,6 +47,7 @@ flags:
   -limit    stop after this many
   -depth    how far to follow the cross-references, 2 by default
   -max      the cap on the references, in characters, 40000 by default
+  -ask      the most that goes in one question, 32000 characters by default
   -routes   the route file naming the hosts
   -hosts    only these hosts, by name, comma separated
   -wait     wait this long for a host to come up
@@ -64,6 +65,7 @@ type solveReviewFlags struct {
 	limit   int
 	depth   int
 	max     int
+	ask     int
 	routes  string
 	hosts   string
 	wait    time.Duration
@@ -100,6 +102,7 @@ func runSolveReview(args []string) error {
 	fs.IntVar(&f.limit, "limit", 0, "stop after this many")
 	fs.IntVar(&f.depth, "depth", 2, "how far to follow the cross-references")
 	fs.IntVar(&f.max, "max", 40000, "cap on the references, in characters")
+	fs.IntVar(&f.ask, "ask", 32000, "the most that goes in one question, in characters")
 	fs.StringVar(&f.routes, "routes", "", "route file")
 	fs.StringVar(&f.hosts, "hosts", "", "only these hosts")
 	fs.DurationVar(&f.wait, "wait", 0, "wait this long for a host")
@@ -243,6 +246,7 @@ func reviewOne(ctx context.Context, c *solve.Corpus, store solve.Store, root str
 	started := time.Now()
 	engine := solve.Engine{
 		Ask:     fleetAsker{host: host, keep: f.keep},
+		Limit:   f.ask,
 		Archive: solveArchive(root, "review", f.lang, label),
 		Logf:    logf,
 	}
