@@ -12,16 +12,20 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/extract"
+	"github.com/tamnd/bourbaki-solver/katex"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/quality"
 )
 
 func runExtract(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("extract: want one of audit, fonts, page, prepare, run")
+		return fmt.Errorf("extract: want one of audit, drift, fonts, page, prepare, run")
 	}
 	switch args[0] {
 	case "audit":
 		return extractAudit(args[1:])
+	case "drift":
+		return extractDrift(args[1:])
 	case "fonts":
 		return extractFonts(args[1:])
 	case "page":
@@ -421,6 +425,310 @@ func extractPage(args []string) error {
 	fmt.Printf("head: %s [band %d]\nlines: %d  flags: %v\n\n%s\n",
 		p.Head, vol.HeadBand, p.Lines, p.Flags, p.Body)
 	return nil
+}
+
+// extractDrift re-reads the pages a hand repair froze, and reports the ones the
+// extractor would now write differently.
+//
+// A hand repair sets manual: true and extract run then leaves the page alone
+// for good. The reason it gives is that the text layer has not changed since
+// the repair, so re-reading the page would put back the same fault. That is
+// true of the layer and not of the reader: every pass that taught the extractor
+// something new made some of those repairs unnecessary, and a few of them
+// wrong. Page 106 of the English printing is the one that showed it. Its sum
+// was repaired for the prime and kept "\sum_i^n_{=1}", which KaTeX will not
+// set, while a read today gives "\sum_{i=1}^n" with nothing done to it, and the
+// page had been sitting frozen in front of the repair for three passes.
+//
+// So this is the drift between the two: what is committed against what the
+// reader says today, on the pages nobody re-reads. It is a work list and not a
+// rule. Every manual page differs here by construction, since the repair itself
+// is a difference, and the number worth looking at is the one beside it: how
+// many spans of each body KaTeX refuses. A page whose fresh read refuses fewer
+// is a page whose repair has been overtaken.
+func extractDrift(args []string) error {
+	fs := flag.NewFlagSet("extract drift", flag.ExitOnError)
+	book := fs.String("book", "", "book id")
+	first := fs.Int("f", 0, "first pdf page")
+	last := fs.Int("l", 0, "last pdf page")
+	verbose := fs.Bool("v", false, "print the paragraphs that differ")
+	fix := fs.Bool("fix", false, "take the paragraphs whose fresh read KaTeX sets and the committed one it does not")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: bourbaki extract drift -book <id> [-f N] [-l N] [-v] [-fix]\n\n")
+		fs.PrintDefaults()
+	}
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *book == "" {
+		fs.Usage()
+		os.Exit(2)
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		return err
+	}
+	b, ok := books.Get(*book)
+	if !ok {
+		return fmt.Errorf("no book %q in %s", *book, corpus.BooksPath(root))
+	}
+	src, err := openPDF(root, b)
+	if err != nil {
+		return err
+	}
+	lay, err := src.XML(context.Background(), *first, *last)
+	if err != nil {
+		return err
+	}
+	if err := src.WithRules(context.Background(), lay); err != nil {
+		return err
+	}
+	// The same two passes extract run makes, because a page read on its own is
+	// not the page a run of the volume writes: the head band and the compound
+	// words are both measurements over the whole volume, and a drift report
+	// that read them differently would report drift it had caused itself.
+	vol := extract.Measure(lay)
+	compounds := extract.Compounds{}
+	for _, pg := range lay.Pages {
+		compounds.Read(extract.ReadPageWith(lay, pg, vol).Body)
+	}
+	vol.Compounds = compounds
+
+	eng, err := katex.New()
+	if err != nil {
+		return err
+	}
+	manual, moved, took := 0, 0, 0
+	for _, pg := range lay.Pages {
+		path := corpus.PagePath(root, b.ID, pg.Number)
+		f, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !f.Meta.Manual {
+			continue
+		}
+		manual++
+		p := extract.ReadPageWith(lay, pg, vol)
+		if p.Body == f.Body {
+			continue
+		}
+		moved++
+		was, now := refused(eng, f.Body), refused(eng, p.Body)
+		mark := "  "
+		if now < was {
+			mark = "<-" // the fresh read sets what the repair could not
+		}
+		fmt.Printf("%s %s p %d  %d paragraphs differ  KaTeX refuses %d, would refuse %d\n",
+			mark, b.ID, pg.Number, diffCount(paragraphs(f.Body), paragraphs(p.Body)), was, now)
+		if *verbose {
+			for _, l := range paraDiff(paragraphs(f.Body), paragraphs(p.Body)) {
+				fmt.Printf("    %s\n", l)
+			}
+		}
+		if !*fix || now >= was {
+			continue
+		}
+		body, n := overtaken(eng, f.Body, p.Body)
+		if n == 0 {
+			continue
+		}
+		f.Body = body
+		if err := f.Write(path); err != nil {
+			return err
+		}
+		took += n
+		fmt.Printf("   took %d paragraphs from the fresh read of p %d\n", n, pg.Number)
+	}
+	fmt.Printf("%s: %d pages repaired by hand, %d of them read differently today\n", b.ID, manual, moved)
+	if *fix {
+		fmt.Printf("%s: %d paragraphs taken from the fresh read\n", b.ID, took)
+	}
+	return nil
+}
+
+// overtaken replaces the paragraphs of a repaired page that a read today sets
+// and the repair does not, and returns the body and how many it took.
+//
+// Paragraph by paragraph and not page by page, because a page is rarely one or
+// the other. Page 106 of the English printing wants the fresh read of its
+// Corollary, whose sum the repair left as "\sum_i^n_{=1}", and wants to keep
+// its next paragraph, where the repair wrote \sum for a large operator the
+// reader still calls \Sigma. Page 471 wants the fresh d^{-1}_j and would lose
+// three matrices the repair rebuilt if it took the whole page.
+//
+// A paragraph is taken only where the two readings write the same words around
+// the mathematics and the fresh reading sets a formula the repair does not. The
+// words are what says the two are the same paragraph: the drift is inside the
+// mathematics, so prose that matches means both readings are looking at the
+// same text and the only question left is which of them sets it. That is what
+// keeps the rebuilt displays of page 471, which the fresh read hands back as
+// three lines of wreckage whose words match nothing the repair wrote.
+func overtaken(eng *katex.Renderer, oldBody, freshBody string) (string, int) {
+	old, now := paragraphs(oldBody), paragraphs(freshBody)
+	// The body has to come back out of its blocks as it went in, or what is
+	// written back is a reformatting of the page with a repair somewhere in it.
+	if strings.Join(old, "\n\n") != strings.TrimSuffix(corpus.NormalizeBody(oldBody), "\n") {
+		return oldBody, 0
+	}
+	keep := common(old, now)
+	out := append([]string(nil), old...)
+	took, i, j := 0, 0, 0
+	// The hunks between the paragraphs the two readings share. Inside a hunk a
+	// paragraph is paired by its words and not by its position, and only where
+	// the words pick out one paragraph and no more: a hunk is short, and two
+	// paragraphs of one with the same words and different mathematics would be
+	// a page saying the same sentence twice, which is a page to read and not to
+	// rewrite.
+	for _, k := range append(keep, [2]int{len(old), len(now)}) {
+		for a := i; a < k[0]; a++ {
+			b, n := 0, 0
+			for c := j; c < k[1]; c++ {
+				if prose(now[c]) == prose(old[a]) {
+					b, n = c, n+1
+				}
+			}
+			if n != 1 {
+				continue
+			}
+			if refused(eng, now[b]) < refused(eng, old[a]) {
+				out[a] = now[b]
+				took++
+			}
+		}
+		i, j = k[0]+1, k[1]+1
+	}
+	if took == 0 {
+		return oldBody, 0
+	}
+	return strings.Join(out, "\n\n"), took
+}
+
+// prose is text with its mathematics taken out, its delimiters with it, and its
+// spacing flattened. What is left is the words, in order.
+//
+// The delimiters go because the two readings are allowed to disagree about them:
+// a formula the repair left inline in the middle of a sentence is the same
+// formula the fresh read sets as a display of its own, and prose that counted
+// the dollars would call those two different texts.
+func prose(s string) string {
+	spans, _ := quality.Math(s)
+	r := []rune(s)
+	out, at := make([]rune, 0, len(r)), 0
+	for _, sp := range spans {
+		if sp.Start < at || sp.End > len(r) {
+			return s // an unclosed span, so nothing here is measured
+		}
+		out = append(out, r[at:sp.Start]...)
+		at = sp.End
+	}
+	out = append(out, r[at:]...)
+	kept := out[:0]
+	for i, c := range out {
+		if c == '$' && (i == 0 || out[i-1] != '\\') {
+			continue
+		}
+		kept = append(kept, c)
+	}
+	return strings.Join(strings.Fields(string(kept)), " ")
+}
+
+// refused is how many math spans of a body KaTeX will not set, which is P04
+// asked of one page rather than of the corpus.
+func refused(eng *katex.Renderer, body string) int {
+	n := 0
+	spans, _ := quality.Math(body)
+	for _, s := range spans {
+		if _, err := eng.Render(s.Text, s.Display); err != nil {
+			n++
+		}
+	}
+	return n
+}
+
+// paragraphs cuts a page body into the blocks it is written in, which is the
+// unit a hand repair works in and the unit a diff of one is readable in.
+//
+// A block is not a line. A paragraph is one long line, but a display is three,
+// the fences and the mathematics between them, and 390 of the page files carry
+// one. Cutting on the blank line rather than on the newline keeps a display
+// whole, so it is compared and written back as the one thing it is.
+func paragraphs(body string) []string {
+	var out []string
+	for _, s := range strings.Split(corpus.NormalizeBody(body), "\n\n") {
+		if t := strings.Trim(s, "\n"); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+// paraDiff is the paragraphs of a page that changed, as - for the committed
+// text and + for what a read today gives.
+func paraDiff(old, now []string) []string {
+	keep := common(old, now)
+	var out []string
+	i, j := 0, 0
+	for _, k := range keep {
+		for ; i < k[0]; i++ {
+			out = append(out, "- "+old[i])
+		}
+		for ; j < k[1]; j++ {
+			out = append(out, "+ "+now[j])
+		}
+		i, j = k[0]+1, k[1]+1
+	}
+	for ; i < len(old); i++ {
+		out = append(out, "- "+old[i])
+	}
+	for ; j < len(now); j++ {
+		out = append(out, "+ "+now[j])
+	}
+	return out
+}
+
+// diffCount is how many paragraphs paraDiff would print.
+func diffCount(old, now []string) int { return len(paraDiff(old, now)) }
+
+// common is the longest common subsequence of two pages, as the pairs of
+// indices that match. A page is a few dozen paragraphs, so the square table is
+// nothing, and pairing by index is not enough: a repair that split a display
+// back out of a paragraph moves everything under it by one.
+func common(a, b []string) [][2]int {
+	n, m := len(a), len(b)
+	t := make([][]int, n+1)
+	for i := range t {
+		t[i] = make([]int, m+1)
+	}
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if a[i] == b[j] {
+				t[i][j] = t[i+1][j+1] + 1
+				continue
+			}
+			t[i][j] = max(t[i+1][j], t[i][j+1])
+		}
+	}
+	var out [][2]int
+	for i, j := 0, 0; i < n && j < m; {
+		switch {
+		case a[i] == b[j]:
+			out = append(out, [2]int{i, j})
+			i, j = i+1, j+1
+		case t[i+1][j] >= t[i][j+1]:
+			i++
+		default:
+			j++
+		}
+	}
+	return out
 }
 
 // repairedByHand says whether the page already at path was repaired by hand and
