@@ -123,7 +123,13 @@ type SolutionFrontMatter struct {
 	TruthJudge  string   `yaml:"truth_judge,omitempty"`
 	AuditJudge  string   `yaml:"audit_judge,omitempty"`
 	Corrections int      `yaml:"corrections"`
-	Tokens      *Tokens  `yaml:"tokens,omitempty"`
+	// Reviewed is when the judges last read this solution again without
+	// rewriting it. It is not Generated: a solution written in March and
+	// re-judged in August under a better prompt is a different thing from one
+	// written in August, and a file carrying one date for both cannot say which
+	// it is.
+	Reviewed string  `yaml:"reviewed,omitempty"`
+	Tokens   *Tokens `yaml:"tokens,omitempty"`
 	// PromptSHA256 identifies the instructions the solution was written under,
 	// as it does for a translated section. A prompt that gets better is a
 	// reason to solve an exercise again, and a solution that cannot say which

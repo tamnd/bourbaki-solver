@@ -12,15 +12,21 @@ import (
 )
 
 func runSolve(args []string) error {
-	if len(args) > 0 && args[0] == "run" {
-		return runSolveRun(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "run":
+			return runSolveRun(args[1:])
+		case "review":
+			return runSolveReview(args[1:])
+		}
 	}
 	fs := flag.NewFlagSet("solve", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: bourbaki solve <context|run> [flags]
+		fmt.Fprint(os.Stderr, `usage: bourbaki solve <context|run|review> [flags]
 
   context  what a model is shown when it is asked to do an exercise
   run      ask, judge, and write the answers down
+  review   judge a solution the corpus already holds, without rewriting it
 
 usage: bourbaki solve context [-lang en] [-label alg-viii-s1-ex-19] [-json]
 

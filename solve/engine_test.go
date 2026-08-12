@@ -505,6 +505,84 @@ func TestTheSelectorIsGivenTheObligationsAndNoMore(t *testing.T) {
 	}
 }
 
+// Review is the judging half with the writing half taken out. It is three calls
+// and not seven, and the solution it was given comes back the way it went in.
+func TestASolutionJudgedAndNotRewritten(t *testing.T) {
+	a := &asker{by: map[string][]string{
+		"reference": {reference}, "truth": {pass}, "audit": {auditPass},
+	}}
+	got, err := engine(a).Review(context.Background(),
+		exercise("Prove that $M$ is Noetherian."), answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Judged || got.Status != corpus.StatusVerified {
+		t.Errorf("judged %v, status %q", got.Judged, got.Status)
+	}
+	if !got.TruthPassed || !got.AuditPassed {
+		t.Errorf("judges %v and %v", got.TruthPassed, got.AuditPassed)
+	}
+	if want := []string{"reference", "truth", "audit"}; !equal(a.stages(), want) {
+		t.Errorf("it ran %v", a.stages())
+	}
+	// The judges were given the solution as it stands, and no candidate was
+	// asked for. A review that wrote its own answer would be judging that one.
+	if !strings.Contains(a.question(t, "truth"), "finitely generated") {
+		t.Error("the truth judge was not shown the solution")
+	}
+}
+
+// A solution the judges throw out. The verdict comes back whole, because the
+// table says a solution changed and the judgement is the only thing that says
+// why.
+func TestAReviewThatOverturnsWhatTheFileSays(t *testing.T) {
+	a := &asker{by: map[string][]string{
+		"reference": {reference}, "truth": {fail}, "audit": {auditFail},
+	}}
+	got, err := engine(a).Review(context.Background(), exercise("Prove it."), answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != corpus.StatusUnverified {
+		t.Errorf("status %q", got.Status)
+	}
+	if !strings.Contains(got.Truth, "The third step is asserted") ||
+		!strings.Contains(got.Audit, "The case $n = 0$ is not covered") {
+		t.Error("the judgements did not come back whole")
+	}
+	if got.WhyTruth == "" {
+		t.Error("there is no line saying what the truth judge decided")
+	}
+	// Nothing was corrected. The question here is whether what was written
+	// stands, not what it should have said.
+	for _, s := range a.stages() {
+		if strings.HasPrefix(s, "correct") {
+			t.Errorf("it tried to fix the solution: %v", a.stages())
+		}
+	}
+}
+
+// An exercise the reference stops at is not a solution both judges threw out,
+// and a review that reported it as unverified would be reporting a corpus gap
+// as a wrong answer.
+func TestAReviewOfAnExerciseTheReferenceStops(t *testing.T) {
+	a := &asker{by: map[string][]string{
+		"reference": {strings.ReplaceAll(reference, "REACH: IN_CORPUS", "REACH: OUT_OF_CORPUS")}}}
+	got, err := engine(a).Review(context.Background(), exercise("Prove it."), answer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Judged {
+		t.Error("the judges were asked about an exercise that is out of corpus")
+	}
+	if got.Status != corpus.StatusBlocked {
+		t.Errorf("status %q", got.Status)
+	}
+	if len(a.asked) != 1 {
+		t.Errorf("it spent %d calls on it", len(a.asked))
+	}
+}
+
 func equal(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
