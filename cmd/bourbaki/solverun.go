@@ -15,6 +15,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/fleet"
 	"github.com/tamnd/bourbaki-solver/ocr"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/quality"
 	"github.com/tamnd/bourbaki-solver/solve"
 )
@@ -128,7 +129,7 @@ func runSolveRun(args []string) error {
 	}
 
 	if f.dry {
-		return solveDryRun(c, o, work)
+		return solveDryRun(c, o, f.ask, work)
 	}
 
 	hosts, err := ocrHostsNow(ctx, f.routes, f.hosts, f.wait, logf)
@@ -241,10 +242,13 @@ func inOrder(labels []string) {
 // half of the run that can fail without a fleet, and the sizes are what a person
 // reads before spending an afternoon of somebody's account on a prompt that
 // turns out to carry four hundred thousand characters.
-func solveDryRun(c *solve.Corpus, o solve.Options, work []string) error {
+func solveDryRun(c *solve.Corpus, o solve.Options, ask int, work []string) error {
+	// What the reference call leaves the context, which is the tightest of the
+	// five calls to fit and so the one the sent column is measured on.
+	room := ask - len(prompt.SolveReference(""))
 	fmt.Printf("%d exercises, asking nothing\n\n", len(work))
-	fmt.Printf("%-24s %8s  %5s  %s\n", "exercise", "context", "parts", "calls")
-	total, most := 0, 0
+	fmt.Printf("%-24s %12s %12s  %5s  %s\n", "exercise", "context", "sent", "parts", "calls")
+	total, most, trimmed := 0, 0, 0
 	for _, label := range work {
 		cx, err := c.Build(label, o)
 		if err != nil {
@@ -252,14 +256,20 @@ func solveDryRun(c *solve.Corpus, o solve.Options, work []string) error {
 		}
 		parts := cx.PartsOf()
 		chars := cx.Chars()
+		sent := len(cx.RenderWithin(room, ""))
 		total += chars
 		if chars > most {
 			most = chars
 		}
-		fmt.Printf("%-24s %8s  %5d  %d\n", label, kb(chars), len(parts), 7)
+		if sent < len(cx.Render()) {
+			trimmed++
+		}
+		fmt.Printf("%-24s %12s %12s  %5d  %d\n", label, kb(chars), kb(sent), len(parts), 7)
 	}
 	fmt.Printf("\ncontext  mean %s, largest %s, %s in all\n",
 		kb(total/len(work)), kb(most), kb(total))
+	fmt.Printf("sent     %d of %d trimmed to fit the %s a question leaves them\n",
+		trimmed, len(work), kb(room))
 	fmt.Printf("calls    up to %d, and as few as %d if every one stops at the reference\n",
 		len(work)*7, len(work))
 	return nil
