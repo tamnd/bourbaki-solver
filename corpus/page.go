@@ -99,6 +99,18 @@ type PageFrontMatter struct {
 // PageFile is one page of one volume.
 type PageFile = File[PageFrontMatter]
 
+// Bend is how the corpus writes the dangerous bend, the sign Bourbaki sets in
+// the margin against a passage the reader is to take slowly. U+2621 is the
+// caution sign, which is the road sign the bend is drawn from, and writing the
+// character rather than a command means a reader can search for it and every
+// renderer can set it.
+//
+// It lives here rather than in extract because both ends of the page file
+// contract need it: extraction writes it at the head of the passage it marks,
+// and assembly has to read past it to find the head of a statement, since a
+// marked passage often opens on one.
+const Bend = "☡"
+
 // PagesDir is where the pages of one volume are written.
 //
 // Committed, not scratch. These were under work/ at first, on the reasoning

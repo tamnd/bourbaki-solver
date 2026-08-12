@@ -148,6 +148,45 @@ func TestStatementsReadsAHeadThatLostItsBold(t *testing.T) {
 	}
 }
 
+// The dangerous bend marks a passage, and a marked passage often opens on a
+// statement. Extraction writes the sign at the head of the paragraph, so it
+// stands in front of the head, and reading the paragraph as prose would drop
+// four permanent tags out of the French printing: Remarque 2 of § 7 no. 1, two
+// of the Examples of § 9 no. 2 and the Remark of § 16 no. 8. A tag that
+// disappears is a tag retired, which is the one thing this corpus promises not
+// to do.
+func TestStatementsReadsAHeadBehindTheDangerousBend(t *testing.T) {
+	in := blocks(
+		"### 1. Anneaux simples",
+		"**Remarques.** — 1) Un anneau simple est artinien à gauche.",
+		corpus.Bend+" 2) On dit parfois qu’un anneau A est quasi-simple s’il n’est pas réduit à 0.",
+		"### 2. Algèbres galoisiennes",
+		corpus.Bend+" **Remarque.** — Soit L une extension galoisienne de degré fini du corps K.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 7}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"alg-viii-s7-n1-rem-1",
+		"alg-viii-s7-n1-rem-2",
+		"alg-viii-s7-n2-rem-1",
+	})
+	// The sign is a mark on the whole statement, so it goes back at the front of
+	// the body once the head has been read off. It marks the passage either way,
+	// and leaving it on the heading would put it in the table of contents.
+	for _, s := range got[1:] {
+		if !strings.HasPrefix(s.Body, corpus.Bend+" ") {
+			t.Errorf("%s lost the sign that marks it: %q", s.Label(), s.Body)
+		}
+	}
+	for _, b := range out {
+		if strings.HasPrefix(b.text, "#") && strings.Contains(b.text, corpus.Bend) {
+			t.Errorf("the sign ended up in a heading: %q", b.text)
+		}
+	}
+}
+
 // A Corollary standing under nothing is a section boundary read wrong, not a
 // statement to guess a number for.
 func TestStatementsRefusesAnOrphanCorollary(t *testing.T) {

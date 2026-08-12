@@ -110,14 +110,13 @@ func (r *Renderer) Render(tex string, display bool) (string, error) {
 	// No macros. Bourbaki writes \mathscr, \mathfrak and \mathbf across the
 	// chapter and KaTeX knows all three.
 	//
-	// The one command the corpus writes that KaTeX does not know is \dbend, the
-	// dangerous bend the book prints in the margin of a hard passage, which
-	// comes from a LaTeX package nobody here loads. It is deliberately not
-	// defined here: 17 spans in the corpus are the bare command with no
-	// surrounding mathematics, which is not a formula at all, and the answer to
-	// that is to write the sign in the Markdown rather than to teach the
-	// renderer a command the corpus should not be emitting. P04 reports them
-	// until it is.
+	// The corpus used to write \dbend here, the dangerous bend the book prints
+	// in the margin of a hard passage, out of a LaTeX package nobody here
+	// loads. It was deliberately never defined: the 17 spans were the bare
+	// command with no mathematics around it, which is not a formula at all, and
+	// the answer was to write the sign in the Markdown rather than to teach the
+	// renderer a command the corpus should not be emitting. Extraction writes
+	// U+2621 now and this stays empty.
 	opts.Set("macros", r.vm.NewObject())
 	opts.Set("strict", false)
 
