@@ -1,6 +1,7 @@
 package publish
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,10 +36,13 @@ func testSite(t *testing.T) *Site {
 		"#### Lemma 2 {#alg-viii-s14-lem-2 .statement tag=00GO}",
 		"",
 		"By Theorem 1.",
+		"",
+		"See the [exercises for § 14](exercises/s14/).",
 	}, "\n")
 
 	s := &Site{Root: t.TempDir(), Langs: []string{"en", "fr"},
 		Draft: map[string]bool{}, byTag: map[string]*Statement{}, byLabel: map[string]*Section{},
+		byExTag: map[string]*Exercise{}, byExLabel: map[string]*Exercise{},
 		CitedBy: map[string][]*Edge{}, Cites: map[string][]*Edge{}}
 	for _, lang := range s.Langs {
 		for _, m := range []corpus.SectionFrontMatter{meta(lang, 14, "Reduced Algebras"), meta(lang, 15, "Brauer Groups")} {
@@ -47,8 +51,21 @@ func testSite(t *testing.T) *Site {
 			sec.Units = Units(sec.Body)
 			s.Sections = append(s.Sections, sec)
 		}
+		// Two exercises of § 14, one of them starred, which is the shape the
+		// chapter has: 76 of its 317 exercises carry a mark and the rest do not.
+		for _, n := range []int{1, 8} {
+			ex := &Exercise{Lang: lang, Dir: "s14", Body: "Prove that $A$ is reduced.",
+				Path: filepath.Join("content", lang, "alg", "VIII", "exercises", "s14", fmt.Sprintf("%02d.md", n)),
+				Meta: corpus.ExerciseFrontMatter{Book: "alg", Chapter: "VIII", Section: 14,
+					Exercise: n, Label: fmt.Sprintf("alg-viii-s14-ex-%d", n), Lang: lang,
+					Tag: map[int]string{1: "00H1", 8: "00H8"}[n], BookPage: "A VIII.92",
+					Starred: n == 8}}
+			s.Exercises = append(s.Exercises, ex)
+		}
 	}
-	s.index()
+	if err := s.index(); err != nil {
+		t.Fatal(err)
+	}
 	return s
 }
 
@@ -108,19 +125,151 @@ func TestAReferenceFromASectionIsLinkedAtTheSection(t *testing.T) {
 	}
 }
 
-// An exercise is in the corpus and has no page yet. Saying it is not in the
-// corpus is a lie the reader can check, since the exercises are in the same
-// repository as the page saying so.
-func TestAnExerciseIsNotCalledMissing(t *testing.T) {
+// An exercise citing a theorem is a row on the theorem's page, and it is a link
+// now that the exercise has a page. It reads as "Exercise 8, § 14" rather than
+// as its label, because every § has an Exercise 8.
+func TestAnExerciseCitingAStatementIsLinked(t *testing.T) {
 	s := testSite(t)
 	s.CitedBy["00GJ"] = []*Edge{{FromLabel: "alg-viii-s14-ex-8", ToTag: "00GJ", ToLabel: "alg-viii-s14-thm-1"}}
 
 	got := s.mustPage(t, "tag/00GJ/index.html")
-	if strings.Contains(got, "not in this corpus") {
+	if strings.Contains(got, "not in this corpus") || strings.Contains(got, "does not hold") {
 		t.Errorf("an exercise is called missing:\n%s", got)
 	}
-	if !strings.Contains(got, "an exercise, no page yet") {
-		t.Errorf("want the exercise noted in:\n%s", got)
+	if !strings.Contains(got, `<a href="/en/alg/VIII/s14/ex/8/" title="alg-viii-s14-ex-8">Exercise 8, § 14</a>`) {
+		t.Errorf("the exercise is not linked:\n%s", got)
+	}
+}
+
+// An exercise the corpus does not hold says so, and says it differently from a
+// citation of a Book nobody has transcribed. The two look the same on the page
+// and are fixed by different work.
+func TestAnExerciseTheCorpusLacksSaysWhichKindOfGapItIs(t *testing.T) {
+	s := testSite(t)
+	s.CitedBy["00GJ"] = []*Edge{{FromLabel: "alg-viii-s14-ex-99", ToTag: "00GJ", ToLabel: "alg-viii-s14-thm-1"}}
+
+	got := s.mustPage(t, "tag/00GJ/index.html")
+	if !strings.Contains(got, "an exercise the corpus does not hold") {
+		t.Errorf("want the gap named in:\n%s", got)
+	}
+}
+
+// The page the whole step is for. The disclosure is written whether or not there
+// is a solution, so that landing the solutions of M8 is a content change and not
+// a template change, and it is closed, so a reader who wants to think about the
+// exercise first can.
+func TestAnExerciseHasAPageWithAnEmptyDisclosure(t *testing.T) {
+	s := testSite(t)
+	got := s.mustPage(t, "en/alg/VIII/s14/ex/8/index.html")
+	for _, want := range []string{
+		"<h1>Exercise 8, § 14</h1>",
+		`<p class="tagline">Tag <code>00H8</code>`,
+		"Algebra, VIII, p. 92",
+		"Bourbaki marks this one as harder than the rest.",
+		"<summary>Solution</summary>",
+		"No solution has been written yet.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the exercise page does not carry %q:\n%s", want, got)
+		}
+	}
+	// <details> without open, which is the whole point of using the element.
+	if strings.Contains(got, "<details class=\"solution\" open") {
+		t.Errorf("the solution is open on load:\n%s", got)
+	}
+	// An unstarred exercise says nothing rather than saying it is not starred.
+	if plain := s.mustPage(t, "en/alg/VIII/s14/ex/1/index.html"); strings.Contains(plain, "harder than the rest") {
+		t.Errorf("an unmarked exercise is marked:\n%s", plain)
+	}
+}
+
+// The list a § points at. The marks are the short form here, because the
+// sentence the exercise's own page carries is nineteen repetitions of itself on
+// a page of nineteen rows.
+func TestTheExerciseListNamesWhatIsInIt(t *testing.T) {
+	s := testSite(t)
+	got := s.mustPage(t, "en/alg/VIII/s14/ex/index.html")
+	for _, want := range []string{
+		"<h1>Exercises for § 14. Reduced Algebras</h1>",
+		"2 exercises. No solution has been written for any of them yet.",
+		`<li><a href="/en/alg/VIII/s14/ex/1/">Exercise 1</a></li>`,
+		`<li><a href="/en/alg/VIII/s14/ex/8/">Exercise 8</a> <span class="count">harder</span></li>`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the list does not carry %q:\n%s", want, got)
+		}
+	}
+}
+
+// A solution is machine-written and machine-judged, and the note saying so is
+// inside the disclosure and above the solution, so it cannot be read past.
+func TestASolutionCarriesTheStandingNote(t *testing.T) {
+	s := testSite(t)
+	for _, ex := range s.Exercises {
+		if ex.Meta.Exercise == 8 && ex.Lang == "en" {
+			ex.Solution = &Solution{Body: "Because $A$ has no nilpotents.",
+				Path: "content/solutions/en/alg/VIII/s14/08.md",
+				Meta: corpus.SolutionFrontMatter{Label: ex.Meta.Label, Lang: "en",
+					Status: corpus.StatusVerified, Model: "gpt-5.6"}}
+		}
+	}
+	got := s.mustPage(t, "en/alg/VIII/s14/ex/8/index.html")
+	note := "This solution was written by gpt-5.6 and judged by a machine. " +
+		"It is not Bourbaki&#39;s and it has not been checked by a person."
+	if !strings.Contains(got, note) {
+		t.Errorf("the standing note is not on the page:\n%s", got)
+	}
+	if strings.Index(got, note) > strings.Index(got, "no nilpotents") {
+		t.Error("the note is under the solution rather than above it")
+	}
+	if strings.Contains(got, "No solution has been written yet") {
+		t.Errorf("the page says both that there is a solution and that there is not:\n%s", got)
+	}
+}
+
+// The corpus links its own exercises the way the repository holds them, so that
+// the link works when the file is read on GitHub. The site hangs them off the §.
+// Passing the corpus path through unchanged is where the 49 broken links on the
+// first build came from.
+func TestTheCorpusLinkToItsExercisesLandsOnTheSite(t *testing.T) {
+	s := testSite(t)
+	got := s.mustPage(t, "en/alg/VIII/s14/index.html")
+	if !strings.Contains(got, `<a href="/en/alg/VIII/s14/ex/">exercises for § 14</a>`) {
+		t.Errorf("the corpus link was not mapped:\n%s", got)
+	}
+	if strings.Contains(got, "/en/alg/VIII/exercises/") {
+		t.Errorf("the repository path is on the page as a URL:\n%s", got)
+	}
+}
+
+// An exercise carries a tag as a statement does, and a tag that resolves to
+// nothing is the one thing the tag scheme promises will not happen. The page is
+// the exercise's own, so the second URL says which one is canonical.
+func TestAnExerciseTagResolves(t *testing.T) {
+	s := testSite(t)
+	got := s.mustPage(t, "tag/00H8/index.html")
+	if !strings.Contains(got, "<h1>Exercise 8, § 14</h1>") {
+		t.Errorf("the tag page is not the exercise:\n%s", got)
+	}
+	if !strings.Contains(got, `<link rel="canonical" href="/en/alg/VIII/s14/ex/8/">`) {
+		t.Errorf("the copy does not name the original:\n%s", got)
+	}
+	// And the original does not name itself, which would be noise on every one
+	// of the seven hundred pages that are not copies.
+	if page := s.mustPage(t, "en/alg/VIII/s14/ex/8/index.html"); strings.Contains(page, "rel=\"canonical\"") {
+		t.Errorf("the exercise page carries a canonical link to itself:\n%s", page)
+	}
+}
+
+// Two things under one tag is the failure the whole scheme exists to prevent,
+// and left alone it shows up as a page written twice with whichever came last
+// winning, which is the quietest way for it to go wrong.
+func TestATagOnAStatementAndAnExerciseIsRefused(t *testing.T) {
+	s := testSite(t)
+	s.Exercises[0].Meta.Tag = "00GJ"
+	s.byExTag, s.byExLabel = map[string]*Exercise{}, map[string]*Exercise{}
+	if err := s.index(); err == nil {
+		t.Fatal("a tag on two different things was accepted")
 	}
 }
 

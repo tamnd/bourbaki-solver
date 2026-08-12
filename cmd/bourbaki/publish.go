@@ -104,15 +104,26 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 	}
 
 	// The counts a reader of the log would otherwise have to grep the tree for.
+	// A tag page is split by what the tag is on, since an exercise tag page is a
+	// second copy of a page counted elsewhere and a total that hid that would
+	// read as more coverage than there is.
 	byKind := map[string]int{}
 	for _, w := range wrote {
 		switch {
 		case strings.HasPrefix(w, "tag/"):
+			if tag := strings.TrimSuffix(strings.TrimPrefix(w, "tag/"), "/index.html"); site.ExerciseTag(tag) != nil {
+				byKind["exercise tag pages"]++
+				continue
+			}
 			byKind["tag pages"]++
 		case strings.HasPrefix(w, "katex/"):
 			byKind["KaTeX stylesheet and fonts"]++
 		case w == "index.html", w == "tags/index.html", w == "style.css":
 			byKind["site pages"]++
+		case strings.HasSuffix(w, "/ex/index.html"):
+			byKind["exercise list pages"]++
+		case strings.Contains(w, "/ex/"):
+			byKind["exercise pages"]++
 		default:
 			byKind["section and chapter pages"]++
 		}

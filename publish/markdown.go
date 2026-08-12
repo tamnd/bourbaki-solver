@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -226,6 +227,10 @@ type Renderer struct {
 	// Dir is the URL that a relative link in the body resolves against, ending
 	// in a slash. Empty leaves relative links alone.
 	Dir string
+	// Exercises is where the exercises of a § of this chapter are on the site,
+	// given "s5" or "a1" and an exercise number, or zero for the whole set. Nil
+	// resolves such a link like any other relative one.
+	Exercises func(dir string, n int) string
 	// File and Line say where the body came from: the path as committed, and
 	// the file line the body's first line sits on. They are for the one message
 	// this renderer can produce, a formula KaTeX will not read, and a message
@@ -347,6 +352,11 @@ func (r Renderer) inline(s string) string {
 	return s
 }
 
+// exerciseLinkRE is the corpus's own way of pointing at exercises, which is a
+// path in the repository: exercises/s5/ for the set and exercises/s5/08.md for
+// one of them.
+var exerciseLinkRE = regexp.MustCompile(`^exercises/([sa]\d+)/(?:(\d+)\.md)?$`)
+
 // href resolves a link written in the body.
 //
 // The corpus writes its own links relative to the directory the Markdown files
@@ -354,10 +364,22 @@ func (r Renderer) inline(s string) string {
 // exercises of § 1 as exercises/s1/. A section page is one level below the
 // chapter on the site, so passing that through unchanged would point a level
 // too deep, and it would still look like a link.
+//
+// The exercises are the one place where the repository layout and the site
+// layout differ rather than nest. The corpus keeps them in a directory of the
+// chapter, so that the link works when the file is read on GitHub, and the site
+// hangs them off the § they belong to. Mapping the one to the other here is what
+// lets both be true of the same line of Markdown.
 func (r Renderer) href(url string) string {
 	if r.Dir == "" || strings.HasPrefix(url, "/") || strings.Contains(url, "://") ||
 		strings.HasPrefix(url, "#") {
 		return url
+	}
+	if m := exerciseLinkRE.FindStringSubmatch(url); m != nil && r.Exercises != nil {
+		n, _ := strconv.Atoi(m[2]) // empty means the whole set, which is zero
+		if to := r.Exercises(m[1], n); to != "" {
+			return to
+		}
 	}
 	return r.Dir + url
 }
