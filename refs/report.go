@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
 // The reports the graph is worth reading through. They go in the corpus so that
@@ -184,6 +186,12 @@ func (res *Result) outOfCorpus(*Index) string {
 		rows = append(rows, row{k, c})
 		byBook[k.book] += c
 	}
+	// The chapter is the last word and not a nicety. The rows come out of a map,
+	// so any two the rest of this cannot separate come out in whatever order the
+	// map was walked in, and the file is committed and diffed in CI: a report
+	// that reordered itself between two runs of the same build would fail the
+	// check with nothing wrong. Most of the Books cite one or two chapters, so
+	// the ties are the ordinary case here rather than the odd one.
 	sort.Slice(rows, func(i, j int) bool {
 		if byBook[rows[i].key.book] != byBook[rows[j].key.book] {
 			return byBook[rows[i].key.book] > byBook[rows[j].key.book]
@@ -191,7 +199,10 @@ func (res *Result) outOfCorpus(*Index) string {
 		if rows[i].key.book != rows[j].key.book {
 			return rows[i].key.book < rows[j].key.book
 		}
-		return rows[i].count > rows[j].count
+		if rows[i].count != rows[j].count {
+			return rows[i].count > rows[j].count
+		}
+		return chapterOrder(rows[i].key.chapter) < chapterOrder(rows[j].key.chapter)
 	})
 
 	var b strings.Builder
@@ -204,6 +215,18 @@ func (res *Result) outOfCorpus(*Index) string {
 		fmt.Fprintf(&b, "| %d | %s | %s |\n", r.count, r.key.book, r.key.chapter)
 	}
 	return b.String()
+}
+
+// chapterOrder sorts chapters the way the Éléments number them, so VIII comes
+// after IV. A chapter this cannot read sorts last rather than failing: the
+// report is a description and a citation with a malformed chapter should show
+// in it, at the bottom, and not stop it being written.
+func chapterOrder(s string) int {
+	n, err := corpus.RomanOrder(s)
+	if err != nil {
+		return 1 << 30
+	}
+	return n
 }
 
 // unresolved is the one report that is an audit rather than a description. A
