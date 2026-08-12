@@ -30,6 +30,14 @@ flags:
 
 Every chatgpt-tool listener binds 127.0.0.1 on its own host, so nothing here
 works without ssh. The tunnels are what the rest of the tool talks to.
+
+The model column of status is what the route asks for, checked against the
+catalogue the host advertises. Both of those say what is on offer, and an
+account that has been moved down still offers the same list, so status also
+prints what the hosts have really answered on, read back off the finished jobs
+in the queue. It costs no model calls and it knows nothing until work has run.
+Read that block before starting anything long: a whole section of chapter VIII
+came back on a cut down model with the board reading gpt-5 the whole time.
 `
 
 // fleetFlags are the three that every fleet subcommand takes.
@@ -265,6 +273,7 @@ func runFleetStatus(args []string) error {
 	fs := flag.NewFlagSet("fleet status", flag.ExitOnError)
 	flags.bind(fs)
 	deep := fs.Bool("deep", false, "ask each route for a completion as well, which costs a minute or more per host")
+	queueRoot := fs.String("queue", defaultQueueRoot(), "queue directory, read for what the hosts have answered on")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -320,5 +329,6 @@ func runFleetStatus(args []string) error {
 		fmt.Fprintf(os.Stderr, "host facts as of %s, run bourbaki fleet probe to refresh\n",
 			state.Written.Local().Format(time.RFC3339))
 	}
+	printAnswers(*queueRoot, results)
 	return nil
 }
