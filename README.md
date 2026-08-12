@@ -69,8 +69,12 @@ share             public ChatGPT share pages, read whole over plain HTTP
 translate         vi, zh, ja
 solve             exercise solver and verifier
 audit             corpus checks
+publish           the static site, built out of the committed Markdown
+katex             KaTeX under a JS engine, which sets the mathematics at build time
 ```
 
 ## Licence
 
 MIT for the code. The corpus it builds is derived from copyrighted material and is for personal study, see the licence in the corpus repo.
+
+`katex/` holds a vendored copy of KaTeX 0.18.4 with its stylesheet and its woff2 fonts, under the MIT licence in `katex/LICENSE`. The bytes are checked against `katex/SHA256SUMS` by a test.

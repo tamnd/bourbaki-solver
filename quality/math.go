@@ -244,18 +244,21 @@ func needTeX(c *Corpus) string {
 
 // M04. Every math span parses.
 //
-// The spec asks for a KaTeX parse with latexmk behind it. Neither is wired,
-// and the reason is worth writing down rather than leaving as a gap: CI here
-// installs Go and nothing else, and a rule that only runs on the one machine
-// with a TeX distribution on it is a rule that will be broken for months
-// before anybody notices. Reimplementing KaTeX in Go to avoid that is not a
-// trade anybody should make either.
+// The spec asks for a KaTeX parse with latexmk behind it. This is the
+// structural half of it: a brace that does not close, a backslash with no
+// command after it, a subscript or a superscript with nothing under it, and an
+// empty span. The § 21 region that M01 reports fails this one too, from the
+// other side.
 //
-// What is here instead is the structural half, which needs nothing installed
-// and catches the faults that a lost character actually produces: a brace that
-// does not close, a backslash with no command after it, a subscript or a
-// superscript with nothing under it, and an empty span. The § 21 region that
-// M01 reports fails this one too, from the other side.
+// KaTeX itself is now P04, which came with the site: it runs in-process with
+// nothing to install, which was the objection to wiring it here. Measured over
+// the corpus as committed, M04 is at zero and P04 finds 135 spans, so KaTeX is
+// strictly the stronger reading of the two today and this rule is not what
+// finds a broken formula.
+//
+// It is kept anyway. The structural rule is the cheap one and the one that says
+// which shape is wrong rather than where a parser stopped, and a corpus that is
+// at zero on a rule is the corpus that notices the day it stops being.
 //
 // It stays behind -validate-tex, as the spec puts it, because it is the rule
 // most likely to want tightening and the one whose false positives would cost

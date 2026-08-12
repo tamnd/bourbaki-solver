@@ -187,6 +187,77 @@ func TestEveryPageSaysWhoWroteIt(t *testing.T) {
 	}
 }
 
+// The mathematics is rendered here, so the fonts it is set in have to be part
+// of the site. A page that links a stylesheet the deployment does not carry
+// falls back to the browser's serif at the wrong size, which looks like a
+// rendering bug and is a packaging one.
+func TestTheFontsShipWithTheSite(t *testing.T) {
+	s := testSite(t)
+	dir := t.TempDir()
+	wrote, err := s.Build(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fonts := 0
+	css := false
+	for _, rel := range wrote {
+		switch {
+		case rel == "katex/katex.min.css":
+			css = true
+		case strings.HasPrefix(rel, "katex/fonts/"):
+			fonts++
+		}
+	}
+	if !css || fonts == 0 {
+		t.Fatalf("the site carries the stylesheet %v and %d fonts", css, fonts)
+	}
+	page := s.mustPage(t, "en/alg/VIII/s14/index.html")
+	if !strings.Contains(page, `<link rel="stylesheet" href="/katex/katex.min.css">`) {
+		t.Errorf("a page does not link the stylesheet:\n%s", page)
+	}
+	// The stylesheet asks for its fonts relative to itself, so the two have to
+	// stay at these depths relative to each other.
+	b, err := os.ReadFile(filepath.Join(dir, "katex", "katex.min.css"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "url(fonts/") {
+		t.Error("the stylesheet does not reach its fonts from where it was written")
+	}
+}
+
+// The escape hatch, and the two things it has to be: off by default, and loud
+// when it is on. A build that quietly printed the TeX of a formula the
+// extraction lost characters out of would put the fault in front of a reader in
+// a form that looks like a decision somebody took.
+func TestBrokenMathIsMarkedAndOnlyWhenAskedFor(t *testing.T) {
+	s := testSite(t)
+	broken := `Then $\frac{1$ and the rest.`
+	for _, sec := range s.Sections {
+		sec.Body += "\n\n" + broken
+		sec.Units = Units(sec.Body)
+	}
+
+	if _, err := s.Build(t.TempDir()); err == nil {
+		t.Fatal("a broken formula built without complaint")
+	}
+	if len(s.Broken) != 0 {
+		t.Errorf("%d formulae were marked without being asked for", len(s.Broken))
+	}
+
+	s.AllowBrokenMath = true
+	got := s.mustPage(t, "en/alg/VIII/s14/index.html")
+	if !strings.Contains(got, `class="math broken"`) {
+		t.Errorf("the formula is not marked:\n%s", got)
+	}
+	if !strings.Contains(got, `$\frac{1$`) {
+		t.Errorf("the source of the formula is not shown:\n%s", got)
+	}
+	if len(s.Broken) == 0 {
+		t.Error("the build did not say what it marked")
+	}
+}
+
 func (s *Site) mustPage(t *testing.T, rel string) string {
 	t.Helper()
 	dir := t.TempDir()

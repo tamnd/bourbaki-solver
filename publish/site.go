@@ -44,15 +44,30 @@ type Site struct {
 	// Unresolved is how many references the graph could not follow, which the
 	// about page publishes rather than hides.
 	Unresolved int
+
+	// AllowBrokenMath builds a site with the formulae KaTeX refuses marked on
+	// the page instead of failing. It is off by default and the deploy never
+	// turns it on: spec 12 §5 makes a refused span a hard failure, because a
+	// site that quietly prints the TeX of a formula the extraction got wrong
+	// puts the fault in front of a reader in a form that looks deliberate.
+	// Marked is not quiet, and it is what makes the other twenty thousand
+	// formulae reviewable while the broken ones wait on the printed page.
+	AllowBrokenMath bool
+	// Broken is what that produced, in the order it was found.
+	Broken []Refusal
 }
 
 // Section is one file of content/<lang>/.
 type Section struct {
-	Lang  string
-	Meta  corpus.SectionFrontMatter
-	Body  string
-	Path  string // repo-relative, so the page can link at GitHub
-	Slug  string // front, historical-note, s1, a4
+	Lang string
+	Meta corpus.SectionFrontMatter
+	Body string
+	Path string // repo-relative, so the page can link at GitHub
+	Slug string // front, historical-note, s1, a4
+	// Head is the file line the body's first line sits on, which is the front
+	// matter plus the blank line under it. It is carried so that a formula the
+	// renderer refuses is reported at a line somebody can open.
+	Head  int
 	Units []Unit
 }
 
@@ -154,7 +169,14 @@ func loadLang(root, lang string) ([]*Section, error) {
 		if !strings.HasSuffix(p, ".md") {
 			return nil
 		}
-		f, err := corpus.ReadFile[corpus.SectionFrontMatter](p)
+		// The bytes are read here rather than by corpus.ReadFile because the
+		// front matter has to be counted as well as parsed, and reading the
+		// file twice to learn how long its head is would be silly.
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			return err
+		}
+		f, err := corpus.ParseFile[corpus.SectionFrontMatter](raw)
 		if err != nil {
 			return fmt.Errorf("%s: %w", p, err)
 		}
@@ -163,7 +185,7 @@ func loadLang(root, lang string) ([]*Section, error) {
 			return err
 		}
 		sec := &Section{Lang: lang, Meta: f.Meta, Body: f.Body,
-			Path: filepath.ToSlash(rel), Slug: slug(f.Meta)}
+			Path: filepath.ToSlash(rel), Slug: slug(f.Meta), Head: corpus.BodyStart(raw)}
 		sec.Units = Units(f.Body)
 		out = append(out, sec)
 		return nil

@@ -156,6 +156,35 @@ func SplitFrontMatter(b []byte) (head, body []byte, err error) {
 	return b[m[2]:m[3]], b[m[1]:], nil
 }
 
+// BodyStart is the file line that line one of the parsed body sits on, counting
+// both from one.
+//
+// A rule, or a renderer, works on the body and knows a body line. The reader it
+// reports to has the file open in an editor and knows a file line, and the two
+// differ by the front matter and by the blank line under it that NormalizeBody
+// trims. This is the only place that difference is worked out, because two
+// answers to "which line is this" is one answer too many.
+func BodyStart(raw []byte) int {
+	lines := bytes.Split(raw, []byte("\n"))
+	line, fences := 0, 0
+	for i, l := range lines {
+		if string(bytes.TrimRight(l, " \t\r")) == "---" {
+			fences++
+			if fences == 2 {
+				line = i + 2 // the line after the closing fence, counting from one
+				break
+			}
+		}
+	}
+	if fences < 2 {
+		return 1
+	}
+	for line <= len(lines) && strings.TrimSpace(string(lines[line-1])) == "" {
+		line++
+	}
+	return line
+}
+
 // NormalizeBody applies the body conventions: LF endings, no trailing
 // whitespace on any line, nothing blank at either end, exactly one newline at
 // the end. The hash is taken over the result, so an editor that strips or adds

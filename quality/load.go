@@ -1,7 +1,6 @@
 package quality
 
 import (
-	"bytes"
 	"fmt"
 	"io/fs"
 	"os"
@@ -359,26 +358,11 @@ func readDoc(root, path, lang string) (Doc, error) {
 // between the fence and the text, so counting from the fence would put every
 // line of every finding one out. Nobody checks a line number that is nearly
 // right, they stop trusting the tool.
-func bodyStart(raw []byte) int {
-	lines := bytes.Split(raw, []byte("\n"))
-	line, fences := 0, 0
-	for i, l := range lines {
-		if string(bytes.TrimRight(l, " \t\r")) == "---" {
-			fences++
-			if fences == 2 {
-				line = i + 2 // the line after the closing fence, counting from one
-				break
-			}
-		}
-	}
-	if fences < 2 {
-		return 1
-	}
-	for line <= len(lines) && strings.TrimSpace(string(lines[line-1])) == "" {
-		line++
-	}
-	return line
-}
+//
+// The work is in corpus because publish now needs the same answer: a formula
+// KaTeX refuses is reported at a file line, and the audit and the site have to
+// agree about which line that is.
+func bodyStart(raw []byte) int { return corpus.BodyStart(raw) }
 
 // readPages reads pages/<book>/*.md for every book the corpus has extracted,
 // counting the ones git has and skipping the ones it does not.

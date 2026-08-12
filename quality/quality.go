@@ -89,12 +89,13 @@ const (
 	References  = "references"
 	Translation = "translation"
 	Solutions   = "solutions"
+	Publication = "publication"
 	Hygiene     = "hygiene"
 )
 
 var groupOrder = []string{
 	Structure, Tags, Mathematics, Figures,
-	References, Translation, Solutions, Hygiene,
+	References, Translation, Solutions, Publication, Hygiene,
 }
 
 // checks is every rule, in the order spec 08 lists them. Registration is a

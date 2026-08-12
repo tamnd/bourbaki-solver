@@ -19,10 +19,56 @@ func TestMathIsNotMarkdown(t *testing.T) {
 	if strings.Contains(got, "<em>") || strings.Contains(got, "<strong>") {
 		t.Errorf("mathematics was read as emphasis:\n%s", got)
 	}
-	for _, want := range []string{`<span class="math">$x^*\otimes y$</span>`, `<span class="math">$x^*\in E^*$</span>`} {
+	// KaTeX keeps the source it was given in the MathML annotation, so the
+	// assertion is that both formulae reached it whole. That is the property
+	// being tested and it does not move when KaTeX changes its markup.
+	for _, want := range []string{`x^*\otimes y</annotation>`, `x^*\in E^*</annotation>`} {
 		if !strings.Contains(got, want) {
 			t.Errorf("want %s in:\n%s", want, got)
 		}
+	}
+}
+
+// The rendered mathematics is markup and not source. A page that shipped the
+// TeX would be a page that had silently fallen back, which is exactly what
+// section 5 of the spec forbids.
+func TestTheMathematicsIsRenderedAndNotPrinted(t *testing.T) {
+	var r Renderer
+	got, err := r.HTML(`The kernel of $\pi$ is $\mathfrak{m}$.`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got, "$") {
+		t.Errorf("a delimiter reached the page:\n%s", got)
+	}
+	if !strings.Contains(got, `<span class="katex">`) {
+		t.Errorf("nothing was rendered:\n%s", got)
+	}
+	// The letter is set rather than the command printed. KaTeX writes the
+	// fraktur m as a plain m in a class that picks the font out of the ones
+	// this build copies alongside the stylesheet, so this is the assertion that
+	// says the typesetting reached the page.
+	if !strings.Contains(got, `class="mord mathfrak">m<`) {
+		t.Errorf("\\mathfrak{m} was not set in fraktur:\n%s", got)
+	}
+}
+
+// A formula KaTeX will not read stops the build, and says where. The
+// alternative is raw TeX on the page, which looks deliberate and never gets
+// fixed.
+func TestARefusedFormulaNamesTheFileAndTheLine(t *testing.T) {
+	r := Renderer{File: "content/en/alg/VIII/01_s1.md", Line: 12}
+	body := "Prose.\n\nMore prose.\n\nAnd then $\\frac{1$ breaks."
+	got, err := r.HTML(body)
+	if err == nil {
+		t.Fatalf("a broken formula rendered: %s", got)
+	}
+	// Line 5 of the body, and the body starts at file line 12.
+	if !strings.Contains(err.Error(), "content/en/alg/VIII/01_s1.md:16") {
+		t.Errorf("the error does not say where: %v", err)
+	}
+	if !strings.Contains(err.Error(), `\frac{1`) {
+		t.Errorf("the error does not say what: %v", err)
 	}
 }
 

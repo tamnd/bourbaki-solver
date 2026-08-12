@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/katex"
 )
 
 // Build writes the whole site under out and returns the paths it wrote,
@@ -34,6 +37,23 @@ func (s *Site) Build(out string) ([]string, error) {
 	if err := write("style.css", styleCSS); err != nil {
 		return nil, err
 	}
+	// KaTeX writes markup that means nothing without its stylesheet and its
+	// fonts, so they are part of the site rather than something a deployment
+	// step is trusted to remember. They go under katex/ with the stylesheet at
+	// the top of it, because the stylesheet asks for fonts/ relative to itself.
+	err := fs.WalkDir(katex.Assets(), ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(katex.Assets(), p)
+		if err != nil {
+			return err
+		}
+		return write(path.Join("katex", p), string(b))
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	page, err := s.front()
 	if err != nil {
@@ -46,7 +66,11 @@ func (s *Site) Build(out string) ([]string, error) {
 	for _, sec := range s.Sections {
 		body, err := s.section(sec)
 		if err != nil {
-			return nil, fmt.Errorf("%s: %w", sec.Path, err)
+			// Not wrapped with the path. The renderer names the file and the
+			// line itself, since it is the only thing here that knows the line,
+			// and a wrap would print the path twice on the one message anybody
+			// ever sees from this.
+			return nil, err
 		}
 		rel := filepath.ToSlash(filepath.Join(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug, "index.html"))
 		if err := write(rel, body); err != nil {
@@ -117,11 +141,47 @@ func (s *Site) chapters() []chapterKey {
 // into this site and the body's own relative links resolved against the chapter
 // the body was written in.
 func (s *Site) renderer(sec *Section) Renderer {
-	r := Renderer{Link: s.TagURL}
+	r := Renderer{Link: s.TagURL, Line: 1}
 	if sec != nil {
 		r.Dir = s.ChapterURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)
+		r.File, r.Line = sec.Path, sec.Head
+		if r.Line == 0 {
+			r.Line = 1
+		}
+	}
+	if s.AllowBrokenMath {
+		r.OnRefusal = s.marked
 	}
 	return r
+}
+
+// marked is the page a refused formula gets under -allow-broken-math: the TeX
+// as the corpus has it, in a form that says on its face that it is broken. The
+// same span is rendered on more than one page, so the list this keeps is the
+// pages it appears on and not the count of distinct faults; the audit's P04 is
+// what counts those.
+func (s *Site) marked(ref Refusal) string {
+	s.Broken = append(s.Broken, ref)
+	el, class := "span", "math broken"
+	if ref.Display {
+		el, class = "div", "math display broken"
+	}
+	// The title carries KaTeX's message, which carries the TeX, which is full
+	// of backslashes. %q would escape them the way Go writes a string literal
+	// and the browser would print the escapes, so the attribute is escaped as
+	// HTML and not as Go.
+	return fmt.Sprintf(`<%s class="%s" title="%s">%s</%s>`, el, class,
+		template.HTMLEscapeString("this formula is broken in the corpus and could not be set: "+ref.Why),
+		template.HTMLEscapeString(delim(ref)), el)
+}
+
+// delim writes a span back the way the Markdown has it, delimiters and all,
+// since what is being shown is the source rather than the mathematics.
+func delim(ref Refusal) string {
+	if ref.Display {
+		return "$$" + ref.Span + "$$"
+	}
+	return "$" + ref.Span + "$"
 }
 
 type layout struct {
@@ -133,6 +193,7 @@ type layout struct {
 	Lang    string
 	Home    string
 	CSS     string
+	KaTeX   string
 	Crumbs  []crumb
 	Content template.HTML
 	Langs   []langLink
@@ -154,6 +215,11 @@ type langLink struct {
 func (s *Site) render(l layout) (string, error) {
 	l.Home = s.url()
 	l.CSS = s.url() + "style.css"
+	// Every page of this site has mathematics on it, including the ones that
+	// only list statements, so the stylesheet is linked unconditionally rather
+	// than page by page. It is 25 KB and it is the same 25 KB every time, which
+	// the browser caches once for the whole site.
+	l.KaTeX = s.url() + "katex/katex.min.css"
 	if l.Lang == "" {
 		l.Lang = "en"
 	}
@@ -285,7 +351,6 @@ func short(sec *Section) string {
 func (s *Site) tag(st *Statement) (string, error) {
 	en := st.Sections["en"]
 	var b strings.Builder
-	r := s.renderer(en)
 
 	lang := "en"
 	if en == nil {
@@ -303,6 +368,14 @@ func (s *Site) tag(st *Statement) (string, error) {
 		return "", fmt.Errorf("no language holds it")
 	}
 	u := st.Units[lang]
+	// The renderer is built after the language is settled, so that a tag held
+	// in French alone resolves its links against the French chapter and names
+	// the French file when a formula in it will not render.
+	r := s.renderer(en)
+	// The unit is a slice of the section body starting under its heading, so
+	// its line one is not the section's, and a formula reported against this
+	// page has to name the line the file actually has it on.
+	r.Line += u.Heading.Line + 1
 
 	fmt.Fprintf(&b, "<h1>%s</h1>\n", template.HTMLEscapeString(u.Heading.Text))
 	fmt.Fprintf(&b, "<p class=\"tagline\">Tag <code>%s</code>, permanent. "+
@@ -399,7 +472,11 @@ func (s *Site) list(b *strings.Builder, title string, edges []*Edge, of func(*Ed
 			continue
 		}
 		if r.Title != "" {
-			fmt.Fprintf(b, "<li><a href=%q title=%q>%s</a></li>\n", r.URL, r.Title, text)
+			// The title is a heading out of the corpus and can hold a quote or
+			// a backslash, so it is escaped as HTML rather than written with %q,
+			// which escapes for Go and would end the attribute early.
+			fmt.Fprintf(b, "<li><a href=%q title=\"%s\">%s</a></li>\n",
+				r.URL, template.HTMLEscapeString(r.Title), text)
 			continue
 		}
 		fmt.Fprintf(b, "<li><a href=%q>%s</a></li>\n", r.URL, text)
@@ -504,6 +581,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
+<link rel="stylesheet" href="{{.KaTeX}}">
 <link rel="stylesheet" href="{{.CSS}}">
 <body>
 <header>
@@ -534,8 +612,16 @@ h4 { font-size: 1rem; margin-top: 1.6rem; }
 h4.statement { font-variant: small-caps; }
 .tag { font-family: ui-monospace, monospace; font-size: .8em; text-decoration: none;
   border: 1px solid var(--rule); border-radius: 3px; padding: 0 .25em; }
-.math.display { margin: 1rem 0; text-align: center; overflow-x: auto; }
-.math { font-family: ui-monospace, monospace; font-size: .92em; }
+/* KaTeX sets the mathematics itself. What is left here is the one thing it
+   cannot know: a display wider than a phone has to scroll rather than push the
+   page sideways. */
+.math.display { margin: 1rem 0; overflow-x: auto; overflow-y: hidden; padding: .2rem 0; }
+.katex { font-size: 1.05em; }
+/* Only ever seen under -allow-broken-math, and loud on purpose: this is the
+   source of a formula that did not survive the text layer, and it must not be
+   mistaken for a formula somebody meant to write this way. */
+.broken { font-family: ui-monospace, monospace; font-size: .85em; color: #a11;
+  background: #fee; border: 1px solid #a11; border-radius: 3px; padding: 0 .2em; }
 .langs a, .langs .here { margin-left: .5rem; }
 .langs .here { font-weight: bold; }
 .langs .draft { opacity: .55; }
