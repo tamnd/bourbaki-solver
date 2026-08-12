@@ -90,10 +90,25 @@ func header(title, what string) string {
 // inDegree is how many references point at each statement, counted over the
 // resolved edges. A reference that names a § and no statement in it is not a
 // citation of any statement and is left out.
+//
+// So is a statement's reference to itself. Bourbaki sets the proof after the
+// statement with nothing between them, so a proof that says "the properties of
+// Proposition 7" is attributed to Proposition 7 and points at Proposition 7,
+// and the resolver is right both times: that sentence is in that statement and
+// it does name it. It is not the chapter leaning on the statement, which is
+// what both reports that read this are about, and 76 of the 2122 edges are of
+// that shape. Counting them put 25 statements in the most-cited table that
+// nothing but their own proof mentions, and kept the same 25 out of the list of
+// statements nothing cites, which is the number that would have been read as a
+// claim about the corpus.
+//
+// Compared on the label rather than the tag, because an edge either side of an
+// extraction and before the next tags merge has no tag yet, and two empty tags
+// are not the same statement.
 func (res *Result) inDegree() map[string]int {
 	n := map[string]int{}
 	for _, e := range res.Edges {
-		if e.ToLabel != "" && e.How != BySection && e.How != OutOfCorpus {
+		if e.ToLabel != "" && e.ToLabel != e.FromLabel && e.How != BySection && e.How != OutOfCorpus {
 			n[e.ToLabel]++
 		}
 	}

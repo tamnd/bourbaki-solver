@@ -53,3 +53,29 @@ func TestTheOutOfCorpusReportPutsTheMostCitedChapterFirst(t *testing.T) {
 		t.Errorf("the rows are not in citation order:\n%s", got)
 	}
 }
+
+// A proof that names the statement it is proving is not the chapter citing it.
+// Bourbaki sets the proof directly after the statement, so every such sentence
+// is attributed to the statement it stands in, and both reports that read the
+// in-degree are about what the rest of the chapter leans on.
+func TestAStatementDoesNotCiteItself(t *testing.T) {
+	to := func(s string) *string { return &s }
+	res := &Result{Edges: []Edge{
+		{From: "0001", FromLabel: "a-prop-7", To: to("0001"), ToLabel: "a-prop-7", How: ByNearest},
+		{From: "0002", FromLabel: "a-prop-8", To: to("0001"), ToLabel: "a-prop-7", How: ByNearest},
+	}}
+	if got := res.inDegree()["a-prop-7"]; got != 1 {
+		t.Errorf("in-degree is %d, want 1: the proof of Proposition 7 is not a citation of it", got)
+	}
+}
+
+// The tag is empty between an extraction and the next tags merge, and two
+// statements without tags are not one statement.
+func TestTwoUntaggedStatementsAreNotOneStatement(t *testing.T) {
+	res := &Result{Edges: []Edge{
+		{FromLabel: "a-prop-8", ToLabel: "a-prop-7", How: ByNearest},
+	}}
+	if got := res.inDegree()["a-prop-7"]; got != 1 {
+		t.Errorf("in-degree is %d, want 1: neither statement has a tag yet", got)
+	}
+}
