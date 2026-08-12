@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -31,8 +32,15 @@ type Site struct {
 
 	Sections   []*Section
 	Statements []*Statement
+	Exercises  []*Exercise
 
 	byTag map[string]*Statement
+	// byExTag and byExLabel are the exercises, which carry tags of their own and
+	// are not statements. 317 of the corpus's tags are on an exercise, so a tag
+	// table that could not follow them was a third of the table saying "no page
+	// yet" about files that were sitting in the repository.
+	byExTag   map[string]*Exercise
+	byExLabel map[string]*Exercise
 	// byLabel is the § a section label names, English for preference. A
 	// reference is as often to a whole § as to a statement in one, and a § has
 	// no tag, so this is what those rows are linked through.
@@ -102,6 +110,7 @@ type Edge struct {
 // touches work/, which is what lets the site be built from a public clone.
 func Load(root string) (*Site, error) {
 	s := &Site{Root: root, byTag: map[string]*Statement{}, byLabel: map[string]*Section{},
+		byExTag: map[string]*Exercise{}, byExLabel: map[string]*Exercise{},
 		CitedBy: map[string][]*Edge{}, Cites: map[string][]*Edge{}, Draft: map[string]bool{}}
 
 	langs, err := languages(root)
@@ -115,8 +124,22 @@ func Load(root string) (*Site, error) {
 			return nil, err
 		}
 		s.Sections = append(s.Sections, secs...)
+		exs, err := loadExercises(root, lang)
+		if err != nil {
+			return nil, err
+		}
+		s.Exercises = append(s.Exercises, exs...)
 	}
-	s.index()
+	sols, err := loadSolutions(root)
+	if err != nil {
+		return nil, err
+	}
+	for _, ex := range s.Exercises {
+		ex.Solution = sols[ex.Lang+"\x00"+ex.Meta.Label]
+	}
+	if err := s.index(); err != nil {
+		return nil, err
+	}
 
 	if err := s.floor(); err != nil {
 		return nil, err
@@ -229,7 +252,7 @@ func (s *Site) Section(label string) *Section { return s.byLabel[label] }
 
 // index collects the statements across languages. The tag is the key, since it
 // is the one thing that is the same statement in every printing.
-func (s *Site) index() {
+func (s *Site) index() error {
 	for _, sec := range s.Sections {
 		if l := sectionLabel(sec); l != "" {
 			if _, ok := s.byLabel[l]; !ok || sec.Lang == "en" {
@@ -254,7 +277,38 @@ func (s *Site) index() {
 		}
 	}
 	sort.Slice(s.Statements, func(i, j int) bool { return s.Statements[i].Tag < s.Statements[j].Tag })
+
+	// English for preference again, for the same reason: the label is what the
+	// reference graph is built in and the graph is built in English.
+	for _, ex := range s.Exercises {
+		if _, ok := s.byExLabel[ex.Meta.Label]; !ok || ex.Lang == "en" {
+			s.byExLabel[ex.Meta.Label] = ex
+		}
+		if ex.Meta.Tag == "" {
+			continue
+		}
+		if _, ok := s.byExTag[ex.Meta.Tag]; !ok || ex.Lang == "en" {
+			s.byExTag[ex.Meta.Tag] = ex
+		}
+		// A tag names one thing. Two things under one tag is the failure the
+		// whole scheme exists to prevent, and it would show up here as a page
+		// written twice with whichever came last winning, which is the quietest
+		// way for it to go wrong.
+		if st := s.byTag[ex.Meta.Tag]; st != nil {
+			return fmt.Errorf("tag %s is on the statement %s and on the exercise %s",
+				ex.Meta.Tag, st.Label, ex.Meta.Label)
+		}
+	}
+	return nil
 }
+
+// Exercise looks an exercise up by its label, which is how a reference to one is
+// followed.
+func (s *Site) Exercise(label string) *Exercise { return s.byExLabel[label] }
+
+// ExerciseTag looks one up by its tag, which is what a tag URL resolves through
+// when the tag is not a statement's.
+func (s *Site) ExerciseTag(tag string) *Exercise { return s.byExTag[tag] }
 
 // Tag looks a statement up. It is what a tag URL resolves through.
 func (s *Site) Tag(tag string) *Statement { return s.byTag[tag] }
@@ -393,4 +447,17 @@ func (s *Site) SectionURL(sec *Section) string {
 // ChapterURL is the contents of one chapter in one language.
 func (s *Site) ChapterURL(lang, book, chapter string) string {
 	return s.url(lang, book, chapter)
+}
+
+// ExerciseURL is one exercise. It hangs off the § rather than off an exercises/
+// directory of its own, because an exercise belongs to its § and a reader who
+// trims the last two elements off this should land on the § and not on a
+// parallel tree of the chapter.
+func (s *Site) ExerciseURL(ex *Exercise) string {
+	return s.url(ex.Lang, ex.Meta.Book, ex.Meta.Chapter, ex.Dir, "ex", strconv.Itoa(ex.Meta.Exercise))
+}
+
+// ExercisesURL is the list of them for one §.
+func (s *Site) ExercisesURL(lang, book, chapter, dir string) string {
+	return s.url(lang, book, chapter, dir, "ex")
 }

@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -89,12 +90,54 @@ func (s *Site) Build(out string) ([]string, error) {
 		}
 	}
 
+	for _, set := range s.exerciseSets() {
+		body, err := s.exerciseList(set)
+		if err != nil {
+			return nil, err
+		}
+		rel := filepath.ToSlash(filepath.Join(set.Lang, set.Book, set.Chapter, set.Dir, "ex", "index.html"))
+		if err := write(rel, body); err != nil {
+			return nil, err
+		}
+	}
+
+	for _, ex := range s.Exercises {
+		body, err := s.exercisePage(ex, "")
+		if err != nil {
+			return nil, err
+		}
+		rel := filepath.ToSlash(filepath.Join(ex.Lang, ex.Meta.Book, ex.Meta.Chapter, ex.Dir,
+			"ex", strconv.Itoa(ex.Meta.Exercise), "index.html"))
+		if err := write(rel, body); err != nil {
+			return nil, err
+		}
+	}
+
 	for _, st := range s.Statements {
 		body, err := s.tag(st)
 		if err != nil {
 			return nil, fmt.Errorf("tag %s: %w", st.Tag, err)
 		}
 		if err := write(filepath.ToSlash(filepath.Join("tag", st.Tag, "index.html")), body); err != nil {
+			return nil, err
+		}
+	}
+
+	// An exercise carries a tag as a statement does, and a tag that resolves to
+	// nothing is the one thing the tag scheme promises will not happen. The page
+	// is the exercise's own page, served at the second URL and declaring the
+	// first as canonical, because the exercise page is already everything a tag
+	// page would hold and a second version of it would be a second thing to keep
+	// right.
+	for _, ex := range s.Exercises {
+		if ex.Meta.Tag == "" || s.byExTag[ex.Meta.Tag] != ex {
+			continue
+		}
+		body, err := s.exercisePage(ex, s.ExerciseURL(ex))
+		if err != nil {
+			return nil, err
+		}
+		if err := write(filepath.ToSlash(filepath.Join("tag", ex.Meta.Tag, "index.html")), body); err != nil {
 			return nil, err
 		}
 	}
@@ -144,6 +187,7 @@ func (s *Site) renderer(sec *Section) Renderer {
 	r := Renderer{Link: s.TagURL, Line: 1}
 	if sec != nil {
 		r.Dir = s.ChapterURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)
+		r.Exercises = s.exerciseHref(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)
 		r.File, r.Line = sec.Path, sec.Head
 		if r.Line == 0 {
 			r.Line = 1
@@ -190,14 +234,17 @@ type layout struct {
 	// language of the text on the page and not of the site, which matters here
 	// more than on most sites: a screen reader that says a Vietnamese page in
 	// English pronunciation reads it as noise.
-	Lang    string
-	Home    string
-	CSS     string
-	KaTeX   string
-	Crumbs  []crumb
-	Content template.HTML
-	Langs   []langLink
-	Note    string
+	Lang  string
+	Home  string
+	CSS   string
+	KaTeX string
+	// Canonical is set on a page that is a second copy of another one, which is
+	// what an exercise's tag URL is. Empty everywhere else.
+	Canonical string
+	Crumbs    []crumb
+	Content   template.HTML
+	Langs     []langLink
+	Note      string
 }
 
 type crumb struct {
@@ -295,8 +342,18 @@ func (s *Site) chapter(k chapterKey) (string, error) {
 		if sec.Lang != k.Lang || sec.Meta.Book != k.Book || sec.Meta.Chapter != k.Chapter {
 			continue
 		}
-		fmt.Fprintf(&b, "<li><a href=%q>%s</a> <span class=\"count\">%d statements, %d exercises</span></li>\n",
-			s.SectionURL(sec), template.HTMLEscapeString(heading(sec)), sec.Meta.Statements, sec.Meta.Exercises)
+		fmt.Fprintf(&b, "<li><a href=%q>%s</a> <span class=\"count\">%d statements, ",
+			s.SectionURL(sec), template.HTMLEscapeString(heading(sec)), sec.Meta.Statements)
+		// The exercise count is a link where the exercises are held and plain
+		// text where they are not, so the contents page says which §§ a reader
+		// can actually go to the exercises of.
+		if s.hasExercises(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug) {
+			fmt.Fprintf(&b, "<a href=%q>%d exercises</a>",
+				s.ExercisesURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug), sec.Meta.Exercises)
+		} else {
+			fmt.Fprintf(&b, "%d exercises", sec.Meta.Exercises)
+		}
+		b.WriteString("</span></li>\n")
 	}
 	b.WriteString("</ul>\n")
 	var langs []langLink
@@ -429,6 +486,9 @@ func (s *Site) from(e *Edge) row {
 	if sec := s.Section(e.FromLabel); sec != nil {
 		return row{URL: s.SectionURL(sec), Text: heading(sec), Title: e.FromLabel}
 	}
+	if ex := s.Exercise(e.FromLabel); ex != nil {
+		return row{URL: s.ExerciseURL(ex), Text: ex.Name(), Title: e.FromLabel}
+	}
 	return row{Text: e.FromLabel, Note: note(e, e.FromLabel)}
 }
 
@@ -441,6 +501,9 @@ func (s *Site) to(e *Edge) row {
 	}
 	if sec := s.Section(e.ToLabel); sec != nil {
 		return row{URL: s.SectionURL(sec), Text: e.Raw, Title: heading(sec)}
+	}
+	if ex := s.Exercise(e.ToLabel); ex != nil {
+		return row{URL: s.ExerciseURL(ex), Text: e.Raw, Title: ex.Name() + " (" + e.ToLabel + ")"}
 	}
 	return row{Text: e.Raw, Note: note(e, e.ToLabel)}
 }
@@ -486,8 +549,7 @@ func (s *Site) list(b *strings.Builder, title string, edges []*Edge, of func(*Ed
 
 // note says why a reference has no link, which is not always the same reason. A
 // citation of a Book this corpus does not hold is a fact about the printed
-// volume and stays visible. An exercise is in the corpus and has no page yet,
-// and saying it is not here would be a lie the reader could check.
+// volume and stays visible.
 func note(e *Edge, label string) string {
 	if e.Book != "" {
 		return template.HTMLEscapeString("not in this corpus: " + e.Book + " " + e.Chapter)
@@ -495,10 +557,13 @@ func note(e *Edge, label string) string {
 	return missing(label)
 }
 
-// missing says why a label has no page of its own.
+// missing says why a label has no page of its own. An exercise gets its own
+// wording, because an exercise reaching here is one the extraction did not pick
+// up rather than a whole volume nobody has transcribed, and the two are fixed by
+// different work.
 func missing(label string) string {
 	if ref, err := corpus.ParseLabel(label); err == nil && ref.Kind == corpus.KindExercise {
-		return "an exercise, no page yet"
+		return "an exercise the corpus does not hold"
 	}
 	return "not in this corpus"
 }
@@ -515,17 +580,17 @@ func (s *Site) tagTable() (string, error) {
 	b.WriteString("<table class=\"tags\">\n<tr><th>tag</th><th>statement</th></tr>\n")
 	for _, e := range entries {
 		label := template.HTMLEscapeString(e.Label)
-		if st := s.Tag(string(e.Tag)); st != nil {
+		// A statement and an exercise both have a tag page, and the row is the
+		// same row either way: the promise a tag makes is that the URL resolves,
+		// not that what it resolves to is a theorem.
+		if s.Tag(string(e.Tag)) != nil || s.ExerciseTag(string(e.Tag)) != nil {
 			fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a></td><td>%s</td></tr>\n",
 				s.TagURL(string(e.Tag)), e.Tag, label)
 			continue
 		}
 		// A tag with no page is printed and marked rather than left out, since a
 		// tag table that quietly holds back a third of the tags is worse than no
-		// table. Which of the two reasons it is matters: 317 of these are
-		// exercises, which are in the corpus and are published by a later step,
-		// and a row that said they were missing would be wrong about a file the
-		// reader can open.
+		// table.
 		fmt.Fprintf(&b, "<tr><td>%s</td><td>%s <span class=\"out\">%s</span></td></tr>\n",
 			e.Tag, label, missing(e.Label))
 	}
@@ -581,7 +646,8 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{.Title}}</title>
-<link rel="stylesheet" href="{{.KaTeX}}">
+{{if .Canonical}}<link rel="canonical" href="{{.Canonical}}">
+{{end}}<link rel="stylesheet" href="{{.KaTeX}}">
 <link rel="stylesheet" href="{{.CSS}}">
 <body>
 <header>
@@ -589,7 +655,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
 {{if .Langs}}<nav class="langs">{{range .Langs}}{{if .Here}}<span class="here">{{.Lang}}</span>{{else if .Draft}}<a class="draft" href="{{.URL}}" title="below the coverage floor">{{.Lang}}</a>{{else}}<a href="{{.URL}}">{{.Lang}}</a>{{end}}{{end}}</nav>{{end}}
 </header>
 <main>
-{{if .Crumbs}}<nav class="crumbs">{{range .Crumbs}}<a href="{{.URL}}">{{.Text}}</a>{{end}}</nav>
+{{if .Crumbs}}<nav class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sep">›</span>{{end}}<a href="{{$c.URL}}">{{$c.Text}}</a>{{end}}</nav>
 {{end}}{{.Content}}
 </main>
 {{if .Note}}<footer class="note">{{.Note}}</footer>{{end}}
@@ -626,7 +692,17 @@ h4.statement { font-variant: small-caps; }
 .langs .here { font-weight: bold; }
 .langs .draft { opacity: .55; }
 .crumbs { font-family: system-ui, sans-serif; font-size: .8rem; margin-bottom: 1rem; }
-.tagline, .where, .caveat, .note, .subtitle { color: var(--thin); font-size: .88rem; }
+/* The separator is its own element rather than a ::before on the link, so that
+   it is not underlined with the link and is not part of what a click hits. */
+.crumbs .sep { color: var(--thin); margin: 0 .4em; }
+.tagline, .where, .caveat, .note, .subtitle, .marks { color: var(--thin); font-size: .88rem; }
+/* The solution is behind a disclosure and nothing here opens it. A reader who
+   wants to think about the exercise first should not have the answer on the
+   screen, and a reader who wants the answer is one click away. */
+details.solution { border: 1px solid var(--rule); border-radius: 3px; padding: .6rem .8rem; margin: 2rem 0; }
+details.solution summary { cursor: pointer; font-family: system-ui, sans-serif; font-size: .9rem; }
+details.solution[open] summary { border-bottom: 1px solid var(--rule); padding-bottom: .4rem; margin-bottom: .6rem; }
+.warn { font-size: .85rem; color: #a11; }
 .caveat, .note { border-top: 1px solid var(--rule); padding-top: .6rem; margin-top: 2rem; }
 .statement-body { border-left: 3px solid var(--rule); padding-left: 1rem; }
 ul.refs, ul.toc { padding-left: 1.2rem; }
