@@ -259,6 +259,99 @@ func TestReportsNameTheRightStatements(t *testing.T) {
 	}
 }
 
+// An unnumbered corollary hangs from the last Theorem or Proposition above it,
+// and not from whatever numbered statement happens to be nearest.
+//
+// The chapter prints both interpositions. § 20 no. 6 has Proposition 6, then a
+// Remark, then the corollary of Proposition 6. § 1 no. 1 has Proposition 3,
+// then Lemma 2, then the corollary of Proposition 3, the lemma being what the
+// corollary's proof uses rather than what it follows from. Taking any numbered
+// statement left both of those corollaries fathered by the interposed one, and
+// the three references to them resolved to nothing.
+func TestAnInterposedStatementDoesNotFatherACorollary(t *testing.T) {
+	root := fixture(t)
+	body := `---
+book: alg
+chapter: VIII
+section: 1
+lang: en
+subsections:
+    - "no": 1
+      page: 1
+statements: 6
+exercises: 2
+---
+
+### 1. A first no.
+
+#### Proposition 3 {#alg-viii-s1-prop-3 .statement tag=0001}
+
+Let A be a ring.
+
+#### Lemma 2 {#alg-viii-s1-lem-2 .statement tag=0002}
+
+Used in the proof below.
+
+#### Corollary {#alg-viii-s1-n1-cor-1 .statement tag=0003}
+
+This is the corollary of Proposition 3.
+
+#### Proposition 6 {#alg-viii-s1-prop-6 .statement tag=0004}
+
+Let B be a ring.
+
+#### Remark {#alg-viii-s1-n1-rem-1 .statement tag=0005}
+
+An aside that hangs from nothing.
+
+#### Corollary {#alg-viii-s1-n1-cor-2 .statement tag=0006}
+
+This is the corollary of Proposition 6.
+`
+	if err := os.WriteFile(filepath.Join(root, "content", "en", "alg", "VIII", "01_s1_a.md"),
+		[]byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	ix, err := Load(root, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		label  string
+		parent string
+		number int
+	}{
+		{"alg-viii-s1-n1-cor-1", "prop", 3},
+		{"alg-viii-s1-n1-cor-2", "prop", 6},
+	} {
+		st := ix.Statement(tc.label)
+		if st == nil {
+			t.Fatalf("%s is not in the index", tc.label)
+		}
+		if string(st.FollowsKind) != tc.parent || st.FollowsNumber != tc.number {
+			t.Errorf("%s hangs from %s %d, want %s %d",
+				tc.label, st.FollowsKind, st.FollowsNumber, tc.parent, tc.number)
+		}
+	}
+	// And the references to them are what this is for.
+	for _, tc := range []struct{ in, label string }{
+		{"the corollary of Proposition 3", "alg-viii-s1-n1-cor-1"},
+		{"the corollary of Proposition 6", "alg-viii-s1-n1-cor-2"},
+	} {
+		c := Parse(tc.in, 1)
+		if len(c) != 1 {
+			t.Fatalf("%q read as %d citations", tc.in, len(c))
+		}
+		got, err := ix.Resolve(c[0], Site{Section: "alg-viii-s1"})
+		if err != nil {
+			t.Fatalf("%q did not resolve: %v", tc.in, err)
+		}
+		if got.Label != tc.label {
+			t.Errorf("%q resolved to %s, want %s", tc.in, got.Label, tc.label)
+		}
+	}
+}
+
 // A language the corpus does not hold is an error and not an empty graph, so
 // that a typo in -lang does not read as a corpus with no references in it.
 func TestBuildRejectsAMissingLanguage(t *testing.T) {

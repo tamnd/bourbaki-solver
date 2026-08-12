@@ -146,6 +146,47 @@ func TestParse(t *testing.T) {
 		name: "a bare page with no chapter to carry",
 		in:   "and p. 401, Corollary 1 gives the result.",
 		want: nil,
+	}, {
+		// The corollary and the page it is printed on are one reference. Read as
+		// two, the corollary is hunted for in the § doing the citing, which is
+		// § 8 and holds no Proposition 12, and the page belongs to a chapter this
+		// corpus does not have.
+		name: "a corollary of a statement in another Book",
+		in:   "and the corollary of Proposition 12 of II, §1, No. 8, p. 209, the mapping",
+		want: []Citation{{Raw: "corollary of Proposition 12 of II, §1, No. 8, p. 209", Form: FormAttached,
+			Chapter: "II", Section: 1, Subsec: 8, Page: 209,
+			Kind: corpus.KindCorollary, ParentKind: corpus.KindProposition, ParentNumber: 12}},
+	}, {
+		name: "a corollary whose parent's page is in brackets",
+		in:   "By Corollary 1 of Proposition 4 (VIII, p. 83), there exists an element b in A.",
+		want: []Citation{{Raw: "Corollary 1 of Proposition 4 (VIII, p. 83)", Form: FormAttached,
+			Chapter: "VIII", Page: 83,
+			Kind: corpus.KindCorollary, Number: 1, ParentKind: corpus.KindProposition, ParentNumber: 4}},
+	}, {
+		// The third way the chapter writes the same thing, with a comma and no
+		// word between the parent and its page.
+		name: "a corollary whose parent's page follows a comma",
+		in:   "By the corollary of Proposition 9, VIII, p. 71, the mapping is bijective.",
+		want: []Citation{{Raw: "corollary of Proposition 9, VIII, p. 71", Form: FormAttached,
+			Chapter: "VIII", Page: 71,
+			Kind: corpus.KindCorollary, ParentKind: corpus.KindProposition, ParentNumber: 9}},
+	}, {
+		// The locator written first, which is what a bracketed aside does. This
+		// has to be tried before the page form: that form takes the head of it
+		// and leaves a bare "of Theorem 2" behind, and § 5 prints two statements
+		// called Corollary 1, so throwing away the parent throws away the one
+		// thing in the sentence that says which.
+		name: "a corollary with its parent's page said first",
+		in:   "is equal to $(D_{\\lambda})_{V_{\\lambda}}$ (VIII, p. 82, Corollary 1 of Theorem 2).",
+		want: []Citation{{Raw: "VIII, p. 82, Corollary 1 of Theorem 2", Form: FormAttached,
+			Chapter: "VIII", Page: 82,
+			Kind: corpus.KindCorollary, Number: 1, ParentKind: corpus.KindTheorem, ParentNumber: 2}},
+	}, {
+		name: "an unnumbered corollary with its parent's page said first",
+		in:   "there exists (II, §1, No. 9, p. 210, Corollary of Proposition 13) an isomorphism",
+		want: []Citation{{Raw: "II, §1, No. 9, p. 210, Corollary of Proposition 13", Form: FormAttached,
+			Chapter: "II", Section: 1, Subsec: 9, Page: 210,
+			Kind: corpus.KindCorollary, ParentKind: corpus.KindProposition, ParentNumber: 13}},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Parse(tc.in, 1)

@@ -171,7 +171,7 @@ const kindAlt = `Proposition|Theorem|Corollary|Lemma|Definition|Remark|Example|E
 // the wrong Book. Tolerating the dollar is cheaper than the guess.
 var locator = `(?:(` + bookAlt + `),\s*)?\b([IVX]+)(?:,\s*§\s*(\d+))?(,\s*Appendix)?(?:,\s*[Nn]o\.\s*(\d+))?,\s*p\.\s*\$?(\d+)`
 
-// The five forms, in the order they are tried. Order is the whole of the
+// The forms, in the order they are tried. Order is the whole of the
 // difference between reading "Proposition 25 of II, §1, No. 13, p. 222" as one
 // reference to another chapter and reading it as two, a Proposition of the § in
 // hand and a page of chapter II that nothing points at. It is also what keeps
@@ -191,11 +191,28 @@ var (
 	// with the letter, since a part of a statement carries no tag of its own, but
 	// it has to be read past: left out, the reference comes apart into a bare
 	// Corollary 1 and a page, and the bare half is what the resolver guesses at.
-	namedRE    = regexp.MustCompile(`\b(` + kindAlt + `)\s+(\d+)` + part + `\s+(?:of\s+|\()` + locator)
-	attachedRE = regexp.MustCompile(`\b[Cc]orollary\s*(\d*)` + part + `\s+(?:of|to)\s+(` + kindAlt + `)\s+(\d+)`)
-	pageRE     = regexp.MustCompile(locator + `(?:,\s*(` + kindAlt + `)\s*(\d+))?`)
-	formulaRE  = regexp.MustCompile(`formula\s*\((\d+)\)`)
-	locCitRE   = regexp.MustCompile(`(loc\. cit\.)`)
+	namedRE = regexp.MustCompile(`\b(` + kindAlt + `)\s+(\d+)` + part + `\s+(?:of\s+|\()` + locator)
+	// The locator on the end is what says which § the parent stands in, and
+	// leaving it out was the single largest fault in the graph. "the corollary
+	// of Proposition 12 of II, §1, No. 8, p. 209" came apart into a corollary
+	// hunted for in chapter VIII, where there is no Proposition 12 to hang it
+	// on, and a page of chapter II that nothing pointed at. Read whole it is one
+	// reference and it leaves the corpus. The same shape with this chapter's own
+	// pages, "Corollary 1 of Proposition 4 (VIII, p. 83)", is a reference from
+	// § 11 to a statement of § 5, and resolving it in § 11 could only ever fail.
+	attachedRE = regexp.MustCompile(`\b[Cc]orollary\s*(\d*)` + part +
+		`\s+(?:of|to)\s+(` + kindAlt + `)\s+(\d+)(?:\s*(?:of\s+|,\s*|\()` + locator + `\)?)?`)
+	// The same reference with the locator written first, which is what the
+	// brackets do: "(II, §1, No. 9, p. 210, Corollary of Proposition 13)" and
+	// "(VIII, p. 82, Corollary 1 of Theorem 2)". This has to be tried before the
+	// page form, which would take the head of it and hand the tail to the
+	// resolver as a bare corollary: the second of those is a Corollary 1 that
+	// § 5 prints two of, and dropping "of Theorem 2" throws away the one thing
+	// in the sentence that says which.
+	leadRE    = regexp.MustCompile(locator + `,\s*[Cc]orollary\s*(\d*)` + part + `\s+(?:of|to)\s+(` + kindAlt + `)\s+(\d+)`)
+	pageRE    = regexp.MustCompile(locator + `(?:,\s*(` + kindAlt + `)\s*(\d+))?`)
+	formulaRE = regexp.MustCompile(`formula\s*\((\d+)\)`)
+	locCitRE  = regexp.MustCompile(`(loc\. cit\.)`)
 	// A second page in the same bracket does not repeat the chapter: the book
 	// writes "(VIII, p. 190, Corollary and p. 401, Corollary 1)" and means
 	// chapter VIII both times. Five references of the chapter are written this
@@ -213,13 +230,36 @@ var (
 	boldLead  = regexp.MustCompile(`\*\*(` + kindAlt + `)\s*\d*\.?\*\*`)
 )
 
-// scanner is the alternation of all five, tried in that order. Go's regexp
+// scanner is the alternation of them all, tried in that order. Go's regexp
 // prefers the earliest match and, among matches at the same place, the first
 // alternative that matches, which is exactly the precedence wanted here.
-var scanner = regexp.MustCompile(
-	`(?:` + namedRE.String() + `)|(?:` + attachedRE.String() + `)|(?:` + pageRE.String() +
-		`)|(?:` + formulaRE.String() + `)|(?:` + locCitRE.String() + `)|(?:` + contRE.String() +
-		`)|(?:` + localRE.String() + `)`)
+var forms = []*regexp.Regexp{namedRE, attachedRE, leadRE, pageRE, formulaRE, locCitRE, contRE, localRE}
+
+var scanner = regexp.MustCompile(alternation(forms))
+
+func alternation(res []*regexp.Regexp) string {
+	parts := make([]string, len(res))
+	for i, re := range res {
+		parts[i] = `(?:` + re.String() + `)`
+	}
+	return strings.Join(parts, `|`)
+}
+
+// The group each form's submatches start at, counted from the forms themselves
+// rather than written down. They were written down once, and every one of them
+// had to be recounted by hand the day a form grew a group, which is the kind of
+// arithmetic that is wrong long before anybody notices: a citation would come
+// back as the wrong form with the wrong fields and still look like a citation.
+var (
+	atNamed    = 1
+	atAttached = atNamed + namedRE.NumSubexp()
+	atLead     = atAttached + attachedRE.NumSubexp()
+	atPage     = atLead + leadRE.NumSubexp()
+	atFormula  = atPage + pageRE.NumSubexp()
+	atLocCit   = atFormula + formulaRE.NumSubexp()
+	atCont     = atLocCit + locCitRE.NumSubexp()
+	atLocal    = atCont + contRE.NumSubexp()
+)
 
 // Parse reads every citation out of one file's body.
 //
@@ -263,32 +303,30 @@ func blank(s string) string { return strings.Repeat(" ", len(s)) }
 // first: a page citation need not name a Book and an attached citation need not
 // number the corollary.
 func citation(m []string, at Citation) (Citation, bool) {
-	const (
-		named    = 1  // kind, number, book, chapter, section, appendix, subsec, page
-		attached = 9  // number, parent kind, parent number
-		page     = 12 // book, chapter, section, appendix, subsec, page, kind, number
-		formula  = 20 // number
-		locCit   = 21 // the whole of it
-		cont     = 22 // page, kind, number
-		local    = 25 // kind, number
-	)
+	named, attached, lead := atNamed, atAttached, atLead
+	page, formula, locCit, cont, local := atPage, atFormula, atLocCit, atCont, atLocal
 	switch {
 	case m[named] != "":
-		c := Citation{Raw: m[0], Form: FormNamed,
-			Book: m[named+2], Chapter: m[named+3], Appendix: m[named+5] != ""}
-		c.Section, c.Subsec, c.Page = atoi(m[named+4]), atoi(m[named+6]), atoi(m[named+7])
+		c := Citation{Raw: m[0], Form: FormNamed}
 		c.Kind, c.Number = kind(m[named]), atoi(m[named+1])
+		locate(&c, m, named+2)
 		return c, true
 	case m[attached+1] != "":
 		// Number stays 0 when the prose did not write one, because a corollary
 		// the book left unnumbered is not the same statement as its Corollary 1
 		// and is not looked up the same way.
-		return Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary, Number: atoi(m[attached]),
-			ParentKind: kind(m[attached+1]), ParentNumber: atoi(m[attached+2])}, true
+		c := Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary, Number: atoi(m[attached]),
+			ParentKind: kind(m[attached+1]), ParentNumber: atoi(m[attached+2])}
+		locate(&c, m, attached+3)
+		return c, true
+	case m[lead+1] != "":
+		c := Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary, Number: atoi(m[lead+6]),
+			ParentKind: kind(m[lead+7]), ParentNumber: atoi(m[lead+8])}
+		locate(&c, m, lead)
+		return c, true
 	case m[page+1] != "":
-		c := Citation{Raw: m[0], Form: FormPage,
-			Book: m[page], Chapter: m[page+1], Appendix: m[page+3] != ""}
-		c.Section, c.Subsec, c.Page = atoi(m[page+2]), atoi(m[page+4]), atoi(m[page+5])
+		c := Citation{Raw: m[0], Form: FormPage}
+		locate(&c, m, page)
 		if m[page+6] != "" {
 			c.Kind, c.Number = kind(m[page+6]), atoi(m[page+7])
 		}
@@ -311,6 +349,16 @@ func citation(m []string, at Citation) (Citation, bool) {
 		return Citation{Raw: m[0], Form: FormLocal, Kind: kind(m[local]), Number: atoi(m[local+1])}, true
 	}
 	return Citation{}, false
+}
+
+// locate reads the six groups of a locator into the citation. The order is the
+// one the pattern writes them in, Book, chapter, §, Appendix, no., page, and it
+// is read in one place so that a form which grows a locator does not also grow
+// its own way of misreading one.
+func locate(c *Citation, m []string, at int) {
+	c.Book, c.Chapter = m[at], m[at+1]
+	c.Appendix = m[at+3] != ""
+	c.Section, c.Subsec, c.Page = atoi(m[at+2]), atoi(m[at+4]), atoi(m[at+5])
 }
 
 func kind(s string) corpus.Kind {
