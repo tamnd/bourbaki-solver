@@ -117,8 +117,10 @@ const (
 		"COMPLETE: YES\nSELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: YES\nSCORE: 7/7\n"
 	fail = "The third step is asserted.\n\nVERDICT: FAIL\nTRUTH: FALSE\n" +
 		"COMPLETE: NO\nSELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: NO\nSCORE: 3/7\n"
-	auditPass = "I could not break it.\n\nVERDICT: PASS\nTRUTH: TRUE\n"
-	auditFail = "The case $n = 0$ is not covered.\n\nVERDICT: FAIL\nTRUTH: FALSE\n"
+	work = "CHECKED: the chain stops, it would fail if the chain were infinite, ruled out\n" +
+		"TRIED: $M = \\mathbf{Z}$, the argument still runs\n\n"
+	auditPass = work + "I could not break it.\n\nVERDICT: PASS\nTRUTH: TRUE\n"
+	auditFail = work + "The case $n = 0$ is not covered.\n\nVERDICT: FAIL\nTRUTH: FALSE\n"
 	answer    = "Let $N$ be a submodule of $M$. Then $N$ is finitely generated.\n\nUSES: 0001, 0002\n"
 )
 
@@ -658,4 +660,47 @@ func first(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// The audit judge's answer is asked for again when it carries a verdict and no
+// work behind it. This is the fifty one bytes exercise 2 of § 1 came back with,
+// twice, on a solution the truth judge had failed at four thousand characters.
+func TestAnAuditWithNoWorkInItIsAskedAgain(t *testing.T) {
+	bare := "PART a: PASS\nPART b: PASS\nVERDICT: PASS\nTRUTH: TRUE\n"
+	a := &asker{by: map[string][]string{
+		"reference": {reference}, "candidate-direct": {answer},
+		"candidate-contrapositive": {answer}, "candidate-elementary": {answer},
+		"select": {"SELECTED: 1"}, "truth": {pass},
+		"audit": {bare, auditPass},
+	}}
+	got, err := engine(a).Solve(context.Background(), exercise("Prove it."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Solution.Meta.Status != corpus.StatusVerified {
+		t.Errorf("status %q, and the second audit was a pass", got.Solution.Meta.Status)
+	}
+	var second string
+	for _, q := range a.asked {
+		if strings.HasSuffix(q.id, "audit-2") {
+			second = q.question
+		}
+	}
+	if second == "" {
+		t.Fatal("the audit was not asked a second time")
+	}
+	if !strings.Contains(first(second, 300), "no CHECKED line") {
+		t.Errorf("the complaint is not what was wrong: %s", first(second, 200))
+	}
+}
+
+// A judge that went through the steps and tried nothing is the other half of it.
+func TestAnAuditThatSubstitutedNothingIsAskedAgain(t *testing.T) {
+	if err := wantAudit("CHECKED: step 1, nothing breaks it, ruled out\n" +
+		"VERDICT: PASS\nTRUTH: TRUE\n"); err == nil {
+		t.Error("an audit that tried nothing passed the guard")
+	}
+	if err := wantAudit(auditPass); err != nil {
+		t.Errorf("an audit with its work in it was refused: %v", err)
+	}
 }

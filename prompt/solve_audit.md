@@ -42,11 +42,23 @@ had to name it as standard and did not.
 
 Then try to falsify it. Substitute a small ring, a small module, a degenerate
 case, a case where one hypothesis fails, and see whether the solution's argument
-still runs and its conclusion still holds. Write down what you tried and what
-came of it. An argument that survives being pushed at is worth more than one
-that was not pushed.
+still runs and its conclusion still holds. An argument that survives being
+pushed at is worth more than one that was not pushed.
 
 {{PARTS}}
+
+Write down what you did before you write any verdict, on lines of these two
+shapes, each on a line of its own.
+
+CHECKED: the step, what would have to be true for it to fail, whether that is ruled out here
+TRIED: what you substituted, what came of it
+
+One CHECKED line for every step of the solution, in the order the solution
+writes them. A step with no line against it is a step nobody checked, and a
+solution nobody checked cannot be passed for having survived.
+
+At least one TRIED line, and one for each thing you tried. A verdict reached
+without substituting anything is a verdict about how the solution reads.
 
 Then write these lines, each on a line of its own, exactly in this form.
 

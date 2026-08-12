@@ -253,3 +253,36 @@ func TestTheTagsASolutionSaysItUsed(t *testing.T) {
 		t.Errorf("read as %v, %q", uses, rest)
 	}
 }
+
+// The work the audit judge did is counted so that an answer which did none can
+// be told from one that did. The fifty one bytes in the second case are what
+// exercise 2 of § 1 came back with, twice, on a solution the truth judge had
+// just failed at four thousand characters.
+func TestTheWorkBehindAnAuditIsCounted(t *testing.T) {
+	full := `CHECKED: step 1, it would fail if $M$ were not finite length, ruled out by the hypothesis
+CHECKED: step 2, it would fail if $s$ were not surjective, not ruled out here
+**TRIED:** $A = \mathbf{Z}/4$, the argument still runs
+
+VERDICT: FAIL
+TRUTH: FALSE
+`
+	if d := Read(full); d.Checked != 2 || d.Tried != 1 {
+		t.Errorf("read %d checked and %d tried, want 2 and 1", d.Checked, d.Tried)
+	}
+	if d := Read("PART a: PASS\nPART b: PASS\nVERDICT: PASS\nTRUTH: TRUE\n"); d.Checked != 0 || d.Tried != 0 {
+		t.Errorf("an audit with no work in it read %d checked and %d tried", d.Checked, d.Tried)
+	}
+	// A line with nothing after the colon is the keyword and not the work.
+	if d := Read("CHECKED:\nTRIED:   \n"); d.Checked != 0 || d.Tried != 0 {
+		t.Errorf("two empty lines read as %d checked and %d tried", d.Checked, d.Tried)
+	}
+}
+
+// Counting the work is for the guard, which asks again. The verdict itself is
+// not touched by it: a judge that wrote its work in prose and reached a fail has
+// still reached a fail.
+func TestTheWorkIsNotPartOfTheVerdict(t *testing.T) {
+	if ok, why := Read("VERDICT: PASS\nTRUTH: TRUE\n").Audited(); !ok {
+		t.Errorf("an audit with no CHECKED line did not pass Audited: %s", why)
+	}
+}
