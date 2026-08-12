@@ -29,6 +29,10 @@ type Site struct {
 	// twenty five times out of twenty seven is worse than one that does not
 	// offer it.
 	Draft map[string]bool
+	// Drafts offers the draft languages in the switcher anyway. It is the -drafts
+	// flag and it is for looking at a translation in place while it is being
+	// written. The deploy never sets it.
+	Drafts bool
 
 	Sections   []*Section
 	Statements []*Statement
@@ -108,7 +112,16 @@ type Edge struct {
 
 // Load reads everything the site is built from. Nothing here opens a PDF or
 // touches work/, which is what lets the site be built from a public clone.
-func Load(root string) (*Site, error) {
+func Load(root string) (*Site, error) { return LoadOnly(root, nil) }
+
+// LoadOnly is Load restricted to the languages named, in the order Load would
+// have put them. An empty list is every language content/ holds.
+//
+// The restriction is for a person looking at one language while working on it,
+// so it fails on a language the corpus does not have rather than quietly
+// building the rest: a typed -lang vn is a build of English alone that looks
+// like a build of Vietnamese that came out empty.
+func LoadOnly(root string, only []string) (*Site, error) {
 	s := &Site{Root: root, byTag: map[string]*Statement{}, byLabel: map[string]*Section{},
 		byExTag: map[string]*Exercise{}, byExLabel: map[string]*Exercise{},
 		CitedBy: map[string][]*Edge{}, Cites: map[string][]*Edge{}, Draft: map[string]bool{}}
@@ -116,6 +129,12 @@ func Load(root string) (*Site, error) {
 	langs, err := languages(root)
 	if err != nil {
 		return nil, err
+	}
+	if len(only) > 0 {
+		langs, err = keep(langs, only)
+		if err != nil {
+			return nil, err
+		}
 	}
 	s.Langs = langs
 	for _, lang := range langs {
@@ -172,6 +191,36 @@ func languages(root string) ([]string, error) {
 		}
 		return out[i] < out[j]
 	})
+	return out, nil
+}
+
+// keep narrows a language list to the ones asked for, keeping the order of the
+// list rather than the order of the ask.
+func keep(langs, only []string) ([]string, error) {
+	has := map[string]bool{}
+	for _, l := range langs {
+		has[l] = true
+	}
+	want := map[string]bool{}
+	for _, l := range only {
+		l = strings.TrimSpace(l)
+		if l == "" {
+			continue
+		}
+		if !has[l] {
+			return nil, fmt.Errorf("no content in %s, the corpus holds %s", l, strings.Join(langs, ", "))
+		}
+		want[l] = true
+	}
+	var out []string
+	for _, l := range langs {
+		if want[l] {
+			out = append(out, l)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("no language asked for")
+	}
 	return out, nil
 }
 
@@ -317,6 +366,17 @@ func (s *Site) Tag(tag string) *Statement { return s.byTag[tag] }
 // reach before the navigation offers it.
 const coverageFloor = 0.2
 
+// drafted says whether any language is under the floor, which is what decides
+// whether the front page explains the rule at all.
+func (s *Site) drafted() bool {
+	for _, lang := range s.Langs {
+		if s.Draft[lang] {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Site) floor() error {
 	count := map[string]int{}
 	for _, sec := range s.Sections {
@@ -329,6 +389,37 @@ func (s *Site) floor() error {
 		s.Draft[lang] = float64(count[lang]) < coverageFloor*float64(count["en"])
 	}
 	return nil
+}
+
+// langLinks is the switcher for one page. here is the language of the page, and
+// at answers "where is this same thing in that language", empty when that
+// language does not have it.
+//
+// Every page builds its switcher through this, because the rule it applies is
+// the same everywhere and it is easy to get subtly wrong page by page: offer a
+// language only where it holds the thing the reader is looking at, and keep the
+// languages under the coverage floor out unless somebody asked for them. The
+// language of the page itself is always in the list, even when it is a draft and
+// even when nothing else is, since a reader who has landed on a Vietnamese page
+// should be told the page is Vietnamese.
+func (s *Site) langLinks(here string, at func(lang string) string) []langLink {
+	var out []langLink
+	for _, lang := range s.Langs {
+		if lang != here && s.Draft[lang] && !s.Drafts {
+			continue
+		}
+		url := at(lang)
+		if url == "" {
+			continue
+		}
+		out = append(out, langLink{Lang: lang, URL: url, Here: lang == here, Draft: s.Draft[lang]})
+	}
+	// One entry is the page saying what it already says in its lang attribute, so
+	// there is nothing to switch to and the switcher is not written at all.
+	if len(out) < 2 {
+		return nil
+	}
+	return out
 }
 
 // graph loads the reference graph and turns it into the two lists a tag page

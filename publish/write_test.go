@@ -407,6 +407,154 @@ func TestBrokenMathIsMarkedAndOnlyWhenAskedFor(t *testing.T) {
 	}
 }
 
+// withDraft adds a language holding one § of the two and one exercise of the
+// two, which is the shape the Vietnamese has: a translation that has started
+// and is a long way from the end of the chapter.
+func withDraft(t *testing.T, s *Site) *Site {
+	t.Helper()
+	en := s.Sections[0]
+	m := en.Meta
+	m.Lang = "vi"
+	m.TranslatedFrom = "content/en/alg/VIII/Reduced Algebras.md"
+	m.TranslationModel = "gpt-5-6-mini"
+	m.GlossaryVersion = 5
+	// The § stops before Lemma 2, so that one statement of it is held in three
+	// languages and the other in two. A part-translated file is not a shape the
+	// corpus has, and a §§ of a chapter translated and the rest not is exactly
+	// its shape; this is the small version of that.
+	body, _, _ := strings.Cut(en.Body, "#### Lemma 2")
+	sec := &Section{Lang: "vi", Meta: m, Body: body, Slug: slug(m),
+		Path: filepath.Join("content", "vi", "alg", "VIII", m.SectionTitle+".md")}
+	sec.Units = Units(sec.Body)
+	s.Sections = append(s.Sections, sec)
+
+	ex := *s.Exercises[0]
+	ex.Lang = "vi"
+	ex.Meta.Lang = "vi"
+	ex.Meta.TranslatedFrom = "content/en/alg/VIII/exercises/s14/01.md"
+	ex.Meta.TranslationModel = "gpt-5-6-mini"
+	ex.Path = filepath.Join("content", "vi", "alg", "VIII", "exercises", "s14", "01.md")
+	s.Exercises = append(s.Exercises, &ex)
+
+	s.Langs = append(s.Langs, "vi")
+	// The fixture is two §§ where the corpus is twenty seven, so the count that
+	// puts Vietnamese under the floor is set rather than counted. What floor
+	// itself does is tested on its own.
+	s.Draft["vi"] = true
+	if err := s.index(); err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// Spec 12 §7. Vietnamese has two §§ of twenty seven, so a switcher that offered
+// it everywhere would be a dead end twenty five times out of twenty seven.
+func TestALanguageUnderTheFloorIsNotOfferedUnlessAskedFor(t *testing.T) {
+	s := withDraft(t, testSite(t))
+
+	en := s.mustPage(t, "en/alg/VIII/s14/index.html")
+	if strings.Contains(en, `href="/vi/alg/VIII/s14/"`) {
+		t.Errorf("a language under the floor is in the switcher of an English page:\n%s", en)
+	}
+	// Built and reachable, which is the other half of the rule: the floor keeps
+	// a language out of the navigation and does not keep it off the site.
+	vi := s.mustPage(t, "vi/alg/VIII/s14/index.html")
+	if !strings.Contains(vi, `<span class="here">vi</span>`) ||
+		!strings.Contains(vi, `href="/en/alg/VIII/s14/"`) {
+		t.Errorf("the page of a draft language does not say what it is or where the English is:\n%s", vi)
+	}
+
+	s.Drafts = true
+	en = s.mustPage(t, "en/alg/VIII/s14/index.html")
+	if !strings.Contains(en, `<a class="draft" href="/vi/alg/VIII/s14/"`) {
+		t.Errorf("-drafts did not put the language back in the switcher:\n%s", en)
+	}
+}
+
+// The other half of §7, which holds whether or not the language is a draft: a
+// language is offered on a page only where it has that page.
+func TestALanguageIsOfferedOnlyWhereItHoldsThePage(t *testing.T) {
+	s := withDraft(t, testSite(t))
+	s.Drafts = true
+
+	for _, rel := range []string{
+		"en/alg/VIII/s15/index.html",      // Vietnamese has § 14 and not § 15
+		"en/alg/VIII/s14/ex/8/index.html", // and exercise 1 and not exercise 8
+		"tag/00GO/index.html",             // and Theorem 1 and not Lemma 2
+	} {
+		if got := s.mustPage(t, rel); strings.Contains(got, `>vi</a>`) {
+			t.Errorf("%s offers a language that does not hold it:\n%s", rel, got)
+		}
+	}
+	for _, rel := range []string{"en/alg/VIII/s14/ex/1/index.html", "tag/00GJ/index.html"} {
+		if got := s.mustPage(t, rel); !strings.Contains(got, `>vi</a>`) {
+			t.Errorf("%s does not offer the language that holds it:\n%s", rel, got)
+		}
+	}
+}
+
+// The floor is a share of the English and not a count, so that it means the
+// same thing when the corpus is one chapter and when it is ten.
+func TestTheFloorIsAShareOfTheEnglish(t *testing.T) {
+	s := &Site{Draft: map[string]bool{}, Langs: []string{"en", "fr", "vi"}}
+	for i := 0; i < 27; i++ {
+		s.Sections = append(s.Sections, &Section{Lang: "en"})
+	}
+	for i := 0; i < 27; i++ {
+		s.Sections = append(s.Sections, &Section{Lang: "fr"})
+	}
+	for i := 0; i < 2; i++ {
+		s.Sections = append(s.Sections, &Section{Lang: "vi"})
+	}
+	if err := s.floor(); err != nil {
+		t.Fatal(err)
+	}
+	if s.Draft["fr"] {
+		t.Error("a language with all of the chapter is under the floor")
+	}
+	if !s.Draft["vi"] {
+		t.Error("a language with two §§ of twenty seven is not under the floor")
+	}
+	if s.Draft["en"] {
+		t.Error("English is measured against itself and came out short")
+	}
+}
+
+// L08 knows a translation was written by a cut down model and says so as a soft
+// finding. The reader of the page has more right to that than the audit does.
+func TestACutDownModelIsSaidOnThePage(t *testing.T) {
+	s := withDraft(t, testSite(t))
+	want := "cut down version"
+	if got := s.mustPage(t, "vi/alg/VIII/s14/index.html"); !strings.Contains(got, want) {
+		t.Errorf("a section written by a small model does not say so:\n%s", got)
+	}
+	if got := s.mustPage(t, "vi/alg/VIII/s14/ex/1/index.html"); !strings.Contains(got, want) {
+		t.Errorf("an exercise written by a small model does not say so:\n%s", got)
+	}
+	// And not on the pages it is not true of, which is the whole chapter but two
+	// files.
+	if got := s.mustPage(t, "en/alg/VIII/s14/index.html"); strings.Contains(got, want) {
+		t.Errorf("a transcription is called a cut down translation:\n%s", got)
+	}
+}
+
+// A typed -lang vn is a build of English that looks like a build of Vietnamese
+// which came out empty, so it is an error instead.
+func TestALanguageTheCorpusLacksIsAnError(t *testing.T) {
+	if _, err := keep([]string{"en", "fr", "vi"}, []string{"vn"}); err == nil {
+		t.Error("a language the corpus does not hold was accepted")
+	}
+	got, err := keep([]string{"en", "fr", "vi"}, []string{"vi", "en"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// English first, as the whole site orders languages, and not in the order it
+	// was asked for.
+	if strings.Join(got, ",") != "en,vi" {
+		t.Errorf("-lang reordered the languages: %v", got)
+	}
+}
+
 func (s *Site) mustPage(t *testing.T, rel string) string {
 	t.Helper()
 	dir := t.TempDir()

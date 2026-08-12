@@ -14,7 +14,8 @@ import (
 func runPublish(args []string) error {
 	fs := flag.NewFlagSet("publish", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: bourbaki publish [-out site] [-base /bourbaki] [-clean] [-check]
+		fmt.Fprint(os.Stderr, `usage: bourbaki publish [-out site] [-base /bourbaki] [-lang en,fr] [-clean]
+                        [-check] [-drafts]
 
 Builds the static site out of the committed Markdown. Every page is written
 from content/, tags/ and the reference manifests, and nothing else is opened:
@@ -27,16 +28,25 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 
   -out                 where to write the site, site/ by default
   -base                the path the site is served under, empty for a domain root
+  -lang                build only these languages, comma separated. All of them
+                       by default. A language the corpus does not hold is an
+                       error rather than an empty build.
   -clean               remove -out first, so a page a rename orphaned does not survive
   -check               build and report, write nothing
+  -drafts              offer the languages under the coverage floor in the language
+                       switcher. They are built and reachable either way; without
+                       this they are reached from the front page and not from the
+                       pages themselves. Never set by the deploy.
   -allow-broken-math   mark the formulae KaTeX refuses instead of stopping, for
                        looking at the site locally. Never set by the deploy.
 `)
 	}
 	out := fs.String("out", "site", "directory to write")
 	base := fs.String("base", "", "path the site is served under")
+	lang := fs.String("lang", "", "build only these languages, comma separated")
 	clean := fs.Bool("clean", false, "remove the output directory first")
 	check := fs.Bool("check", false, "build in memory and write nothing")
+	drafts := fs.Bool("drafts", false, "offer the languages under the coverage floor in the switcher")
 	allowBroken := fs.Bool("allow-broken-math", false, "mark refused formulae instead of stopping")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -46,16 +56,25 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		return err
 	}
 
-	site, err := publish.Load(root)
+	var only []string
+	if *lang != "" {
+		only = strings.Split(*lang, ",")
+	}
+	site, err := publish.LoadOnly(root, only)
 	if err != nil {
 		return err
 	}
 	site.Base = *base
 	site.AllowBrokenMath = *allowBroken
+	site.Drafts = *drafts
 
 	langs := map[string]int{}
+	exs := map[string]int{}
 	for _, sec := range site.Sections {
 		langs[sec.Lang]++
+	}
+	for _, ex := range site.Exercises {
+		exs[ex.Lang]++
 	}
 	fmt.Printf("publish: %d sections over %d languages, %d tagged statements\n",
 		len(site.Sections), len(site.Langs), len(site.Statements))
@@ -63,8 +82,11 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		note := ""
 		if site.Draft[lang] {
 			note = " (below the coverage floor, kept out of the switcher)"
+			if *drafts {
+				note = " (below the coverage floor, offered anyway by -drafts)"
+			}
 		}
-		fmt.Printf("\t%s\t%d sections%s\n", lang, langs[lang], note)
+		fmt.Printf("\t%s\t%d sections, %d exercises%s\n", lang, langs[lang], exs[lang], note)
 	}
 
 	dest := *out
