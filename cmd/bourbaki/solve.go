@@ -12,9 +12,17 @@ import (
 )
 
 func runSolve(args []string) error {
+	if len(args) > 0 && args[0] == "run" {
+		return runSolveRun(args[1:])
+	}
 	fs := flag.NewFlagSet("solve", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: bourbaki solve context [-lang en] [-label alg-viii-s1-ex-19] [-json]
+		fmt.Fprint(os.Stderr, `usage: bourbaki solve <context|run> [flags]
+
+  context  what a model is shown when it is asked to do an exercise
+  run      ask, judge, and write the answers down
+
+usage: bourbaki solve context [-lang en] [-label alg-viii-s1-ex-19] [-json]
 
 Assembles what a model is shown when it is asked to do an exercise, out of the
 committed Markdown and the reference graph: the exercise, every earlier
@@ -26,7 +34,8 @@ reads and is worth reading yourself before spending a fleet on it. Without one
 it measures every exercise of the printing and prints the distribution, which
 is how the caps were chosen.
 
-Nothing here calls a model. It reads the corpus and nothing else.
+Nothing here calls a model. It reads the corpus and nothing else. That is
+bourbaki solve run, which is where the seven calls of the pipeline are made.
 
   -lang    which printing to read, en by default
   -label   one exercise, printed in full
@@ -155,8 +164,11 @@ func mean(xs []int) int {
 }
 
 func kb(n int) string {
-	if n < 10000 {
+	switch {
+	case n < 10000:
 		return fmt.Sprintf("%d chars", n)
+	case n < 1000000:
+		return fmt.Sprintf("%.1fk chars", float64(n)/1000)
 	}
-	return fmt.Sprintf("%.1fk chars", float64(n)/1000)
+	return fmt.Sprintf("%.1fM chars", float64(n)/1000000)
 }

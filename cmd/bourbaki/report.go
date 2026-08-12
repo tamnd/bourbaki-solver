@@ -38,6 +38,7 @@ const reportHelp = `usage: bourbaki report <what>
   coverage     what the corpus holds against what the table of contents says
   printings    where the two printings of a chapter disagree
   translation  what each language holds, what is stale, and which terms it misses
+  solutions    the scorecard: what has an answer, and how well it is believed
 
 Run bourbaki report <what> -h for the flags.
 `
@@ -56,11 +57,13 @@ func runReport(args []string) error {
 		return reportPrintingsCmd(args[1:])
 	case "translation", "translations":
 		return reportTranslationCmd(args[1:])
+	case "solutions", "solution":
+		return reportSolutionsCmd(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, reportHelp)
 		return nil
 	}
-	return fmt.Errorf("unknown report %q, try: usage, coverage, printings, translation", args[0])
+	return fmt.Errorf("unknown report %q, try: usage, coverage, printings, translation, solutions", args[0])
 }
 
 const translationUsage = `usage: bourbaki report translation [flags]
