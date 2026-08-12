@@ -19,15 +19,18 @@ func runSolve(args []string) error {
 			return runSolveRun(args[1:])
 		case "review":
 			return runSolveReview(args[1:])
+		case "eval":
+			return runSolveEval(args[1:])
 		}
 	}
 	fs := flag.NewFlagSet("solve", flag.ExitOnError)
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, `usage: bourbaki solve <context|run|review> [flags]
+		fmt.Fprint(os.Stderr, `usage: bourbaki solve <context|run|review|eval> [flags]
 
   context  what a model is shown when it is asked to do an exercise
   run      ask, judge, and write the answers down
   review   judge a solution the corpus already holds, without rewriting it
+  eval     put answers a person has ruled on to the judges, and count the misses
 
 usage: bourbaki solve context [-lang en] [-label alg-viii-s1-ex-19] [-json]
 
