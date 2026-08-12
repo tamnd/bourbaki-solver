@@ -151,6 +151,30 @@ func (s *Site) Build(out string) ([]string, error) {
 		}
 	}
 
+	// The reports of the corpus, rendered. They are committed Markdown like the
+	// rest and they are the part of it that says what is wrong with it.
+	rs, err := s.reports()
+	if err != nil {
+		return nil, err
+	}
+	at := s.sitewide()
+	for _, r := range rs {
+		body, err := s.reportPage(r, at)
+		if err != nil {
+			return nil, err
+		}
+		if err := write(path.Join("reports", r.Name, "index.html"), body); err != nil {
+			return nil, err
+		}
+	}
+	index, err := s.reportIndex(rs)
+	if err != nil {
+		return nil, err
+	}
+	if err := write("reports/index.html", index); err != nil {
+		return nil, err
+	}
+
 	table, err := s.tagTable()
 	if err != nil {
 		return nil, err
@@ -707,9 +731,10 @@ func (s *Site) front() (string, error) {
 	fmt.Fprintf(&b, "<p><a href=%q>All %d tags</a>, <a href=%q>search</a> over the statements and the "+
 		"exercises, and <a href=%q>about</a> for how the text got here and what a machine wrote. Of the "+
 		"%d references the chapter makes, %d do not resolve, and %d of the %d tagged statements are cited "+
-		"by nothing. Those are the numbers worth watching.</p>\n",
+		"by nothing. Those are the numbers worth watching and the <a href=%q>reports</a> name every one "+
+		"of them.</p>\n",
 		s.url("tags"), len(set.Tags), s.url("search"), s.url("about"),
-		s.Edges, s.Unresolved, s.uncited(), len(s.Statements))
+		s.Edges, s.Unresolved, s.uncited(), len(s.Statements), s.url("reports"))
 	return s.render(layout{Title: "Bourbaki", Content: template.HTML(b.String())})
 }
 
@@ -805,6 +830,10 @@ table { border-collapse: collapse; width: 100%; font-size: .9rem; }
    thing, so they do not break across two lines while the rest of the row is
    one. */
 .coverage td:first-child { white-space: nowrap; }
+/* A report table is words on the left and counts on the right, and a count that
+   is not right aligned is a column nobody can compare down. */
+table.report .num { text-align: right; white-space: nowrap; }
+table.report td:first-child { white-space: nowrap; }
 th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid var(--rule); }
 code { font-family: ui-monospace, monospace; font-size: .9em; }
 `
