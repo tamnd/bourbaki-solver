@@ -81,7 +81,7 @@ func (ix *Index) Resolve(c Citation, at Site) (Target, error) {
 		}
 		return ix.inSection(c, from, ByContext, 0, at)
 	case FormAttached:
-		return ix.attached(c, from)
+		return ix.attachedIn(c, from)
 	}
 	if c.Chapter != Chapter {
 		return Target{How: OutOfCorpus, Book: "A"}, nil
@@ -106,6 +106,37 @@ func (ix *Index) Resolve(c Citation, at Site) (Target, error) {
 		no = s.SubsecAt(c.Page)
 	}
 	return ix.inSection(c, s.Label, ByPage, no, at)
+}
+
+// attachedIn decides which § a corollary named by its parent is to be looked up
+// in, which until this was written was always the § the sentence stood in.
+//
+// That is right for "by the corollary of Proposition 2" and wrong for every
+// attached citation that says where the parent is printed, which is most of
+// them: 20 of the chapter's 37 unresolved references were this one fault. A
+// corollary of a Proposition 12 that belongs to Book II was hunted for in
+// chapter VIII, where the hunt could only fail, and one whose parent is printed
+// on VIII, p. 83 was hunted for in the § doing the citing rather than the § the
+// page falls in.
+//
+// The locator governs whenever the sentence gives one, and the § in hand is the
+// fallback rather than the rule.
+func (ix *Index) attachedIn(c Citation, from string) (Target, error) {
+	if c.Chapter == "" {
+		return ix.attached(c, from)
+	}
+	if c.Chapter != Chapter {
+		return Target{How: OutOfCorpus, Book: "A"}, nil
+	}
+	on := ix.SectionAt(c.Chapter, c.Page)
+	switch len(on) {
+	case 0:
+		return Target{}, fmt.Errorf("no § of chapter %s is printed on page %d", c.Chapter, c.Page)
+	case 1:
+	default:
+		return Target{}, fmt.Errorf("page %d is in %d sections at once", c.Page, len(on))
+	}
+	return ix.attached(c, on[0].Label)
 }
 
 // attached finds a corollary from the statement it hangs from.

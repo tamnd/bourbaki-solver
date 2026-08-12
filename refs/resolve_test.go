@@ -104,6 +104,23 @@ func TestResolve(t *testing.T) {
 		name: "a corollary of a statement that has none", in: "the corollary of Proposition 1",
 		from: "alg-viii-s1", err: "no corollary 1 of Proposition 1",
 	}, {
+		// The page says which § the parent stands in, so the § doing the citing
+		// has nothing to do with it. Read without the page this is a Proposition
+		// 2 of § 2, which § 2 does not print.
+		name: "a corollary whose parent's page names another §", in: "Corollary 1 of Proposition 2 (VIII, p. 10)",
+		from: "alg-viii-s2", label: "alg-viii-s1-prop-2-cor-1", how: ByParent,
+	}, {
+		name: "an unnumbered corollary whose parent's page names another §", in: "the corollary of Proposition 2 of VIII, p. 10",
+		from: "alg-viii-s2", label: "alg-viii-s1-n2-cor-1", how: ByParent,
+	}, {
+		// Another chapter of Algebra, and there is nothing here to look it up
+		// in. Hunting for it in the § doing the citing is how this used to fail.
+		name: "a corollary of a statement in another chapter", in: "the corollary of Proposition 12 of II, §1, No. 8, p. 209",
+		from: "alg-viii-s1", how: OutOfCorpus, book: "A",
+	}, {
+		name: "a corollary whose parent's page is in no §", in: "Corollary 1 of Proposition 2 (VIII, p. 900)",
+		from: "alg-viii-s1", err: "no § of chapter VIII is printed on page 900",
+	}, {
 		name: "another Book", in: "Set Theory, III, §2, No. 4, p. 155",
 		how: OutOfCorpus, book: "E",
 	}, {

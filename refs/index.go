@@ -240,11 +240,30 @@ func section(root, lang string, rec corpus.SectionRecord) (*Section, error) {
 			FollowsKind: follows.Kind, FollowsNumber: follows.Number,
 		}
 		s.Statements = append(s.Statements, st)
-		if r.Number != 0 && r.Kind.Scope() != corpus.ScopeParent {
+		if fathers(r) {
 			follows = r
 		}
 	}
 	return s, nil
+}
+
+// fathers says whether a statement is one an unnumbered corollary below it can
+// be said to hang from.
+//
+// The chain used to take any numbered statement, and that is not how the book
+// reads. § 20 no. 6 prints Proposition 6, then a Remark, then a Corollary, and
+// the corollary is the corollary of Proposition 6: the remark stands between
+// them on the page and hangs from nothing. § 1 no. 1 does the same with a Lemma
+// 2 interposed, which is the lemma the corollary's proof uses rather than the
+// statement it follows from.
+//
+// Only a Theorem or a Proposition may father one, and that is the corpus
+// speaking rather than a guess: of the thirty-six attached citations in the
+// chapter that name a parent, twenty-eight name a Proposition and eight a
+// Theorem, and none names a Lemma, a Definition, a Remark, an Example or a
+// Scholium. So nothing the book actually writes can be lost by this.
+func fathers(r corpus.Ref) bool {
+	return r.Number != 0 && (r.Kind == corpus.KindTheorem || r.Kind == corpus.KindProposition)
 }
 
 var subsecRE = regexp.MustCompile(`^### (\d+)\.`)
