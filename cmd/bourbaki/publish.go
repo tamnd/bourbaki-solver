@@ -142,8 +142,10 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 			byKind["KaTeX stylesheet and fonts"]++
 		case strings.HasSuffix(w, ".json"):
 			byKind["search indexes"]++
+		case strings.HasPrefix(w, "reports/") && w != "reports/index.html":
+			byKind["report pages"]++
 		case w == "index.html", w == "tags/index.html", w == "search/index.html",
-			w == "about/index.html", w == "style.css":
+			w == "about/index.html", w == "reports/index.html", w == "style.css":
 			byKind["site pages"]++
 		case strings.HasSuffix(w, "/ex/index.html"):
 			byKind["exercise list pages"]++

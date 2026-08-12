@@ -263,10 +263,9 @@ func (s *Site) about() (string, error) {
 	fmt.Fprintf(&b, "<tr><td>retired tags</td><td>%d</td></tr>\n", len(set.Inactive))
 	b.WriteString("</table>\n")
 	fmt.Fprintf(&b, "<p>Most of what does not resolve is a reference out of the chapter, to a Book this "+
-		"corpus does not hold yet, and that is the ingestion order rather than a fault. The lists are "+
-		"generated into <a href=%q>reports/</a> in the corpus, one file per question, and they are "+
-		"regenerated and diffed on every change so that none of them can quietly go stale.</p>\n",
-		corpusRepo+"/tree/main/reports")
+		"corpus does not hold yet, and that is the ingestion order rather than a fault. Every one of them "+
+		"is named in the <a href=%q>reports</a>, one file per question, and each report is regenerated and "+
+		"diffed on every change so that none of them can quietly go stale.</p>\n", s.url("reports"))
 
 	b.WriteString("<h2>Licence</h2>\n")
 	b.WriteString("<p><em>Éléments de mathématique</em> is copyright N. Bourbaki and its publishers, " +
