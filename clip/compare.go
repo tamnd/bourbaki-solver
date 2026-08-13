@@ -473,7 +473,12 @@ func (r Report) Markdown() string {
 		fmt.Fprintf(&out, "- parts at: `%s` against `%s`\n\n",
 			Window(row.Native, row.At), Window(row.Model, row.At))
 	}
-	return out.String()
+	// Every entry ends with the blank line that separates it from the next
+	// one, including the last, which has nothing to be separated from. The
+	// corpus audit reads a file that ends with a blank line as a finding, so
+	// this is the difference between a report and a report the corpus will
+	// not take.
+	return strings.TrimRight(out.String(), "\n") + "\n"
 }
 
 // code is a list of words set as code and separated by commas, cut off at

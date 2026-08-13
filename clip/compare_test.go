@@ -214,6 +214,39 @@ func TestASilentClipIsNeitherAgreementNorDisagreement(t *testing.T) {
 	if strings.Contains(markdown, "page 85 line 14") {
 		t.Error("Markdown() printed a clip that agreed, want the disagreements and nothing else")
 	}
+	if !strings.HasSuffix(markdown, "\n") || strings.HasSuffix(markdown, "\n\n") {
+		t.Errorf("Markdown() ends %q, want one newline and no blank line after it", last(markdown, 12))
+	}
+}
+
+// The corpus is where these reports are committed and its audit reads a file
+// that ends with a blank line as a finding. Every entry here is written with
+// the blank line that separates it from the next one, so the last entry ends
+// with a separator and nothing to separate, and four reports were written that
+// way before the pre-commit hook refused them.
+func TestTheReportDoesNotEndWithABlankLine(t *testing.T) {
+	for _, report := range []Report{
+		{Book: "ts-iii-v-fr", Clips: 1, Agreed: 1},
+		{Book: "ts-iii-v-fr", Clips: 1, Differed: 1, Rows: []Row{
+			{Page: 22, Line: WholePage, Verdict: Differ, Lost: []string{"Šmulian"}},
+		}},
+		{Book: "ts-iii-v-fr", Clips: 1, Differed: 1, Rows: []Row{
+			{Page: 22, Line: 16, Verdict: Differ, Native: "˘Smulian", Model: "Šmulian"},
+		}},
+	} {
+		markdown := report.Markdown()
+		if !strings.HasSuffix(markdown, "\n") || strings.HasSuffix(markdown, "\n\n") {
+			t.Errorf("Markdown() ends %q, want one newline and no blank line after it",
+				last(markdown, 12))
+		}
+	}
+}
+
+func last(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[len(s)-n:]
 }
 
 // answer0022 is the first answer that ever came back from a clip, exactly as
