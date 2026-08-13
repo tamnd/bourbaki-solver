@@ -1,6 +1,9 @@
 package pdfglyph
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestCompareCountsWhatChanged(t *testing.T) {
 	// Page 442 of Algèbre chapitre 8, the line that made this necessary: the
@@ -69,5 +72,42 @@ func TestCompareOnBlankPages(t *testing.T) {
 	}
 	if d := Compare([]rune("0"), nil); d.Lost['0'] != 1 {
 		t.Errorf("a page emptied: %+v", d)
+	}
+}
+
+// The Myers difference is free to choose any shortest script, so where a
+// substitution has the same character again a few places along it will keep that
+// one and put the deletion and the insertion in two runs. Page 118 of Théorie
+// des ensembles chapitres 1 et 2 does exactly this with four of its 34 wide
+// tildes, and reading the two halves apart called four characters lost on a page
+// where nothing was lost.
+func TestComparePairsASplitSubstitution(t *testing.T) {
+	old := []rune("the sum e of the terms e and e")
+	now := []rune("the sum ̃ of the terms ̃ and ̃")
+	d := Compare(old, now)
+	if Total(d.Lost) != 0 {
+		t.Errorf("a substitution was read as a loss: %v", d.Lost)
+	}
+	if Total(d.Added) != 0 {
+		t.Errorf("a substitution was read as a gain: %v", d.Added)
+	}
+	if d.Changed[Change{'e', '̃'}] != 3 {
+		t.Errorf("changed %v, want three e read as a combining tilde", d.Changed)
+	}
+}
+
+// Nothing pairs across the page. A character lost at the top and another
+// recovered at the bottom are two separate things, and the whole point of this
+// comparison is that the first of them is a bug.
+func TestCompareDoesNotPairAcrossThePage(t *testing.T) {
+	filler := strings.Repeat("x", 200)
+	old := []rune("e" + filler)
+	now := []rune(filler + "̃")
+	d := Compare(old, now)
+	if d.Lost['e'] != 1 {
+		t.Errorf("a lost character was paid for by one recovered elsewhere: %+v", d)
+	}
+	if d.Added['̃'] != 1 {
+		t.Errorf("added %v, want the tilde on its own", d.Added)
 	}
 }

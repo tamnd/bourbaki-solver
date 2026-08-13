@@ -90,6 +90,7 @@ func extractFonts(args []string) error {
 		size   int
 		spans  int
 		runes  int
+		reads  string
 		pages  map[int]bool
 		glyphs map[string]int
 	}
@@ -100,7 +101,11 @@ func extractFonts(args []string) error {
 			key := fmt.Sprintf("%s/%d", f.Base(), f.Size)
 			st := stats[key]
 			if st == nil {
-				st = &stat{base: f.Base(), size: f.Size, pages: map[int]bool{}, glyphs: map[string]int{}}
+				st = &stat{base: f.Base(), size: f.Size, reads: unnamed,
+					pages: map[int]bool{}, glyphs: map[string]int{}}
+				if extract.KnownFont(f) {
+					st.reads = extract.Classify(f, s).String()
+				}
 				stats[key] = st
 			}
 			st.spans++
@@ -118,10 +123,19 @@ func extractFonts(args []string) error {
 	sort.Slice(keys, func(i, j int) bool { return stats[keys[i]].runes > stats[keys[j]].runes })
 
 	fmt.Printf("%s  %d pages, %d fonts, %d distinct family and size\n", b.ID, len(lay.Pages), len(lay.Fonts), len(keys))
-	fmt.Printf("%-22s %5s %8s %8s %7s\n", "family", "size", "spans", "chars", "pages")
+	fmt.Printf("%-22s %5s %8s %8s %7s  %s\n", "family", "size", "spans", "chars", "pages", "read as")
+	unknown := 0
 	for _, k := range keys {
 		st := stats[k]
-		fmt.Printf("%-22s %5d %8d %8d %7d\n", st.base, st.size, st.spans, st.runes, len(st.pages))
+		fmt.Printf("%-22s %5d %8d %8d %7d  %s\n", st.base, st.size, st.spans, st.runes, len(st.pages), st.reads)
+		if st.reads == unnamed {
+			unknown++
+		}
+	}
+	if unknown > 0 {
+		fmt.Printf("\n%d of the %d have no entry in the tables of extract/font.go and are read as\n", unknown, len(keys))
+		fmt.Printf("prose, which is right for a text face and loses a mathematics font whole.\n")
+		fmt.Printf("Every page carrying one is flagged unknown-font.\n")
 	}
 	if *family == "" {
 		return nil
@@ -753,3 +767,8 @@ func repairedByHand(path string) (bool, error) {
 	return false, fmt.Errorf("%s is on disk and will not parse, so this run "+
 		"cannot tell whether it was repaired by hand: %w", path, err)
 }
+
+// unnamed is what the font survey prints for a family the tables have never
+// been shown. It is not a class: a run in such a font is read as prose because
+// there is nothing else to do with it, and the page it is on says so.
+const unnamed = "UNNAMED"

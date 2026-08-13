@@ -579,7 +579,7 @@ func bandSize(r Run) int {
 // proportion to the line it is on: the large operators and the pieces of a
 // delimiter spanning several lines. pdftohtml reports a height of 7 for all of
 // them whatever their real size, so they are recognised by their font.
-func tall(r Run) bool { return family(r.Spec) == "CMEX" }
+func tall(r Run) bool { return Extension(r.Spec) }
 
 // sign reports whether a run is a large operator, which is the one kind of
 // glyph a line can write a limit across rather than beside. A wide tilde and a

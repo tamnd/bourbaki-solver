@@ -77,6 +77,18 @@ const (
 	// place reads as mathematics the book does not contain, and the hole it
 	// would be filling at least leaves the operands right.
 	FlagDrawnRule Flag = "drawn-rule"
+	// FlagUnknownFont is a run in a font the tables in font.go have never been
+	// shown. It is read as prose, which is what a text face wants and what a
+	// mathematics font cannot survive, and the name alone does not say which
+	// of the two it is.
+	//
+	// This flag exists because of what its absence cost. Lie chapters 7 to 9 is
+	// set in Knuth's Computer Modern where the volumes read before it are set
+	// in Latin Modern, so its mathematics italic is called CMMI10 and not
+	// LMMathItalic10, and 31496 runs of variables came through as English
+	// words. The run reported the volume 100% clean. Nothing is missing from a
+	// page read that way, which is exactly why nothing found it.
+	FlagUnknownFont Flag = "unknown-font"
 )
 
 // Page is one page read.
@@ -155,6 +167,9 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 			}
 			if strings.TrimSpace(r.Text) == "" && r.Class == ClassMath {
 				out.flag(FlagDroppedGlyph)
+			}
+			if !KnownFont(r.Spec) {
+				out.flag(FlagUnknownFont)
 			}
 			for _, c := range r.Text {
 				if PUA(c) {
