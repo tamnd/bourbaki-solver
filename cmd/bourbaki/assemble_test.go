@@ -157,6 +157,94 @@ func TestRunAssemble(t *testing.T) {
 	}
 }
 
+// An erratum is written into a manifest and stamped into the assembled file, and
+// it has to survive the assembler being run again. Written into content/ by hand
+// it would not: content/ is a pure function of the pages and the next run wipes
+// it, which is how the first one was found, by CI reporting the file as out of
+// date on the push that added it.
+func TestAnErratumSurvivesAReassembly(t *testing.T) {
+	root := smallCorpus(t)
+	t.Setenv("BOURBAKI_CORPUS", root)
+	m := &corpus.ErrataManifest{Entries: []corpus.LabelErrata{{
+		Label: "alg-viii-s1-ex-2", Lang: "en",
+		Errata: []corpus.Erratum{{Says: "a K-vector space", Read: "a K-algebra", Why: "V is multiplied"}},
+	}}}
+	b, err := m.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corpus.ErrataPath(root), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "content", "en", "alg", "VIII", "exercises", "s1", "02.md")
+	ex, err := corpus.ReadFile[corpus.ExerciseFrontMatter](path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ex.Meta.Errata) != 1 || ex.Meta.Errata[0].Read != "a K-algebra" {
+		t.Fatalf("exercise 2 carries %+v", ex.Meta.Errata)
+	}
+	one, err := corpus.ReadFile[corpus.ExerciseFrontMatter](
+		filepath.Join(root, "content", "en", "alg", "VIII", "exercises", "s1", "01.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(one.Meta.Errata) != 0 {
+		t.Errorf("exercise 1 was given exercise 2's erratum: %+v", one.Meta.Errata)
+	}
+	// The printed words are what the corpus holds. The correction stands beside
+	// them and does not touch them.
+	if !strings.Contains(ex.Body, "a K-vector space") {
+		t.Errorf("the printed text was edited: %q", ex.Body)
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-check", "-q"}); err != nil {
+		t.Fatalf("the erratum did not survive the second run: %v", err)
+	}
+}
+
+// An erratum against a label nothing is called is a correction that will never
+// be seen again, and it looks exactly like a correction that was applied.
+func TestAnErratumAgainstNothingStopsTheRun(t *testing.T) {
+	root := smallCorpus(t)
+	t.Setenv("BOURBAKI_CORPUS", root)
+	m := &corpus.ErrataManifest{Entries: []corpus.LabelErrata{
+		{Label: "alg-viii-s1-ex-9", Lang: "en",
+			Errata: []corpus.Erratum{{Says: "a", Read: "b", Why: "c"}}},
+	}}
+	b, err := m.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corpus.ErrataPath(root), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = runAssemble([]string{"-book", "alg-viii", "-q"})
+	if err == nil {
+		t.Fatal("an erratum on an exercise that does not exist should stop the run")
+	}
+	if !strings.Contains(err.Error(), "alg-viii-s1-ex-9") {
+		t.Errorf("the error does not say which: %v", err)
+	}
+
+	// A chapter this run did not touch is not this run's business. The corpus
+	// is twenty-six chapters across eight volumes and each is assembled on its
+	// own, so judging another volume's labels here would make every run fail
+	// until every volume was in.
+	m.Entries[0].Label = "alg-i-s1-ex-9"
+	if b, err = m.Bytes(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corpus.ErrataPath(root), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Errorf("another chapter's erratum stopped this one: %v", err)
+	}
+}
+
 // A section file is named for its title and an exercise file for its number, so
 // correcting either renames or drops a file. The old one has to go, or it sits
 // there for ever looking like part of the book.
@@ -253,7 +341,7 @@ func TestWriteExercisesRefusesAGap(t *testing.T) {
 		p.Exercises = append(p.Exercises, e)
 	}
 	cx := corpus.ChapterExercises{Chapter: "VIII"}
-	err := writeExercises(t.TempDir(), "en", p, map[string][]byte{}, &cx, nil)
+	err := writeExercises(t.TempDir(), "en", p, map[string][]byte{}, &cx, nil, nil, nil)
 	if err == nil {
 		t.Fatal("a § missing exercise 3 should be an error")
 	}

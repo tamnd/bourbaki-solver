@@ -119,6 +119,16 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 	}
 	tagOf := set.Lookup()
 
+	// The errata are the other thing a person writes down that the assembler
+	// has to carry: content/ is a pure function of the pages, so a correction
+	// noted in a file by hand is gone the next time this runs.
+	errata, err := corpus.LoadErrata(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	errataOf := errata.Lookup(lang)
+	used := map[string]bool{}
+
 	rec := corpus.BookSections{ID: book}
 	exrec := corpus.BookExercises{ID: book}
 	files := map[string][]byte{}
@@ -130,7 +140,7 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 		cr := corpus.ChapterSections{Chapter: ch.Numeral, Title: ch.Title}
 		cx := corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
 		for _, p := range pieces {
-			if err := writeExercises(root, lang, p, files, &cx, tagOf); err != nil {
+			if err := writeExercises(root, lang, p, files, &cx, tagOf, errataOf, used); err != nil {
 				return nil, nil, sum, err
 			}
 			f := sectionFile(*b, ch, p, lang, tagOf)
@@ -166,6 +176,9 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 		}
 		rec.Chapters = append(rec.Chapters, cr)
 		exrec.Chapters = append(exrec.Chapters, cx)
+	}
+	if err := errataApplied(root, errata, lang, b.Book, bt.Chapters, used); err != nil {
+		return nil, nil, sum, err
 	}
 
 	sections, err := corpus.LoadSections(root)
@@ -206,7 +219,8 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 // writing the manifest and carrying on would leave the corpus quietly short of
 // an exercise.
 func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte,
-	cx *corpus.ChapterExercises, tagOf map[string]tags.Tag) error {
+	cx *corpus.ChapterExercises, tagOf map[string]tags.Tag,
+	errataOf map[string][]corpus.Erratum, used map[string]bool) error {
 	if len(p.Exercises) == 0 {
 		return nil
 	}
@@ -220,6 +234,9 @@ func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte
 	}
 	for _, e := range p.Exercises {
 		e.Meta.Tag = string(tagOf[e.Meta.Label])
+		if x, ok := errataOf[e.Meta.Label]; ok {
+			e.Meta.Errata, used[e.Meta.Label] = x, true
+		}
 		f := corpus.ExerciseFile{Meta: e.Meta, Body: e.Body}
 		out, err := f.Bytes()
 		if err != nil {
@@ -242,6 +259,36 @@ func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte
 	}
 	cx.Total += len(p.Exercises)
 	cx.Section = append(cx.Section, sx)
+	return nil
+}
+
+// errataApplied stops the run when an erratum of a chapter this run assembled
+// went nowhere.
+//
+// The failure it is here for is quiet. A person writes down a correction, gets
+// the label a character wrong, and the manifest loads, the assembly succeeds,
+// the file is written without it, and the correction is never seen again by
+// anybody. The only chapters that can be judged are the ones this run covered,
+// so the labels of other volumes are left alone: an erratum names its label as
+// <book>-<chapter>-..., and that prefix is what says whether this run was
+// supposed to have applied it.
+func errataApplied(root string, m *corpus.ErrataManifest, lang, book string,
+	chapters []corpus.Chapter, used map[string]bool) error {
+	var mine []string
+	for _, ch := range chapters {
+		mine = append(mine, strings.ToLower(book+"-"+ch.Numeral+"-"))
+	}
+	for _, e := range m.Entries {
+		if e.Lang != lang || used[e.Label] {
+			continue
+		}
+		for _, prefix := range mine {
+			if strings.HasPrefix(e.Label, prefix) {
+				return fmt.Errorf("%s: %s has an erratum on it and nothing in the assembly is called that",
+					corpus.ErrataPath(root), e.Label)
+			}
+		}
+	}
 	return nil
 }
 
