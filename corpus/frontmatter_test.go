@@ -175,3 +175,39 @@ func TestPaths(t *testing.T) {
 		t.Error("a bad label made a path")
 	}
 }
+
+// A person who reads a solution writes down what they found, and what they
+// found does not quietly become the verdict.
+func TestWhatAReaderFoundIsKeptApartFromTheVerdict(t *testing.T) {
+	f, err := ParseFile[SolutionFrontMatter]([]byte(`---
+label: alg-viii-s1-ex-6
+lang: en
+status: partial
+parts:
+    - id: d
+      status: unverified
+      reason: it relies on numbered definitions not included in the supplied section
+hand_read: "2026-08-13"
+found:
+    - part d is sound; the definitions it cites were trimmed out of the question,
+      which is the context assembly and not the solution
+---
+
+The solution.
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Meta.Status != StatusPartial {
+		t.Errorf("the reading moved the status to %q", f.Meta.Status)
+	}
+	if f.Meta.Parts[0].Status != StatusUnverified {
+		t.Errorf("the reading moved part d to %q", f.Meta.Parts[0].Status)
+	}
+	if f.Meta.HandRead != "2026-08-13" {
+		t.Errorf("hand_read read as %q", f.Meta.HandRead)
+	}
+	if len(f.Meta.Found) != 1 || !strings.Contains(f.Meta.Found[0], "trimmed out") {
+		t.Errorf("found read as %v", f.Meta.Found)
+	}
+}
