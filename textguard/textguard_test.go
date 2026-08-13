@@ -260,3 +260,21 @@ func TestProviderMarkupIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// A display written the other way is turned into the corpus's way rather than
+// sent back for another call. Exercise 2 of § 1 came back with twenty of them.
+func TestADisplayWrittenWithBracketsIsTurnedRound(t *testing.T) {
+	got := Normalise("The equality\n\\[\nsrs(M)=s(M).\n\\]\nholds, and \\(s\\neq 0\\).\n")
+	want := "The equality\n$$\nsrs(M)=s(M).\n$$\nholds, and $s\\neq 0$.\n"
+	if got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+	// The escapes that are not delimiters are left alone, and \\[ in a matrix
+	// row is a line break rather than the start of a display.
+	for _, keep := range []string{`\{x\}`, `\begin{pmatrix}1\\2\end{pmatrix}`, `a\,b`,
+		`\begin{aligned}a&=b\\[2pt]c&=d\end{aligned}`} {
+		if got := Normalise(keep); got != keep {
+			t.Errorf("Normalise(%q) = %q", keep, got)
+		}
+	}
+}

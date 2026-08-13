@@ -34,12 +34,15 @@ that comes out.
 
 End with a line of its own, after the last line of the solution, listing the
 four character tags of the results you actually used. The tag is printed on the
-heading of each piece you were given.
+heading of each piece you were given. The line looks like this, where XXXX and
+YYYY stand in for tags and are not tags.
 
-USES: 00QM, 00QN
+USES: XXXX, YYYY
 
 Write `USES:` with nothing after it if you used none of them. List a tag once.
-Do not list a tag for something you were told about and did not use.
+Do not list a tag for something you were told about and did not use. Every tag
+on the line has to be one printed in the material below, and the tags of the
+line above are not, so an answer that copies them out will come back to you.
 
 Below is the exercise and the material it stands in. Each piece is bracketed by
 a line of three angle brackets and headed with what it is and where it came
