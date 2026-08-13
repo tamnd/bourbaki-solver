@@ -302,12 +302,55 @@ func CMEX(r rune) (latex string, accent, ok bool) {
 var combining = map[rune]string{
 	'̂': `\widehat`,
 	'̃': `\widetilde`,
-	// U+02C6, the circumflex that takes a width of its own instead of
-	// combining. It is what the French printing sets the hat of a Fourier
-	// transform in, out of the text face rather than out of an extension font,
-	// and it arrives welded to the run beside it. See unhat, which cuts it out
-	// before this is asked about it.
+}
+
+// spacing is the accents TeX draws as glyphs of a width of their own rather
+// than as marks that combine with the letter before them. A text face carries
+// the whole set, since the accents of the European languages have to be
+// available to prose, and the series reaches into it for its mathematics too:
+// where an accent is wanted over a letter the mathematics fonts have no accent
+// for, the accent comes out of the roman.
+//
+// Nothing was ever lost here and nothing was ever flagged. The accent arrived
+// as itself, sat in the line where it was drawn, and 646 of them are in the
+// corpus today as loose characters standing beside the letter they belong over:
+// "Let ˜G be a universal covering" where the volume prints G with a tilde, "¯k
+// an algebraic closure" where it prints k with a bar, 304 tildes and 216 bars
+// and the rest spread over five more marks. A reader sees an accent that has
+// fallen off. A renderer sees a character with no mathematics around it.
+//
+// The circumflex was already read, because the French printing sets the hat of
+// a Fourier transform out of this face and the pages said $\tau$ˆ$(...)$; the
+// rest of the set is read the same way now. See unhat, which cuts an accent out
+// of the run it arrives welded to, and place, which puts it over the letter it
+// was drawn over.
+var spacing = map[rune]string{
 	'ˆ': `\widehat`,
+	'˜': `\widetilde`,
+	'¯': `\overline`,
+	'˚': `\mathring`,
+	'˙': `\dot`,
+	'˘': `\breve`,
+	'¨': `\ddot`,
+	'ˇ': `\check`,
+}
+
+// marks is the combining mark each spacing accent stands for, which is what
+// turns an accent and a letter back into the letter the printer set.
+//
+// The two acute and grave are here and are not in spacing. They are drawn out
+// of the same face and they arrive the same way, and in these six volumes they
+// are never mathematics: every one of the 75 is a French word in a bibliography
+// or a name in a historical note, "Th´eorie des groupes de Lie", "alg`ebres de
+// Cartan", "Poincar´e-Birkhoff-Witt", and the copyright page of every French
+// printing, which reads "Toute repr´esentation, reproduction int´egrale ou
+// partielle faite par quelque proc´ed´e que ce soit". Writing them as accents
+// over a letter would put a French sentence inside dollar signs, so they
+// compose or they stay as they are.
+var marks = map[rune]rune{
+	'ˆ': '̂', '˜': '̃', '¯': '̄', '˚': '̊',
+	'˙': '̇', '˘': '̆', '¨': '̈', 'ˇ': '̌',
+	'´': '́', '`': '̀', '¸': '̧',
 }
 
 // Accent returns the LaTeX for a run that is an accent drawn over another run,
@@ -319,6 +362,9 @@ func Accent(f pdfsrc.FontSpec, text string) (string, bool) {
 	// prepared volume says U+0302 where the font said b, and the b is only a
 	// hat by the convention of a font nobody can see.
 	if latex, ok := combining[r]; ok {
+		return latex, true
+	}
+	if latex, ok := spacing[r]; ok {
 		return latex, true
 	}
 	if Extension(f) {

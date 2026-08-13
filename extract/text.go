@@ -6,6 +6,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
@@ -133,7 +135,7 @@ func statementHead(s, caps string) string {
 func tokens(l Line) []token {
 	var toks []token
 	var accents []Run
-	for _, r := range unhat(l.Runs) {
+	for _, r := range unhat(composed(l.Runs)) {
 		if _, ok := Accent(r.Spec, r.Text); ok {
 			accents = append(accents, r)
 			continue
@@ -185,9 +187,155 @@ func tokens(l Line) []token {
 	return place(toks, accents)
 }
 
-// unhat cuts the spacing circumflex out of the runs it arrived welded to, so
-// that it can be placed over the letter it was drawn over like any other
-// accent.
+// composed folds an accent into the letter it was drawn over, for the accents
+// that are never mathematics. The acute, the grave and the cedilla are drawn
+// out of the text faces and every one of the 76 in the six volumes is a French
+// word in a bibliography, a name in a historical note, or the copyright page,
+// which reads "Toute repr´esentation, reproduction int´egrale ou partielle
+// faite par quelque proc´ed´e que ce soit" in the corpus today and reads as
+// French after this. Writing them as accents over a letter would put a French
+// sentence inside dollar signs, so they compose or they stay as they are, and
+// there is no test of a word here because there is nothing they could be
+// mistaken for.
+//
+// Which run the two arrive in is not part of it. The layer breaks a run at an
+// accent's kern as readily as anywhere else, and Lie 7 to 9 hands back "Sur les
+// repr´" with "esentations alg´" after it and "´" welded to the front of
+// "etale" twenty-five times.
+//
+// The accents that are also mathematics do not come through here at all. unhat
+// cuts each of those out into an accent of its own and place puts it over the
+// letter it was drawn over, which is the only thing that tells the hat of
+// "u ∈ ˆG is summable", drawn on top of the G before it, from the diaeresis of
+// "Jordan-H¨older", drawn on top of the o after it. A draft that read the
+// letters either side instead wrote "îs".
+func composed(runs []Run) []Run {
+	var text []rune
+	var owner []int
+	for i, r := range runs {
+		for _, c := range r.Text {
+			text = append(text, c)
+			owner = append(owner, i)
+		}
+	}
+	type glyph struct {
+		r   rune
+		own int
+	}
+	out := make([]glyph, 0, len(text))
+	widen := map[int]int{}
+	taken := false
+	for i := 0; i < len(text); i++ {
+		mark, ok := marks[text[i]]
+		// A large operator out of the extension font is not an accent
+		// whatever code it arrives under. Poppler hands the coprod of "X =
+		// \\coprod_{i\\in I}X_i" on page 18 of Topologie algebrique back as a
+		// grave, and the i of the subscript is a letter right after it, so
+		// without this the sum of a family of B-spaces reads "X = $_{ì\\in
+		// I}X_i$".
+		if Extension(runs[owner[i]].Spec) {
+			ok = false
+		}
+		if _, drawn := spacing[text[i]]; !ok || drawn {
+			out = append(out, glyph{text[i], owner[i]})
+			continue
+		}
+		if i+1 < len(text) && unicode.IsLetter(text[i+1]) {
+			if c, ok := compose(text[i+1], mark); ok {
+				// The letter goes into the run the word is being written in
+				// rather than into its own. TeX sets the e of an italic
+				// "Algèbre" out of the mathematics italic, because that is
+				// where an accented letter of an italic word comes from, so
+				// the run it arrives in is a mathematics run of one character
+				// and the page said "Alg$è$bre".
+				own := owner[i+1]
+				if len(out) > 0 && unicode.IsLetter(out[len(out)-1].r) {
+					own = out[len(out)-1].own
+					// The word takes the ground the accent and the letter
+					// were drawn on as well as the letter itself. Without it
+					// the emitter reads the seven units the run of the lone e
+					// stood in as a gap between words and the page says
+					// "Algè bre".
+					widen[own] = max(widen[own], through(runs, owner[i+1]))
+				}
+				out = append(out, glyph{c, own})
+				i++
+				taken = true
+				continue
+			}
+		}
+		// The accent drawn after the letter it belongs over rather than
+		// before it, which is how the layer hands back the cedilla of
+		// "contrefac¸on" and, on two lines of Lie 7 to 9 out of the four that
+		// name the same chapter of Algebra, the grave of "Alge`bre".
+		if len(out) > 0 && unicode.IsLetter(out[len(out)-1].r) {
+			if c, ok := compose(out[len(out)-1].r, mark); ok {
+				out[len(out)-1].r = c
+				// The same move the branch above makes, for the same
+				// reason. Two of the four lines that cite Chapter X of
+				// Algebra draw the grave after the e, and the e is a
+				// mathematics run of one character sitting between two
+				// italic ones, so the word takes it and the ground it
+				// stood in or the page says "Alg$è$bre".
+				if last := &out[len(out)-1]; len(out) > 1 &&
+					utf8.RuneCountInString(runs[last.own].Text) == 1 &&
+					unicode.IsLetter(out[len(out)-2].r) &&
+					out[len(out)-2].own != last.own {
+					widen[out[len(out)-2].own] = max(widen[out[len(out)-2].own], runs[last.own].Right())
+					last.own = out[len(out)-2].own
+				}
+				taken = true
+				continue
+			}
+		}
+		out = append(out, glyph{text[i], owner[i]})
+	}
+	if !taken {
+		return runs
+	}
+	folded := make([][]rune, len(runs))
+	for _, g := range out {
+		folded[g.own] = append(folded[g.own], g.r)
+	}
+	rewritten := make([]Run, len(runs))
+	copy(rewritten, runs)
+	for i := range rewritten {
+		rewritten[i].Text = string(folded[i])
+		if right, ok := widen[i]; ok && right > rewritten[i].Right() {
+			rewritten[i].Width = right - rewritten[i].Left
+		}
+	}
+	return rewritten
+}
+
+// through is the right edge of the cell the first character of a run was drawn
+// in, which is where a word that has taken that character now reaches to.
+func through(runs []Run, i int) int {
+	n := utf8.RuneCountInString(runs[i].Text)
+	if n <= 1 {
+		return runs[i].Right()
+	}
+	return runs[i].Left + runs[i].Width/n
+}
+
+// compose writes a letter and a combining mark as the one letter Unicode has
+// for the two, and says so when Unicode has none. What the two make is
+// Unicode's business rather than this file's, so the pair goes through NFC and
+// is taken only where NFC gives back one character. That is also what tells the
+// two orders apart: the grave of "Alge`bre" is drawn after its letter and a b
+// with a grave over it is not a letter anybody has ever printed, so the pair
+// the mark is written in front of composes to nothing and the pair behind it
+// composes to an e with a grave.
+func compose(letter rune, mark rune) (rune, bool) {
+	c := norm.NFC.String(string([]rune{letter, mark}))
+	if utf8.RuneCountInString(c) != 1 {
+		return 0, false
+	}
+	return []rune(c)[0], true
+}
+
+// unhat cuts a spacing accent out of the runs it arrived welded to, so that it
+// can be placed over the letter it was drawn over like any other accent.
 //
 // The French printing sets the hat of the Fourier transform in the text face
 // rather than in the extension font, and poppler hands it back inside the run
@@ -206,7 +354,7 @@ func unhat(runs []Run) []Run {
 	var out []Run
 	for _, r := range runs {
 		rs := []rune(r.Text)
-		if len(rs) < 2 || !strings.ContainsRune(r.Text, hat) {
+		if len(rs) < 2 || !strings.ContainsFunc(r.Text, isSpacing) {
 			out = append(out, r)
 			continue
 		}
@@ -220,7 +368,7 @@ func unhat(runs []Run) []Run {
 		}
 		last := 0
 		for i, c := range rs {
-			if c != hat {
+			if !isSpacing(c) {
 				continue
 			}
 			if i > last {
@@ -236,9 +384,13 @@ func unhat(runs []Run) []Run {
 	return out
 }
 
-// hat is U+02C6, the circumflex that stands on its own rather than combining
-// with the letter before it.
-const hat = 'ˆ'
+// isSpacing reports whether a character is one of the accents a text face draws
+// at a width of its own rather than as a mark that combines with the letter
+// before it.
+func isSpacing(r rune) bool {
+	_, ok := spacing[r]
+	return ok
+}
 
 // footnoteMark reports whether a run is a reference to a footnote, which this
 // volume sets as a parenthesised number raised above the line. Everything else
@@ -343,6 +495,22 @@ func accent(t token, a Run, latex string) []token {
 	if hi <= lo {
 		return []token{t}
 	}
+	if word, ok := letter(rs, lo, hi, a); ok {
+		// The accent was drawn over a letter of a word rather than over a
+		// letter of mathematics, so it is spelling and not notation. Lie 7 to
+		// 9 breaks the run at the kern and hands back "Jordan-H¨" with "older"
+		// after it, "K¨" with "ahler", "f¨" with "ur", and "ZASSENHAUS, ¨"
+		// with "Uber", and all ten of them went out with a diaeresis over a
+		// letter in mathematics inside an English sentence.
+		t.text = word
+		// The accent stood between the letter before it and the letter it
+		// covers, and now it stands nowhere, so the word takes the space it
+		// was drawn in. Without this the emitter reads the three units the
+		// diaeresis of "a K¨" occupied as a gap between words and page 421
+		// says "a K ähler structure".
+		t.left = min(t.left, a.Left)
+		return []token{t}
+	}
 	cut := func(from, to int) token {
 		p := t
 		p.text = string(rs[from:to])
@@ -366,6 +534,49 @@ func accent(t token, a Run, latex string) []token {
 		out = append(out, cut(hi, len(rs)))
 	}
 	return out
+}
+
+// letter reports whether the accent was drawn over a letter of a word, and
+// gives back the token's text with the two written as the one letter the
+// printer set.
+//
+// A letter of a word has a letter beside it and a letter of mathematics does
+// not. "Jordan-H¨older" breaks into "Jordan-H" and "older" and the o the hat
+// covers is followed by an l; "from ˜V to C" breaks the same way and the V the
+// tilde covers is followed by a space. That is the whole of the difference, and
+// nothing in the geometry or in the run boundaries carries it: the two are laid
+// out alike, down to the accent overlapping the letter after it by the same few
+// units in both.
+//
+// The accent has to be one the text faces draw, since a wide hat out of the AMS
+// symbol font is notation wherever it is drawn, and the two have to compose to
+// a letter Unicode has. The caution over the S of Šmulian is drawn as a breve
+// rather than as a caron and so composes to nothing, which is right: the corpus
+// cannot spell what the volume prints.
+//
+// What this does not reach is a word the layer cuts into single letters. The
+// bibliography of Lie 7 to 9 names a Russian journal and the layer hands it
+// back as "Obˇ", "sˇ" and "c", so each caron covers a token of one character
+// with no letter beside it in the token and there is nothing here to read. It
+// stays as the corpus has always carried it.
+func letter(rs []rune, lo, hi int, a Run) (string, bool) {
+	if hi != lo+1 || !unicode.IsLetter(rs[lo]) {
+		return "", false
+	}
+	before := lo > 0 && unicode.IsLetter(rs[lo-1])
+	after := hi < len(rs) && unicode.IsLetter(rs[hi])
+	if !before && !after {
+		return "", false
+	}
+	mark, ok := marks[[]rune(a.Text)[0]]
+	if !ok {
+		return "", false
+	}
+	c, ok := compose(rs[lo], mark)
+	if !ok {
+		return "", false
+	}
+	return string(rs[:lo]) + string(c) + string(rs[hi:]), true
 }
 
 // cmexText renders a run of CMEX, which is one glyph in practice.
