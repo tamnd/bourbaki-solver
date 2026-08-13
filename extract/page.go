@@ -67,6 +67,9 @@ const (
 	// born-digital volume is read through a model. Measured on Algebra VIII:
 	// 19 pages of the 992 in the two printings, 31 matrices in each.
 	FlagStackedMatrix Flag = "stacked-matrix"
+	// FlagStackedRows is a display whose rows the gathering ran together. See
+	// stackedRows below for what says so and what it costs to be wrong.
+	FlagStackedRows Flag = "stacked-rows"
 	// FlagEmpty is a page with no text on it at all.
 	FlagEmpty Flag = "empty"
 	// FlagDrawnRule is a rule the page draws that could not be put back into
@@ -175,7 +178,15 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 				if PUA(c) {
 					out.flag(FlagTallDelimiter)
 				}
+				if c == arrowExtension {
+					out.flag(FlagDiagram)
+				}
 			}
+		}
+	}
+	for _, ln := range append(append([]Line{}, lines...), notes...) {
+		if stackedRows(ln) {
+			out.flag(FlagStackedRows)
 		}
 	}
 	out.Continues = continues(lines)
@@ -986,4 +997,58 @@ func wordInMath(body string) bool {
 		}
 	}
 	return false
+}
+
+// arrowExtension is the piece TeX draws a tall vertical arrow's shaft out of.
+//
+// A commutative diagram set without xypic is a table of terms with arrows
+// between them, and the vertical ones are built the way a tall bracket is
+// built, out of an arrowhead and as many shaft pieces as the gap needs. The
+// head sits at a CMEX code poppler drops, and the shaft comes back as this
+// character with nothing around it to say what it belonged to.
+//
+// Nothing puts that back. The arrows are placed by coordinate and the terms
+// they join are on three separate lines by the time they are read, so the
+// diagram of page 119 of Lie 7 to 9 came out as three exact sequences one
+// after another with no arrows between them and the label q of the middle
+// arrow attached to the term above it as an exponent. The page said nothing
+// about it and raised no flag, which is worse than saying so.
+const arrowExtension = '⏐'
+
+// stackedRows reports whether the gathering ran two rows of a display together.
+//
+// A display that sets rows one above the other, a cases or a small array,
+// hands its rows back interleaved: the layer has no rows in it, so sorting by
+// the left edge takes the first cell of the top row, then the first cell of
+// the bottom row, and page 229 of Lie 7 to 9 came out reading
+// "$\{V(0)$V(2) ifif $mm$ is evenis odd" where the page prints V(0) if m is
+// even over V(2) if m is odd.
+//
+// What says it is rows and not an exponent over an index is that the cells
+// line up. TeX sets a superscript and a subscript of one base at the same left
+// edge too, which is why one pair proves nothing, but it sets them smaller and
+// off the baseline, and it never sets four of them in a column. So only
+// full-size runs on the baseline are counted and two columns are wanted.
+func stackedRows(l Line) bool {
+	type cell struct{ left, top, bottom int }
+	var cells []cell
+	for _, r := range l.Runs {
+		if r.Level != Base || r.Depth != 0 || strings.TrimSpace(r.Text) == "" {
+			continue
+		}
+		cells = append(cells, cell{r.Left, r.Top, r.Bottom()})
+	}
+	columns := map[int]bool{}
+	for i, a := range cells {
+		for _, b := range cells[i+1:] {
+			if a.left != b.left {
+				continue
+			}
+			if a.bottom > b.top && b.bottom > a.top {
+				continue
+			}
+			columns[a.left] = true
+		}
+	}
+	return len(columns) >= 2
 }
