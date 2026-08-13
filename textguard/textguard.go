@@ -287,10 +287,38 @@ var normalise = strings.NewReplacer(
 	"\ufeff", "",
 )
 
+// displayBrackets is the other spelling of a display, \[ ... \], written out as
+// the corpus writes one.
+//
+// The corpus has $$ and nothing else: \[ occurs in no file of content/en, and
+// the prompt says which to use. It still came back the other way, twenty times
+// in one solution, exercise 2 of § 1, while the four solutions written beside it
+// on the same prompt used $$ throughout. That is a model being a model, and it
+// is not worth a call to say so. The two spellings mean the same display, so the
+// answer is turned into the corpus's spelling here rather than sent back.
+// The row break of a matrix is \\, and \\[2pt] is a row break asking for space
+// after it. Both start with a backslash that is not the delimiter's, so they are
+// put aside before the delimiters are turned round and put back afterwards.
+var (
+	rowBreak     = strings.NewReplacer(`\\`, "\x00")
+	rowBreakBack = strings.NewReplacer("\x00", `\\`)
+	delimiters   = strings.NewReplacer(
+		`\[`, "$$",
+		`\]`, "$$",
+		`\(`, "$",
+		`\)`, "$",
+	)
+)
+
+func displayBrackets(text string) string {
+	return rowBreakBack.Replace(delimiters.Replace(rowBreak.Replace(text)))
+}
+
 // Normalise applies those substitutions and trims trailing space from every
 // line, which is invisible in review and shows up in every later diff.
 func Normalise(text string) string {
 	text = bareBlackboard.ReplaceAllString(text, `\mathbf{$1}`)
+	text = displayBrackets(text)
 	text = normalise.Replace(text)
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {

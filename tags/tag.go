@@ -40,6 +40,24 @@ type Tag string
 // or zeroed field is not silently a valid one.
 const Reserved Tag = "0000"
 
+// SampleA and SampleB stand in for a tag in the prompts that ask a model to
+// write down what it used, and they are never assigned to anything either.
+//
+// They are reserved because of what the prompt used to say. It gave the shape of
+// the tag line as USES: 00QM, 00QN, and 00QM and 00QN are Theorem 1 and
+// Corollary 2 of Appendix 3, which is Hilbert's Nullstellensatz. Three of the
+// five answers to exercise 1 of § 1, on Artinian modules over a principal ideal
+// domain, came back with exactly that line under them, copied out of the
+// instructions, and one of them is in the corpus. A sample citation that names
+// a real result is a false citation waiting for a model with nothing better to
+// write, so the sample now names two tags that no result can ever have.
+const (
+	SampleA Tag = "XXXX"
+	SampleB Tag = "YYYY"
+)
+
+func held(t Tag) bool { return t == Reserved || t == SampleA || t == SampleB }
+
 // Parse reads a tag and refuses anything that is not exactly Width characters
 // of Alphabet. Lowercase is refused rather than folded: a tag is copied between
 // files, URLs and citations by hand, and one spelling is what keeps those
@@ -53,7 +71,7 @@ func Parse(s string) (Tag, error) {
 			return "", fmt.Errorf("tag %q has %q in it, which is not in %s", s, s[i], Alphabet)
 		}
 	}
-	if Tag(s) == Reserved {
+	if held(Tag(s)) {
 		return "", fmt.Errorf("tag %q is reserved and is never assigned", s)
 	}
 	return Tag(s), nil
@@ -64,13 +82,18 @@ func FromInt(n int) (Tag, error) {
 	if n <= 0 {
 		return "", fmt.Errorf("tag number %d is not a tag: allocation starts at 1", n)
 	}
-	b := []byte(Reserved)
+	want, b := n, []byte(Reserved)
 	for i := Width - 1; i >= 0; i-- {
 		b[i] = Alphabet[n%len(Alphabet)]
 		n /= len(Alphabet)
 	}
 	if n > 0 {
 		return "", fmt.Errorf("the %d character tag space is full", Width)
+	}
+	if held(Tag(b)) {
+		// Unreachable in any corpus this will ever hold, and here so that the
+		// allocator cannot hand out something Parse refuses to read back.
+		return "", fmt.Errorf("tag number %d is %q, which is reserved", want, b)
 	}
 	return Tag(b), nil
 }

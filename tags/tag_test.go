@@ -46,3 +46,26 @@ func TestParse(t *testing.T) {
 		}
 	}
 }
+
+// The prompts hand a model the shape of the tag line, and the tags they write
+// in it are held back from the allocator so that copying the shape can never
+// produce a citation to a real result.
+func TestTheSampleTagsAreNeverAssigned(t *testing.T) {
+	for _, s := range []Tag{Reserved, SampleA, SampleB} {
+		if _, err := Parse(string(s)); err == nil {
+			t.Errorf("%s parsed as a tag that could be on a statement", s)
+		}
+		if got, err := FromInt(s.Int()); err == nil {
+			t.Errorf("the allocator handed out %s at number %d", got, s.Int())
+		}
+	}
+	// And they are still the shape of a tag, which is what makes a copied
+	// sample something the solve guard can see and complain about rather than
+	// something that reads as no citation at all.
+	for _, s := range []Tag{SampleA, SampleB} {
+		if len(s) != Width {
+			t.Errorf("%s is %d characters, and a sample that is not tag shaped "+
+				"is a sample a model will not copy in the shape being taught", s, len(s))
+		}
+	}
+}

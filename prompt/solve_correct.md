@@ -39,11 +39,13 @@ your own.
 {{PARTS}}
 
 End with the same tag line as before, updated to the results the repaired
-solution actually uses.
+solution actually uses. XXXX and YYYY below stand in for tags and are not tags.
 
-USES: 00QM, 00QN
+USES: XXXX, YYYY
 
-Write `USES:` with nothing after it if you used none of them.
+Write `USES:` with nothing after it if you used none of them. Every tag on the
+line has to be one printed in the material you were given, and the tags of the
+line above are not, so an answer that copies them out will come back to you.
 
 ## What the judges said
 

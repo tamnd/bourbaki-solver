@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tamnd/bourbaki-solver/tags"
 	"github.com/tamnd/bourbaki-solver/textguard"
 )
 
@@ -121,12 +122,12 @@ func TestTheSelectorAsksForANumber(t *testing.T) {
 // since it is what the model is copying.
 func TestACandidateEndsWithTheTagsItUsed(t *testing.T) {
 	for _, name := range []string{"candidate", "correct"} {
-		body := "The module is Noetherian.\n\nUSES: 00QM, 00QN\n"
-		if !strings.Contains(built()[name], "USES: 00QM, 00QN") {
+		body := "The module is Noetherian.\n\nUSES: XXXX, YYYY\n"
+		if !strings.Contains(built()[name], "USES: XXXX, YYYY") {
 			t.Fatalf("%s does not show the tag line it asks for", name)
 		}
 		uses, rest := textguard.Uses(body)
-		if len(uses) != 2 || uses[0] != "00QM" || uses[1] != "00QN" {
+		if len(uses) != 2 || uses[0] != "XXXX" || uses[1] != "YYYY" {
 			t.Errorf("%s: the example line reads as %v", name, uses)
 		}
 		if strings.Contains(rest, "USES") {
@@ -271,3 +272,40 @@ func TestTheTruthJudgeIsShownTheObligationLinesTheParserReads(t *testing.T) {
 		t.Errorf("the examples read as %+v, and the prompt shows one of each", d.Obligations)
 	}
 }
+
+// What the prompt writes on its sample tag line is not a tag any statement can
+// have. It used to be 00QM and 00QN, which are Theorem 1 and Corollary 2 of
+// Appendix 3, and three of the five answers to exercise 1 of § 1 came back
+// citing Hilbert's Nullstellensatz for a fact about Artinian modules over a
+// principal ideal domain.
+func TestTheSampleTagLineNamesNothingRealResultCanBe(t *testing.T) {
+	for _, p := range []struct{ name, text string }{
+		{"solve_candidate.md", SolveCandidateFor("the context", Angles()[0], nil)},
+		{"solve_correct.md", SolveCorrect("the context", "the solution", "the complaints", nil)},
+	} {
+		line := usesSample(p.text)
+		if line == "" {
+			t.Errorf("%s no longer shows the shape of the tag line", p.name)
+			continue
+		}
+		for _, w := range tagsIn(line) {
+			if _, err := tags.Parse(w); err == nil {
+				t.Errorf("%s writes %s on its sample line, and a statement can carry "+
+					"that tag, so a model copying the line cites a real result", p.name, w)
+			}
+		}
+	}
+}
+
+var sampleLine = regexp.MustCompile(`(?m)^USES: (.+)$`)
+var sampleTag = regexp.MustCompile(`[0-9A-Z]{4}`)
+
+func usesSample(prompt string) string {
+	m := sampleLine.FindStringSubmatch(prompt)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+func tagsIn(line string) []string { return sampleTag.FindAllString(line, -1) }
