@@ -50,8 +50,40 @@ func TestTheVariantGreekRowIsWholeAndIsNeverPunctuation(t *testing.T) {
 			t.Errorf("cmmi[%q] = %q, want %q", code, got, want)
 		}
 	}
-	if len(cmmi) != 6 {
-		t.Errorf("the mathematics italic table has %d entries, want the 6 of the row", len(cmmi))
+	for code, want := range map[rune]string{
+		'[': `\flat `, '\\': `\natural `, ']': `\sharp `,
+	} {
+		if got := cmmi[code]; got != want {
+			t.Errorf("cmmi[%q] = %q, want %q", code, got, want)
+		}
+	}
+	if len(cmmi) != 9 {
+		t.Errorf("the mathematics italic table has %d entries, want the 6 of the row and the 3 musical signs", len(cmmi))
+	}
+}
+
+// Exercise 14 of Algebra chapter VIII, the one that names the subgroup of inner
+// automorphisms. The delta is in a sentence and not in a formula, so it is set
+// in the roman and the roman hands back the increment sign. It has to come out
+// as the letter, since a sentence that mentions Γ/∆ and a sentence that mentions
+// Γ/Δ are the same sentence and only one of them is findable.
+const proseGreekPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="290" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="3" size="16" family="SnsrnnQjcxplMknsjpVdyrqvLMRoman10" color="#131413"/>
+<text top="200" left="100" width="60" height="14" font="3">and ∆ the subgroup</text>
+</page>
+</pdf2xml>
+`
+
+func TestACapitalInASentenceIsTheLetterAndNotTheSign(t *testing.T) {
+	lines := parse(t, proseGreekPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = "and Δ the subgroup"
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %q\nwant %q", got, want)
 	}
 }
 

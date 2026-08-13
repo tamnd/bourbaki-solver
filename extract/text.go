@@ -416,6 +416,8 @@ func runText(r Run) string {
 			return `\boldsymbol{` + runes(s, cmmi) + `}`
 		}
 		return runes(s, cmmi)
+	case "MSAM":
+		return runes(s, msam)
 	}
 	if r.Class == ClassStrong {
 		return bold(s)
@@ -424,7 +426,7 @@ func runText(r Run) string {
 		return wrapLetters(s, `\mathbf`)
 	}
 	if !r.Class.Math() && r.Level == Base {
-		return s
+		return prose.Replace(s)
 	}
 	if r.Class == ClassMath && r.Bold {
 		// Bourbaki sets a few of its Greek letters bold, and a bold letter of
