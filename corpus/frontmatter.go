@@ -159,6 +159,19 @@ type SolutionFrontMatter struct {
 	// it is.
 	Reviewed string  `yaml:"reviewed,omitempty"`
 	Tokens   *Tokens `yaml:"tokens,omitempty"`
+	// HandRead is when a person read this solution against the exercise and the
+	// § it belongs to, and Found is what they found, one line to a finding.
+	//
+	// Neither of them moves Status. Status is what the pipeline decided and
+	// the corpus says so plainly; a reader who disagrees with it writes down
+	// why here and the disagreement stays visible instead of being swallowed
+	// by an edit. Part d) of exercise 6 of § 1 is the case that wanted this:
+	// the judge failed it for citing definitions it had not been shown, which
+	// was true and was the trimming's fault and not the solution's, and the
+	// proof is sound. That is a fact about the run worth keeping, and it is
+	// not the same fact as the solution having passed.
+	HandRead string   `yaml:"hand_read,omitempty"`
+	Found    []string `yaml:"found,omitempty"`
 	// PromptSHA256 identifies the instructions the solution was written under,
 	// as it does for a translated section. A prompt that gets better is a
 	// reason to solve an exercise again, and a solution that cannot say which
