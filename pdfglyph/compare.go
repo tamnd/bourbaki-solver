@@ -142,7 +142,7 @@ type mark struct {
 // same run. The Myers difference is free to choose any shortest script, and
 // where the page has the same character again a few places along it will happily
 // keep that one and put the deletion and the insertion in two runs with keeps
-// between them. Page 118 of Théorie des ensembles chapitres 1 et 2 sets 34 wide
+// between them. Page 118 of Théories spectrales chapitres 1 et 2 sets 34 wide
 // tildes; 30 of them pair inside their run and the other 4 come out as four e
 // deleted here and four combining tildes inserted there, which read as four
 // characters lost on a page where nothing at all was lost.

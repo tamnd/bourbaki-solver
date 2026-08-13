@@ -385,7 +385,7 @@ var cmsy = map[rune]string{
 // TeX names them and nothing outside TeX has heard of varrho or varpi. Poppler
 // falls back on the code and the row comes out as punctuation.
 //
-// Two of them do real damage. Théorie spectrale writes the spectral radius as
+// Two of them do real damage. Théories spectrales writes the spectral radius as
 // ϱ(x) and 131 of those arrived as "%", which is where a LaTeX line stops being
 // read. Topologie algébrique writes the Poincaré groupoid as ϖ(B) and 374 of
 // those arrived as "$", which closes the mathematics it is inside of and opens

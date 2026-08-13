@@ -38,7 +38,7 @@ func TestClassifyReadsBothFoundries(t *testing.T) {
 }
 
 // A subset tag is six capitals and a plus sign, except where it is not: the
-// French Théorie des ensembles runs four of them together in front of the name
+// French Théories spectrales runs four of them together in front of the name
 // with no plus anywhere, so a font arrives called
 // QnnxqjJsnccdPstrhwMdcrddLMMathItalic10 and reading it by prefix left every
 // variable in the volume classed as prose.
