@@ -69,9 +69,13 @@ func extractPrepare(args []string) error {
 	}
 
 	fmt.Printf("%s  %d names rewritten in %d encodings\n", b.ID, res.Total(), res.Encodings)
-	if res.Total() == 0 {
+	if res.Total() == 0 && res.Unicode == 0 {
 		fmt.Printf("  nothing to do, the printing names no glyph poppler cannot read\n")
 		return nil
+	}
+	if res.Unicode > 0 {
+		fmt.Printf("  %d font CMaps given the codes they were missing, each one of them\n", res.Unicode)
+		fmt.Printf("  would have kept the old reading over the names just rewritten\n")
 	}
 	fmt.Printf("  %s\n", path)
 	for _, n := range res.Sorted() {

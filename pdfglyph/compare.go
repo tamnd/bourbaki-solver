@@ -99,6 +99,7 @@ func Compare(old, now []rune) Diff {
 		d.Hard = true
 		return d
 	}
+	var left, right []mark
 	for i := 0; i < len(script); {
 		if script[i].op == keep {
 			d.Kept++
@@ -109,27 +110,74 @@ func Compare(old, now []rune) Diff {
 		// the deletions and the insertions are paired off in order, because a
 		// glyph that read as one character and now reads as another arrives as
 		// one of each in the same place.
-		var del, ins []rune
+		var del, ins []mark
 		for ; i < len(script) && script[i].op != keep; i++ {
 			if script[i].op == remove {
-				del = append(del, script[i].r)
+				del = append(del, mark{script[i].r, i})
 			} else {
-				ins = append(ins, script[i].r)
+				ins = append(ins, mark{script[i].r, i})
 			}
 		}
 		n := min(len(del), len(ins))
 		for j := 0; j < n; j++ {
-			d.Changed[Change{del[j], ins[j]}]++
+			d.Changed[Change{del[j].r, ins[j].r}]++
 		}
-		for _, r := range ins[n:] {
-			d.Added[r]++
-		}
-		for _, r := range del[n:] {
-			d.Lost[r]++
-		}
+		left = append(left, del[n:]...)
+		right = append(right, ins[n:]...)
 	}
+	pairNearby(&d, left, right)
 	return d
 }
+
+// mark is one edit and where in the script it happened.
+type mark struct {
+	r  rune
+	at int
+}
+
+// pairNearby matches the edits a run did not pair against the edits of a run
+// nearby, and only what is left over after that is a character the volume lost.
+//
+// A substitution does not always arrive as a deletion and an insertion in the
+// same run. The Myers difference is free to choose any shortest script, and
+// where the page has the same character again a few places along it will happily
+// keep that one and put the deletion and the insertion in two runs with keeps
+// between them. Page 118 of Théorie des ensembles chapitres 1 et 2 sets 34 wide
+// tildes; 30 of them pair inside their run and the other 4 come out as four e
+// deleted here and four combining tildes inserted there, which read as four
+// characters lost on a page where nothing at all was lost.
+//
+// So the leftovers are paired by position, and by position only: an insertion
+// pairs with a deletion within a few dozen characters of it, which is the same
+// glyph seen twice, and nothing pairs across the page, which would let a real
+// loss here be paid for by a real gain there and is the one thing this exists to
+// catch.
+func pairNearby(d *Diff, del, ins []mark) {
+	used := make([]bool, len(ins))
+	k := 0
+	for _, x := range del {
+		for k < len(ins) && (used[k] || ins[k].at < x.at-nearby) {
+			k++
+		}
+		if k < len(ins) && ins[k].at <= x.at+nearby {
+			d.Changed[Change{x.r, ins[k].r}]++
+			used[k] = true
+			k++
+			continue
+		}
+		d.Lost[x.r]++
+	}
+	for i, m := range ins {
+		if !used[i] {
+			d.Added[m.r]++
+		}
+	}
+}
+
+// nearby is how far apart two halves of one substitution are allowed to have
+// been put. A page of this series runs to about two thousand characters, so this
+// is a neighbourhood and not the page.
+const nearby = 32
 
 type op byte
 

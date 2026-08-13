@@ -138,7 +138,7 @@ func tokens(l Line) []token {
 			accents = append(accents, r)
 			continue
 		}
-		if family(r.Spec) == "CMEX" {
+		if Extension(r.Spec) {
 			text, acc := cmexText(r)
 			if acc {
 				accents = append(accents, r)
@@ -403,13 +403,13 @@ func cmexText(r Run) (text string, accent bool) {
 func runText(r Run) string {
 	s := r.Text
 	switch family(r.Spec) {
-	case "rsfs":
+	case "rsfs", "EUSM":
 		return wrapLetters(s, `\mathscr`)
 	case "EUFM":
 		return wrapLetters(s, `\mathfrak`)
-	case "CMSSDC":
+	case "CMSSDC", "LMSans":
 		return wrapLetters(s, `\mathsf`)
-	case "LMMathSymbols":
+	case "LMMathSymbols", "CMSY", "CMBSY":
 		return symbols(s)
 	}
 	if r.Class == ClassStrong {

@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"sort"
 	"strings"
 	"unicode"
 
@@ -63,22 +64,126 @@ func (c Class) String() string {
 // Math reports whether a class belongs inside dollar signs.
 func (c Class) Math() bool { return c == ClassMath || c == ClassBold }
 
-// family is a font family with its size stripped, so that LMRoman10 and
-// LMRoman7 are both "LMRoman" and CMEX10 and CMEX7 are both "CMEX".
-func family(f pdfsrc.FontSpec) string {
-	return strings.TrimRight(f.Base(), "0123456789")
+// families is every font family the corpus is set in and what a run in one of
+// them is. Where the class is ClassText the run takes its class from the bold
+// and italic flags instead, since a text face carries prose, emphasis and
+// headings all three.
+//
+// It is a table and not a switch because of what a missing entry used to do.
+// Anything not named here fell through to prose, silently, and the volumes set
+// in Knuth's original Computer Modern rather than in Latin Modern are named
+// CMMI and CMSY where the others are named LMMathItalic and LMMathSymbols. Lie
+// chapters 7 to 9 has 31496 runs of mathematics italic and 14475 of the symbol
+// font, and every one of them was being read as an English word: the extractor
+// called the volume 100% clean and nothing anywhere said otherwise. A family
+// that is not in this table now flags its page. See FlagUnknownFont.
+//
+// The two names for one design are both here, because both printings exist and
+// the encodings are the same font: CM and LM are the same shapes at the same
+// codes, drawn again in an outline format. Only the names differ.
+var families = map[string]Class{
+	// The text faces. Roman, italic, bold and the typewriter, in both the
+	// Computer Modern and the Latin Modern namings, plus the faces a publisher
+	// dropped in for a running head or a chapter title.
+	"LMRoman": ClassText, "CMR": ClassText, "CMTI": ClassText, "CMBX": ClassText,
+	"CMTT": ClassText, "CMSL": ClassText, "CMCSC": ClassText, "CMB": ClassText,
+	"Times": ClassText, "TimesNewRoman": ClassText, "Times New Roman": ClassText,
+	"TimesNewRomanPS": ClassText, "TimesNewRomanPSMT": ClassText,
+	"SMinionPlus": ClassText, "Springnew": ClassText, "SFXC": ClassText,
+
+	// Small capitals, which is what a statement head is set in.
+	"LMRomanCaps": ClassHead,
+
+	// The mathematics. The italic carries the variables, the symbol font the
+	// relations and the operators, the extension font the large operators and
+	// the large delimiters, and the rest are the alphabets a formula reaches
+	// for: fraktur, script, blackboard bold and the sans of a functor.
+	"LMMathItalic": ClassMath, "CMMI": ClassMath, "CMMIB": ClassMath,
+	"LMMathSymbols": ClassMath, "CMSY": ClassMath, "CMBSY": ClassMath,
+	"LMMathExtension": ClassMath, "CMEX": ClassMath,
+	"MSAM": ClassMath, "MSBM": ClassMath,
+	"rsfs": ClassMath, "EUFM": ClassMath, "EUSM": ClassMath, "EUEX": ClassMath,
+	"BOUR": ClassMath, "CMSSDC": ClassMath, "LMSans": ClassMath,
+	"TeX-mathx": ClassMath,
+
+	// The pieces of a commutative diagram, drawn by xypic.
+	"XYCMAT-Medium": ClassDiagram, "XYCMBT-Medium": ClassDiagram,
+	"XYDASH-Medium": ClassDiagram, "XYATIP-Medium": ClassDiagram,
+	"XYBTIP-Medium": ClassDiagram, "XYBSQL-Medium": ClassDiagram,
 }
+
+// stems is the keys of families, longest first, so that LMRomanCaps is read
+// before LMRoman and TimesNewRomanPSMT before Times.
+var stems = func() []string {
+	out := make([]string, 0, len(families))
+	for k := range families {
+		out = append(out, k)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if len(out[i]) != len(out[j]) {
+			return len(out[i]) > len(out[j])
+		}
+		return out[i] < out[j]
+	})
+	return out
+}()
+
+// family is the entry in families that a font is, or the empty string for a
+// font nobody has named yet.
+//
+// It matches the end of the name rather than the whole of it, because a subset
+// tag is not always written the way the specification says. The specification
+// wants six capitals and a plus, DGLNOH+CMSY7, which pdfsrc.FontSpec.Base cuts
+// off. The Théories spectrales and Topologie algébrique files were merged by a
+// tool that ran the tag straight into the name instead, four times over, and
+// arrive as SnsrnnQjcxplMknsjpVdyrqvLMRoman10. Matching the end reads both, and
+// the design size comes off first so that CMSY7 and CMSY10 are one font.
+func family(f pdfsrc.FontSpec) string {
+	name := f.Base()
+	// A publisher's font carries its style in the name, after a comma the way
+	// the specification writes it or run straight on: the running head of
+	// Topologie algébrique is set in TimesNewRomanItalic and the title page
+	// beside it in TimesNewRoman,Italic. The style is already known from the
+	// flags pdftohtml reports, so it comes off and the name is read again.
+	if i := strings.IndexByte(name, ','); i > 0 {
+		name = name[:i]
+	}
+	if s := stemOf(name); s != "" {
+		return s
+	}
+	// The style is written after a hyphen as often as it is run straight on, and
+	// LMMathSymbols8-Regular is the same design as LMMathSymbols8.
+	for _, style := range []string{"BoldItalic", "Italic", "Bold", "Regular"} {
+		if rest, ok := strings.CutSuffix(name, style); ok {
+			return stemOf(strings.TrimSuffix(rest, "-"))
+		}
+	}
+	return ""
+}
+
+// stemOf is the entry in families that a font name ends with, once the design
+// size has come off it, or the empty string for a name nothing matches.
+func stemOf(name string) string {
+	name = strings.TrimRight(name, "0123456789")
+	for _, s := range stems {
+		if len(name) >= len(s) && strings.EqualFold(name[len(name)-len(s):], s) {
+			return s
+		}
+	}
+	return ""
+}
+
+// KnownFont reports whether the tables have anything to say about a font. A run
+// in a font they do not know is read as prose, which is right for a text face
+// nobody has listed and wrong for a mathematics font, and there is no way to
+// tell which from the name alone. So the page says so instead.
+func KnownFont(f pdfsrc.FontSpec) bool { return family(f) != "" }
 
 // Classify decides what a run is from its font and the italic and bold flags
 // pdftohtml reports.
 func Classify(f pdfsrc.FontSpec, s pdfsrc.Span) Class {
-	switch family(f) {
-	case "LMRomanCaps":
-		return ClassHead
-	case "LMMathItalic", "LMMathSymbols", "CMEX", "MSAM", "MSBM", "rsfs", "EUFM", "BOUR", "CMSSDC":
-		return ClassMath
-	case "XYCMAT-Medium", "XYCMBT-Medium":
-		return ClassDiagram
+	if c, ok := families[family(f)]; ok && c != ClassText {
+		return c
 	}
 	switch {
 	case s.Bold && strong(s.Text):
@@ -216,11 +321,22 @@ func Accent(f pdfsrc.FontSpec, text string) (string, bool) {
 	if latex, ok := combining[r]; ok {
 		return latex, true
 	}
-	if family(f) == "CMEX" {
+	if Extension(f) {
 		latex, acc, ok := CMEX(r)
 		return latex, ok && acc
 	}
 	return "", false
+}
+
+// Extension reports whether a font is the mathematics extension font, which
+// TeX calls CMEX10 and its outline redrawing calls LMMathExtension10. It is the
+// one font read entirely by position, so the two names have to answer alike.
+func Extension(f pdfsrc.FontSpec) bool {
+	switch family(f) {
+	case "CMEX", "LMMathExtension":
+		return true
+	}
+	return false
 }
 
 // symbolPairs are the places where TeX draws one symbol out of two glyphs and

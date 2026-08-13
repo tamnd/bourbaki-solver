@@ -26,15 +26,27 @@
 // glyph by glyph against the printed page, do the work for both printings and
 // there is no second table to keep honest.
 //
-// The rewrite is byte for byte the same length as the file it came from. A name
-// is replaced in place and padded with spaces, which a PDF name array reads as
-// nothing, so every offset in the cross reference table still points where it
-// did and no object has to be rewritten. Nothing outside a /Differences array
-// of an /Type /Encoding object is touched. The prepared copy goes in work/,
-// which is gitignored, and the volume itself is never written to.
+// No byte of the file is ever moved. A name is replaced where it stands and
+// padded with spaces, which a PDF name array reads as nothing, so every offset
+// in the cross reference still points where it did. What the rewrite cannot
+// reach in place it appends: an encoding that lives inside a compressed object
+// stream, and a /ToUnicode CMap that has to be told about the codes it skips,
+// are written to the end of the file as an incremental update, which is a
+// stretch of new objects and a new cross reference carrying /Prev. Nothing
+// outside a /Differences array and the CMaps of the fonts that use one is
+// touched. The prepared copy goes in work/, which is gitignored, and the volume
+// itself is never written to.
+//
+// Two of the six volumes hide their encodings further than plain sight. Lie
+// chapters 7 to 9 keeps all 35 /Differences arrays and all 39 font dictionaries
+// inside four /ObjStm, so the string does not occur in the file at all, and it
+// ships a /ToUnicode CMap per font that maps every code except the ones whose
+// TeX names the glyph list has never heard of. A CMap outranks the name it is
+// attached to, so a rewrite that stops at the name changes nothing.
 package pdfglyph
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -52,6 +64,9 @@ type Result struct {
 	Encodings int
 	// Names counts the replacements, by the TeX name that was replaced.
 	Names map[string]int
+	// Unicode is how many /ToUnicode CMaps were given codes they were missing,
+	// each one a CMap that would otherwise have kept the old reading.
+	Unicode int
 	// Unknown counts the names that look like TeX and have no replacement,
 	// so that a volume with a glyph this package has never seen says so
 	// rather than dropping it quietly.
@@ -206,13 +221,39 @@ func Rewrite(pdf []byte) ([]byte, Result, error) {
 	res := Result{Names: map[string]int{}, Unknown: map[string]int{}}
 	out := make([]byte, len(pdf))
 	copy(out, pdf)
-	fonts := baseFonts(pdf)
-	for _, o := range objects(pdf) {
-		dict := o.dict(pdf)
+	srcs, err := sources(out)
+	if err != nil {
+		return nil, res, err
+	}
+	fonts := baseFonts(srcs)
+	rewritten := map[int]map[int]rune{}
+	for _, s := range srcs {
+		if err := rewriteNames(s, fonts, rewritten, &res); err != nil {
+			return nil, res, err
+		}
+	}
+	patches, err := patchToUnicode(newUnicodeMaps(srcs[0]), cmapNeeds(srcs, rewritten))
+	if err != nil {
+		return nil, res, err
+	}
+	res.Unicode = len(patches)
+	out, err = appendUpdate(out, append(updates(srcs), patches...))
+	if err != nil {
+		return nil, res, err
+	}
+	return out, res, nil
+}
+
+// rewriteNames replaces the TeX glyph names in one source's /Differences
+// arrays, and records which encoding objects it touched.
+func rewriteNames(src *source, fonts map[int]string, rewritten map[int]map[int]rune, res *Result) error {
+	buf := src.buf
+	for _, o := range src.objs {
+		dict := o.dict(buf)
 		if !encodingRe.MatchString(dict) {
 			continue
 		}
-		s, e, ok := differences(pdf, o)
+		s, e, ok := differences(buf, o)
 		if !ok {
 			continue
 		}
@@ -221,9 +262,20 @@ func Rewrite(pdf []byte) ([]byte, Result, error) {
 		if !strings.Contains(strings.ToUpper(font), "CMEX") {
 			table = mathNames
 		}
-		n := 0
-		for _, m := range nameRe.FindAllSubmatchIndex(pdf[s:e], -1) {
-			name := string(pdf[s+m[2] : s+m[3]])
+		codes := map[int]rune{}
+		code := 0
+		for _, m := range codeNameRe.FindAllSubmatchIndex(buf[s:e], -1) {
+			if m[2] >= 0 {
+				at, err := strconv.Atoi(string(buf[s+m[2] : s+m[3]]))
+				if err != nil {
+					return err
+				}
+				code = at
+				continue
+			}
+			at := code
+			code++
+			name := string(buf[s+m[4] : s+m[5]])
 			want, ok := table[name]
 			if !ok {
 				if texName.MatchString(name) && font != "" {
@@ -231,25 +283,317 @@ func Rewrite(pdf []byte) ([]byte, Result, error) {
 				}
 				continue
 			}
-			if len(want)+1 > m[1]-m[0] {
-				return nil, res, fmt.Errorf("/%s does not fit where /%s was", want, name)
+			if len(want) > m[5]-m[4] {
+				return fmt.Errorf("/%s does not fit where /%s was", want, name)
 			}
-			copy(out[s+m[0]:], "/"+want)
-			for i := s + m[0] + len(want) + 1; i < s+m[1]; i++ {
-				out[i] = ' '
+			copy(buf[s+m[4]-1:], "/"+want)
+			for i := s + m[4] + len(want); i < s+m[5]; i++ {
+				buf[i] = ' '
+			}
+			r, ok := glyphRune(want)
+			if !ok {
+				return fmt.Errorf("/%s is not a name this knows the character of", want)
 			}
 			res.Names[name]++
-			n++
+			codes[at] = r
 		}
-		if n > 0 {
+		if len(codes) > 0 {
 			res.Encodings++
+			rewritten[o.num] = codes
+			src.edited(o.num)
 		}
 	}
-	return out, res, nil
+	return nil
 }
 
-// nameRe is a PDF name as a font encoding writes one.
-var nameRe = regexp.MustCompile(`/([A-Za-z][A-Za-z0-9]*)`)
+// cmapNeeds is what each /ToUnicode CMap in a file is missing, gathered from
+// the fonts that point at it: the codes whose glyph name was just rewritten,
+// and the character that name now stands for.
+//
+// A CMap is read before the glyph name and wins over it, so a font that carries
+// one and a rewritten encoding would come back exactly as it went in unless the
+// CMap is dealt with. Several fonts of a family share one CMap, so what they
+// need is merged rather than fought over.
+func cmapNeeds(srcs []*source, rewritten map[int]map[int]rune) map[int]map[int]rune {
+	out := map[int]map[int]rune{}
+	for _, src := range srcs {
+		for _, o := range src.objs {
+			dict := o.dict(src.buf)
+			if !fontRe.MatchString(dict) {
+				continue
+			}
+			enc := encRefRe.FindStringSubmatch(dict)
+			cmap := toUnicodeRe.FindStringSubmatch(dict)
+			if enc == nil || cmap == nil {
+				continue
+			}
+			e, err := strconv.Atoi(enc[1])
+			if err != nil {
+				continue
+			}
+			want := rewritten[e]
+			if len(want) == 0 {
+				continue
+			}
+			num, err := strconv.Atoi(cmap[1])
+			if err != nil {
+				continue
+			}
+			if out[num] == nil {
+				out[num] = map[int]rune{}
+			}
+			for code, r := range want {
+				out[num][code] = r
+			}
+		}
+	}
+	return out
+}
+
+// patchToUnicode gives every CMap the codes it is missing, as objects to append
+// to the file, and leaves alone every code it already has.
+//
+// The missing codes are not a corner case. Lie chapters 7 to 9 ships a CMap for
+// every font, and each one lists every code except the ones whose TeX name is
+// not in the Adobe glyph list: the CMap of the symbol font at 7 point maps 21
+// codes and skips the prime, the negation stroke and the two angle brackets,
+// which are precisely the four this package has replacements for. Poppler reads
+// the CMap, finds nothing at those codes, and prints nothing, 4592 times over
+// the volume.
+//
+// The first version of this threw the whole CMap away instead, which is one
+// line of code and wrong. A CMap is a font wide table, and a font whose encoding
+// this package touched at four codes has a hundred others the CMap is the only
+// good reading of: throwing it away cost the French Algèbre chapitre 8 310 mus,
+// which its CMap called U+03BC and whose glyph name is the micro sign, and 195
+// pieces of tall parenthesis, which its CMap called U+239B and whose names are
+// the private use codes a font means by them. Adding to the table takes the
+// codes that were missing and keeps the ones that were not.
+//
+// A patched CMap is written out uncompressed. It is a few kilobytes in a copy
+// that lives in work/ and is thrown away whenever the tables change, and it is
+// worth being able to read the thing when a reading goes wrong.
+func patchToUnicode(maps *unicodeMaps, needs map[int]map[int]rune) ([]update, error) {
+	nums := make([]int, 0, len(needs))
+	for num := range needs {
+		nums = append(nums, num)
+	}
+	sort.Ints(nums)
+
+	var out []update
+	for _, num := range nums {
+		body, ok := maps.body(num)
+		if !ok {
+			continue
+		}
+		have := cmapCodes(body)
+		var codes []int
+		for code := range needs[num] {
+			if !have[code] {
+				codes = append(codes, code)
+			}
+		}
+		if len(codes) == 0 {
+			continue
+		}
+		sort.Ints(codes)
+		patched, err := addBFChars(body, codes, needs[num], codeWidth(body))
+		if err != nil {
+			return nil, fmt.Errorf("object %d: %w", num, err)
+		}
+		out = append(out, update{num: num, body: streamObject(patched)})
+	}
+	return out, nil
+}
+
+// addBFChars puts a block of single character mappings into a CMap, in front of
+// the endcmap that closes it, which is where a mapping is still read and where
+// nothing already in the file has to move to make room. The block is broken at
+// a hundred entries, which is the most the specification allows in one.
+func addBFChars(body []byte, codes []int, want map[int]rune, width int) ([]byte, error) {
+	i := bytes.LastIndex(body, []byte("endcmap"))
+	if i < 0 {
+		return nil, fmt.Errorf("the CMap does not end with endcmap")
+	}
+	var b bytes.Buffer
+	b.Write(body[:i])
+	for len(codes) > 0 {
+		n := min(len(codes), 100)
+		fmt.Fprintf(&b, "%d beginbfchar\n", n)
+		for _, code := range codes[:n] {
+			fmt.Fprintf(&b, "<%0*X> <%04X>\n", width, code, want[code])
+		}
+		b.WriteString("endbfchar\n")
+		codes = codes[n:]
+	}
+	b.Write(body[i:])
+	return b.Bytes(), nil
+}
+
+// streamObject is the body of an indirect object holding a stream, as an
+// incremental update writes one.
+func streamObject(body []byte) []byte {
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "<</Length %d>>\nstream\n", len(body))
+	b.Write(body)
+	b.WriteString("\nendstream")
+	return b.Bytes()
+}
+
+// codeWidth is how many hexadecimal digits a CMap writes a code in, taken from
+// the entries already in it, since a code written to another width than its
+// codespace says is not read at all. Two is what a simple font's CMap uses and
+// what is assumed for a CMap with nothing in it to go on.
+func codeWidth(body []byte) int {
+	for _, b := range bfcharRe.FindAllSubmatch(body, -1) {
+		if h := hexRe.FindSubmatch(b[1]); h != nil {
+			return len(h[1])
+		}
+	}
+	for _, b := range bfrangeRe.FindAllSubmatch(body, -1) {
+		if h := hexRe.FindSubmatch(b[1]); h != nil {
+			return len(h[1])
+		}
+	}
+	return 2
+}
+
+// glyphRune is the character poppler prints for one of this package's
+// replacement names, which is what a CMap entry for that code has to say if the
+// two are to agree. Every value of the tables above is either a character of
+// its own, a name of the Adobe list this spells out, or a uniXXXX.
+func glyphRune(name string) (rune, bool) {
+	if r, ok := glyphRunes[name]; ok {
+		return r, true
+	}
+	if rest, ok := strings.CutPrefix(name, "uni"); ok && len(rest) == 4 {
+		n, err := strconv.ParseInt(rest, 16, 32)
+		if err != nil {
+			return 0, false
+		}
+		return rune(n), true
+	}
+	r := []rune(name)
+	if len(r) == 1 && r[0] < 0x80 {
+		return r[0], true
+	}
+	return 0, false
+}
+
+// glyphRunes is the Adobe names this package replaces a TeX name with, and it
+// is short because the replacements were chosen to be the characters the
+// English printing delivers and those are nearly all printable on their own.
+var glyphRunes = map[string]rune{
+	"zero": '0', "one": '1', "two": '2', "three": '3', "four": '4',
+	"five": '5', "six": '6', "seven": '7', "eight": '8', "nine": '9',
+	"bracketleft": '[', "backslash": '\\', "bracketright": ']',
+	"asciicircum": '^', "underscore": '_', "grave": '`',
+	"colon": ':', "semicolon": ';', "less": '<', "equal": '=',
+	"greater": '>', "question": '?',
+}
+
+// unicodeMaps reads the /ToUnicode CMaps of a file. A CMap is a stream, and a
+// stream is always a top level object however much of the rest of the file is
+// packed into object streams, so only the file itself is indexed. Several fonts
+// of one family point at one CMap, so each is inflated once.
+type unicodeMaps struct {
+	file *source
+	at   map[int]object
+	seen map[int][]byte
+}
+
+func newUnicodeMaps(file *source) *unicodeMaps {
+	m := &unicodeMaps{file: file, at: map[int]object{}, seen: map[int][]byte{}}
+	for _, o := range file.objs {
+		m.at[o.num] = o
+	}
+	return m
+}
+
+// body is a CMap decoded, or nothing if the file does not have it or this
+// cannot read it, in which case the font keeps whatever it had and the glyph
+// name rewrite underneath is all it gets.
+func (m *unicodeMaps) body(num int) ([]byte, bool) {
+	if b, ok := m.seen[num]; ok {
+		return b, b != nil
+	}
+	b := m.read(num)
+	m.seen[num] = b
+	return b, b != nil
+}
+
+func (m *unicodeMaps) read(num int) []byte {
+	o, ok := m.at[num]
+	if !ok {
+		return nil
+	}
+	start, end, ok := streamSpan(m.file.buf, o)
+	if !ok {
+		return nil
+	}
+	body := m.file.buf[start:end]
+	if flateRe.MatchString(o.dict(m.file.buf)) {
+		out, err := inflate(body)
+		if err != nil {
+			return nil
+		}
+		return out
+	}
+	return append([]byte{}, body...)
+}
+
+// cmapCodes is every code a CMap gives a Unicode for. A destination of nothing
+// but zeros is how a tool writes a code it had no Unicode for, and poppler
+// prints nothing for it, so it does not count as covered.
+func cmapCodes(body []byte) map[int]bool {
+	out := map[int]bool{}
+	for _, b := range bfcharRe.FindAllSubmatch(body, -1) {
+		h := hexRe.FindAllSubmatch(b[1], -1)
+		for i := 0; i+1 < len(h); i += 2 {
+			code, err := strconv.ParseInt(string(h[i][1]), 16, 32)
+			if err != nil || zeros(h[i+1][1]) {
+				continue
+			}
+			out[int(code)] = true
+		}
+	}
+	for _, b := range bfrangeRe.FindAllSubmatch(body, -1) {
+		for _, r := range bfrangeEntryRe.FindAllSubmatch(b[1], -1) {
+			lo, err := strconv.ParseInt(string(r[1]), 16, 32)
+			if err != nil {
+				continue
+			}
+			hi, err := strconv.ParseInt(string(r[2]), 16, 32)
+			if err != nil || hi < lo || hi-lo > 0xFFFF {
+				continue
+			}
+			for c := lo; c <= hi; c++ {
+				out[int(c)] = true
+			}
+		}
+	}
+	return out
+}
+
+func zeros(hex []byte) bool {
+	for _, c := range hex {
+		if c != '0' {
+			return false
+		}
+	}
+	return true
+}
+
+var (
+	bfcharRe       = regexp.MustCompile(`(?s)beginbfchar(.*?)endbfchar`)
+	bfrangeRe      = regexp.MustCompile(`(?s)beginbfrange(.*?)endbfrange`)
+	bfrangeEntryRe = regexp.MustCompile(`(?s)<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<[0-9A-Fa-f]*>|\[.*?\])`)
+	hexRe          = regexp.MustCompile(`<([0-9A-Fa-f]+)>`)
+)
+
+// codeNameRe is one entry of a /Differences array: a number, which says what
+// code the names after it start at, or a name, which takes the next code.
+var codeNameRe = regexp.MustCompile(`(\d+)|/([A-Za-z][A-Za-z0-9]*)`)
 
 // object is one indirect object, as far as this package needs one: a number and
 // where its body starts and stops.
@@ -292,10 +636,12 @@ func objects(pdf []byte) []object {
 }
 
 var (
-	encodingRe = regexp.MustCompile(`/Type\s*/Encoding`)
-	baseFontRe = regexp.MustCompile(`/BaseFont\s*/([A-Za-z0-9+\-]+)`)
-	encRefRe   = regexp.MustCompile(`/Encoding\s+(\d+)\s+0\s+R`)
-	diffRe     = regexp.MustCompile(`/Differences\s*\[`)
+	encodingRe  = regexp.MustCompile(`/Type\s*/Encoding`)
+	fontRe      = regexp.MustCompile(`/Type\s*/Font[^a-zA-Z]`)
+	toUnicodeRe = regexp.MustCompile(`/ToUnicode\s+(\d+)\s+\d+\s+R`)
+	baseFontRe  = regexp.MustCompile(`/BaseFont\s*/([A-Za-z0-9+\-]+)`)
+	encRefRe    = regexp.MustCompile(`/Encoding\s+(\d+)\s+0\s+R`)
+	diffRe      = regexp.MustCompile(`/Differences\s*\[`)
 )
 
 // baseFonts maps an encoding object to the font that uses it, since the same
@@ -303,25 +649,27 @@ var (
 // draw over a letter in the extension font and a glyph of its own in the AMS
 // fonts. An encoding two fonts of different designs share is left out, so that
 // it is skipped rather than read as one of them.
-func baseFonts(pdf []byte) map[int]string {
+func baseFonts(srcs []*source) map[int]string {
 	out := map[int]string{}
-	for _, o := range objects(pdf) {
-		dict := o.dict(pdf)
-		bf := baseFontRe.FindStringSubmatch(dict)
-		ref := encRefRe.FindStringSubmatch(dict)
-		if bf == nil || ref == nil {
-			continue
+	for _, src := range srcs {
+		for _, o := range src.objs {
+			dict := o.dict(src.buf)
+			bf := baseFontRe.FindStringSubmatch(dict)
+			ref := encRefRe.FindStringSubmatch(dict)
+			if bf == nil || ref == nil {
+				continue
+			}
+			num, err := strconv.Atoi(ref[1])
+			if err != nil {
+				continue
+			}
+			name := base(bf[1])
+			if old, ok := out[num]; ok && old != name {
+				out[num] = ""
+				continue
+			}
+			out[num] = name
 		}
-		num, err := strconv.Atoi(ref[1])
-		if err != nil {
-			continue
-		}
-		name := base(bf[1])
-		if old, ok := out[num]; ok && old != name {
-			out[num] = ""
-			continue
-		}
-		out[num] = name
 	}
 	return out
 }
@@ -367,7 +715,7 @@ func Prepare(root, id, path, sum string) (string, Result, error) {
 	if err != nil {
 		return "", res, err
 	}
-	if res.Total() == 0 {
+	if res.Total() == 0 && res.Unicode == 0 {
 		return path, res, nil
 	}
 	prepared := PreparedPath(root, id, sum)
@@ -405,6 +753,10 @@ func PreparedPath(root, id, sum string) string {
 // and long enough that two sets of tables do not share one.
 func tableSum() string {
 	var b strings.Builder
+	// The rewrite itself is versioned along with the tables, since a prepared
+	// copy is only as good as what made it and a change in what this package
+	// does to a file has to invalidate the copies as surely as a new name does.
+	b.WriteString("v3 tounicode;")
 	for _, t := range []map[string]string{cmexNames, mathNames} {
 		keys := make([]string, 0, len(t))
 		for k := range t {
