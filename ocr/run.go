@@ -234,7 +234,12 @@ type Report struct {
 	// never reached a host. They are not rejections and are reported apart from
 	// them, since a run that released fifty pages did nothing wrong to any of
 	// them and a run that rejected fifty has fifty bad readings to explain.
-	Released  int                 `json:"released,omitempty"`
+	Released int `json:"released,omitempty"`
+	// Faces is every letter that changed typeface against the native reading a
+	// repaired page replaced. It is a list to read and not a count to watch: the
+	// model is wrong about a face more often than the extractor is and neither
+	// is always wrong, so the run reports and does not correct. See faces.go.
+	Faces     []FaceChange        `json:"faces,omitempty"`
 	PerHost   map[string]int      `json:"per_host,omitempty"`
 	HostTimes map[string]Duration `json:"host_times,omitempty"`
 }
@@ -279,8 +284,28 @@ func (r Report) Summary() string {
 	for _, rule := range sortedRules(r.Rules) {
 		fmt.Fprintf(&out, "  %-10s %4d\n", rule, r.Rules[rule])
 	}
+	if len(r.Faces) > 0 {
+		pages := map[int]bool{}
+		for _, change := range r.Faces {
+			pages[change.Page] = true
+		}
+		fmt.Fprintf(&out, "  %d letters on %d pages are in a different face than the reading they replaced, see the report\n",
+			len(r.Faces), len(pages))
+		for i, change := range r.Faces {
+			if i == FacesShown {
+				fmt.Fprintf(&out, "    and %d more\n", len(r.Faces)-FacesShown)
+				break
+			}
+			fmt.Fprintf(&out, "    %s\n", change)
+		}
+	}
 	return out.String()
 }
+
+// FacesShown is how many typeface changes the printed summary lists before it
+// says how many are left. The rest are in the report, which is where a list
+// meant to be read through belongs.
+const FacesShown = 10
 
 func sortedRules(counts map[Rule]int) []Rule {
 	out := make([]Rule, 0, len(counts))
@@ -370,6 +395,7 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				report.Rejected += outcome.rejected
 				report.Dead += outcome.dead
 				report.Failures = append(report.Failures, outcome.failures...)
+				report.Faces = append(report.Faces, outcome.faces...)
 				for rule, count := range outcome.rules {
 					report.Rules[rule] += count
 				}
@@ -511,6 +537,9 @@ type outcome struct {
 	repaired int
 	rules    map[Rule]int
 	failures []Failure
+	// faces is every letter that changed typeface against the reading this run
+	// replaced. See faces.go.
+	faces []FaceChange
 }
 
 // one runs a single batch and files everything it produced.
@@ -670,10 +699,12 @@ func (r *Runner) file(ctx context.Context, host Host, dest string, value task, o
 		out.repaired++
 		value.repaired = Reasons(problems)
 	}
-	if err := r.write(value, text); err != nil {
+	changes, err := r.write(value, text)
+	if err != nil {
 		r.reject(value, out, nil, "could not write the page: "+err.Error())
 		return
 	}
+	out.faces = append(out.faces, changes...)
 	if _, err := r.Queue.Finish(value.job, true, ""); err != nil {
 		r.logf("page %d: could not mark the job done: %v", value.page, err)
 	}
@@ -742,7 +773,7 @@ func (r *Runner) reject(value task, out *outcome, rules []Rule, reason string) {
 }
 
 // write puts an accepted page in the corpus.
-func (r *Runner) write(value task, text string) error {
+func (r *Runner) write(value task, text string) (changes []FaceChange, err error) {
 	head, body := SplitHead(text)
 	meta := corpus.PageFrontMatter{
 		Book: r.Book, PDFPage: value.page, Method: corpus.MethodOCR, Model: r.Model,
@@ -760,11 +791,19 @@ func (r *Runner) write(value task, text string) error {
 		meta.Flags = append(meta.Flags, "repaired in its own thread: "+value.repaired)
 	}
 	path := corpus.PagePath(r.Root, r.Book, value.page)
-	carry(&meta, path)
+	replaced, native := carry(&meta, path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+		return nil, err
 	}
-	return corpus.PageFile{Meta: meta, Body: body}.Write(path)
+	if err := (corpus.PageFile{Meta: meta, Body: body}).Write(path); err != nil {
+		return nil, err
+	}
+	// Only against a native reading. A scanned volume has no text layer to be
+	// the better witness, so there is nothing to compare and nothing to say.
+	if native {
+		changes = faceChanges(value.page, replaced, body)
+	}
+	return changes, nil
 }
 
 // carry takes from the page being replaced the two things a picture cannot say.
@@ -793,10 +832,10 @@ func (r *Runner) write(value task, text string) error {
 // reading is better evidence than the new one, because it is evidence at all.
 //
 // Nothing else is taken.
-func carry(meta *corpus.PageFrontMatter, path string) {
+func carry(meta *corpus.PageFrontMatter, path string) (replaced string, native bool) {
 	old, err := corpus.ReadFile[corpus.PageFrontMatter](path)
 	if err != nil {
-		return
+		return "", false
 	}
 	if meta.PageLabel == "" {
 		meta.PageLabel = old.Meta.PageLabel
@@ -805,6 +844,7 @@ func carry(meta *corpus.PageFrontMatter, path string) {
 		meta.RunningHead, meta.Locator = old.Meta.RunningHead, old.Meta.Locator
 	}
 	meta.Continues = old.Meta.Continues
+	return old.Body, old.Meta.Method == corpus.MethodNative
 }
 
 // Head is a transcribed running head taken apart.
