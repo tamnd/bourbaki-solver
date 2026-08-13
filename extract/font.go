@@ -372,9 +372,32 @@ var cmsy = map[rune]string{
 	'}':  `\}`,
 	'0':  `'`,
 	'6':  `\not`,
+	'7':  `\mapstochar `,
 	'h':  `\langle `,
 	'i':  `\rangle `,
+	'k':  `\|`,
 	'\\': `\backslash `,
+}
+
+// cmmi is the same thing for the mathematics italic font. Its letters and most
+// of its Greek carry names the Adobe glyph list knows, so they arrive as the
+// letters they are, but the six variant Greek at 0x22 to 0x27 are named the way
+// TeX names them and nothing outside TeX has heard of varrho or varpi. Poppler
+// falls back on the code and the row comes out as punctuation.
+//
+// Two of them do real damage. Théorie spectrale writes the spectral radius as
+// ϱ(x) and 131 of those arrived as "%", which is where a LaTeX line stops being
+// read. Topologie algébrique writes the Poincaré groupoid as ϖ(B) and 374 of
+// those arrived as "$", which closes the mathematics it is inside of and opens
+// the prose after it: page 13 carried "groupoïde de Poincaré $$(B)$" and read
+// as display mathematics containing the letter B.
+var cmmi = map[rune]string{
+	'"':  `\varepsilon `,
+	'#':  `\vartheta `,
+	'$':  `\varpi `,
+	'%':  `\varrho `,
+	'&':  `\varsigma `,
+	'\'': `\varphi `,
 }
 
 // unicodeMath maps the characters the mathematics fonts do come out as to

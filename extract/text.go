@@ -411,6 +411,11 @@ func runText(r Run) string {
 		return wrapLetters(s, `\mathsf`)
 	case "LMMathSymbols", "CMSY", "CMBSY":
 		return symbols(s)
+	case "LMMathItalic", "CMMI", "CMMIB":
+		if r.Bold {
+			return `\boldsymbol{` + runes(s, cmmi) + `}`
+		}
+		return runes(s, cmmi)
 	}
 	if r.Class == ClassStrong {
 		return bold(s)
