@@ -2,7 +2,7 @@ package extract
 
 import "testing"
 
-// Page 100 of Théorie spectrale chapitres 1 et 2, the line that defines the
+// Page 100 of Théories spectrales chapitres 1 et 2, the line that defines the
 // spectral radius as a limit of norms. Two glyphs on it carry names TeX made up
 // and the Adobe glyph list has never heard of: varrho at 0x25 of the
 // mathematics italic, which poppler prints as a per cent sign, and bardbl at
