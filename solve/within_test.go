@@ -165,3 +165,57 @@ func tail(s string) string {
 	}
 	return s
 }
+
+// A solution cites the way the book prints it, and the trimming has to hear
+// that. Exercise 6 of § 1 is why: it proves d) out of Definition 1 and
+// Definition 2, names neither by label nor by tag, and both were dropped.
+func TestTheTrimmingHearsTheBooksOwnWayOfCiting(t *testing.T) {
+	s := span{label: "alg-viii-s1-def-1", tag: "0001", name: "Definition 1"}
+	for _, cited := range []string{
+		"By Definition 2 of § 1 and Definition 1(ii), the sequence is stationary.",
+		"the tag is alg-viii-s1-def-1",
+		"cited as 0001 on the line",
+	} {
+		if !named(s, cited) {
+			t.Errorf("%q did not count as naming Definition 1", cited)
+		}
+	}
+	for _, quiet := range []string{
+		"By Definition 12 of § 1 the module is Artinian.",
+		"By Proposition 1 of § 1 the module is Artinian.",
+		"nothing points at it at all",
+	} {
+		if named(s, quiet) {
+			t.Errorf("%q was read as naming Definition 1", quiet)
+		}
+	}
+	// A statement whose heading the corpus prints without a name is matched on
+	// the label and the tag as before, and never on the empty string.
+	if named(span{label: "alg-viii-s1-n1", tag: "0002"}, "anything at all") {
+		t.Error("a statement with no printed name matched everything")
+	}
+}
+
+// And the whole of it, on a § that will not fit: the definition the solution
+// argues from stays and the one it never mentions goes.
+func TestTheStatementTheSolutionArguesFromIsTheOneKept(t *testing.T) {
+	c := &Context{Label: "alg-viii-s1-ex-6", Lang: "en", Cites: map[string]Reach{},
+		Pieces: []Piece{
+			{Kind: TheExercise, Label: "alg-viii-s1-ex-6", Text: "Let A be a ring and e an idempotent."},
+			{Kind: TheSection, Label: "alg-viii-s1", Text: "## § 1. ARTINIAN MODULES\n\n" +
+				"#### Definition 1 {#alg-viii-s1-def-1 .statement tag=0001}\n\n" +
+				strings.Repeat("Every decreasing sequence of submodules is stationary. ", 40) + "\n\n" +
+				"#### Example 3 {#alg-viii-s1-n2-exa-3 .statement tag=000G}\n\n" +
+				strings.Repeat("A principal ideal domain is Noetherian. ", 40) + "\n"}}}
+	whole := c.Render()
+	got := c.RenderWithin(len(whole)-1200, "The sequence is stationary by Definition 1(ii).")
+	if strings.Contains(got, "is not printed here") == false {
+		t.Fatalf("nothing was dropped from a context over the limit:\n%s", got)
+	}
+	if !strings.Contains(got, "Every decreasing sequence of submodules is stationary") {
+		t.Error("the definition the solution argues from was dropped")
+	}
+	if strings.Contains(got, "A principal ideal domain is Noetherian") {
+		t.Error("the statement nothing points at was kept instead")
+	}
+}

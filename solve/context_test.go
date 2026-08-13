@@ -328,3 +328,61 @@ func boolToInt(b bool) int {
 	}
 	return 0
 }
+
+// A printing with an error in it keeps the error and carries the correction
+// beside it. The words a reader holds in their hands are not edited, and the
+// model is not asked to solve an exercise that cannot be solved.
+func TestAnExerciseCarriesTheCorrectionsToItsPrinting(t *testing.T) {
+	root := fixture(t)
+	if err := os.WriteFile(filepath.Join(root,
+		"content/en/alg/VIII/exercises/s1/01.md"), []byte(`---
+book: alg
+chapter: VIII
+section: 1
+exercise: 1
+label: alg-viii-s1-ex-1
+tag: "0003"
+lang: en
+errata:
+    - says: finite-dimensional over K'
+      read: infinite-dimensional over K'
+      why: the French of 1981 says de dimension infinie, and the deduction the
+        exercise asks for holds only in the infinite case.
+---
+
+The first exercise asks for a field finite-dimensional over K'.
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Read(root, "en")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := build(t, c, "alg-viii-s1-ex-1", Options{}).Pieces[0].Text
+	if !strings.Contains(text, "The first exercise asks for a field finite-dimensional") {
+		t.Error("the printed words were edited rather than kept")
+	}
+	for _, want := range []string{"has an error in it", `read "infinite-dimensional over K'"`,
+		"de dimension infinie"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the correction does not say %q:\n%s", want, text)
+		}
+	}
+	// And an exercise printed correctly gains nothing.
+	if plain := build(t, c, "alg-viii-s1-ex-2", Options{}).Pieces[0].Text; strings.Contains(
+		plain, "has an error in it") {
+		t.Errorf("an exercise with no erratum on it was told there was one: %s", plain)
+	}
+	// The correction travels with the exercise when a later one is being
+	// solved, because exercise 4 b) of § 1 is answered out of exercise 3 a).
+	sib := build(t, c, "alg-viii-s1-ex-3", Options{})
+	var carried bool
+	for _, p := range sib.Pieces {
+		if p.Kind == Sibling && p.Label == "alg-viii-s1-ex-1" {
+			carried = strings.Contains(p.Text, "has an error in it")
+		}
+	}
+	if !carried {
+		t.Error("the correction was left behind when the exercise went in as a sibling")
+	}
+}

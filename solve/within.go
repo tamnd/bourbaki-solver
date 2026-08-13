@@ -175,8 +175,11 @@ func (c *Context) less(gone, cut map[int]bool, section int, cuts []span) string 
 // span is one statement of a § and where it sits in the file.
 type span struct {
 	label, tag string
-	from       int
-	text       string
+	// name is how the book itself prints the statement, "Definition 1" or
+	// "Proposition 3", off the heading and before the brace.
+	name string
+	from int
+	text string
 }
 
 func statements(body string) []span {
@@ -187,24 +190,57 @@ func statements(body string) []span {
 		if i+1 < len(at) {
 			end = at[i+1][0]
 		}
-		s := span{label: body[m[2]:m[3]], from: m[0], text: body[m[0]:end]}
-		if m[4] >= 0 {
-			s.tag = body[m[4]:m[5]]
+		s := span{label: body[m[4]:m[5]], from: m[0], text: body[m[0]:end],
+			name: strings.TrimSpace(body[m[2]:m[3]])}
+		if m[6] >= 0 {
+			s.tag = body[m[6]:m[7]]
 		}
 		out = append(out, s)
 	}
 	return out
 }
 
-// named says whether the work in front of the judge names this statement, by its
-// permanent label or by its tag. Both are read because a solution is asked to
-// cite by tag and a reference written by a model that has read the headings
-// tends to cite by whatever the heading printed.
+// named says whether the work in front of the judge names this statement: by its
+// permanent label, by its tag, or the way the book itself prints it.
+//
+// The third of those was missing and it cost exercise 6 of § 1 a part. The
+// solution proves d) out of Definition 1 and Definition 2, cites them as
+// "Definition 2 of § 1" and "Definition 1(ii)", which is exactly what the
+// candidate prompt asks for, and names neither the label nor the tag anywhere,
+// because a solution is mathematics and a tag is bookkeeping. So both
+// definitions ranked as things nothing pointed at, both were the first out when
+// the question would not fit, and the truth judge failed part d) for relying on
+// "numbered definitions not included in the supplied section". It was right to.
+// Nothing had shown them to it.
+//
+// The match is on the printed name and is deliberately loose. "Proposition 3 of
+// § 4" holds on to this §'s Proposition 3 as well, and a § that prints Example 5
+// twice holds on to both. Keeping a statement the work merely mentions costs
+// some room; dropping one it turns on costs the judgement.
 func named(s span, cited string) bool {
 	if s.label != "" && strings.Contains(cited, s.label) {
 		return true
 	}
-	return s.tag != "" && strings.Contains(cited, s.tag)
+	if s.tag != "" && strings.Contains(cited, s.tag) {
+		return true
+	}
+	return s.name != "" && mentions(cited, s.name)
+}
+
+// mentions is Contains that does not let Proposition 1 be found inside
+// Proposition 12. Bourbaki numbers from one and reaches two figures in a long §,
+// so the digit after matters.
+func mentions(text, name string) bool {
+	for at := 0; ; {
+		i := strings.Index(text[at:], name)
+		if i < 0 {
+			return false
+		}
+		at += i + len(name)
+		if at == len(text) || text[at] < '0' || text[at] > '9' {
+			return true
+		}
+	}
 }
 
 // rebuild writes the § back with the dropped statements replaced by their names.
