@@ -32,11 +32,21 @@
 //
 // What it is not is a replacement for extraction, and the first seven pages
 // audited say so plainly. The model fixed every loose accent on them, twenty
-// seven of them, and it also read the interior of V as its closure seven times
-// on one page, wrote the polar of a cone as its interior on another, and gave
-// the spectral radius as varrho on one run of a page and as rho on the next.
-// Ours are narrow and mechanical and its are broad and not repeatable, so what
-// this produces is a list of places to look rather than a page to ship. It is
+// seven of them, and it fixed an inverse image the text layer had turned inside
+// out and three not-elements that had lost the bar off the relation. It also
+// read the interior of V as its closure seven times on one page, wrote the
+// polar of a cone as its interior on another, put every plain capital in bold,
+// and dropped the script l fifteen times. The prompt was rewritten twice
+// against those pages and closed all of them, which is the encouraging half.
+// The other half is that closing them is not the same as being able to trust
+// the next page: the same picture of page 114 gave the spectral radius as
+// varrho twenty times on one run and as rho twenty-four times on the next with
+// nothing in the prompt to explain it, and the last ring on page 111 came back
+// as a bar under the prompt that had just been taught the difference, so a
+// compact convex neighbourhood of zero is mapped into its own closure and the
+// lemma says nothing. Ours are narrow and mechanical and its are broad and not
+// repeatable, so what this produces is a list of places to look rather than a
+// page to ship. It is
 // also for the pages worth minutes: the ones carrying a glyph the extractor has
 // just been taught to read, and the ones a rule flagged.
 //
