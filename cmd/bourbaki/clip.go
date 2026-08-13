@@ -52,6 +52,8 @@ flags for read:
 flags for audit:
   -book ID       book id
   -o PATH        where to write the Markdown report, default reports/clip-<book>.md
+  -fresh         judge against what the extractor reads today rather than what
+                 it read when the clips were cut
   -v             print every disagreement rather than the first few
 
 The extractor reads a born-digital volume out of its text layer, which is exact
@@ -374,6 +376,7 @@ func clipAudit(args []string) error {
 	book := fs.String("book", "", "book id")
 	out := fs.String("o", "", "where to write the Markdown report")
 	verbose := fs.Bool("v", false, "print every disagreement")
+	fresh := fs.Bool("fresh", false, "judge against what the extractor reads today rather than what it read when the clips were cut")
 	fs.Usage = func() { fmt.Fprint(os.Stderr, clipUsage) }
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -389,6 +392,9 @@ func clipAudit(args []string) error {
 	index, err := clip.ReadIndex(clip.IndexPath(root, entry.ID))
 	if err != nil {
 		return fmt.Errorf("%s has no clips: %w", entry.ID, err)
+	}
+	if *fresh {
+		index = index.Refresh(pageBody(root, entry.ID))
 	}
 	report, err := clip.Compare(index, clip.AnswersDir(root, entry.ID))
 	if err != nil {

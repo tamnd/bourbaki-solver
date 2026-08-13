@@ -146,3 +146,36 @@ func BoxOf(line extract.Line) Box {
 	}
 	return box
 }
+
+// Refresh takes an index and replaces the reading it pinned with what the
+// extractor says today, for the whole pages in it.
+//
+// The pinning is deliberate and stays: a comparison is of two readings and the
+// one the pictures were actually argued against is the one that was current
+// when they were cut. But a cut is worth reading twice, once when the answers
+// arrive and again after the extractor has been fixed, and the second reading
+// is the one that says whether the disagreement still stands. Eight pages of
+// Lie 7 to 9 were cut before the spacing accents landed and six of them
+// disagreed; five of the six disagreed about "Poincar e-Birkhoff-Witt" and
+// "Obˇsˇc", which no longer exist, and the audit had no way to say so.
+//
+// A page the reader has nothing for keeps what it had, because an empty body
+// is a page that has not been extracted rather than a page that now reads
+// nothing, and a line keeps what it had because a line number is an index into
+// a layout and the layout moves.
+func (i Index) Refresh(native func(page int) (body, head string)) Index {
+	out := i
+	out.Targets = make([]Target, len(i.Targets))
+	copy(out.Targets, i.Targets)
+	for at, target := range out.Targets {
+		if !target.Whole() {
+			continue
+		}
+		body, head := native(target.Page)
+		if strings.TrimSpace(body) == "" {
+			continue
+		}
+		out.Targets[at].Native, out.Targets[at].Head = body, head
+	}
+	return out
+}
