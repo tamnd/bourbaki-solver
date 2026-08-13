@@ -48,6 +48,10 @@ type setup struct {
 	// It is how the flagged pages of a born-digital volume are read without the
 	// other four hundred and forty nine going anywhere near a model.
 	only map[int]bool
+	// ask is the prompt the pages of this run are read with, which is not the
+	// same question for a photograph of a scan and for a flagged page of a
+	// volume that already has a reading. See prompt.OCRNative.
+	ask string
 }
 
 // ocrSetup finds the book, its render manifest and the queue.
@@ -75,8 +79,10 @@ func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
 		return out, fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract, or -flagged for the pages it could not read",
 			entry.ID, entry.Nature, entry.Extraction)
 	}
+	out.ask = prompt.OCR()
 	var only map[int]bool
 	if flagged {
+		out.ask = prompt.OCRNative()
 		pages, err := flaggedPages(root, entry.ID)
 		if err != nil {
 			return out, err
@@ -98,7 +104,12 @@ func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
 	if mapErr != nil {
 		fmt.Fprintf(os.Stderr, "no page map for %s, so the running head and page label rules are skipped: %v\n", entry.ID, mapErr)
 	}
-	return setup{root: root, entry: entry, pmap: pmap, manifest: manifest, queue: q, only: only}, nil
+	// out and not a fresh literal. It was written as one and the prompt field
+	// added later was set on out and dropped on the way back, so every page
+	// went to the fleet with an empty prompt until a run said "no prompt".
+	out.root, out.entry, out.pmap = root, entry, pmap
+	out.manifest, out.queue, out.only = manifest, q, only
+	return out, nil
 }
 
 func (s setup) expect(page int) ocr.Expect {
@@ -179,7 +190,7 @@ func ocrFill(args []string) error {
 	if err != nil {
 		return err
 	}
-	runner := &ocr.Runner{Book: state.entry.ID, Root: state.root, Queue: state.queue, Prompt: prompt.OCR()}
+	runner := &ocr.Runner{Book: state.entry.ID, Root: state.root, Queue: state.queue, Prompt: state.ask}
 	sources := state.sources(*first, *last)
 	added, err := runner.Fill(sources)
 	if err != nil {
@@ -255,7 +266,7 @@ func ocrRun(args []string) error {
 
 	runner := &ocr.Runner{
 		Book: state.entry.ID, Root: state.root, Queue: state.queue,
-		Prompt: prompt.OCR(), Model: route.DefaultModel,
+		Prompt: state.ask, Model: route.DefaultModel,
 		Hosts: hosts, Shell: fleet.SSH{Timeout: 2 * time.Minute}, Copy: ocr.Rsync{Timeout: 30 * time.Minute},
 		Batch: *batch, Limit: *limit, Keep: *keep,
 		Expect: state.expect, RetryDPI: render.RetryDPI,
