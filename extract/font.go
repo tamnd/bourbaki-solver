@@ -325,7 +325,43 @@ func Accent(f pdfsrc.FontSpec, text string) (string, bool) {
 		latex, acc, ok := CMEX(r)
 		return latex, ok && acc
 	}
+	if family(f) == "MSBM" {
+		latex, ok := msbm[r]
+		return latex, ok
+	}
 	return "", false
+}
+
+// msbm is the four wide accents of the AMS symbol font read by their codes,
+// for the printing that names no glyph at all.
+//
+// The English chapter VIII draws its "omit this factor" hat out of MSBM10
+// rather than out of the extension font, 24 of them, 22 in the appendix on
+// determinants over a noncommutative field where the whole argument turns on
+// p(v_1), ..., widehat{p(v_i)}, ..., p(v_n). The French names those glyphs and
+// pdfglyph rewrites the names to the combining accents; the English names
+// nothing, so poppler falls back on the code and the accent arrives as an
+// opening bracket. Page 466 shipped "p[(v_i)" nine times and the sentence read
+// as an unbalanced bracket rather than as a hat.
+//
+// Which code is which accent is what the embedded font says. The subset the
+// English volume carries is a CFF with a built in encoding of six codes, 0x3F
+// emptyset, 0x5B hatwide, 0x5C hatwider, 0x5D tildewide, 0x5E tildewider and
+// 0x60 space, and the counts agree: 20 at 0x5B and 2 at 0x5C against the
+// French's 22 hats, 1 at 0x5D and 1 at 0x5E against its 2 tildes. There is no
+// widest of either in this printing, so there is no row to write down here.
+//
+// Reading the glyph is not the same as knowing what it covers. A wide accent is
+// drawn over a whole subexpression and place puts it over the token it covers
+// most, so the hat of G/H comes out over the G, and the dozen or so of these in
+// the corpus read as an accent on part of what they were set over. That is a
+// question about where an accent goes and not about what it is, and it is the
+// same question the French printings already ask.
+var msbm = map[rune]string{
+	'[':  `\widehat`,
+	'\\': `\widehat`,
+	']':  `\widetilde`,
+	'^':  `\widetilde`,
 }
 
 // Extension reports whether a font is the mathematics extension font, which
