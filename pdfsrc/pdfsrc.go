@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"path/filepath"
@@ -511,6 +512,39 @@ func (s *Source) Render(ctx context.Context, first, last, dpi int, gray bool, pr
 	args = append(args, "-f", strconv.Itoa(first), "-l", strconv.Itoa(last))
 	// Four digits covers 734 pages with room to spare and sorts lexically.
 	args = append(args, "-progress", s.Path, prefix)
+	_, err := s.Run.Run(ctx, "pdftoppm", args...)
+	return err
+}
+
+// Crop rasterises one rectangle of one page and writes it as <prefix>-N.png.
+//
+// The rectangle is in pixels of the page as it would be rendered at this dpi,
+// measured from the top left corner, which is the frame pdftoppm's own crop
+// flags are in and the frame pdftohtml reports its boxes in once they are
+// scaled. Poppler rasterises the slice rather than the page, so a line of type
+// costs a line of type: cutting one line out of Théories spectrales at 600 dpi
+// is a 30 KB image where the page it came from is a megabyte and a half.
+//
+// A cut that runs off the page is not an error here and is not one for poppler
+// either, which clips it, and clipping is the right answer: a running head sits
+// a few units above the text block and the padding around a line of it has
+// nowhere to come from.
+func (s *Source) Crop(ctx context.Context, page, dpi int, gray bool, box image.Rectangle, prefix string) error {
+	if box.Dx() <= 0 || box.Dy() <= 0 {
+		return fmt.Errorf("crop page %d: the box is %d by %d", page, box.Dx(), box.Dy())
+	}
+	if err := os.MkdirAll(filepath.Dir(prefix), 0o755); err != nil {
+		return err
+	}
+	args := []string{"-png", "-r", strconv.Itoa(dpi)}
+	if gray {
+		args = append(args, "-gray")
+	}
+	args = append(args,
+		"-f", strconv.Itoa(page), "-l", strconv.Itoa(page),
+		"-x", strconv.Itoa(box.Min.X), "-y", strconv.Itoa(box.Min.Y),
+		"-W", strconv.Itoa(box.Dx()), "-H", strconv.Itoa(box.Dy()),
+		s.Path, prefix)
 	_, err := s.Run.Run(ctx, "pdftoppm", args...)
 	return err
 }

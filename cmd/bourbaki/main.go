@@ -24,6 +24,7 @@ commands:
   toc              read each volume's table of contents into manifests/toc.yaml
   render           rasterise a scanned volume to the page images OCR reads
   extract          read the pages of a volume into Markdown
+  clip             cut a page out of a volume as a picture and have a model read it
   share            read public ChatGPT share links into imports/
   assemble         put the pages back into the sections the book is written in
   fix              the repairs that need no PDF and no model
@@ -70,6 +71,8 @@ func main() {
 		err = runRender(args[1:])
 	case "extract":
 		err = runExtract(args[1:])
+	case "clip":
+		err = runClip(args[1:])
 	case "share":
 		err = runShare(args[1:])
 	case "assemble":
