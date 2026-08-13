@@ -375,7 +375,15 @@ func (b Batch) Run(ctx context.Context) (result Result, err error) {
 	out := path(root, "out", b.ID)
 	logFile := path(root, "logs", b.ID+".log")
 
-	if err := prepare(ctx, b.Shell, b.Host, in, out, path(root, "logs")); err != nil {
+	// The answers directory is emptied rather than reused, which is what the
+	// empty first argument to prepare is for. What the poll counts is the files
+	// in it, so an answer an earlier run left behind is counted as this run's:
+	// a batch of four was declared finished before the tool had started and
+	// four answers to a question nobody had asked came home. That has happened
+	// twice, once when two runs of one volume shared a name and once when the
+	// same seven pictures went out under a rewritten prompt and came back in
+	// twelve seconds a page wearing the old prompt's answers.
+	if err := prepare(ctx, b.Shell, b.Host, out, in, out, path(root, "logs")); err != nil {
 		return result, err
 	}
 	// Removing the images is not conditional on the rest working.
@@ -436,14 +444,22 @@ func (b Batch) Run(ctx context.Context) (result Result, err error) {
 // second, and the tool reads a pile of instant failures as an IP level block
 // and bans the accounts behind them for eight hours, so asking first costs one
 // ssh and saves a pool.
-func prepare(ctx context.Context, shell Shell, host Host, dirs ...string) error {
+//
+// clear is a directory to empty first, or the empty string for none. It is
+// removed before the others are made, so naming it in dirs as well is how a
+// caller says empty this one and then make it again.
+func prepare(ctx context.Context, shell Shell, host Host, clear string, dirs ...string) error {
 	quoted := make([]string, 0, len(dirs))
 	for _, dir := range dirs {
 		quoted = append(quoted, quote(dir))
 	}
+	command := "mkdir -p " + strings.Join(quoted, " ")
+	if clear != "" {
+		command = "rm -rf " + quote(clear) + " && " + command
+	}
 	ready, err := shell.Run(ctx, host.Name, fmt.Sprintf(
-		"mkdir -p %s && (pgrep -f %s >/dev/null && echo display-up || echo display-down)",
-		strings.Join(quoted, " "), quote("Xvfb "+host.display()+" ")))
+		"%s && (pgrep -f %s >/dev/null && echo display-up || echo display-down)",
+		command, quote("Xvfb "+host.display()+" ")))
 	if err != nil {
 		return fmt.Errorf("prepare %s: %w", host.Name, err)
 	}
