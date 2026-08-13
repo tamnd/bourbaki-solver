@@ -325,8 +325,12 @@ func Accent(f pdfsrc.FontSpec, text string) (string, bool) {
 		latex, acc, ok := CMEX(r)
 		return latex, ok && acc
 	}
-	if family(f) == "MSBM" {
+	switch family(f) {
+	case "MSBM":
 		latex, ok := msbm[r]
+		return latex, ok
+	case "TeX-mathx":
+		latex, ok := mathx[r]
 		return latex, ok
 	}
 	return "", false
@@ -434,7 +438,66 @@ var cmmi = map[rune]string{
 	'%':  `\varrho `,
 	'&':  `\varsigma `,
 	'\'': `\varphi `,
+	// The three musical signs live in the mathematics italic too, at 0x5B to
+	// 0x5D, and only the natural has a name anything outside TeX knows. The
+	// dual of a function on a quotient group is written f flat all through the
+	// chapter on Fourier transforms, so Théories spectrales shipped "f^[" 15
+	// times and Topologie algébrique shipped "]" for the sharp 16 times. A
+	// natural gets rewritten by pdfglyph where that can reach the encoding, so
+	// none of those is in the corpus today, but the code is still the code.
+	'[':  `\flat `,
+	'\\': `\natural `,
+	']':  `\sharp `,
 }
+
+// msam is the same thing again for the first of the two AMS symbol fonts. Its
+// relations carry names the Adobe list mostly knows, so the row that reads as
+// punctuation is a short one: the curly precedes and follows at 0x34 and 0x3C
+// and the complement at 0x7B. Topologie algébrique shipped 15 runs of "4" for
+// a preceding relation and 39 of "{", which opens a group TeX then looks for
+// the end of.
+//
+// The slanted inequalities are here for the same reason the whole cmsy row is:
+// the code is the encoding, and a 6 out of this font is a 6 the same way a 4
+// is a preceding relation. They resolve by name in every volume read so far.
+var msam = map[rune]string{
+	'4': `\preccurlyeq `,
+	'6': `\leqslant `,
+	'<': `\succcurlyeq `,
+	'>': `\geqslant `,
+	'{': `\complement `,
+}
+
+// mathx is the extra mathematics font the French volumes set their check
+// accents out of, and it is the one font here that hides in plain sight: its
+// subset names the narrow check "q" and the wide one "asciitilde", which are
+// names the glyph list knows perfectly well, so poppler resolves them and hands
+// back a letter and a tilde with nothing wrong anywhere to report.
+//
+// What that costs is a sentence. Théories spectrales writes the reflected
+// function as f check and the reflected measure as nu check, and page 420
+// shipped "la fonction $fq$ sur G par $fq(g) =f(g^{-1})$", which reads as f
+// times q and is a product of two functions that is not there. 34 of them
+// across chapters 3 to 5 and 11 across chapters 1 and 2.
+var mathx = map[rune]string{
+	'q': `\check`,
+	'~': `\widecheck`,
+}
+
+// prose is the two capitals Bourbaki sets in the text face that arrive as the
+// sign that looks like the letter rather than as the letter.
+//
+// Where a Greek capital appears in a sentence rather than in a formula the
+// series sets it in the roman, and the roman it is set in hands back U+2206, the
+// increment sign, for a capital delta. The page reads the same and searching for
+// it does not: a reader who greps the corpus for Δ misses the 337 of these,
+// every mention of the group of inner automorphisms in the Algebra exercises
+// among them, and a translator who matches the term against a glossary misses
+// them the same way. The ohm sign is the same substitution for a capital omega,
+// 108 across the six volumes and 103 of them in the text face, most in the
+// passages of Algebra chapter VIII about an algebraically closed extension and
+// the rest spread over the three French ones.
+var prose = strings.NewReplacer("∆", "Δ", "Ω", "Ω")
 
 // unicodeMath maps the characters the mathematics fonts do come out as to
 // LaTeX. Leaving them as Unicode would read well and would not compile, and the
@@ -471,6 +534,24 @@ var unicodeMath = map[rune]string{
 	// coming out as nothing at all.
 	'ℓ': `\ell`, 'ℜ': `\Re`, 'ℑ': `\Im`,
 	'⊠': `\boxtimes`, '♮': `\natural`, '∁': `\complement`,
+
+	// The rest arrive from fonts that do name their glyphs, so nothing was ever
+	// lost and nothing was ever flagged: the character came through and stopped
+	// there, and a page of Théories spectrales that reads ϱ(u) for the spectral
+	// radius reads it as the letter and not as the mathematics. There are 4000
+	// or so of them across the six volumes and the norm alone is 2172.
+	//
+	// The variant Greek is the same row cmmi reads by code, arriving by name
+	// this time. The norm is U+2225, which is the parallel sign rather than the
+	// U+2016 the table already had. The solidus is combining, so it lands on the
+	// character before it and the run reads \varphi_a(b)\not= 0.
+	'∥': `\|`, '̸': `\not`,
+	'ϱ': `\varrho`, 'ϖ': `\varpi`, 'ϑ': `\vartheta`, 'ς': `\varsigma`, 'ϵ': `\epsilon`,
+	'♯': `\sharp`, '♭': `\flat`, '≼': `\preccurlyeq`, '≽': `\succcurlyeq`,
+	// The last two are the codepoints a typesetter reaches for that are not the
+	// letter they look like: U+2206 is the increment sign and U+2126 is the ohm,
+	// and the series means the capital Greek by both of them.
+	'∆': `\Delta`, 'Ω': `\Omega`,
 }
 
 // PUA is the Private Use Area block poppler puts the pieces of a delimiter that
