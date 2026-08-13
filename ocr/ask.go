@@ -134,7 +134,7 @@ func (a Ask) Do(ctx context.Context) (Answer, error) {
 	metaFile := path(dir, "meta.json")
 	logFile := path(dir, "log")
 
-	if err := prepare(ctx, a.Shell, a.Host, dir); err != nil {
+	if err := prepare(ctx, a.Shell, a.Host, "", dir); err != nil {
 		return Answer{}, err
 	}
 	defer func() {

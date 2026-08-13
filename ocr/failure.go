@@ -19,6 +19,11 @@ import "strings"
 // solution that mentions one.
 var failures = []string{
 	"Something went wrong",
+	// The same failure worded for a person rather than for a log. It came back
+	// as the whole of a page of Théories spectrales, from a profile that had
+	// just been rotated onto, and the audit read it as a page the model and the
+	// extractor disagreed about.
+	"Hmm...something seems to have gone wrong",
 	"You've reached our limit",
 	"You have reached our limit",
 	"Too many concurrent requests",

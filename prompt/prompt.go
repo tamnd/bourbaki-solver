@@ -22,6 +22,48 @@ var ocrBourbaki string
 // OCR is the prompt for reading a page of a scanned volume.
 func OCR() string { return strings.TrimSpace(ocrBourbaki) + "\n" }
 
+//go:embed clip_line.md
+var clipLine string
+
+// ClipLine is the prompt for reading a picture of one line of a page.
+//
+// It is not the OCR prompt with the page rules taken out. A page and a line are
+// different questions: a page carries a running head, headings and paragraph
+// breaks and the answer is a structure, and a line carries none of that and the
+// answer is one line. Half of what this asks for is about the cut itself, which
+// leaves the neighbouring lines sliced off at the edges, and none of that
+// applies to a page.
+func ClipLine() string { return strings.TrimSpace(clipLine) + "\n" }
+
+// ClipLineSHA256 is the hash of the clip prompt as embedded.
+func ClipLineSHA256() string { return SHA256(ClipLine()) }
+
+//go:embed clip_page.md
+var clipPage string
+
+// ClipPage is the prompt for reading a picture of a whole page.
+//
+// It is a paragraph where the OCR prompt is two pages, and the short one is the
+// one to reach for first. The long prompt was written a rule at a time against
+// the scanned volumes, where the model was being asked to rebuild a structure
+// out of a photograph; a born-digital page cut to its own text block is a clean
+// picture of clean type, and most of those rules are answering questions it
+// does not raise.
+//
+// Every rule that is here was put here by a page that came back wrong. The
+// first version said to write the rings in bold and the model bolded every
+// capital on the page, so that a Banach space E, a cone C and a subspace F all
+// came back as number sets; hence the sentence saying what bold is not for. It
+// wrote \mathcal where Bourbaki sets script, \rho for the curly rho, \xi for
+// the script l, a dot for the ring on an interior, and parentheses for the
+// angle brackets of a duality pairing. And on three pages in a row it read
+// \not= as =, which is the one defect that costs a reader the meaning of the
+// sentence rather than the look of it, so it is named.
+func ClipPage() string { return strings.TrimSpace(clipPage) + "\n" }
+
+// ClipPageSHA256 is the hash of the page prompt as embedded.
+func ClipPageSHA256() string { return SHA256(ClipPage()) }
+
 //go:embed glossary.md
 var glossaryPrompt string
 

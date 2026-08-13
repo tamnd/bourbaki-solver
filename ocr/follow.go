@@ -161,7 +161,7 @@ func (f Follow) Ask(ctx context.Context) (string, error) {
 	answerFile := path(dir, "answer.md")
 	logFile := path(dir, "log")
 
-	if err := prepare(ctx, f.Shell, f.Host, dir); err != nil {
+	if err := prepare(ctx, f.Shell, f.Host, "", dir); err != nil {
 		return "", err
 	}
 	// The prompt carries the whole transcription of a page of Bourbaki, so it

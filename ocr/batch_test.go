@@ -47,7 +47,9 @@ func (b *box) Run(ctx context.Context, host, command string) (string, error) {
 	}
 	b.commands = append(b.commands, command)
 	switch {
-	case strings.HasPrefix(command, "mkdir -p"):
+	// Contains and not HasPrefix: the preflight empties the answers directory
+	// in the same command it makes the directories with, so it opens with rm.
+	case strings.Contains(command, "mkdir -p"):
 		if b.noDisplay {
 			return "display-down\n", nil
 		}
@@ -591,6 +593,38 @@ func TestASummaryReadsAsOneLine(t *testing.T) {
 	// A batch that read nothing must not divide by zero working out its rate.
 	if (Result{}).PerPage() != 0 {
 		t.Error("an empty result reported a rate")
+	}
+}
+
+// TestTheAnswersDirectoryIsEmptiedBeforeTheToolStarts. The poll counts the
+// files in it and calls the batch finished when the count reaches the number of
+// images, so an answer an earlier run left there is counted as this one's. It
+// has cost two runs. The first time, two runs of one volume were given the same
+// batch name and a batch of four was declared complete before the tool had
+// started; the second time the same seven pictures went out under a rewritten
+// prompt, which gave them the same name again, and came back in twelve seconds
+// a page still wearing the answers of the prompt before it.
+func TestTheAnswersDirectoryIsEmptiedBeforeTheToolStarts(t *testing.T) {
+	machine := &box{pid: 11, perPoll: 4}
+	work := batch(t, machine, 2)
+	if _, err := work.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	out := "bourbaki-ocr/out/" + work.ID
+	var cleared, started bool
+	for _, command := range machine.commands {
+		switch {
+		case strings.Contains(command, "rm -rf '"+out+"'"):
+			cleared = true
+		case strings.Contains(command, "ocr-batch"):
+			if !cleared {
+				t.Fatalf("the tool started with the answers of an earlier run still in %s", out)
+			}
+			started = true
+		}
+	}
+	if !cleared || !started {
+		t.Errorf("cleared %v started %v, want the answers emptied and then the tool run", cleared, started)
 	}
 }
 

@@ -16,6 +16,9 @@ func TestTheServicesOwnErrorPageIsNotAnAnswer(t *testing.T) {
 		"\n" + wentWrong + "\n",
 		"You've reached our limit of messages per hour. Please try again later.",
 		"Too many concurrent requests. Please try again.",
+		// Verbatim, and the whole of the file: it came back as page 113 of
+		// Théories spectrales and the audit compared it with the page.
+		"Hmm...something seems to have gone wrong.",
 	} {
 		if ProviderFailure(text) == "" {
 			t.Errorf("read as an answer: %q", text)
