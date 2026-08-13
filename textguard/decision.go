@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -66,6 +67,11 @@ var (
 	// package has any business fixing.
 	checkedLine = regexp.MustCompile(`(?mi)^` + mark + `CHECKED` + mark + `:[ \t]*\S.*$`)
 	triedLine   = regexp.MustCompile(`(?mi)^` + mark + `TRIED` + mark + `:[ \t]*\S.*$`)
+	// The truth judge's line, one to an obligation. The number is what the
+	// reference numbered it and is read so that ten lines about obligation 1 are
+	// not ten obligations checked.
+	obligationLine = regexp.MustCompile(`(?mi)^` + mark + `OBLIGATION` + mark +
+		`([0-9]{1,3})` + mark + `:` + mark + `(NOT[ \t]+DISCHARGED|DISCHARGED)` + mark + `[,.]?[ \t]*(.*)$`)
 	// A part decision names the part first, because that is how the exercise
 	// names it and because a judge that has to write the letter out is a judge
 	// that has to look at which part it is deciding.
@@ -105,11 +111,28 @@ type Decision struct {
 	// that shows no work cannot be told from a judge that did none.
 	Checked, Tried int
 
+	// Obligations is what the truth judge said about each obligation the
+	// reference set, by the number the reference gave it.
+	//
+	// The same thing again from the other judge. Exercise 4 of § 1 was filed
+	// verified on a truth judge that answered its ten obligations with a hundred
+	// and thirty two bytes: nine decision lines, no analysis, and a score of
+	// seven out of seven. Counted here, a judge that discharged nothing can be
+	// told from a judge that said nothing.
+	Obligations []ObligationDecision
+
 	// Parts is the per-part verdict of a multi-part exercise, keyed by the
 	// letter the book prints. It is empty for an exercise that has no parts,
 	// which is not the same as an exercise whose parts went unjudged: the
 	// prompts ask for a part line only where the exercise has parts.
 	Parts []PartDecision
+}
+
+// ObligationDecision is one obligation of the reference, answered.
+type ObligationDecision struct {
+	N          int
+	Discharged bool
+	Why        string
 }
 
 // PartDecision is one lettered part of an exercise, judged alone.
@@ -143,8 +166,30 @@ func Read(review string) Decision {
 	d.HasQuality = hasComplete && hasSelfContained && hasHumanReadable && hasVerifiable
 	d.Checked = len(checkedLine.FindAllString(review, -1))
 	d.Tried = len(triedLine.FindAllString(review, -1))
+	d.Obligations = obligations(review)
 	d.Parts = parts(review)
 	return d
+}
+
+// obligations reads the per-obligation decisions, last one to a number winning
+// and the numbers in order, the same way parts are read.
+func obligations(review string) []ObligationDecision {
+	byN := map[int]ObligationDecision{}
+	for _, m := range obligationLine.FindAllStringSubmatch(review, -1) {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			continue
+		}
+		byN[n] = ObligationDecision{N: n,
+			Discharged: !strings.EqualFold(strings.Fields(m[2])[0], "NOT"),
+			Why:        strings.TrimSpace(strings.Trim(strings.TrimSpace(m[3]), "*_`-"))}
+	}
+	out := make([]ObligationDecision, 0, len(byN))
+	for _, o := range byN {
+		out = append(out, o)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].N < out[j].N })
+	return out
 }
 
 // parts reads the per-part decisions, last one to a part winning.

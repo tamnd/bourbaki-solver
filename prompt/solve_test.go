@@ -256,3 +256,18 @@ func TestTheAuditIsShownTheWorkLinesTheParserCounts(t *testing.T) {
 			d.Checked, d.Tried)
 	}
 }
+
+// The truth judge is asked for one line to an obligation, for the same reason
+// the audit judge is asked for its steps: exercise 4 of § 1 answered ten
+// obligations with a hundred and thirty two bytes and scored it 7 of 7. The
+// lines the prompt shows have to be lines the parser reads.
+func TestTheTruthJudgeIsShownTheObligationLinesTheParserReads(t *testing.T) {
+	d := textguard.Read(built()["truth"])
+	if len(d.Obligations) != 2 {
+		t.Fatalf("the truth prompt's own examples read as %d obligation lines, want 2",
+			len(d.Obligations))
+	}
+	if !d.Obligations[0].Discharged || d.Obligations[1].Discharged {
+		t.Errorf("the examples read as %+v, and the prompt shows one of each", d.Obligations)
+	}
+}
