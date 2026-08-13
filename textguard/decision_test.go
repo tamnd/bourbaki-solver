@@ -286,3 +286,47 @@ func TestTheWorkIsNotPartOfTheVerdict(t *testing.T) {
 		t.Errorf("an audit with no CHECKED line did not pass Audited: %s", why)
 	}
 }
+
+// One line to an obligation, the number read off the line so that ten lines
+// about obligation 1 are not ten obligations checked.
+func TestTheObligationsAreReadByNumber(t *testing.T) {
+	d := Read(`OBLIGATION 1: DISCHARGED, the second paragraph proves it
+**OBLIGATION 2:** NOT DISCHARGED, the base case is missing
+OBLIGATION 10: DISCHARGED, by the citation of Proposition 3
+OBLIGATION 1: NOT DISCHARGED, on second reading it asserts it
+
+VERDICT: FAIL
+`)
+	if len(d.Obligations) != 3 {
+		t.Fatalf("read %d obligations, want 3: %+v", len(d.Obligations), d.Obligations)
+	}
+	// In order, and the last word on obligation 1 is the one that counts.
+	if d.Obligations[0].N != 1 || d.Obligations[0].Discharged {
+		t.Errorf("the first is %+v, and it was answered twice with the second a no",
+			d.Obligations[0])
+	}
+	if d.Obligations[1].N != 2 || d.Obligations[1].Discharged {
+		t.Errorf("the second is %+v", d.Obligations[1])
+	}
+	if d.Obligations[2].N != 10 || !d.Obligations[2].Discharged {
+		t.Errorf("the third is %+v", d.Obligations[2])
+	}
+	if d.Obligations[1].Why != "the base case is missing" {
+		t.Errorf("the reason read as %q", d.Obligations[1].Why)
+	}
+}
+
+// The hundred and thirty two bytes exercise 4 of § 1 was filed verified on.
+func TestAVerdictWithNoObligationsInIt(t *testing.T) {
+	d := Read("PART a: PASS\nPART b: PASS\nVERDICT: PASS\nTRUTH: TRUE\nCOMPLETE: YES\n" +
+		"SELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: YES\nSCORE: 7/7\n")
+	if len(d.Obligations) != 0 {
+		t.Errorf("an answer with no obligation line in it read %+v", d.Obligations)
+	}
+	// Nothing about the verdict changes. It parses as the pass it says it is,
+	// and what refuses it is the guard that knows how many obligations there
+	// were.
+	if ok, why := d.Passed(); !ok {
+		t.Errorf("it did not read as the pass it says it is: %s", why)
+	}
+}

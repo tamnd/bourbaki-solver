@@ -14,10 +14,17 @@ step and thinking it is probably fine is failing the step, not passing it.
 
 Do this in order.
 
-First, the obligations. Take them one at a time and say where in the solution
-each one is discharged, or say that it is not. Quote the sentence that does it.
-An obligation discharged by a sentence that asserts it rather than proving it is
-not discharged.
+First, the obligations. Take them one at a time, in the order the reference
+numbers them, and write one line for each, of this shape.
+
+OBLIGATION 3: DISCHARGED, the sentence of the solution that does it
+OBLIGATION 4: NOT DISCHARGED, what is missing
+
+Every obligation gets a line, whether or not you have anything to say about it.
+An obligation with no line against it is an obligation nobody checked, and a
+solution nobody checked cannot be passed for reading well. An obligation
+discharged by a sentence that asserts it rather than proving it is NOT
+DISCHARGED.
 
 Second, the failure modes. Take each one and say whether the solution falls into
 it. This is the part where a wrong solution is usually caught, so do it even

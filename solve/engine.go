@@ -3,6 +3,7 @@ package solve
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -479,7 +480,7 @@ func (s *state) judgeOnce(ctx context.Context, solution string) (Judgement, erro
 	truth, err := s.ask(ctx, s.stage("truth"),
 		s.within(s.stage("truth"), s.reference+"\n"+solution, func(context string) string {
 			return prompt.SolveTruth(context, s.reference, solution, s.parts)
-		}), wantTruth)
+		}), wantTruthOf(s.reference))
 	if err != nil {
 		return Judgement{}, err
 	}
@@ -738,21 +739,77 @@ func wantSelection(text string) error {
 	return nil
 }
 
-func wantTruth(text string) error {
-	d := textguard.Read(text)
-	switch {
-	case d.Verdict == "UNKNOWN":
-		return fmt.Errorf("there is no VERDICT line in it")
-	case !d.HasTruth:
-		return fmt.Errorf("there is no TRUTH line in it")
-	case !d.HasQuality:
-		return fmt.Errorf("it does not answer all four of COMPLETE, SELF_CONTAINED, " +
-			"HUMAN_READABLE and VERIFIABLE")
-	case d.Score < 0:
-		return fmt.Errorf("there is no SCORE line in it")
+// wantTruthOf is the truth judge's answer read against the reference it was
+// given, which is what says how many obligations it had to answer.
+//
+// Exercise 4 of § 1 is why the count is here. Its reference set ten obligations,
+// six for part a and four for part b, and the truth judge answered them with a
+// hundred and thirty two bytes: two part lines, a verdict, a truth line, the
+// four publication lines and SCORE: 7/7. Nothing else. The audit judge sent back
+// fifty one bytes on the same solution, and the exercise was filed verified on
+// two rubber stamps. Nothing in the pipeline could tell that from a judgement,
+// because everything the prompt asked for on a line was there and everything it
+// asked for in prose was optional.
+//
+// So the obligations are asked for on lines and counted. Fewer lines than the
+// reference set obligations is an unread answer and another call, the same as a
+// missing SCORE line. It is not a fail: what is being checked is that the judge
+// answered the question, not what it answered.
+func wantTruthOf(reference string) func(string) error {
+	need := countObligations(reference)
+	return func(text string) error {
+		d := textguard.Read(text)
+		switch {
+		case d.Verdict == "UNKNOWN":
+			return fmt.Errorf("there is no VERDICT line in it")
+		case !d.HasTruth:
+			return fmt.Errorf("there is no TRUTH line in it")
+		case !d.HasQuality:
+			return fmt.Errorf("it does not answer all four of COMPLETE, SELF_CONTAINED, " +
+				"HUMAN_READABLE and VERIFIABLE")
+		case d.Score < 0:
+			return fmt.Errorf("there is no SCORE line in it")
+		case len(d.Obligations) < need:
+			return fmt.Errorf("the reference sets %d obligation%s and there %s %d "+
+				"OBLIGATION line%s in it, one to an obligation is what makes the "+
+				"verdict a reading rather than an impression", need, plural(need),
+				were(len(d.Obligations)), len(d.Obligations), plural(len(d.Obligations)))
+		}
+		return nil
 	}
-	return nil
 }
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// countObligations is how many the reference set.
+//
+// The reference writes them as a numbered list under its own heading and the
+// count is the count of items, not the highest number: a reference that numbers
+// 1, 2, 2, 3 has set four obligations and the judge owes a line to each of them.
+func countObligations(reference string) int {
+	n := 0
+	for _, line := range strings.Split(obligations(reference), "\n") {
+		if obligationItem.MatchString(line) {
+			n++
+		}
+	}
+	if n == 0 {
+		// A reference whose obligations this cannot read still gets one line out
+		// of the judge, because the answer that has to be refused here is the one
+		// with no reading in it at all.
+		return 1
+	}
+	return n
+}
+
+// obligationItem is one item of the reference's numbered list, with the part
+// marker Bourbaki's lettered exercises put in front of it.
+var obligationItem = regexp.MustCompile(`^\s*(?:[0-9]{1,3}[.)]|[-*])\s+\S`)
 
 // wantAudit reads the audit judge's answer, and it asks for the work as well as
 // for the verdict.

@@ -113,9 +113,14 @@ const (
 		"## Falsification Checks\n\nTake $M = \\mathbf{Z}$.\n\n" +
 		"## Reference Conclusion\n\nThe module is Noetherian.\n\n" +
 		"NATURE: PROOF\nREACH: IN_CORPUS\n"
-	pass = "Every obligation is discharged.\n\nVERDICT: PASS\nTRUTH: TRUE\n" +
+	// The reference above sets one obligation, so a truth judge's answer owes it
+	// one line. Both of these carry it, because an answer that does not is
+	// refused before its verdict is read.
+	pass = "OBLIGATION 1: DISCHARGED, the second paragraph proves it\n\n" +
+		"Every obligation is discharged.\n\nVERDICT: PASS\nTRUTH: TRUE\n" +
 		"COMPLETE: YES\nSELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: YES\nSCORE: 7/7\n"
-	fail = "The third step is asserted.\n\nVERDICT: FAIL\nTRUTH: FALSE\n" +
+	fail = "OBLIGATION 1: NOT DISCHARGED, the third step is asserted\n\n" +
+		"The third step is asserted.\n\nVERDICT: FAIL\nTRUTH: FALSE\n" +
 		"COMPLETE: NO\nSELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: NO\nSCORE: 3/7\n"
 	work = "CHECKED: the chain stops, it would fail if the chain were infinite, ruled out\n" +
 		"TRIED: $M = \\mathbf{Z}$, the argument still runs\n\n"
@@ -702,5 +707,67 @@ func TestAnAuditThatSubstitutedNothingIsAskedAgain(t *testing.T) {
 	}
 	if err := wantAudit(auditPass); err != nil {
 		t.Errorf("an audit with its work in it was refused: %v", err)
+	}
+}
+
+// The truth judge's answer is asked for again when it reaches a verdict without
+// having written down a reading of the obligations. This is the hundred and
+// thirty two bytes exercise 4 of § 1 was filed verified on, against a reference
+// that set ten.
+func TestATruthJudgementWithNoObligationsInItIsAskedAgain(t *testing.T) {
+	bare := "PART a: PASS\nPART b: PASS\nVERDICT: PASS\nTRUTH: TRUE\nCOMPLETE: YES\n" +
+		"SELF_CONTAINED: YES\nHUMAN_READABLE: YES\nVERIFIABLE: YES\nSCORE: 7/7\n"
+	a := &asker{by: map[string][]string{
+		"reference": {reference}, "candidate-direct": {answer},
+		"candidate-contrapositive": {answer}, "candidate-elementary": {answer},
+		"select": {"SELECTED: 1"}, "truth": {bare, pass},
+		"audit": {auditPass},
+	}}
+	got, err := engine(a).Solve(context.Background(), exercise("Prove it."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Solution.Meta.Status != corpus.StatusVerified {
+		t.Errorf("status %q, and the second judgement was a pass", got.Solution.Meta.Status)
+	}
+	var second string
+	for _, q := range a.asked {
+		if strings.HasSuffix(q.id, "truth-2") {
+			second = q.question
+		}
+	}
+	if second == "" {
+		t.Fatal("the truth judge was not asked a second time")
+	}
+	if !strings.Contains(first(second, 300), "OBLIGATION line") {
+		t.Errorf("the complaint is not what was wrong: %s", first(second, 200))
+	}
+}
+
+// How many lines the judge owes is read off the reference it was given, so an
+// exercise whose reference sets ten is not answered with one.
+func TestTheObligationsAreCountedOffTheReference(t *testing.T) {
+	ten := "## Obligations\n\n" +
+		"1. the ascending chain condition holds\n" +
+		"2. the module is finitely generated\n" +
+		"3. every quotient is Artinian\n\n" +
+		"For part b:\n\n" +
+		"4. the endomorphism is nilpotent\n" +
+		"5. the kernel filtration is finite\n\n" +
+		"## Failure Modes\n\n1. assuming the module is free\n"
+	if n := countObligations(ten); n != 5 {
+		t.Errorf("counted %d obligations, want 5", n)
+	}
+	// The failure modes are a numbered list too, and they are not obligations.
+	if err := wantTruthOf(ten)(pass); err == nil {
+		t.Error("one line answered a reference that set five obligations")
+	}
+	// One line is owed even when the reference's own list cannot be read,
+	// because the answer to refuse is the one with no reading in it at all.
+	if n := countObligations("nothing here looks like a list"); n != 1 {
+		t.Errorf("a reference with no readable obligations asks for %d lines", n)
+	}
+	if err := wantTruthOf(reference)(pass); err != nil {
+		t.Errorf("the one line the fixture owes was refused: %v", err)
 	}
 }
