@@ -793,7 +793,12 @@ const englishBodySize = 15
 // where the mathematics is written, and its bold marks come off afterwards.
 func headingText(l Line) string {
 	var b strings.Builder
-	for i, r := range l.Runs {
+	// A heading set all in bold is written out of the runs rather than
+	// rendered, so the accents have to be folded here too. Page 182 heads a
+	// subsection with the Poincaré-Birkhoff-Witt theorem and the layer hands
+	// the acute back at the end of one run with the E at the head of the next.
+	runs := composed(l.Runs)
+	for i, r := range runs {
 		if r.Class != ClassBold && r.Class != ClassStrong {
 			text := strings.Join(strings.Fields(strings.ReplaceAll(Render(l), "**", "")), " ")
 			// The star that marks a subsection optional is a mark of the book
@@ -804,7 +809,7 @@ func headingText(l Line) string {
 			}
 			return text
 		}
-		if i > 0 && r.Left-l.Runs[i-1].Right() >= 3 {
+		if i > 0 && r.Left-runs[i-1].Right() >= 3 {
 			b.WriteString(" ")
 		}
 		b.WriteString(r.Text)
