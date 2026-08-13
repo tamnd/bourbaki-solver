@@ -218,13 +218,36 @@ type exerciseFile struct {
 	body    string
 	section string // the § label, alg-viii-s1
 	number  int
+	errata  []corpus.Erratum
+}
+
+// withErrata is the exercise as it goes to a model: the printed words, and then
+// the corrections to them if the printing has any.
+//
+// The block goes on the exercise itself rather than beside it because the
+// exercise is the one piece the trimming of §3.1a can never drop, and a
+// correction that can be trimmed away from the text it corrects is worse than
+// no correction at all.
+func (e *exerciseFile) withErrata() string {
+	if len(e.errata) == 0 {
+		return e.body
+	}
+	var b strings.Builder
+	b.WriteString(e.body)
+	b.WriteString("\n\nThe printed text above has an error in it. The words are the " +
+		"printing's and are kept as they stand, and here is what each has to say " +
+		"for the exercise to hold. Solve the exercise as corrected.\n")
+	for _, x := range e.errata {
+		fmt.Fprintf(&b, "\nWhere it says %q, read %q. %s\n", x.Says, x.Read, x.Why)
+	}
+	return b.String()
 }
 
 // statementRE is the heading refs.Index reads too. The corpus writes a
 // statement as a heading carrying its permanent label and its tag, and a
 // reference resolves to the label, so this is what turns a resolved edge back
 // into the words of the thing it resolved to.
-var statementRE = regexp.MustCompile(`(?m)^#+ .*\{#([a-z0-9-]+) \.statement(?: tag=([0-9A-Z]{4}))?\}[ \t]*$`)
+var statementRE = regexp.MustCompile(`(?m)^#+ (.*?)[ \t]*\{#([a-z0-9-]+) \.statement(?: tag=([0-9A-Z]{4}))?\}[ \t]*$`)
 
 // Read loads one printing of the corpus for solving.
 func Read(root, lang string) (*Corpus, error) {
@@ -300,10 +323,10 @@ func (c *Corpus) cut(sf *sectionFile) {
 		if i+1 < len(at) {
 			end = at[i+1][0]
 		}
-		s := &statement{label: sf.body[m[2]:m[3]], file: sf,
+		s := &statement{label: sf.body[m[4]:m[5]], file: sf,
 			text: strings.TrimSpace(sf.body[m[0]:end])}
-		if m[4] >= 0 {
-			s.tag = sf.body[m[4]:m[5]]
+		if m[6] >= 0 {
+			s.tag = sf.body[m[6]:m[7]]
 		}
 		c.unit[s.label] = s
 	}
@@ -344,7 +367,8 @@ func (c *Corpus) readExercises() error {
 		}
 		ex := &exerciseFile{label: f.Meta.Label, tag: f.Meta.Tag,
 			path: filepath.ToSlash(rel), body: strings.TrimSpace(f.Body),
-			number: f.Meta.Exercise, section: sectionOf(f.Meta.Label)}
+			number: f.Meta.Exercise, section: sectionOf(f.Meta.Label),
+			errata: f.Meta.Errata}
 		c.exercises[ex.label] = ex
 		c.inSection[ex.section] = append(c.inSection[ex.section], ex)
 		return nil
@@ -386,7 +410,7 @@ func (c *Corpus) Build(label string, o Options) (*Context, error) {
 
 	out := &Context{Label: label, Tag: ex.tag, Lang: c.Lang, Options: o}
 	out.Pieces = append(out.Pieces, Piece{Kind: TheExercise, Label: ex.label,
-		Tag: ex.tag, File: ex.path, Text: ex.body})
+		Tag: ex.tag, File: ex.path, Text: ex.withErrata()})
 
 	// Every earlier exercise of the same §, in the order the book prints them.
 	// "With the notation of Exercise 18" is how Bourbaki writes an exercise
@@ -400,7 +424,7 @@ func (c *Corpus) Build(label string, o Options) (*Context, error) {
 			continue
 		}
 		out.Pieces = append(out.Pieces, Piece{Kind: Sibling, Label: sib.label,
-			Tag: sib.tag, File: sib.path, Text: sib.body})
+			Tag: sib.tag, File: sib.path, Text: sib.withErrata()})
 	}
 
 	out.Pieces = append(out.Pieces, Piece{Kind: TheSection, Label: sf.label,

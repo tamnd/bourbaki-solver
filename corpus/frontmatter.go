@@ -92,13 +92,42 @@ type ExerciseFrontMatter struct {
 	// Bourbaki marks the harder exercises with a pilcrow and sets some in
 	// small type as supplementary. There is no numeric difficulty rating to
 	// record, unlike TAOCP.
-	Starred       bool     `yaml:"starred"`
-	Supplementary bool     `yaml:"supplementary,omitempty"`
-	Refs          []string `yaml:"refs,omitempty"`
+	Starred       bool      `yaml:"starred"`
+	Supplementary bool      `yaml:"supplementary,omitempty"`
+	Refs          []string  `yaml:"refs,omitempty"`
+	Errata        []Erratum `yaml:"errata,omitempty"`
 
 	TranslatedFrom   string `yaml:"translated_from,omitempty"`
 	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
+}
+
+// Erratum is a place where the printed page is wrong and the corpus keeps the
+// printed words anyway.
+//
+// The corpus transcribes a printing. When the printing has an error in it the
+// transcription has the same error, and correcting the text in place would be a
+// silent edit of a source somebody may hold in their hands, which is the one
+// thing this corpus must not do. So the words stay and the correction goes here,
+// beside them, with what the page says, what it has to say for the statement to
+// hold, and the evidence.
+//
+// The first of these is exercise 3 a) of chapter VIII, § 1. The 2023 English
+// translation asks for a field K finite-dimensional over a subfield K'
+// isomorphic to it, and then asks the reader to deduce that a ring built out of
+// K is neither right Artinian nor right Noetherian. Its right ideals are the
+// K'-subspaces of K, so the deduction holds exactly when K is infinite over K',
+// and the French of 1981 says "de dimension infinie". The English is a slip in
+// translation, and it is not harmless: the solver read it, wrote a solution to
+// exercise 4 b) on top of it, and both judges passed it.
+type Erratum struct {
+	// Says is what the printed page has, quoted.
+	Says string `yaml:"says"`
+	// Read is what it has to be for the statement to hold.
+	Read string `yaml:"read"`
+	// Why is the evidence, in one sentence. A correction with no reason on it
+	// is an opinion about a book, and this corpus does not hold those.
+	Why string `yaml:"why"`
 }
 
 // SolutionFrontMatter is the head of content/solutions/<lang>/....
