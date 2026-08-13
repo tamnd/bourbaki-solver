@@ -335,3 +335,38 @@ func TestAClipThatWasNeverCutIsAnErrorAndNotASkip(t *testing.T) {
 		t.Error("Pending() = nil error, want a complaint about the clip that is not there")
 	}
 }
+
+func TestAFreshAuditJudgesAgainstTodaysReadingAndNotTheCutsOne(t *testing.T) {
+	index := Index{Book: "lie-vii-ix", Targets: []Target{
+		{Page: 7, Line: WholePage, Name: PageName(7), Native: "the Poincar e-Birkhoff-Witt theorem", Head: "LIE VII"},
+		{Page: 8, Line: 3, Name: Name(8, 3), Native: "the Poincar e-Birkhoff-Witt theorem"},
+		{Page: 9, Line: WholePage, Name: PageName(9), Native: "a page nothing has been extracted for"},
+	}}
+	fresh := index.Refresh(func(page int) (string, string) {
+		if page == 7 {
+			return "the Poincaré-Birkhoff-Witt theorem", "CH. VII"
+		}
+		return "", ""
+	})
+	if got := fresh.Targets[0].Native; got != "the Poincaré-Birkhoff-Witt theorem" {
+		t.Errorf("page 7 reads %q, want the accent folded", got)
+	}
+	if got := fresh.Targets[0].Head; got != "CH. VII" {
+		t.Errorf("page 7 furniture is %q, want the head that came with the body", got)
+	}
+	// A line keeps what it had. Its number is an index into a layout and a
+	// rebuild moves the layout, so a line refreshed by number is a comparison
+	// of a picture of one line against the text of another.
+	if got := fresh.Targets[1].Native; got != index.Targets[1].Native {
+		t.Errorf("line 3 reads %q, want the pinned reading", got)
+	}
+	// A page the reader has nothing for has not been extracted rather than
+	// newly reading nothing, and blanking it would turn every word of the
+	// model's answer into a word we do not have.
+	if got := fresh.Targets[2].Native; got != index.Targets[2].Native {
+		t.Errorf("page 9 reads %q, want the pinned reading", got)
+	}
+	if index.Targets[0].Native == fresh.Targets[0].Native {
+		t.Error("Refresh wrote through to the index it was given")
+	}
+}
