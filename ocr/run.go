@@ -760,10 +760,51 @@ func (r *Runner) write(value task, text string) error {
 		meta.Flags = append(meta.Flags, "repaired in its own thread: "+value.repaired)
 	}
 	path := corpus.PagePath(r.Root, r.Book, value.page)
+	carry(&meta, path)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
 	return corpus.PageFile{Meta: meta, Body: body}.Write(path)
+}
+
+// carry takes from the page being replaced the two things a picture cannot say.
+//
+// A page label is the folio as Bourbaki writes it, A IX.340, and most volumes
+// print it in the running head, so the reading has it and this does nothing.
+// Lie 7 to 9 prints the folio as a bare number and leaves the chapter to the
+// other side of the spread, so the label is worked out from the pagination in
+// the manifest, which is something the extractor knows and a model looking at
+// one page cannot. Both flagged pages of the pilot lost their label before
+// this, and a page label is what a citation resolves against.
+//
+// Whether a page carries on the paragraph before it is the other. It is read
+// off the indent of the first line, and by the time a page is a picture on a
+// rented box the page before it is not there to compare against. Assembly has
+// no other source for it.
+//
+// The running head is the third and it is a fallback rather than a carry. What
+// the model read is what the page says, and a head it read is the one to keep,
+// since the picture is the more direct evidence. But the head is set across the
+// width of the page, with the section at one margin and the folio at the other,
+// and on page 111 of Algebra VIII the model wrote those three parts as three
+// lines. The parser reads the first line, so the head came back empty and took
+// the locator with it. The prompt now says the head is one line; this is what
+// happens when it says it anyway. An empty head is the one case where the old
+// reading is better evidence than the new one, because it is evidence at all.
+//
+// Nothing else is taken.
+func carry(meta *corpus.PageFrontMatter, path string) {
+	old, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+	if err != nil {
+		return
+	}
+	if meta.PageLabel == "" {
+		meta.PageLabel = old.Meta.PageLabel
+	}
+	if meta.RunningHead == "" {
+		meta.RunningHead, meta.Locator = old.Meta.RunningHead, old.Meta.Locator
+	}
+	meta.Continues = old.Meta.Continues
 }
 
 // Head is a transcribed running head taken apart.

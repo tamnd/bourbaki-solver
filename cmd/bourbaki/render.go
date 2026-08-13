@@ -29,7 +29,9 @@ flags:
                  born-digital volume
   -batch N       pages per pdftoppm call, default 25
   -overwrite     re-render pages whose image is already on disk
-  -blanks        write a method: blank page file for every blank page (default true)
+  -blanks        write a method: blank page file for every blank page (default
+                 true, and never under -flagged, where the page already has a
+                 reading with its folio on it)
   -manifest      print the manifest that is already on disk and exit
   -json          print the manifest as JSON
 
@@ -113,7 +115,7 @@ func runRender(args []string) error {
 		Book: entry.ID, PDF: filepath.Join(root, entry.PDF), Corpus: root,
 		DPI: *dpi, SourceDPI: sourceDPI(entry), Gray: *gray,
 		First: *first, Last: *last, Only: only, Batch: *batch,
-		Overwrite: *overwrite, WriteBlanks: *blanks,
+		Overwrite: *overwrite, WriteBlanks: blankFiles(*blanks, *flagged),
 	}
 	if !*quiet {
 		// 734 pages at a third of a second is four minutes of silence
@@ -130,6 +132,22 @@ func runRender(args []string) error {
 	}
 	return printManifest(manifest, *asJSON)
 }
+
+// blankFiles says whether this render writes a page file for its blank pages.
+//
+// Writing one is for a volume that has no reading yet, where the file is how a
+// page stays out of the OCR queue. Under -flagged every page already has a
+// reading, out of the text layer, with the folio read off it and the flag that
+// put it on this list, and a blank page file carries neither. Eighteen pages
+// lost their page label to this before it was noticed: the extraction had
+// already called them blank and had a label, and the render overwrote the file
+// with a blank one that did not.
+//
+// The pages are still rendered and still go to the model. What the ink
+// threshold says about a page of a born-digital volume is worth having and is
+// not worth acting on: an empty page there is a page with no text layer, which
+// is what a full page diagram looks like from here.
+func blankFiles(blanks, flagged bool) bool { return blanks && !flagged }
 
 // flaggedPages is the work list the extraction left behind: every page it could
 // not read, in page order, empty ones included. An empty page in a born-digital

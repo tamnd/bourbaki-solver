@@ -57,3 +57,23 @@ func TestNoExtractionReportIsAnErrorAndNotAWholeVolume(t *testing.T) {
 		t.Errorf("pages = %v, want none", pages)
 	}
 }
+
+// A render of the pages a native extraction could not read writes no blank page
+// files, whatever -blanks says.
+//
+// The scanned volumes want them: a blank page file is how a page with nothing
+// on it stays out of the OCR queue, and there is nothing else on disk saying
+// the page exists. A flagged page of a born-digital volume already has a file
+// with the folio on it and the flag that put it on the list, and eighteen pages
+// were overwritten with a blank one that had neither before this said no.
+func TestAFlaggedRenderWritesNoBlankPageFiles(t *testing.T) {
+	if blankFiles(true, true) {
+		t.Error("a flagged render would overwrite a page that already has a reading")
+	}
+	if !blankFiles(true, false) {
+		t.Error("a scanned volume stopped getting its blank page files")
+	}
+	if blankFiles(false, false) {
+		t.Error("-blanks=false was not obeyed")
+	}
+}

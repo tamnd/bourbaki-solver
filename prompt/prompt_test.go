@@ -127,3 +127,35 @@ func TestOCRPromptEndsWithOneNewline(t *testing.T) {
 		t.Fatalf("the prompt should end with exactly one newline, got %q", text[len(text)-3:])
 	}
 }
+
+// The born-digital prompt carries the rules the pilot on Lie 7 to 9 bought.
+// Each one is a defect that shipped before it was written down.
+func TestTheBornDigitalPromptSaysWhatThePilotFound(t *testing.T) {
+	text := OCRNative()
+	for _, want := range []string{
+		`\mathfrak{g}`,   // the Lie algebra came back as a plain g
+		`\mathscr`,       // the script C came back as \mathcal
+		`never \mathcal`, // and it has to be told that in those words
+		"### 4. CENTRAL FUNCTIONS ON G AND FUNCTIONS ON T", // a heading came back bold
+		"**PROPOSITION 3.** —",                             // and a statement head is bold
+		`\mathbf{Z}`,
+		"never \\mathbb",
+		`\lambda_{\mathfrak{g}}`, // it flattened the fraktur in a subscript
+		`\mathbf{SU}`,            // and wrote the classical groups upright
+		`Z(\lambda-\rho)`,        // and bolded a Verma module into the integers
+		"running head",
+		"never as two or three lines", // it wrote the head as three and lost it
+		"LaTeX array",                 // a diagram is an array and not three loose rows
+		`\tag{11}`,                    // a numbered display keeps its number
+		"⟪illegible⟫",                 // the honest failure
+		"no. ",
+		"translating nothing",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the born-digital prompt no longer says %q", want)
+		}
+	}
+	if OCRNativeSHA256() == OCRSHA256() {
+		t.Error("the two prompts hash the same, so a page cannot say which read it")
+	}
+}

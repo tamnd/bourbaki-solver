@@ -22,6 +22,47 @@ var ocrBourbaki string
 // OCR is the prompt for reading a page of a scanned volume.
 func OCR() string { return strings.TrimSpace(ocrBourbaki) + "\n" }
 
+//go:embed ocr_native.md
+var ocrNative string
+
+// OCRNative is the prompt for reading a flagged page of a born-digital volume.
+//
+// It is a second file and not a rule added to the one above, and the reason is
+// what a prompt change costs. The prompt hash goes in the front matter of every
+// page it produced, so editing the scanned prompt puts 1194 pages of Algebra I
+// to VII back in the queue, which is days of fleet time bought for a sentence
+// about a typeface those volumes rarely set.
+//
+// The question is different anyway. A scanned page is a photograph and the
+// model is rebuilding a structure out of it. A flagged page of a born-digital
+// volume is clean type and already has a reading out of the text layer; what is
+// wanted is the part of it the layer could not carry, which is a narrow list.
+//
+// The rules that are here and not there were put here by the pilot on Lie 7 to
+// 9. Two pages came back with the mathematics repaired and the faces flattened:
+// the Lie algebra \mathfrak{g} was written as g, so \lambda_{\mathfrak{g}} came
+// back as \lambda_g and said something else, and \mathscr{C} came back as
+// \mathcal{C}. The second page turned "### 4. CENTRAL FUNCTIONS ON G AND
+// FUNCTIONS ON T" into bold prose, which assembly does not see as a heading and
+// which would have dropped a subsection out of the chapter.
+//
+// The second pass over the same volume, eleven pages, found the faces again and
+// in both directions. The model wrote \lambda_g where the layer has
+// \lambda_{\mathfrak{g}}, so a fraktur letter survives on its own and not in a
+// subscript. It wrote \mathrm{SU}(2,\mathbf{C}) for a group the book sets in
+// bold. And it bolded twelve ordinary italic capitals on page 139, turning the
+// module Z(\lambda-\rho) into the ring of integers, which is the number set
+// rule reaching letters it was never about. All three are named in the prompt
+// now with the page that found them.
+//
+// What the text layer knows about a typeface it knows better than a picture
+// does, and the pages that come back from here are worth checking against the
+// reading they replaced rather than trusted. See bourbaki-solver#111.
+func OCRNative() string { return strings.TrimSpace(ocrNative) + "\n" }
+
+// OCRNativeSHA256 is the hash of the born-digital prompt as embedded.
+func OCRNativeSHA256() string { return SHA256(OCRNative()) }
+
 //go:embed clip_line.md
 var clipLine string
 
