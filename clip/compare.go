@@ -74,7 +74,7 @@ func Compare(index Index, answers string) (Report, error) {
 	}
 	for _, target := range index.Targets {
 		row := Row{Page: target.Page, Line: target.Line, Name: target.Name, Native: target.Native, At: -1}
-		text, err := readAnswer(filepath.Join(answers, answerName(target.Name)))
+		text, err := ReadAnswer(filepath.Join(answers, answerName(target.Name)))
 		switch {
 		case err != nil:
 			row.Verdict = Silent
@@ -247,7 +247,7 @@ func answerName(image string) string {
 	return strings.TrimSuffix(image, filepath.Ext(image)) + ".md"
 }
 
-// readAnswer is one clip's answer as the model wrote it.
+// ReadAnswer is one clip's answer as the model wrote it.
 //
 // The header ocr-batch puts above every answer comes off first. It is four
 // lines of machinery naming the source path on the rented box, the model slot
@@ -256,7 +256,7 @@ func answerName(image string) string {
 // the run as a disagreement in its first character. The page pipeline strips
 // the same block for the same reason and this borrows its rule rather than
 // writing a second one that could drift from it.
-func readAnswer(path string) (string, error) {
+func ReadAnswer(path string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return "", err

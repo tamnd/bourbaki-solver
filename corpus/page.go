@@ -94,6 +94,23 @@ type PageFrontMatter struct {
 	// the accents of § 21 and the summation sign of § 5, none of which can be
 	// recovered by a table.
 	Manual bool `yaml:"manual,omitempty"`
+
+	// Pictured says a display on this page came apart in the text layer and was
+	// put back from a reading of the page image, and that extract must not write
+	// over it either.
+	//
+	// It is separate from Manual and from Method because neither of them is
+	// true. Manual claims a person read the printed page, and the value of that
+	// claim is that it is rare and that somebody stands behind it; spending it
+	// on a repair a command made would leave nothing to say when a person does
+	// read a page. Method: ocr claims the whole page was read as a picture,
+	// which would be a lie about every line of prose on it, and it would put the
+	// page in the counts the OCR route is judged by.
+	//
+	// What is true is narrower than either: the letters and the faces are the
+	// text layer's, and one run of blocks in the middle is the model's. See
+	// clip.Fix for what a repair has to prove before it is written.
+	Pictured bool `yaml:"pictured,omitempty"`
 }
 
 // PageFile is one page of one volume.

@@ -28,6 +28,7 @@ commands:
   cut      cut what a query names out of the PDF as pictures
   read     send the pictures to the fleet and pull the readings back
   audit    compare what came back with what the extractor reads
+  repair   put back the displays that came apart, and nothing else
 
 flags for cut:
   -book ID       book id from manifests/books.yaml
@@ -56,6 +57,12 @@ flags for audit:
   -fresh         judge against what the extractor reads today rather than what
                  it read when the clips were cut
   -v             print every disagreement rather than the first few
+
+flags for repair:
+  -book ID       book id
+  -pages LIST    only these pdf pages, comma separated
+  -n             say what would change and write nothing
+  -v             print the replacement as well as what it replaced
 
 The extractor reads a born-digital volume out of its text layer, which is exact
 where the font says what it draws and guesswork where it does not. A picture
@@ -86,6 +93,8 @@ func runClip(args []string) error {
 		return clipRead(args[1:])
 	case "audit":
 		return clipAudit(args[1:])
+	case "repair":
+		return clipRepair(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, clipUsage)
 		return nil
