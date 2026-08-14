@@ -331,11 +331,11 @@ func laid(toks []token, i int) (script, under, after []token, at, end int) {
 	// a fact about the drawing rather than a threshold. See the head of the file
 	// for the shape it therefore leaves alone.
 	d := toks[i].depth
-	if d == 0 || toks[i].level != Sup {
+	if d == 0 {
 		return nil, nil, nil, 0, 0
 	}
 	at = i
-	for at < len(toks) && toks[at].depth == d && toks[at].level == Sup {
+	for at < len(toks) && toks[at].depth == d {
 		at++
 	}
 	if at >= len(toks) {
@@ -362,8 +362,21 @@ func laid(toks []token, i int) (script, under, after []token, at, end int) {
 	if b.sign {
 		return nil, nil, nil, 0, 0
 	}
+	// Which level the near half of the script was put at is not evidence, and
+	// where it was drawn is. The level of a token is read against the one before
+	// it, and the token before the near half of a script cut in two is not the
+	// symbol the script belongs to but whatever the page drew last. Page 77 sets
+	// the same inverse image twice on one line, once after a U that is itself an
+	// index and once straight after a psi, and the first minus came out a
+	// superscript and the second a subscript off boxes that measure the same to
+	// the unit. So a piece of the near half that is not at the level of the far
+	// half has to be drawn above the middle of the symbol, which is what being
+	// written over a thing means and what an index of the symbol is not.
 	for _, t := range toks[i:at] {
 		if !overlaid(t, b) {
+			return nil, nil, nil, 0, 0
+		}
+		if t.level != Sup && t.top+t.bottom >= b.top+b.bottom {
 			return nil, nil, nil, 0, 0
 		}
 	}

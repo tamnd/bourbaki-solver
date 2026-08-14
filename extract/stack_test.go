@@ -568,3 +568,52 @@ func TestAnInverseImageInsideASubscriptIsPutBackToo(t *testing.T) {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// The same line of page 77 sets the same inverse image again a few characters
+// along, this time straight after a psi rather than after an index. The two
+// minuses measure the same to the unit, 336 to 344 down the page against a
+// letter that runs 330 to 345, and the first came out a superscript and the
+// second a subscript, because the level of a token is read against the token
+// before it and a psi has a descender where an index has none. The near half of
+// a script cut in two stands before the symbol it belongs to, so what is before
+// it is never the thing it should be measured against.
+const nestedAfterADescenderPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="77" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="BMXWVH+LMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="QWXCLB+LMMathItalic10" color="#000000"/>
+<fontspec id="4" size="16" family="BRGRHX+LMMathSymbols10" color="#000000"/>
+<fontspec id="7" size="12" family="SQGJWG+LMMathItalic8" color="#000000"/>
+<fontspec id="8" size="12" family="BXXFTB+LMMathSymbols8" color="#000000"/>
+<fontspec id="9" size="12" family="GTNDLC+LMRoman8" color="#000000"/>
+<fontspec id="10" size="9" family="GMKRRQ+LMMathSymbols6" color="#000000"/>
+<fontspec id="11" size="9" family="NXVBWG+LMRoman6" color="#000000"/>
+<text top="326" left="338" width="6" height="21" font="2">(</text>
+<text top="330" left="344" width="11" height="15" font="3"><i>&#968;</i></text>
+<text top="336" left="355" width="9" height="8" font="10">&#8722;</text>
+<text top="343" left="358" width="7" height="11" font="7"><i>u</i></text>
+<text top="337" left="364" width="5" height="8" font="11">1</text>
+<text top="343" left="369" width="19" height="11" font="9">(V)</text>
+<text top="326" left="389" width="6" height="21" font="2">(</text>
+<text top="330" left="395" width="6" height="15" font="3"><i>t</i></text>
+<text top="329" left="405" width="8" height="15" font="4">&#8728;</text>
+<text top="330" left="417" width="9" height="15" font="3"><i>u</i></text>
+<text top="329" left="430" width="5" height="15" font="4">|</text>
+<text top="322" left="438" width="10" height="11" font="8">&#8722;</text>
+<text top="330" left="441" width="9" height="15" font="3"><i>u</i></text>
+<text top="323" left="448" width="6" height="11" font="9">1</text>
+<text top="326" left="454" width="38" height="21" font="2">(V)))</text>
+</page>
+</pdf2xml>
+`
+
+func TestTheNearHalfOfAScriptIsReadByWhereItIsDrawnAndNotByItsLevel(t *testing.T) {
+	lines := parse(t, nestedAfterADescenderPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `$(\psi_{\overset{-1}{u}(V)}(t∘u|\overset{-1}{u}(V)))$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
