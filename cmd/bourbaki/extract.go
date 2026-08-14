@@ -371,8 +371,9 @@ func extractPage(args []string) error {
 	page := fs.Int("p", 0, "pdf page")
 	raw := fs.Bool("lines", false, "print one line per line, with its geometry")
 	runs := fs.Bool("runs", false, "print one line per run, with its font, class and level")
+	rules := fs.Bool("rules", false, "print one line per drawn horizontal rule, with its geometry")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki extract page -book <id> -p <pdf page> [-lines] [-runs]\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki extract page -book <id> -p <pdf page> [-lines] [-runs] [-rules]\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -407,6 +408,18 @@ func extractPage(args []string) error {
 	}
 	if err := src.WithRules(context.Background(), lay); err != nil {
 		return err
+	}
+	// The rules are the part of a page that is drawn rather than set, so they
+	// are in none of the other views here and are the only evidence for a
+	// fraction, an overline or a set difference sign. Weight and length are
+	// what say which of those a line is, so both are printed in points beside
+	// the box.
+	if *rules {
+		for _, r := range lay.Pages[0].Rules {
+			fmt.Printf("[%4d %4d %3d] thickness %.3f length %6.2f size %5.1f\n",
+				r.Top, r.Left, r.Width, r.Thickness, r.Length, r.Size)
+		}
+		return nil
 	}
 	if *runs {
 		for i, l := range extract.Lines(lay, lay.Pages[0]) {
