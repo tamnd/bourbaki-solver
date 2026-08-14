@@ -77,6 +77,17 @@ const overhang = 2
 // So the walk to the left stops at the first token that is on the band, and
 // A_1\prod keeps its index while \prod_{x\in H\backslash G} gives up its limit.
 //
+// A token drawn across the sign is a limit whatever the band says, since a limit
+// is centred on its sign and nothing else on a line is written across one. That
+// is the reading for a sum set in the middle of a sentence, where the sign is
+// small and the limit under it stands no lower than an index does, and it is
+// what a band measured a unit or two wide of the type asks for as well: the
+// symbol font of Lie 7 to 9 reports every ∈ 19 units high in a line whose roman
+// is 13, so a line of that volume with an ∈ in it is 19 units tall and the
+// limit of a sum on it reads as touching the band. Page 179 gives "x
+// $\in_{\alpha}\sum_{\in B}\mathfrak{g}^{\alpha}$" three times over, with the
+// sign standing in the middle of the limit it takes.
+//
 // The walk also stops where the tokens stop touching, since a limit is one
 // thing and what stands beyond a break in it is something else the line was
 // carrying at that height, and where it reaches material that is centred on
@@ -101,9 +112,11 @@ func hoist(toks []token, top, bottom int) []token {
 			continue
 		}
 		j, left := i, s.left
+		edge := bound(out, i, s, signs)
 		for j > 0 {
 			t := out[j-1]
-			if t.depth == 0 || t.bottom > top && t.top < bottom {
+			if t.depth == 0 ||
+				t.bottom > top && t.top < bottom && !astride(t, s) && t.left+overhang < edge {
 				break
 			}
 			if t.right < left-hoistGap || !nearest(t, s, signs) {
@@ -126,6 +139,89 @@ func hoist(toks []token, top, bottom int) []token {
 		out[j] = s
 	}
 	return out
+}
+
+// astride reports whether a token is written across a sign rather than beside
+// it, which is where a limit is and where an index of the term before the sign
+// is not.
+func astride(t, s token) bool { return lap(t, s) > 0 }
+
+// lap is how much of a token is drawn over a sign.
+func lap(t, s token) int { return min(t.right, s.right) - max(t.left, s.left) }
+
+// bound is how far to the left of a sign its limit may reach, which is as far
+// as the limit reaches to the right of it.
+//
+// TeX centres a limit on its sign, so the half drawn to the left of the sign
+// and the half drawn to the right are of one width, and the right half is
+// handed back whole because nothing was written across it. It therefore
+// measures the left half, which was cut off from its sign and is what the walk
+// is looking for.
+//
+// This is what a limit wider than the sign it is written under asks for. The
+// walk stops at a token that reads as touching the band, and the tokens at the
+// far end of such a limit are neither on the band by any margin nor written
+// across the sign, so the band is all there is to go on and the band of this
+// printing is a unit or two wide of the type. Page 90 of Lie 7 to 9 sets a sum
+// over -q <= j <= p in the middle of a sentence: the minus is drawn from a
+// symbol font at size 10 and reported 14 units high, which laps 2 units into a
+// line whose roman ends at 429, and it was left standing in front of the sign
+// as an index of nothing.
+//
+// The measurement is close rather than exact. That sign spans 281 to 297 and
+// its limit ends at 312, so the limit begins at 266, and 266 is where the minus
+// begins. The same sentence is set again nine lines down and comes out a unit
+// wide, since a glyph box is not the ink inside it and the minus and the p at
+// the two ends of the limit are boxed differently, so the edge is allowed the
+// overhang the two scripts of a stack are allowed and for the same reason.
+// Nothing is allowed past that: an index of the term before a sign lies
+// further out than the limit does, since the limit fills the space between the
+// two, and the walk reaches the index only by first crossing the whole limit
+// and so only from beyond this edge.
+//
+// The scan to the right stops where the walk to the left does, and for the same
+// reasons. A double sum sets the two signs a limit's width apart, so the bound
+// of the second stands within a few units of the first and would measure it a
+// half wider than it is; the |G|^{-1} in front of the double sum of French page
+// 399 is 13 units clear of the sign, and the edge that came of reading the
+// lambda of the second sum into the first reached back over the 1 and took it.
+// Asking that the right half answer to this sign and not to another is what
+// nearest already does for the left.
+//
+// The mirror holds only where the limit is written under the sign, so that is
+// asked before anything is measured. A large operator in the middle of a
+// sentence is set in the text style, where TeX puts the limits beside the sign
+// rather than beneath it, and there is no left half to go and find. Page 444
+// sets Card(G)^{-1} in front of such a sum: the sign spans 149 to 164, its
+// limit C in C-script follows at 164 to 188, and mirroring that onto a sign
+// nothing is drawn across puts the edge at 125, which is 24 units clear on the
+// far side and reaches back over the -1 and takes it. What the test asks for
+// is a script drawn over the sign, and it asks for more than a unit or two of
+// one. The two sums of page 87 stand a limit's width apart and the w that
+// opens the limit of the second begins at 142 where that sign ends at 143,
+// which is the glyph box slack the edge itself is allowed rather than anything
+// written across the sign, and reading it as a limit gave the first sum an
+// edge that took the S-script out of its own.
+func bound(toks []token, i int, s token, signs []token) int {
+	under := false
+	for _, t := range toks {
+		if t.depth > 0 && lap(t, s) > overhang && nearest(t, s, signs) {
+			under = true
+			break
+		}
+	}
+	if !under {
+		return s.right
+	}
+	right := s.right
+	for j := i + 1; j < len(toks); j++ {
+		t := toks[j]
+		if t.depth == 0 || t.left > right+hoistGap || !nearest(t, s, signs) {
+			break
+		}
+		right = max(right, t.right)
+	}
+	return s.left + s.right - right
 }
 
 // nearest reports whether a sign is the one a token is centred on.

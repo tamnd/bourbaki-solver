@@ -210,7 +210,12 @@ func rows(runs []Run) []Line {
 
 	var lines []Line
 	var cur *Line
+	var held []Run
 	for _, r := range runs {
+		if outsize(r) {
+			held = append(held, r)
+			continue
+		}
 		if cur != nil && joins(*cur, r) {
 			cur.Runs = append(cur.Runs, r)
 			widen(cur, r)
@@ -225,9 +230,114 @@ func rows(runs []Run) []Line {
 	if cur != nil {
 		lines = append(lines, *cur)
 	}
+	lines = stand(lines, held)
 	lines = gather(lines)
 	for i := range lines {
 		finish(&lines[i])
+	}
+	return lines
+}
+
+// outsize reports whether a run is held out of the scan and placed once the
+// lines are built. A large operator and a piece of a delimiter are drawn to a
+// size the line they stand on does not account for, and they are reported at a
+// box that is not the box they are drawn in, so they cannot be scanned into the
+// lines with the type they are set among.
+//
+// An accent is drawn out of the same font and is none of this. It is drawn over
+// a letter, it is reported inside the band of the line that letter is on, and
+// what it belongs to is decided from where it sits rather than from what it is
+// set against.
+func outsize(r Run) bool {
+	if _, ok := Accent(r.Spec, r.Text); ok {
+		return false
+	}
+	return tall(r)
+}
+
+// stand puts the large operators and the delimiters back on the lines they
+// belong to, once the lines have been gathered from the type around them.
+//
+// The height these are reported at is not their height. pdftohtml gives 7 for
+// every one of them in the Latin Modern printings whatever size they are set
+// at, and the Computer Modern printing of Lie 7 to 9 gives 19 for a summation
+// sign drawn half as tall again as that. What is reported truly is where the
+// glyph starts, and a large operator starts well above the line it is set on,
+// so its box lies over the line above as readily as over its own and its middle
+// often lies there too. The sum of "x ∈ ∑ 𝔤^α" on page 179 of Lie 7 to 9, on a
+// line whose body sits at 300, is reported at 282 against a line above that
+// ends at 293, and the sign was set in the middle of an English sentence three
+// times on that page alone.
+//
+// The foot is the one edge of the box that lands where the line is, since the
+// height that is too small for the glyph is measured down from a top that is
+// right. It lands 1 to 5 units inside the band in both printings, and it is
+// what the line is chosen by. Nothing is asked of the run in the scan, and
+// nothing about where the line sits is taken from it afterwards: a sign is not
+// body type and has nothing to say about the band.
+//
+// This is what keeps a large delimiter off the line above as well. It is drawn
+// to span what it encloses, so its box laps over that line as readily as over
+// the formula itself. The characteristic polynomial on French page 356 is
+// printed (X² − T_F(q)X + N_F(q))², and its parentheses, drawn 15 units tall
+// against a body of 12, clipped the band of the head above them by exactly half
+// their neighbour's height. Both went to the head, which then read "Proposition
+// $($ 1. — ... élément$)q$ de F", and the formula below lost the brackets that
+// say what is squared.
+func stand(lines []Line, held []Run) []Line {
+	if len(held) == 0 {
+		return lines
+	}
+	if len(lines) == 0 {
+		// A column of nothing but signs is not a page, but nothing is thrown
+		// away on the strength of that.
+		l := Line{Runs: held, Top: held[0].Top, Bottom: held[0].Bottom(),
+			Left: held[0].Left, Right: held[0].Right()}
+		for _, r := range held {
+			l.Left, l.Right = min(l.Left, r.Left), max(l.Right, r.Right())
+		}
+		return append(lines, l)
+	}
+	for _, r := range held {
+		at, best := 0, 0
+		for i, l := range lines {
+			d := 0
+			switch foot := r.Bottom(); {
+			case foot < l.Top:
+				d = l.Top - foot
+			case foot > l.Bottom:
+				d = foot - l.Bottom
+			default:
+				// Inside the band, and the further inside the
+				// surer. Two lines overlap only where the lower
+				// is the row of scripts that hangs under the
+				// upper and gather has not put the two together
+				// yet, so a foot can land in both, and the one
+				// it is a hair inside is the one it is a hair
+				// outside of. The subscripts of
+				// "\sum_{i\in I}Y_ie_i of B_{(K(\mathbf{Y}))}"
+				// on page 368 make a band that opens at 440
+				// where the line itself runs from 429 to 447,
+				// and the foot of the sign is at 440.
+				d = -min(foot-l.Top, l.Bottom-foot)
+			}
+			if i == 0 || d < best {
+				at, best = i, d
+			}
+		}
+		l := &lines[at]
+		l.Runs = append(l.Runs, r)
+		if sign(r) {
+			// An operator is set on its line and the line reaches to
+			// it. A delimiter is not: it is drawn to span the rows it
+			// encloses, it belongs to none of them, and the matrix of
+			// page 365 is bracketed 21 units to the left of its first
+			// column. Giving that edge to one row of it puts the row
+			// outside the line whose scripts it carries, and the s-1
+			// under the a of the second row was left standing as a
+			// line of its own.
+			l.Left, l.Right = min(l.Left, r.Left), max(l.Right, r.Right())
+		}
 	}
 	return lines
 }
@@ -521,15 +631,12 @@ func under(r Run, runs []Run) bool {
 // and the letter it hangs off do not share a top and a superscript sits above
 // both. Half of the shorter run has to be inside the taller one's band, which
 // separates an index from the line below it without separating it from its own.
-// A large delimiter is asked for its middle instead, because it is drawn to
-// span what it encloses and so overlaps the line above the formula as readily
-// as the formula itself. The characteristic polynomial on French page 356 is
-// printed (X² − T_F(q)X + N_F(q))², and its parentheses, drawn 15 units tall
-// against a body of 12, clipped the band of the head above them by exactly half
-// their neighbour's height. Both went to the head, which then read "Proposition
-// $($ 1. — ... élément$)q$ de F", and the formula below lost the brackets that
-// say what is squared. Nothing but a delimiter is drawn to a size the line it
-// belongs to does not account for, so nothing else needs the stricter test.
+// A wide accent is asked for its middle instead. It is drawn out of the font
+// the large operators come from and is reported as tall as one, so half of it
+// inside a band is easily met by a band it has no business in, and a row of
+// accents over a display sits within a few units of the prose below it. The
+// operators themselves never come here at all: they are held out of the scan
+// and placed by stand once the lines are built.
 func joins(l Line, r Run) bool {
 	lo, hi := max(l.Top, r.Top), min(l.Bottom, r.Bottom())
 	overlap := hi - lo

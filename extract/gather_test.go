@@ -201,6 +201,75 @@ const overlappingIndexPage = `<?xml version="1.0" encoding="UTF-8"?>
 </pdf2xml>
 `
 
+// Page 179 of Lie 7 to 9 sets a sum in the middle of a sentence, and the box
+// poppler reports for it is not the box it is drawn in. The sign is reported at
+// top 200, which is the band of the line above, running 198 to 211, and the
+// sentence it belongs to runs 217 to 230. Placing it by its top put the sum in
+// front of the sl_2 of the line above and left its limit standing under a line
+// with no sign on it, so the page shipped "there exists an$\sum$sl_2-triplet"
+// and "the elements of $_{\alpha\in B}$".
+//
+// The foot is what places it. This printing reports the height of an extension
+// glyph as 19 whatever size it is set at, which is junk, but top plus height
+// lands at 219, two units inside the band of the line the sign is on. That is
+// the whole of the measurement, and it holds for the other ten sums of the page.
+const inlineSumPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="179" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="4" size="15" family="DGLKJH+CMR10" color="#000000"/>
+<fontspec id="5" size="15" family="DGLMMN+CMMI10" color="#000000"/>
+<fontspec id="6" size="10" family="DGLNOH+CMSY7" color="#000000"/>
+<fontspec id="7" size="15" family="DGMBID+CMTI10" color="#000000"/>
+<fontspec id="8" size="15" family="DGLMFD+EUFM10" color="#000000"/>
+<fontspec id="10" size="10" family="DGLOII+CMR7" color="#000000"/>
+<fontspec id="11" size="15" family="DGMCMP+CMEX10" color="#000000"/>
+<fontspec id="12" size="10" family="DGLMOM+CMMI7" color="#000000"/>
+<text top="198" left="105" width="20" height="13" font="4">(ii)</text>
+<text top="198" left="131" width="87" height="13" font="7"><i>The elements</i></text>
+<text top="198" left="224" width="9" height="13" font="5"><i>x</i></text>
+<text top="198" left="238" width="12" height="13" font="7"><i>of</i></text>
+<text top="200" left="257" width="8" height="12" font="8">g</text>
+<text top="198" left="270" width="161" height="13" font="7"><i>such that there exists an</i></text>
+<text top="200" left="437" width="11" height="12" font="8">sl</text>
+<text top="204" left="448" width="6" height="9" font="10">2</text>
+<text top="198" left="455" width="125" height="13" font="7"><i>-triplet of the form</i></text>
+<text top="217" left="82" width="6" height="13" font="4">(</text>
+<text top="217" left="88" width="24" height="13" font="5"><i>x, h</i></text>
+<text top="215" left="112" width="6" height="9" font="10">0</text>
+<text top="217" left="119" width="14" height="13" font="5"><i>, y</i></text>
+<text top="217" left="133" width="6" height="13" font="4">)</text>
+<text top="217" left="144" width="123" height="13" font="7"><i>are the elements of</i></text>
+<text top="200" left="277" width="16" height="19" font="11">P</text>
+<text top="231" left="273" width="8" height="9" font="12"><i>&#945;</i></text>
+<text top="229" left="280" width="8" height="14" font="6"><i>&#8712;</i></text>
+<text top="231" left="289" width="8" height="9" font="10">B</text>
+<text top="219" left="299" width="8" height="12" font="8">g</text>
+<text top="215" left="307" width="8" height="9" font="12"><i>&#945;</i></text>
+<text top="217" left="321" width="259" height="13" font="7"><i>that have a non-zero component in each</i></text>
+<text top="243" left="82" width="8" height="12" font="8">g</text>
+<text top="239" left="90" width="8" height="9" font="12"><i>&#945;</i></text>
+<text top="242" left="99" width="5" height="13" font="7"><i>.</i></text>
+</page>
+</pdf2xml>
+`
+
+func TestAnOperatorGoesToTheLineItsFootIsIn(t *testing.T) {
+	lines := parse(t, inlineSumPage)
+	if len(lines) != 3 {
+		t.Fatalf("got %d lines, want 3", len(lines))
+	}
+	want := []string{
+		`(ii) The elements $x$ of $\mathfrak{g}$ such that there exists an $\mathfrak{s}\mathfrak{l}_2$-triplet of the form`,
+		`$(x, h^0, y)$ are the elements of $\sum_{\alpha\in B}\mathfrak{g}^{\alpha}$ that have a non-zero component in each`,
+		`$\mathfrak{g}^{\alpha}$.`,
+	}
+	for i, w := range want {
+		if got := Render(lines[i]); got != w {
+			t.Errorf("Render line %d:\n got %s\nwant %s", i, got, w)
+		}
+	}
+}
+
 func TestAnIndexGoesToTheNearerLine(t *testing.T) {
 	lines := parse(t, overlappingIndexPage)
 	if len(lines) != 2 {
