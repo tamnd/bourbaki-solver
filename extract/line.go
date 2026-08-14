@@ -50,6 +50,13 @@ type Line struct {
 	// Right are the extent of everything in it.
 	Top, Bottom, Left, Right int
 
+	// Rules are the horizontal lines the page draws over the material of
+	// this line rather than setting them in a font: the bar of a fraction,
+	// of a closure and of a conjugate. They are in no font and so in no run,
+	// and without them a line has no way of knowing one was drawn. See
+	// bar.go.
+	Rules []pdfsrc.Rule
+
 	// band is the font size the band was taken from. It is what says whether
 	// the next run to arrive is body type or something hanging off it.
 	band int
@@ -80,6 +87,7 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 	lines := rows(runs)
 	x, ok := gutter(lines)
 	if !ok {
+		bars(lines, p.Rules)
 		return lines, false
 	}
 	var left, right []Run
@@ -90,7 +98,9 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 			right = append(right, r)
 		}
 	}
-	return append(rows(left), rows(right)...), true
+	lines = append(rows(left), rows(right)...)
+	bars(lines, p.Rules)
+	return lines, true
 }
 
 // ligatures are the single characters a font uses for two or three letters set

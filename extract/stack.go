@@ -60,10 +60,11 @@ const hoistGap = 8
 // Three clusters a printing turn on this, and one of the three is not a stack
 // at all: the derivation of exercise 23 of § 1 is the fraction \partial P over
 // \partial T_i, and TeX sets the two halves of an inline fraction at the size
-// and the height a superscript and a subscript are set at, so nothing in a text
-// layer tells them apart. The rule of the fraction is a drawn path and there is
-// no reading of the runs that would find it. That page is repaired by hand in
-// both printings and carries manual: true.
+// and the height a superscript and a subscript are set at, so nothing in the
+// runs tells them apart. What tells them apart is the rule between them, which
+// is a drawn path rather than a run: bar.go reads those off the page and writes
+// the fractions back before a stack is looked for here. That page is repaired
+// by hand in both printings and carries manual: true.
 const overhang = 2
 
 // hoist puts a large operator in front of the limit written across it.
