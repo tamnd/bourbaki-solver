@@ -1045,6 +1045,24 @@ func emit(toks []token) string {
 			out += "$"
 			inMath = true
 		}
+		// A prime never opens a group of its own. It is a mark on what is
+		// already written rather than a script standing by itself, so where a
+		// group is open at its depth it joins that one, and where there is
+		// none it belongs on the line beside the letter it marks.
+		//
+		// Which of the two it is was decided by measurement, and the
+		// measurement is against the box of the line. Page 85 of Lie 7 to 9
+		// sets the matrix of an element of SL(2, k) in the middle of a running
+		// sentence; the minus sign of its top row is drawn nineteen units deep
+		// against the thirteen of the type beside it, so the line takes the
+		// deeper box, and every prime on that line then sits above the letter
+		// it marks and below the middle of the line. "operates by +1 on E′"
+		// shipped as "operates by +1 on $E_'$", which KaTeX will not set. The
+		// twenty-two of those in the volume are all one shape: a prime that
+		// opened an index with nothing else in it.
+		if t.depth > len(open) && strings.Trim(t.text, "'") == "" {
+			t.depth, t.level = len(open), Base
+		}
 		// An index goes inside braces, and stays open for as long as the runs
 		// keep coming at that size: i, ∈ and I side by side are one index and
 		// not three.

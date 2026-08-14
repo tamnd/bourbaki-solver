@@ -76,3 +76,51 @@ func TestAPrimedBaseWithNothingOverItIsLeftAlone(t *testing.T) {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// Page 85 of Lie 7 to 9, the corollary of § 2 no. 2, cut to the piece that
+// carries the fault. Bourbaki sets the element (−1 0 / 0 −1) of SL(2, k) as a
+// 2 by 2 matrix in the middle of a running sentence, and the minus sign of its
+// top row is drawn at the size of the body but nineteen units deep against the
+// thirteen of the type beside it. The line takes the deeper box, and the prime
+// of the E′ at the end of the sentence is then measured against a box that
+// reaches well below the letter it is written on, so it reads as an index.
+//
+// The volume is set in Computer Modern, where the prime of the seven point
+// symbol font is reported fourteen units high against the thirteen of the ten
+// point roman it hangs off, which is why the band rule of widen does not reach
+// it: the prime is not what took the line down, the matrix is.
+const primeUnderAMatrixPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="85" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="1" size="15" family="DGLKJH+CMR10" color="#000000"/>
+<fontspec id="5" size="15" family="DGLKKM+CMSY10" color="#000000"/>
+<fontspec id="7" size="15" family="DGMBID+CMTI10" color="#000000"/>
+<fontspec id="8" size="10" family="DGLNOH+CMSY7" color="#000000"/>
+<text top="180" left="82" width="191" height="13" font="7"><i>The element</i></text>
+<text top="168" left="292" width="12" height="19" font="5"><i>&#8722;</i></text>
+<text top="171" left="304" width="7" height="13" font="1">1</text>
+<text top="180" left="441" width="72" height="13" font="7"><i>operates by</i></text>
+<text top="180" left="519" width="19" height="13" font="1">+1</text>
+<text top="180" left="543" width="16" height="13" font="7"><i>on</i></text>
+<text top="180" left="565" width="10" height="13" font="1">E</text>
+<text top="176" left="575" width="3" height="14" font="8">0</text>
+</page>
+</pdf2xml>
+`
+
+// Nothing is ever written below the line as a prime, so a prime measured to be
+// there was mismeasured. It comes back to the line the same way a prime read as
+// an exponent does, and E' is what the page prints.
+func TestAPrimeIsNeverReadAsAnIndex(t *testing.T) {
+	lines := parse(t, primeUnderAMatrixPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	got := Render(lines[0])
+	if strings.Contains(got, "_") {
+		t.Errorf("the prime came back as an index: %s", got)
+	}
+	if !strings.Contains(got, `E'`) {
+		t.Errorf("Render:\n got %s\nwant a line ending in E'", got)
+	}
+}
