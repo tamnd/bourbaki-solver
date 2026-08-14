@@ -21,6 +21,16 @@ type Volume struct {
 	// heading is large or small relative to the page around it. Zero means the
 	// volume was not measured, and heading falls back on the English size.
 	BodySize int
+
+	// BodyFace is the family the volume sets that text in, which is the other
+	// half of the same measurement. A printing that marks its headings by size
+	// rather than by weight can only be read by size, and a size on its own
+	// says nothing: the cover of Algebra VIII sets the name of the book in a
+	// publisher's Times at 45 and the name of the series in a Springnew at 54,
+	// neither of which is a heading of the text. What the volume sets its own
+	// text in is, and the two faces are never the same one. Empty means the
+	// volume was not measured, and nothing is read by size.
+	BodyFace string
 }
 
 // defaultHeadBand is where the band sits when the volume will not say. The 2023
@@ -55,11 +65,21 @@ const defaultHeadBand = 70
 func Measure(l *pdfsrc.Layout) Volume {
 	var heads, bodies []int
 	sizes := map[int]int{}
+	faces := map[int]map[string]int{}
 	pages := 0
 	for _, p := range l.Pages {
 		lines, _ := LinesColumns(l, p)
 		for _, ln := range lines {
-			sizes[size(ln)] += len(ln.Runs)
+			s := size(ln)
+			sizes[s] += len(ln.Runs)
+			if faces[s] == nil {
+				faces[s] = map[string]int{}
+			}
+			for _, r := range ln.Runs {
+				if r.Class == ClassText {
+					faces[s][family(r.Spec)]++
+				}
+			}
 		}
 		if len(lines) < 4 {
 			continue
@@ -69,7 +89,7 @@ func Measure(l *pdfsrc.Layout) Volume {
 		// with air under it exactly as a running head is, and page 12 of the
 		// French chapter sets that title at 122, which is above the body of
 		// every other page of the volume.
-		if _, ok := heading(lines[0], 0); ok {
+		if _, ok := heading(lines[0], Volume{}); ok {
 			continue
 		}
 		if lines[1].Top-lines[0].Top <= leading(lines)*3/2 {
@@ -86,6 +106,7 @@ func Measure(l *pdfsrc.Layout) Volume {
 	// under it, has the shape of a head and is not one, and there are never
 	// many of those.
 	v := Volume{HeadBand: defaultHeadBand, BodySize: commonest(sizes)}
+	v.BodyFace = commonestFace(faces[v.BodySize])
 	if pages == 0 || len(heads)*2 < pages {
 		return v
 	}
@@ -106,6 +127,24 @@ func commonest(sizes map[int]int) int {
 	for size, runs := range sizes {
 		if runs > n || runs == n && size < best {
 			best, n = size, runs
+		}
+	}
+	return best
+}
+
+// commonestFace is the family most of the runs at one size are set in, counted
+// over the prose alone so that a page of formulae does not answer a question
+// about the text face. Measured: LMRoman on both printings of Algebra VIII and
+// on the three recent French volumes, CMR on Lie 7 to 9, which sets the same
+// design under Knuth's own name.
+func commonestFace(runs map[string]int) string {
+	best, n := "", 0
+	for face, count := range runs {
+		if face == "" {
+			continue
+		}
+		if count > n || count == n && face < best {
+			best, n = face, count
 		}
 	}
 	return best

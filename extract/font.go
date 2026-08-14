@@ -594,6 +594,12 @@ var unicodeMath = map[rune]string{
 	'∥': `\|`, '̸': `\not`,
 	'ϱ': `\varrho`, 'ϖ': `\varpi`, 'ϑ': `\vartheta`, 'ς': `\varsigma`, 'ϵ': `\epsilon`,
 	'♯': `\sharp`, '♭': `\flat`, '≼': `\preccurlyeq`, '≽': `\succcurlyeq`,
+	// The semidirect product, both ways round. Théories spectrales writes the
+	// Poincaré group as SO(3,1) ⋉ R^4 in its historical note and the group of
+	// displacements as R^n ⋊ SO(n) in the exercises of § 3 of chapter V. No
+	// volume that was here before them uses the sign at all, which is why it
+	// took until those two arrived to be missed.
+	'⋉': `\ltimes`, '⋊': `\rtimes`,
 	// The last two are the codepoints a typesetter reaches for that are not the
 	// letter they look like: U+2206 is the increment sign and U+2126 is the ohm,
 	// and the series means the capital Greek by both of them.
