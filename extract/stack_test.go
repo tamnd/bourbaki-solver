@@ -519,3 +519,52 @@ func TestAnIndexTheScriptStopsShortOfGoesAfterIt(t *testing.T) {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// An inverse image written inside a subscript. Page 77 of Topologie algébrique
+// sets the restriction map f from U to the inverse image of V as a subscript of
+// f, so the u is at a level and the -1 written over it is at a level inside
+// that: the minus spans 304 to 313, the u spans 307 to 314 and the one spans 312
+// to 317. Nothing about that is different from the shape on the line except how
+// far in it is, so the reading is the same reading one level out.
+const nestedInverseImagePage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="77" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="BMXWVH+LMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="QWXCLB+LMMathItalic10" color="#000000"/>
+<fontspec id="4" size="16" family="BRGRHX+LMMathSymbols10" color="#000000"/>
+<fontspec id="7" size="12" family="SQGJWG+LMMathItalic8" color="#000000"/>
+<fontspec id="8" size="12" family="BXXFTB+LMMathSymbols8" color="#000000"/>
+<fontspec id="9" size="12" family="GTNDLC+LMRoman8" color="#000000"/>
+<fontspec id="10" size="9" family="GMKRRQ+LMMathSymbols6" color="#000000"/>
+<fontspec id="11" size="9" family="NXVBWG+LMRoman6" color="#000000"/>
+<text top="326" left="269" width="13" height="21" font="2">=</text>
+<text top="330" left="286" width="8" height="15" font="3"><i>f</i></text>
+<text top="343" left="294" width="10" height="11" font="9">U</text>
+<text top="336" left="304" width="9" height="8" font="10">&#8722;</text>
+<text top="343" left="307" width="7" height="11" font="7"><i>u</i></text>
+<text top="337" left="312" width="5" height="8" font="11">1</text>
+<text top="343" left="318" width="19" height="11" font="9">(V)</text>
+<text top="326" left="338" width="6" height="21" font="2">(</text>
+<text top="330" left="389" width="6" height="21" font="2">(</text>
+<text top="330" left="395" width="6" height="15" font="3"><i>t</i></text>
+<text top="329" left="405" width="8" height="15" font="4">&#8728;</text>
+<text top="330" left="417" width="9" height="15" font="3"><i>u</i></text>
+<text top="329" left="430" width="5" height="15" font="4">|</text>
+<text top="322" left="438" width="10" height="11" font="8">&#8722;</text>
+<text top="330" left="441" width="9" height="15" font="3"><i>u</i></text>
+<text top="323" left="448" width="6" height="11" font="9">1</text>
+<text top="326" left="454" width="38" height="21" font="2">(V)))</text>
+</page>
+</pdf2xml>
+`
+
+func TestAnInverseImageInsideASubscriptIsPutBackToo(t *testing.T) {
+	lines := parse(t, nestedInverseImagePage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `$=f_{U\overset{-1}{u}(V)}((t∘u|\overset{-1}{u}(V)))$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
