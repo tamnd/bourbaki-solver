@@ -187,6 +187,25 @@ func TestAnAnswerInTheWrongScriptIsRefused(t *testing.T) {
 	}
 }
 
+// A chunk of the appendix on the trace came back with two English sentences in
+// the middle of it and Vietnamese on both sides, and every test above passed it
+// because each asks about the whole chunk. The sentence here is the one that
+// got through, put back where it stood.
+func TestASentenceLeftInEnglishIsRefused(t *testing.T) {
+	bad := strings.Replace(vi, "Theo Định lý 1,",
+		"It therefore suffices to prove assertion b) when the A-module E is free. "+
+			"There then exists a finitely generated free submodule F of E. Theo Định lý 1,", 1)
+	p := only(t, Audit("vi", en, bad), RuleLanguage)
+	if !strings.Contains(p.Msg, "nothing of vi") {
+		t.Fatalf("did not say what was wrong: %v", p)
+	}
+	// It is the third language rule and not the second: the answer as a whole is
+	// still written in Vietnamese, which is the point of the rule.
+	if !glossary.WrittenIn("vi", bad) {
+		t.Fatal("the answer does not read as Vietnamese, so the script rule would have caught it")
+	}
+}
+
 func TestEveryProblemIsReportedAndNotJustTheFirst(t *testing.T) {
 	bad := strings.Replace(vi, "tag=00RV", "tag=00RW", 1)
 	bad = strings.Replace(bad, "p. 20", "p. 26", 1)

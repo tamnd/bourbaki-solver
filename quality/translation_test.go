@@ -282,6 +282,62 @@ func TestH07FindsAProviderFenceInACommittedFile(t *testing.T) {
 	}
 }
 
+// The paragraph is the eleventh chunk of the appendix on the trace as it came
+// back, with the Vietnamese that surrounds the English on the same line. L07
+// reads the paragraph and passes it, because the paragraph is written in
+// Vietnamese; L11 reads the run of words inside it.
+func TestL11FindsASentenceLeftInEnglishInsideAVietnameseParagraph(t *testing.T) {
+	const vi = "Hãy chứng minh b). " +
+		"It therefore suffices to prove assertion b) when the A-module E is free. " +
+		"There then exists a finitely generated free submodule F of E that contains " +
+		"the image of it. Đặt $w=u+v$. Ảnh của $w$ được chứa trong F."
+	const en = "Let us prove b). " +
+		"It therefore suffices to prove assertion b) when the A-module E is free. " +
+		"There then exists a finitely generated free submodule F of E that contains " +
+		"the image of it. Put $w=u+v$. The image of $w$ is contained in F."
+	docs := pairDocs(en, vi)
+	if got := run(t, l07, docs...); len(got) != 0 {
+		t.Fatalf("L07 already reports this, so L11 has nothing to add: %v", got)
+	}
+	got := run(t, l11, docs...)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, "nothing of vi") {
+		t.Errorf("the finding does not say what language is missing: %s", got[0].Msg)
+	}
+}
+
+// A paragraph that came back wholly in English is L07's, and reporting it twice
+// would put two findings on one line for one failure.
+func TestL11LeavesAWhollyEnglishParagraphToL07(t *testing.T) {
+	docs := pairDocs(
+		"Let A be a ring.\n\nEvery isotypical module is semisimple.",
+		"Cho A là một vành.\n\nEvery isotypical module is semisimple.")
+	if got := run(t, l11, docs...); len(got) != 0 {
+		t.Errorf("L11 reported a paragraph L07 already has: %v", got)
+	}
+	if got := run(t, l07, docs...); len(got) != 1 {
+		t.Errorf("L07 did not report it: %v", got)
+	}
+}
+
+// The mathematics is copied and not translated, so a display carries no
+// Vietnamese and a rule that counted words alone would fail the build on
+// correct work. These are the shapes the corpus actually holds.
+func TestL11LeavesTheMathematicsAlone(t *testing.T) {
+	for _, para := range []string{
+		"det((1$_F+u_F)\\circ (1_F+v_F)) =$ det(1$_F+u_F)$ det(1$_F+v_F)$.",
+		"$$u=\\theta \\sum_{j\\in J}f_j \\tag{2}$$",
+		"Ta chứng minh a). Với mọi số nguyên $p\\geqslant 0$, A-môđun xạ ảnh $\\wedge^pF$ " +
+			"có thể được đồng nhất với một môđun con của $\\wedge^pE$ (III, §7, No. 9, p. 520, Hệ quả).",
+	} {
+		if got := run(t, l11, pairDocs(para, para)...); len(got) != 0 {
+			t.Errorf("%q was reported: %v", para, got)
+		}
+	}
+}
+
 // The two names are real. The same section on the same host a half hour apart
 // came back as gpt-5-6 and then gpt-5-6-mini.
 func TestL08NamesTheFileASmallModelWrote(t *testing.T) {

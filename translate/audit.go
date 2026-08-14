@@ -386,13 +386,22 @@ func tighten(s string) string { return strings.Join(strings.Fields(s), "") }
 
 // The answer has to be in the language that was asked for.
 //
-// Two ways it is not. A model can hand back the English unchanged, which is
+// Three ways it is not. A model can hand back the English unchanged, which is
 // what happens when a call fails in a way that still returns text, and it can
 // hand back a translation of the first paragraph followed by the rest in
 // English. The first is caught by comparing with the source and the second by
 // asking whether the answer carries the script at all. Neither is subtle and
 // both have to be caught before a file is written, because an English file
 // under content/vi is worse than no file: the audit counts it as translated.
+//
+// The third is subtle and it is the one that got through. The appendix on the
+// trace came back with two English sentences in the middle of a Vietnamese
+// paragraph, Vietnamese on both sides of them on the same line, and every test
+// above passed it because each is a test of the whole chunk and the whole chunk
+// is written in Vietnamese. Asked of a run of consecutive words instead, it is
+// as plain as the other two. This is L11 of the audit and it is the same
+// function saying it, for the reason L08 is: finding out in the first minute
+// costs one more ask, and finding out afterwards costs a section.
 func auditLanguage(lang, en, tr string) []Problem {
 	if strings.TrimSpace(tr) == strings.TrimSpace(en) {
 		return []Problem{{Rule: RuleLanguage, Msg: "is the English, unchanged"}}
@@ -400,6 +409,11 @@ func auditLanguage(lang, en, tr string) []Problem {
 	if !glossary.WrittenIn(lang, tr) {
 		return []Problem{{Rule: RuleLanguage,
 			Msg: "carries no " + lang + " writing at all"}}
+	}
+	if run, words := glossary.Untranslated(lang, tr); words >= 2 {
+		return []Problem{{Rule: RuleLanguage, Msg: fmt.Sprintf(
+			"has a run of %d words with nothing of %s in it: %s",
+			len(strings.Fields(run)), lang, short(run))}}
 	}
 	return nil
 }
