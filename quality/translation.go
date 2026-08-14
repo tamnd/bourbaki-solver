@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
@@ -51,6 +50,8 @@ func init() {
 			Title: "the glossary version moves when the renderings do", Run: l09, Need: needGlossaryBase},
 		Check{ID: "L10", Group: Translation, Hard: true,
 			Title: "no English term was left standing", Run: l10, Need: needGlossary},
+		Check{ID: "L11", Group: Translation, Hard: true,
+			Title: "no sentence was left untranslated", Run: l11, Need: needTranslations},
 	)
 }
 
@@ -494,38 +495,60 @@ func l07(c *Corpus) ([]Finding, error) {
 	return out, nil
 }
 
-// english is the words that hold an English sentence together and carry no
-// mathematics of their own. A paragraph with two of them is an English
-// paragraph; what is left of a display when the dollars come off has none.
+// L11. No sentence was left untranslated.
 //
-// Four words are missing from it that belong there on the face of it, and they
-// are missing because Vietnamese has them too. "in" is to print, "to" is big,
-// "an" is peace, "do" is the first half of "do đó", which is how a Vietnamese
-// proof says therefore and which turned up in two of the fourteen paragraphs
-// measured. "so", "may" and "can" are out for the same reason. A word that both
-// languages spell the same way says nothing about which language a paragraph is
-// in, and this list is only worth having if every word on it does.
-var english = map[string]bool{}
-
-func init() {
-	for _, w := range strings.Fields(`the of is and for be we that it as if then every there
-this which are has have let was were from but not all such where when its they one on or
-thus hence therefore follows also only same each other into over under between because since
-while what who whose whom does did shall will would could might must been being had here now
-first second third these those`) {
-		english[w] = true
-	}
-}
-
-func englishWords(s string) int {
-	n := 0
-	for _, w := range strings.Fields(strings.ToLower(s)) {
-		if english[strings.TrimFunc(w, func(r rune) bool { return !unicode.IsLetter(r) })] {
-			n++
+// L07 reads a paragraph and this reads a run of words inside one, which is the
+// difference between the two failures rather than a stricter version of the
+// same one.
+//
+// The appendix on the trace of an endomorphism is where it comes from. Fifteen
+// chunks went over and fourteen came back Vietnamese; the eleventh came back
+// with two English sentences in the middle of a paragraph, Vietnamese on both
+// sides of them on the same line. L07 saw a paragraph written in Vietnamese,
+// because it was. L01 to L05 saw the mathematics, the tags, the headings and
+// the counts all correct, because they were. The only rule that said anything
+// was L10, which reported the one sentence eight times over as eight glossary
+// terms left standing, and eight findings that name eight words are not a rule
+// saying "this sentence is in English".
+//
+// The unit is the run of consecutive words carrying none of the language, and
+// the floor is two English words in that run, which is what L07 measured for a
+// paragraph. Over the corpus as it stands exactly one run anywhere reaches it
+// and it is this one, at fourteen English words in thirty two. The next run
+// down carries none and is the residue of a display. Hard, on that margin, and
+// because a sentence of the book missing from the translation is not something
+// a reader can be left to notice.
+func l11(c *Corpus) ([]Finding, error) {
+	ps, out := c.pairs()
+	for _, p := range ps {
+		for i, para := range paragraphs(p.tr.Body) {
+			run, words := glossary.Untranslated(p.tr.Lang, para.text)
+			if words < 2 {
+				continue
+			}
+			if !translatedInto(p.tr.Lang, para.text) {
+				// The whole paragraph came back in English and L07 says so.
+				// Two rules on one paragraph is one finding too many.
+				continue
+			}
+			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(para.line),
+				Msg: fmt.Sprintf("paragraph %d has a run of %d words with nothing of %s in it: %s",
+					i+1, len(strings.Fields(run)), p.tr.Lang, ellipsis(run, 60))})
 		}
 	}
-	return n
+	return out, nil
 }
+
+// englishWords counts the words that hold an English sentence together and
+// carry no mathematics of their own. A paragraph with two of them is an English
+// paragraph; what is left of a display when the dollars come off has none.
+//
+// The list itself is in the glossary package beside the script test, for the
+// reason the script test is there: L11 asks the same question of a run of words
+// that this asks of a paragraph, the run that writes the translations asks it a
+// third time before an answer goes anywhere near a file, and three copies of a
+// word list drift three ways.
+func englishWords(s string) int { return glossary.EnglishWords(s) }
 
 // translatedInto asks whether this text carries the script of the language.
 //
