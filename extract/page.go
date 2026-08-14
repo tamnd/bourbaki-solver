@@ -189,7 +189,7 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 			out.flag(FlagStackedRows)
 		}
 	}
-	out.Continues = continues(lines)
+	out.Continues = continues(lines, v)
 	out.Body = blocks(lines, v)
 	if len(notes) > 0 {
 		out.Body = strings.TrimRight(out.Body+"\n\n"+footnotes(notes, v), "\n")
@@ -443,14 +443,15 @@ func join(lines []Line, v Volume) string {
 	}
 	head := -1 // the line the last heading came off, for its continuation
 	for i, l := range lines {
-		if h, ok := heading(l, v.BodySize); ok {
+		if h, ok := heading(l, v); ok {
 			// A title too long for the measure is set on two lines and is still
 			// one title. Page 42 sets "§ 2. THE STRUCTURE OF MODULES OF FINITE"
 			// and "LENGTH" under it, page 112 breaks § 6 the same way, and the
 			// four appendices print their number on one line and their name on
 			// the next.
 			if head == i-1 && len(out) > 0 && !opensHead(h) &&
-				l.Top-lines[i-1].Top <= headLead {
+				!chapterLine(lines[i-1]) &&
+				l.Top-lines[i-1].Top <= headLead(lines[i-1]) {
 				out[len(out)-1] += " " + strings.TrimLeft(h, "# ")
 				head = i
 				continue
@@ -462,7 +463,7 @@ func join(lines []Line, v Volume) string {
 		}
 		// The rest of a title broken after a word, where what carries on is not
 		// itself the shape of a heading. See headTail.
-		if head == i-1 && len(out) > 0 && headTail(l) && l.Top-lines[i-1].Top <= headLead {
+		if head == i-1 && len(out) > 0 && headTail(l) && l.Top-lines[i-1].Top <= headLead(lines[i-1]) {
 			out[len(out)-1] += " " + headingText(l)
 			head = i
 			continue
@@ -558,11 +559,11 @@ func join(lines []Line, v Volume) string {
 // left as the measurement it is, and assembly, which can see that a paragraph
 // opening "5) " is an item and not the tail of a sentence, declines to join
 // them. See joinable.
-func continues(lines []Line) bool {
+func continues(lines []Line, v Volume) bool {
 	if len(lines) == 0 {
 		return false
 	}
-	if _, ok := heading(lines[0], 0); ok {
+	if _, ok := heading(lines[0], v); ok {
 		return false
 	}
 	// The margin is the margin of the block, as it is in blocks and join. A
@@ -798,14 +799,18 @@ func leading(lines []Line) int {
 // the word CHAPTER made every subsection head of the French volume a ## where
 // the English has ###. body is that size, and zero means nobody measured, in
 // which case the English size is assumed.
-func heading(l Line, body int) (string, bool) {
-	if !headed(l) {
+func heading(l Line, v Volume) (string, bool) {
+	if h, ok := chapterOpen(l); ok {
+		return h, true
+	}
+	if !headed(l, v) {
 		return "", false
 	}
 	text := headingText(l)
 	if len([]rune(text)) < 3 {
 		return "", false
 	}
+	body := v.BodySize
 	if body == 0 {
 		body = englishBodySize
 	}
@@ -841,6 +846,82 @@ func heading(l Line, body int) (string, bool) {
 // sectionSpace is a section sign at the head of a heading with whatever the
 // press left between it and the number.
 var sectionSpace = regexp.MustCompile(`^§\s*`)
+
+// chapterOpen reads the line a chapter opens on in the three recent French
+// volumes, which say CHAPITRE in a face of their own rather than in bold.
+//
+// Théories spectrales and Topologie algébrique set that one line, and nothing
+// else in either book, in a small capitals face the file names SFXC: 4 lines in
+// Topologie algébrique for its 4 chapters, 2 and 3 in the two volumes of
+// Théories spectrales for theirs. Nothing about it is bold and it is set at the
+// size of the body, so neither half of what tells a heading from a sentence
+// anywhere else in the corpus can see it, and the chapters would not assemble
+// at all: assembly asks the page the table of contents names for the heading
+// that opens a chapter, and that page carried a paragraph reading "chapitre
+// premier".
+//
+// The words come back in lower case because that is how a small capitals font
+// is encoded, a small A sitting at the code of a small a. The page prints
+// CHAPITRE PREMIER, every other volume of the corpus writes that heading in
+// capitals, and the reader of the corpus is owed the same word in the same
+// shape, so the case is put back.
+func chapterOpen(l Line) (string, bool) {
+	if len(l.Runs) == 0 {
+		return "", false
+	}
+	for _, r := range l.Runs {
+		if family(r.Spec) != chapterFace {
+			return "", false
+		}
+	}
+	text := strings.ToUpper(strings.Join(strings.Fields(plain(l)), " "))
+	if !named(text) {
+		return "", false
+	}
+	return "## " + text, true
+}
+
+// chapterFace is the face those volumes keep for that one line.
+const chapterFace = "SFXC"
+
+// sized reports whether a line is a heading in a printing that marks its
+// headings by size rather than by weight.
+//
+// The 2012 French Algebra VIII and both English volumes set every heading in
+// bold, which is what headed reads. The three recent French volumes set almost
+// none: the § headings of all three are drawn in the volume's own roman at 18
+// against a body of 16, upright and unbolded, and so are the marks that divide
+// a gathered run of exercises, and the chapter titles are the same roman at 45.
+// Only the word Exercices and the headings of the back matter carry a bold flag.
+// Read for bold alone, Topologie algébrique offered assembly 25 § headings and
+// none of them was one, and the whole of "§ 1. PRODUITS FIBRÉS ET CARRÉS
+// CARTÉSIENS" arrived as the first sentence of the paragraph under it.
+//
+// So the size is read, and it is read narrowly. The line has to be set in the
+// face the volume sets its own text in, since a publisher's Times at 45 on a
+// cover is not a heading of anything, and every run of it has to be prose,
+// which keeps a display carrying a large operator or a tall delimiter out. What
+// is left in these three volumes is exactly the headings: at 18 the §§ and
+// their marks, at 22 the back matter, at 45 the chapter titles, and nothing
+// else in the volume is set in that face above the size of the body.
+//
+// A row of dot leaders is refused here as it is in headed, for the same reason.
+// Nothing else in a volume prints one, and a table of contents that set its
+// entries a size up would otherwise come out as a hundred headings.
+func sized(l Line, v Volume) bool {
+	if len(l.Runs) == 0 || v.BodyFace == "" || v.BodySize == 0 || size(l) <= v.BodySize {
+		return false
+	}
+	for _, r := range l.Runs {
+		if r.Class != ClassText || family(r.Spec) != v.BodyFace {
+			return false
+		}
+		if strings.Contains(r.Text, ". . .") || strings.Contains(r.Text, "...") {
+			return false
+		}
+	}
+	return true
+}
 
 // named reports whether a heading opens on the word for what it is.
 //
@@ -906,8 +987,30 @@ func headingText(l Line) string {
 // it does over an appendix. What is not a continuation is much further off: the
 // chapter title of page 18 is 64 units under the word CHAPTER, in a larger font,
 // and the title page sets the name of the book 93 units under the name of the
-// series.
-const headLead = 32
+// series. That is the 32 below, and it holds for every heading of the corpus
+// set at the size of a heading.
+//
+// A title set in display type breaks further apart, because the type is bigger
+// and the leading goes with it. Chapter III of Théories spectrales is headed
+// "Applications linéaires" with "compactes et perturbations" 59 units under it,
+// in 39-unit lines, and read against a flat 32 the two halves of the title came
+// out as two chapter titles. So the lead is measured against the line rather
+// than fixed, and the flat figure stands as the floor: twice the band of a
+// 13-unit heading is 26, which is less than the 29 an appendix already needs.
+func headLead(l Line) int {
+	return max(headLeadFlat, l.Height()*2)
+}
+
+const headLeadFlat = 32
+
+// chapterLine reports whether a line is the CHAPITRE of a chapter opening in
+// the face those volumes keep for it. It takes no continuation: the printing
+// sets the title of the chapter under it in display type, on a line of its own,
+// and that title is a heading in its own right and a larger one.
+func chapterLine(l Line) bool {
+	_, ok := chapterOpen(l)
+	return ok
+}
 
 // opensHead reports whether a heading line opens a heading of its own rather
 // than carrying on the one above it. Every heading of the volume that does opens
@@ -969,6 +1072,9 @@ func headTail(l Line) bool {
 // a journal bold, so "an arbitrary base field ([51], p. 102)" has a bold run in
 // the middle of a sentence.
 //
+// A printing that marks its headings by size and not by weight is read the
+// other way, off the measurement of the volume. See sized.
+//
 // What separates them is where the bold is and what it says. A heading opens on
 // its own words, so the line has to start on bold, and it has to carry a bold
 // run of four letters or more somewhere, which a citation number never is. A
@@ -981,9 +1087,12 @@ func headTail(l Line) bool {
 // begins on bold and carries a bold word and is not a heading; what it also
 // carries, and no heading of the volume does, is forty characters of roman
 // running text.
-func headed(l Line) bool {
+func headed(l Line, v Volume) bool {
 	if len(l.Runs) == 0 {
 		return false
+	}
+	if sized(l, v) {
+		return true
 	}
 	runs := l.Runs
 	if r := runs[0]; r.Class == ClassMath && len([]rune(strings.TrimSpace(r.Text))) == 1 {

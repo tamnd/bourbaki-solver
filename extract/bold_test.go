@@ -35,7 +35,7 @@ func TestAHeadingWithMathematicsInItIsAHeading(t *testing.T) {
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	got, ok := heading(lines[0], 0)
+	got, ok := heading(lines[0], Volume{})
 	if !ok {
 		t.Fatalf("the title of page 213 was not read as a heading, it rendered as %s", Render(lines[0]))
 	}
