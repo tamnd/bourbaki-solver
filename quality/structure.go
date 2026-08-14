@@ -338,22 +338,43 @@ func s04(c *Corpus) ([]Finding, error) {
 		book, chapter, _ := strings.Cut(key, "/")
 		var spans []span
 		for _, d := range c.sectionDocs("en", book, chapter) {
-			first, last, err := pdfRange(d.Section.PDFPages)
+			runs, err := pdfRuns(d.Section.PDFPages)
 			if err != nil {
 				out = append(out, Finding{File: d.Path, Line: 1,
 					Msg: fmt.Sprintf("pdf_pages %q: %v", d.Section.PDFPages, err)})
 				continue
 			}
-			if first > last {
-				out = append(out, Finding{File: d.Path, Line: 1,
-					Msg: fmt.Sprintf("pdf_pages %q runs backwards", d.Section.PDFPages)})
-				continue
+			// Every run tiles alongside every other, its own § included: the
+			// exercises of § 1 sit between those of the § before it and those of
+			// the § after, not next to the body of § 1.
+			for _, r := range runs {
+				if r[0] > r[1] {
+					out = append(out, Finding{File: d.Path, Line: 1,
+						Msg: fmt.Sprintf("pdf_pages %q runs backwards", d.Section.PDFPages)})
+					continue
+				}
+				spans = append(spans, span{d, r[0], r[1]})
 			}
-			spans = append(spans, span{d, first, last})
 		}
-		sort.Slice(spans, func(i, j int) bool { return spans[i].first < spans[j].first })
+		// Two spans that open on the same page go shorter first, so that the one
+		// page of front matter comes before the § that begins under it rather
+		// than inside it. And what a span is measured against is the furthest
+		// any earlier one reached, not merely the one before it, because a short
+		// span that opens where a long one does would otherwise hand the next
+		// span a boundary the chapter has long since moved past.
+		sort.Slice(spans, func(i, j int) bool {
+			if spans[i].first != spans[j].first {
+				return spans[i].first < spans[j].first
+			}
+			return spans[i].last < spans[j].last
+		})
 		for i := 1; i < len(spans); i++ {
 			prev, cur := spans[i-1], spans[i]
+			for _, s := range spans[:i] {
+				if s.last > prev.last {
+					prev = s
+				}
+			}
 			switch {
 			case cur.first < prev.last:
 				out = append(out, Finding{File: cur.doc.Path, Line: 1,
@@ -426,6 +447,21 @@ func pdfRange(s string) (int, int, error) {
 		return 0, 0, err
 	}
 	return first, last, nil
+}
+
+// pdfRuns are the runs of PDF pages a file was assembled from. The front matter
+// writes one range, or several separated by commas for a § the volume printed in
+// two places. See bookPages.
+func pdfRuns(s string) ([][2]int, error) {
+	var out [][2]int
+	for _, part := range strings.Split(s, ",") {
+		first, last, err := pdfRange(strings.TrimSpace(part))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, [2]int{first, last})
+	}
+	return out, nil
 }
 
 // S05. The page map validates, and every conflict it published is bracketed.

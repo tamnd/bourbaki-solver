@@ -348,20 +348,40 @@ const indent = 12
 // size that type is set in. The dangerous bend of French page 19 stands at 29
 // against a remark set in 13, and taking the size from it cut the first line of
 // the remark off from the rest of it.
+//
+// Mathematics is the same thing again and is more than one sign of it, so it is
+// left out of the measure wherever there is text to measure instead. TeX does
+// not set a formula at the size of the words around it: page 77 of Lie 7 to 9
+// heads § 1 in 18-point bold and draws the sl of sl(2, k) inside that heading
+// out of EUFM10 at 24, and heads the subsection under it in 15-point bold with
+// the same sl at 19. Measured on the largest run of any kind, the § heading came
+// out six points over the body and the subsection head four, so the subsection
+// head was read as a chapter title, and the second line of the § heading, which
+// carries no mathematics and so measured 18, landed in a block of its own and
+// was never joined back on to the line it belongs to. A line that is nothing but
+// mathematics has no text to measure and is taken as it stands.
 func size(l Line) int {
-	best := 0
+	best, math := 0, 0
 	for _, r := range l.Runs {
 		if r.Level != Base || offband(r) {
 			continue
 		}
-		if r.Spec.Size > best {
+		if r.Spec.Size > math {
+			math = r.Spec.Size
+		}
+		if !r.Class.Math() && r.Spec.Size > best {
 			best = r.Spec.Size
 		}
 	}
-	if best == 0 && len(l.Runs) > 0 {
-		best = l.Runs[0].Spec.Size
+	switch {
+	case best > 0:
+		return best
+	case math > 0:
+		return math
+	case len(l.Runs) > 0:
+		return l.Runs[0].Spec.Size
 	}
-	return best
+	return 0
 }
 
 // blocks reads the lines of a page as a sequence of blocks, a block being a run
@@ -437,6 +457,13 @@ func join(lines []Line, v Volume) string {
 			}
 			flush()
 			out = append(out, h)
+			head = i
+			continue
+		}
+		// The rest of a title broken after a word, where what carries on is not
+		// itself the shape of a heading. See headTail.
+		if head == i-1 && len(out) > 0 && headTail(l) && l.Top-lines[i-1].Top <= headLead {
+			out[len(out)-1] += " " + headingText(l)
 			head = i
 			continue
 		}
@@ -676,9 +703,18 @@ func opener(lines []Line, left int) func(Line) bool {
 }
 
 // displayRE is a line that is nothing but one formula, with the number the
-// book gives the formula in front of it and the punctuation of the sentence
-// around it behind.
-var displayRE = regexp.MustCompile(`^(?:\((\d+)\)\s*)?\$([^$]+)\$[.,;]?$`)
+// book gives the formula on whichever side the volume sets it and the
+// punctuation of the sentence around it behind.
+//
+// Algebra VIII sets the number at the left margin and Lie 7 to 9 sets it flush
+// right, 7 of the one against 110 of the other, and neither volume sets one both
+// ways. Read on the left only, every numbered display of Lie 7 to 9 stayed a line
+// of inline mathematics with a stray "(6)" on the end of it. Worse, the number
+// reaches the measure, so the line looked like a filled line of prose and the
+// line under it was joined on: page 76 shipped "PROPOSITION 6. Let E be a finite
+// dimensional sl(2, k)-module" on the end of formula (6), where it was not a head
+// standing at the front of a paragraph and was never read as one.
+var displayRE = regexp.MustCompile(`^(?:\((\d+)\)\s*)?\$([^$]+)\$[.,;]?(?:\s*\((\d+)\))?$`)
 
 // display writes a line that stands on its own as a display.
 //
@@ -692,8 +728,10 @@ func display(text string) (string, bool) {
 		return "", false
 	}
 	body := strings.TrimSpace(m[2])
-	if m[1] != "" {
-		body += ` \tag{` + m[1] + `}`
+	// The number is kept and the side it was set on is not, since a display on a
+	// line of its own is tagged rather than laid out.
+	if n := m[1] + m[3]; n != "" {
+		body += ` \tag{` + n + `}`
 	}
 	return "$$\n" + body + "\n$$", true
 }
@@ -771,21 +809,54 @@ func heading(l Line, body int) (string, bool) {
 	if body == 0 {
 		body = englishBodySize
 	}
+	// The book prints "§ 2." and the gap it leaves between the sign and the
+	// number is not always wide enough to read as a space: 20 of the 31 §
+	// headings of Lie 7 to 9 came out "§2." and 11 came out "§ 2." off the same
+	// press. The space is not a fact about the book, so it is written the one
+	// way here rather than left to the measurement.
+	text = sectionSpace.ReplaceAllString(text, "§ ")
 	switch {
-	case size(l) >= body+3:
-		return "# " + text, true
-	case strings.HasPrefix(text, "§"), strings.HasPrefix(text, "APPENDIX"):
+	case named(text):
+		// A heading that says in words what it is takes its level from the
+		// words and not from the size, because the printings do not agree on
+		// the size and do agree on the words. Algebra VIII sets the word
+		// CHAPTER small over the title and Lie 7 to 9 sets it three points over
+		// the body, and both of them open a chapter; measured on the size they
+		// came out ## and #, and assembly, which looks for the heading that
+		// opens a chapter, found one volume and not the other.
+		//
 		// An appendix is a section of the chapter and is set like one, and the
-		// table of contents lists the four of this volume beside the twenty-one
+		// table of contents lists the four of Algebra VIII beside its twenty-one
 		// §§. Its number stands on a line of its own, which is the only thing
 		// that tells it apart from a subsection head.
 		return "## " + text, true
+	case size(l) >= body+3:
+		return "# " + text, true
 	case size(l) < body:
-		// The word CHAPTER, which the volume sets small over the title of the
-		// chapter itself.
 		return "## " + text, true
 	}
 	return "### " + text, true
+}
+
+// sectionSpace is a section sign at the head of a heading with whatever the
+// press left between it and the number.
+var sectionSpace = regexp.MustCompile(`^§\s*`)
+
+// named reports whether a heading opens on the word for what it is.
+//
+// APPENDICE is deliberately not here beside APPENDIX. The French printing sets
+// its appendix headings smaller than its §§ and the English one does not, so
+// the two come out at different depths and the assembler is told which by the
+// printing it was handed. That is a difference the volumes really have. The
+// depth of a chapter is not: both printings open a chapter the same way and
+// only the point size disagrees.
+func named(text string) bool {
+	for _, word := range []string{"§", "APPENDIX", "CHAPTER", "CHAPITRE"} {
+		if strings.HasPrefix(text, word) {
+			return true
+		}
+	}
+	return false
 }
 
 // englishBodySize is the size the 2023 English printing sets its text in, which
@@ -863,6 +934,32 @@ func allDigits(s string) bool {
 	return s != ""
 }
 
+// headTail reports whether a line could be the rest of the heading above it.
+//
+// It is not itself a heading and headed will not have it: a heading of this
+// volume opens on a word or on a single sign, and page 171 breaks the title of
+// § 11 after the word AND and sets "sl_2-TRIPLETS" under it, which opens on the
+// two letters of a fraktur sl. What says it belongs to the line above is that
+// there is nothing on it but the type a heading is set in, capitals and
+// mathematics and no running text, and that it is set in the same size as the
+// heading, which is already true of every line the caller offers here.
+func headTail(l Line) bool {
+	strong := false
+	for _, r := range l.Runs {
+		if offband(r) {
+			continue
+		}
+		switch r.Class {
+		case ClassStrong, ClassBold:
+			strong = true
+		case ClassMath:
+		default:
+			return false
+		}
+	}
+	return strong
+}
+
 // headed reports whether a line is a heading.
 //
 // A line set in bold from end to end is one, and that is most of them. The rest
@@ -877,13 +974,23 @@ func allDigits(s string) bool {
 // run of four letters or more somewhere, which a citation number never is. A
 // line of the table of contents passes both and is not a heading, so the dot
 // leaders are read as well: nothing else in the volume prints a row of dots.
+//
+// The last of it is that a heading is set in heading type all the way across.
+// Page 402 of Lie 7 to 9 carries on a sentence of exercise 5 e) with a line that
+// opens on the bold SO of SO(2r, R) and names the group Spin further along, so it
+// begins on bold and carries a bold word and is not a heading; what it also
+// carries, and no heading of the volume does, is forty characters of roman
+// running text.
 func headed(l Line) bool {
 	if len(l.Runs) == 0 {
 		return false
 	}
 	runs := l.Runs
 	if r := runs[0]; r.Class == ClassMath && len([]rune(strings.TrimSpace(r.Text))) == 1 {
-		// The star that marks a subsection optional is drawn before its number.
+		// The star that marks a subsection optional is drawn before its number,
+		// and so is the sign over a §, which TeX keeps in the mathematics
+		// symbol font. Neither is bold and neither is what the line is: the
+		// heading opens on the word after it.
 		runs = runs[1:]
 	}
 	if len(runs) == 0 || runs[0].Class != ClassBold && runs[0].Class != ClassStrong {
@@ -892,6 +999,9 @@ func headed(l Line) bool {
 	words := false
 	for _, r := range l.Runs {
 		if strings.Contains(r.Text, ". . .") || strings.Contains(r.Text, "...") {
+			return false
+		}
+		if (r.Class == ClassText || r.Class == ClassEmph) && letters(r.Text) >= 4 {
 			return false
 		}
 		if r.Class == ClassStrong && letters(r.Text) >= 4 {

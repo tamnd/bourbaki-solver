@@ -25,6 +25,11 @@ const (
 	// BySection is a reference to a page and nothing on it. It resolves to a §
 	// and to no statement, because there is no statement in it to resolve to.
 	BySection = "section"
+	// ByNumbering is a citation of the other printing, settled by what it says
+	// outright. "Chap. VII, §2, no. 3, Prop. 10" names the § and the no., so
+	// there is no page to map and nothing to work backwards from, and where the §
+	// holds more than one Prop. 10 the no. it also names is what decides.
+	ByNumbering = "section-no"
 	// ByContext is a statement named in running prose with nothing else, which
 	// means the § the sentence is in.
 	ByContext = "in-section"
@@ -50,10 +55,28 @@ type Target struct {
 	Book  string // the Book code, when the reference leaves the corpus
 }
 
-// Chapter is the chapter of Algebra this corpus holds. A reference to any other
-// chapter is a reference out of the corpus even though it is the same Book,
-// which is worth keeping in the report: it is the closest thing to ingest next.
+// Chapter is the chapter of Algebra this corpus holds, and is what a reference
+// that names no chapter of its own is read against.
+//
+// A reference to any other chapter of the same Book is a reference out of the
+// corpus, and is worth keeping in the report: it is the closest thing to ingest
+// next.
 const Chapter = "VIII"
+
+// corpusBooks is the Book code as the Éléments write it against the Book as a
+// label writes it, for the Books this corpus has any of.
+//
+// A citation names its Book the way the book prints it, "Algebra" or "Lie", and
+// a label names it the way a path does. Which of them the corpus actually holds
+// is not settled here but asked of the index, so that ingesting a volume is
+// enough to make its references resolve and nothing here has to be remembered.
+var corpusBooks = map[string]string{
+	"A":   "alg",
+	"LIE": "lie",
+	"E":   "ens",
+	"TG":  "top",
+	"TS":  "ts",
+}
 
 // Site is where the sentence making a reference stands. The § is what a bare
 // "Proposition 4" means. The file and the line are what settles a bare
@@ -65,14 +88,72 @@ type Site struct {
 	Line    int
 }
 
+// bookOf is the Book a citation is to be looked up in, and says instead that the
+// reference leaves the corpus when that Book is one the corpus has none of.
+//
+// A sentence that names no Book means its own, which until Lie 7 to 9 was
+// assembled was always Algebra and is now whatever Book the citing § belongs to.
+// The Book that is named is tested on its code and not on its name, since a Book
+// has more than one spelling and Algebra has two, Algebra and Alg. Comparing the
+// name would take every reference a chapter makes to itself under the second of
+// them out of the corpus.
+func (ix *Index) bookOf(c Citation, at Site) (book string, out Target, leaves bool) {
+	if c.Book == "" {
+		if s := ix.Section(at.Section); s != nil {
+			return s.Book, Target{}, false
+		}
+		return "alg", Target{}, false
+	}
+	code := Code(c.Book)
+	book, ok := corpusBooks[code]
+	if code == "" || !ok || !ix.Holds(book) {
+		return "", Target{How: OutOfCorpus, Book: code}, true
+	}
+	return book, Target{}, false
+}
+
+// holdsChapter reports whether the corpus holds this chapter of this Book.
+func (ix *Index) holdsChapter(book, chapter string) bool {
+	for i := range ix.Sections {
+		if ix.Sections[i].Book == book && ix.Sections[i].Chapter == chapter {
+			return true
+		}
+	}
+	return false
+}
+
+// codeFor is the letter the Éléments give a Book, from the name a label uses.
+func codeFor(book string) string {
+	for code, b := range corpusBooks {
+		if b == book {
+			return code
+		}
+	}
+	return ""
+}
+
 // Resolve looks a citation up.
+//
+// A member of a list whose locator was written on the end has a second reading,
+// and it is tried only when the reference as it stands answers nowhere. See
+// under, in the parser, for why it is second and not first. When both readings
+// fail it is the first that is reported, since that is the reference the page
+// prints and the one a reader would go looking for.
 func (ix *Index) Resolve(c Citation, at Site) (Target, error) {
-	// Tested on the code and not on the name, since a Book has more than one
-	// spelling and this one has two, Algebra and Alg. Comparing the name would
-	// take every reference the chapter makes to itself under the second of them
-	// out of the corpus.
-	if code := Code(c.Book); code != "" && code != "A" {
-		return Target{How: OutOfCorpus, Book: code}, nil
+	out, err := ix.resolve(c, at)
+	if err == nil || c.Under == nil {
+		return out, err
+	}
+	if alt, err := ix.resolve(*c.Under, at); err == nil {
+		return alt, nil
+	}
+	return out, err
+}
+
+func (ix *Index) resolve(c Citation, at Site) (Target, error) {
+	book, out, leaves := ix.bookOf(c, at)
+	if leaves {
+		return out, nil
 	}
 	from := at.Section
 	switch c.Form {
@@ -88,14 +169,34 @@ func (ix *Index) Resolve(c Citation, at Site) (Target, error) {
 		if c.Kind == corpus.KindExercise {
 			return ix.exercise(ix.Section(from), c.Number)
 		}
-		return ix.inSection(c, from, ByContext, 0, at)
+		// The no. is passed on where the sentence wrote one. A bare statement has
+		// none and is settled by what stands nearest above it; one written "no. 2,
+		// Remark 1" has said which no. it means, and that is better than nearest
+		// and is the only thing that can settle a kind the § numbers afresh under
+		// every no.
+		return ix.inSection(c, from, ByContext, c.Subsec, at)
 	case FormAttached:
-		return ix.attachedIn(c, from)
+		return ix.attachedIn(c, book, from)
+	case FormSection:
+		s, out, leaves := ix.sectionCited(c, book, from)
+		if leaves {
+			return out, nil
+		}
+		if s == nil {
+			return Target{}, fmt.Errorf("chapter %s of %s has no %s", ix.chapterOf(c, from), book, sectionSaid(c))
+		}
+		if c.Kind == "" {
+			return Target{Label: s.Label, How: BySection}, nil
+		}
+		if c.Kind == corpus.KindExercise {
+			return ix.exercise(s, c.Number)
+		}
+		return ix.inSection(c, s.Label, ByNumbering, c.Subsec, at)
 	}
-	if c.Chapter != Chapter {
-		return Target{How: OutOfCorpus, Book: "A"}, nil
+	if !ix.holdsChapter(book, c.Chapter) {
+		return Target{How: OutOfCorpus, Book: codeFor(book)}, nil
 	}
-	on := ix.SectionAt(c.Chapter, c.Page)
+	on := ix.SectionAt(book, c.Chapter, c.Page)
 	switch len(on) {
 	case 0:
 		return Target{}, fmt.Errorf("no § of chapter %s is printed on page %d", c.Chapter, c.Page)
@@ -130,14 +231,26 @@ func (ix *Index) Resolve(c Citation, at Site) (Target, error) {
 //
 // The locator governs whenever the sentence gives one, and the § in hand is the
 // fallback rather than the rule.
-func (ix *Index) attachedIn(c Citation, from string) (Target, error) {
+func (ix *Index) attachedIn(c Citation, book, from string) (Target, error) {
+	// A locator with a § and no page is one of the other printing, which says
+	// which § the parent stands in rather than which page it is printed on.
+	if c.Page == 0 && c.Section != 0 {
+		s, out, leaves := ix.sectionCited(c, book, from)
+		if leaves {
+			return out, nil
+		}
+		if s == nil {
+			return Target{}, fmt.Errorf("chapter %s of %s has no %s", ix.chapterOf(c, from), book, sectionSaid(c))
+		}
+		return ix.attached(c, s.Label)
+	}
 	if c.Chapter == "" {
 		return ix.attached(c, from)
 	}
-	if c.Chapter != Chapter {
-		return Target{How: OutOfCorpus, Book: "A"}, nil
+	if !ix.holdsChapter(book, c.Chapter) {
+		return Target{How: OutOfCorpus, Book: codeFor(book)}, nil
 	}
-	on := ix.SectionAt(c.Chapter, c.Page)
+	on := ix.SectionAt(book, c.Chapter, c.Page)
 	switch len(on) {
 	case 0:
 		return Target{}, fmt.Errorf("no § of chapter %s is printed on page %d", c.Chapter, c.Page)
@@ -146,6 +259,46 @@ func (ix *Index) attachedIn(c Citation, from string) (Target, error) {
 		return Target{}, fmt.Errorf("page %d is in %d sections at once", c.Page, len(on))
 	}
 	return ix.attached(c, on[0].Label)
+}
+
+// sectionCited is the § a citation of the other printing names, and says instead
+// that the reference leaves the corpus when the chapter is one the corpus has
+// none of.
+//
+// A citation that names no chapter means the chapter it is standing in, which is
+// what "§ 2, no. 3, Prop. 10" says: a volume of three chapters refers to its own
+// as often as to the other two. This is why the § the sentence is in has to be
+// known, and a sentence in no § can only be left alone.
+func (ix *Index) sectionCited(c Citation, book, from string) (*Section, Target, bool) {
+	chapter := ix.chapterOf(c, from)
+	if chapter == "" {
+		return nil, Target{}, false
+	}
+	if !ix.holdsChapter(book, chapter) {
+		return nil, Target{How: OutOfCorpus, Book: codeFor(book)}, true
+	}
+	return ix.SectionIn(book, chapter, c.Section, c.Appendix), Target{}, false
+}
+
+// chapterOf is the chapter a citation names, or the one the sentence stands in
+// when it names none.
+func (ix *Index) chapterOf(c Citation, from string) string {
+	if c.Chapter != "" {
+		return c.Chapter
+	}
+	if s := ix.Section(from); s != nil {
+		return s.Chapter
+	}
+	return ""
+}
+
+// sectionSaid writes back the § a citation named, for a message about one the
+// chapter does not have.
+func sectionSaid(c Citation) string {
+	if c.Appendix {
+		return fmt.Sprintf("Appendix %d", c.Section)
+	}
+	return fmt.Sprintf("§ %d", c.Section)
 }
 
 // attached finds a corollary from the statement it hangs from.
@@ -181,10 +334,82 @@ func (ix *Index) attached(c Citation, section string) (Target, error) {
 	}
 	n := max(c.Number, 1)
 	if len(under) < n {
+		// A reference that gave no number to a parent whose corollaries are all
+		// numbered is not a corollary the corpus is missing, it is a reference
+		// that did not say enough, and saying so is the difference between a
+		// finding a reader can act on and one that sends them looking for a
+		// statement that is printed.
+		if c.Number == 0 {
+			if k := ix.numbered(section, c); k > 0 {
+				return Target{}, fmt.Errorf("%s prints %d numbered corollaries of %s %d and the reference does not say which",
+					section, k, c.ParentKind.Heading(), c.ParentNumber)
+			}
+		}
+		if t, ok := ix.overProof(s, c, n); ok {
+			return t, nil
+		}
 		return Target{}, fmt.Errorf("%s has no corollary %d of %s %d",
 			section, n, c.ParentKind.Heading(), c.ParentNumber)
 	}
 	return Target{Label: under[n-1].Label, Tag: under[n-1].Tag, How: ByParent}, nil
+}
+
+// numbered counts the corollaries the printing hangs from the statement a
+// reference names and gives a number of their own. They are counted by asking
+// for their labels, since a numbered corollary carries its parent in its own
+// label and the count runs from one without a gap.
+func (ix *Index) numbered(section string, c Citation) int {
+	n := 0
+	for ix.Statement(fmt.Sprintf("%s-%s-%d-cor-%d", section, c.ParentKind, c.ParentNumber, n+1)) != nil {
+		n++
+	}
+	return n
+}
+
+// overProof finds a corollary the book hangs from a result over the lemma that
+// was proved on the way to it.
+//
+// A statement is given the last numbered statement above it as its parent, which
+// is what the printing shows and is right nearly everywhere. It is not right
+// where the proof of a theorem borrows a lemma: § 7 of chapter IX states Theorem
+// 3, says "let us accept provisionally the following lemma", states and proves
+// Lemma 5, finishes the proof of the theorem and then prints COROLLARY 1 and
+// COROLLARY 2. Nothing on the page says those hang from the theorem rather than
+// from the lemma, but the volume says it itself, twice, in the words "§7, no. 5,
+// Cor. 1 of Th. 3".
+//
+// The walk stops at the next statement of the kind that was cited, and that is
+// what keeps it from papering over a disagreement. A reference to a corollary of
+// Theorem 1 that is only found past Theorem 2 is not a theorem cited over its
+// proof, it is the reference and the printing naming different theorems, and § 10
+// of chapter VIII is exactly that. It is left unresolved and reported, which is
+// what it is.
+func (ix *Index) overProof(s *Section, c Citation, n int) (Target, bool) {
+	var from *Statement
+	for _, st := range s.Statements {
+		if st.Kind != c.ParentKind || st.Number != c.ParentNumber {
+			continue
+		}
+		if from != nil {
+			return Target{}, false
+		}
+		from = st
+	}
+	if from == nil {
+		return Target{}, false
+	}
+	for _, st := range s.Statements {
+		if st.Path != from.Path || st.Line <= from.Line {
+			continue
+		}
+		if st.Kind == c.ParentKind {
+			break
+		}
+		if st.Kind == corpus.KindCorollary && st.Named && st.Number == n {
+			return Target{Label: st.Label, Tag: st.Tag, How: ByParent}, true
+		}
+	}
+	return Target{}, false
 }
 
 // exercise is Exercise n of a §. There is nothing to search: the exercises of a
@@ -244,7 +469,18 @@ func (ix *Index) inSection(c Citation, section, how string, no int, at Site) (Ta
 		return Target{}, fmt.Errorf("%s has %d statements called %s %d and %d of them in no. %d",
 			section, len(cand), c.Kind.Heading(), c.Number, len(hit), no)
 	}
-	return Target{Label: hit[0].Label, Tag: hit[0].Tag, How: ByPageAndNo}, nil
+	return Target{Label: hit[0].Label, Tag: hit[0].Tag, How: withNo(how)}, nil
+}
+
+// withNo is what an edge records when the no. is what settled it. A page
+// citation that came down to its no. is a different lookup from one the page
+// settled by itself, and is worth telling apart. A citation that named its § and
+// its no. and nothing else was that lookup from the start and has nothing to add.
+func withNo(how string) string {
+	if how == ByPage {
+		return ByPageAndNo
+	}
+	return how
 }
 
 // onPage takes the candidate the book prints on the page the citation names.

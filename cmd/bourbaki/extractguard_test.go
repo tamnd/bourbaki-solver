@@ -32,10 +32,17 @@ func TestAPageThatIsNotThereMayBeWritten(t *testing.T) {
 	}
 }
 
-// The ordinary case, in both directions: extraction owns the pages it wrote and
+// The ordinary case, in every direction: extraction owns the pages it wrote and
 // nobody else's.
-func TestOnlyAManualPageIsKept(t *testing.T) {
+//
+// The page read as a picture is the case that shipped wrong. Eleven flagged
+// pages of Lie 7 to 9 were rendered and read through a model because the text
+// layer could not carry what was on them, and extraction cannot produce that
+// page: what it produces is the reading those eleven replaced.
+func TestOnlyAPageExtractionWroteIsOverwritten(t *testing.T) {
 	const head = "---\nbook: alg-viii\npdf_page: 1\nmethod: native\n" +
+		"input_sha256: abc\nlines: 4\n"
+	const read = "---\nbook: lie-vii-ix\npdf_page: 340\nmethod: ocr\n" +
 		"input_sha256: abc\nlines: 4\n"
 	for _, tc := range []struct {
 		name string
@@ -44,6 +51,7 @@ func TestOnlyAManualPageIsKept(t *testing.T) {
 	}{
 		{"machine", head + "---\n\nText.\n", false},
 		{"by hand", head + "manual: true\n---\n\nText.\n", true},
+		{"read as a picture", read + "---\n\nText.\n", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			keep, err := repairedByHand(writeHead(t, tc.head))

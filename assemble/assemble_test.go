@@ -1,6 +1,7 @@
 package assemble
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -76,14 +77,11 @@ func TestChapter(t *testing.T) {
 	if !front.Front || front.Name() != "front matter" {
 		t.Errorf("the first piece is %+v", front)
 	}
-	if front.First != 18 || front.Last != 18 {
-		t.Errorf("the front matter runs %d-%d, want 18-18", front.First, front.Last)
+	if want := []Run{{18, 18, "A VIII.1", "A VIII.1"}}; !slices.Equal(front.Runs, want) {
+		t.Errorf("the front matter runs %+v, want %+v", front.Runs, want)
 	}
-	if sec.First != 18 || sec.Last != 20 {
-		t.Errorf("§ 1 runs %d-%d, want 18-20", sec.First, sec.Last)
-	}
-	if sec.FirstLabel != "A VIII.1" || sec.LastLabel != "A VIII.3" {
-		t.Errorf("§ 1 runs %s-%s", sec.FirstLabel, sec.LastLabel)
+	if want := []Run{{18, 20, "A VIII.1", "A VIII.3"}}; !slices.Equal(sec.Runs, want) {
+		t.Errorf("§ 1 runs %+v, want %+v", sec.Runs, want)
 	}
 	if got, want := len(sec.Subsections), 2; got != want {
 		t.Errorf("got %d no., want %d", got, want)

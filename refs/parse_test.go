@@ -241,6 +241,110 @@ func TestParse(t *testing.T) {
 		want: []Citation{{Raw: "Proposition 6 of X, §8, n$^o4$, p. $140", Form: FormNamed,
 			Chapter: "X", Section: 8, Subsec: 4, Page: 140,
 			Kind: corpus.KindProposition, Number: 6}},
+	}, {
+		// Two corollaries of the same Theorem, the second written by its number
+		// alone. Both come out of the one match, so the second gets the locator
+		// the first was read with rather than being hunted for on its own.
+		name: "a second statement written by its number alone",
+		in: "(Reduce to the case where $k'$ is algebraically closed, and use $b)$ " +
+			"as well as Cor. 1 and 3 of Th. 1.)",
+		want: []Citation{
+			{Raw: "Cor. 1 and 3 of Th. 1", Form: FormAttached, Kind: corpus.KindCorollary, Number: 1,
+				ParentKind: corpus.KindTheorem, ParentNumber: 1},
+			{Raw: "Cor. 1 and 3 of Th. 1", Form: FormAttached, Kind: corpus.KindCorollary, Number: 3,
+				ParentKind: corpus.KindTheorem, ParentNumber: 1},
+		},
+	}, {
+		// The Book and the chapter are written once and the second § is written
+		// bare. Left alone the second is a § of the chapter of Lie the sentence
+		// stands in, and what it means is a § of chapter III of Algebra.
+		name: "a second § under the same Book",
+		in: "be identified with an element $\\Gamma^*\\in^2V^*($Algebra, Chap. III, §7, no. 4, " +
+			"Prop. 7 and §11, no. 10) and it is easy to",
+		want: []Citation{
+			{Raw: "Algebra, Chap. III, §7, no. 4, Prop. 7", Form: FormSection,
+				Book: "Algebra", Chapter: "III", Section: 7, Subsec: 4,
+				Kind: corpus.KindProposition, Number: 7},
+			{Raw: "§11, no. 10", Form: FormSection, Book: "Algebra", Chapter: "III",
+				Section: 11, Subsec: 10},
+		},
+	}, {
+		// The superscript belongs to a display further down the page and has
+		// landed between the chapter and its §. Read no further than the chapter,
+		// the § is a § of the chapter doing the citing and the corollary is hunted
+		// for in it, which had chapter VIII reported as missing a Proposition 41.
+		name: "a piece of a display standing inside the locator",
+		in: "the $\\mathfrak{g}$-module structure of X (Chap. III,$^{\\alpha\\in B}$ §3, no. 11, " +
+			"Cor. 3 of Prop. 41). Let C be",
+		want: []Citation{{Raw: "Chap. III,$^{\\alpha\\in B}$ §3, no. 11, Cor. 3 of Prop. 41",
+			Form: FormAttached, Chapter: "III", Section: 3, Subsec: 11,
+			Kind: corpus.KindCorollary, Number: 3,
+			ParentKind: corpus.KindProposition, ParentNumber: 41}},
+	}, {
+		// The other printing's way of naming a chapter and a page, and the Book
+		// left in French because Algebra X had not been translated. Unread, the
+		// whole locator goes and an Exercise 23 is looked for in the § of chapter
+		// IX the sentence stands in, which has twelve.
+		name: "a chapter and a page written the other printing's way",
+		in:   "$d)$ Recover the results of $b)$ and $c)$ by using Exerc. 23 of Algèbre, Chap. X, p. 194.",
+		want: []Citation{{Raw: "Exerc. 23 of Algèbre, Chap. X, p. 194", Form: FormNamed,
+			Book: "Algèbre", Chapter: "X", Page: 194,
+			Kind: corpus.KindExercise, Number: 23}},
+	}, {
+		// A no. of the § the sentence stands in. The no. is the whole of what it
+		// says, and § 7 of chapter VIII prints six Remarks, so without it there is
+		// nothing to choose between them.
+		name: "a no. of the § doing the citing",
+		in: "(ii) If E is simple and has highest weight $\\omega ,E^*$ is simple and has " +
+			"highest weight $-w_0(\\omega )$ (cf. no. 2, Remark 2).",
+		want: []Citation{{Raw: "no. 2, Remark 2", Form: FormLocal, Subsec: 2,
+			Kind: corpus.KindRemark, Number: 2}},
+	}, {
+		// A statement of another author's paper, standing where that paper's own
+		// pages are given. It is read so that nothing else reads it, and § 8 is no
+		// longer reported as missing a Theorem 10 that belongs to Kostant.
+		name: "a statement of a work outside the Éléments",
+		in: "$^3$ It can be shown (B. KOSTANT, Lie group representations on polynomial rings, " +
+			"Amer. J. Math., Vol. LXXXV (1963), pp. 327-404, Th. 10 and 15) that",
+		want: nil,
+	}, {
+		// The Proposition says where to look and is not what is being looked at,
+		// so the reference stops at the no. and the statement is dropped.
+		name: "the text in front of a statement",
+		in: "the set $\\mathscr{T}$ is a noetherian ordered set (Theory of Sets, Chap. III, §6, " +
+			"no. 5, text preceding Prop. 7).",
+		want: []Citation{{Raw: "Theory of Sets, Chap. III, §6, no. 5, text preceding Prop. 7",
+			Form: FormSection, Book: "Theory of Sets", Chapter: "III", Section: 6, Subsec: 5}},
+	}, {
+		// The corollary goes with the loc. cit. and so does its parent. Splitting
+		// them leaves a Proposition 3 behind in § 10 of chapter VIII, which prints
+		// no Proposition at all.
+		name: "a corollary of a statement of the work cited last",
+		in:   "it is a decomposable Lie algebra (loc. cit., Cor. 1 of Prop. 3).",
+		want: []Citation{{Raw: "loc. cit., Cor. 1 of Prop. 3", Form: FormLocCit}},
+	}, {
+		// A second no. of the same §, which is what the other printing writes
+		// where Algebra VIII writes a second page of the same chapter.
+		name: "a second no. in the same bracket",
+		in:   "By Chap. III, §3, no. 8, Cor. 2 of Prop. 29, and no. 10, Prop. 36, Aut($\\mathfrak{g}$)",
+		want: []Citation{
+			{Raw: "Chap. III, §3, no. 8, Cor. 2 of Prop. 29", Form: FormAttached,
+				Chapter: "III", Section: 3, Subsec: 8,
+				Kind: corpus.KindCorollary, Number: 2,
+				ParentKind: corpus.KindProposition, ParentNumber: 29},
+			{Raw: "and no. 10, Prop. 36", Form: FormSection,
+				Chapter: "III", Section: 3, Subsec: 10,
+				Kind: corpus.KindProposition, Number: 36},
+		},
+	}, {
+		// The § in brackets after the statement instead of after an "of", which
+		// the page form has read since it was written. Left to fall through it is
+		// a bare Prop. 3 hunted for in § 4, which prints four Propositions, and a
+		// § 2 that nothing points at.
+		name: "a § in brackets after the statement",
+		in:   "The homomorphism $f(G,T)$ is surjective by Prop. 3 (§2, no. 4). We denote by",
+		want: []Citation{{Raw: "Prop. 3 (§2, no. 4)", Form: FormSection,
+			Section: 2, Subsec: 4, Kind: corpus.KindProposition, Number: 3}},
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Parse(tc.in, 1)
@@ -324,6 +428,52 @@ func TestThisBookIsNotSentOutOfTheCorpusByItsOwnName(t *testing.T) {
 		// one chapter, not because the Book is another Book.
 		if target.Book != "A" {
 			t.Errorf("%q resolved to Book %q, want A", name, target.Book)
+		}
+	}
+}
+
+// A run whose locator is written on its end leaves every member in front of it
+// bare, and the second reading is recorded against those and against nothing
+// else. The sentences are the two the volume writes either way: the first is the
+// exercise whose "Cor. 2 of Th. 1" belongs to § 6 along with the Prop. 4 beside
+// it, and the second is the exercise that has already cited Exerc. 10 twice as
+// one of its own §, where only the member the locator is written on belongs to
+// chapter VI.
+func TestALocatorOnTheEndOfARunIsReadAsASecondReading(t *testing.T) {
+	got := Parse("(use $c)$ as well as Cor. 2 of Th. 1 and Prop. 4 (§6, no. 2 and 3)).", 1)
+	if len(got) != 2 {
+		t.Fatalf("read %d citations: %+v", len(got), got)
+	}
+	// The reference as printed says no § and is still read that way.
+	if got[0].Raw != "Cor. 2 of Th. 1" || got[0].Section != 0 {
+		t.Fatalf("the first is %+v", got[0])
+	}
+	u := got[0].Under
+	if u == nil {
+		t.Fatal("the first has no second reading")
+	}
+	if u.Section != 6 || u.Subsec != 2 || u.Form != FormAttached ||
+		u.Kind != corpus.KindCorollary || u.Number != 2 ||
+		u.ParentKind != corpus.KindTheorem || u.ParentNumber != 1 {
+		t.Errorf("the second reading is %+v", *u)
+	}
+	// The member the locator was written on has nothing to be given.
+	if got[1].Under != nil {
+		t.Errorf("the member that wrote the § has a second reading %+v", *got[1].Under)
+	}
+
+	// Each member with a § of its own is left alone, since there is no one
+	// locator for the run to hand back.
+	for _, c := range Parse("use Exerc. 4 of §3 and Exerc. 11 of §5.", 1) {
+		if c.Under != nil {
+			t.Errorf("%q has a second reading %+v", c.Raw, *c.Under)
+		}
+	}
+	// Prose between the two breaks the run, so a statement named a few words
+	// later is not a member of it.
+	for _, c := range Parse("by Th. 1, and it follows from Prop. 6 of §3, no. 6 that", 1) {
+		if c.Under != nil {
+			t.Errorf("%q has a second reading %+v", c.Raw, *c.Under)
 		}
 	}
 }

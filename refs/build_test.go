@@ -3,6 +3,8 @@ package refs
 import (
 	"strings"
 	"testing"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
 // A reference belongs to the statement it is printed under, because that is
@@ -58,6 +60,39 @@ func TestEdgesHangOffTheStatementAbove(t *testing.T) {
 		if e.FromLabel == e.ToLabel {
 			t.Errorf("%s cites itself", e.FromLabel)
 		}
+	}
+}
+
+// The printed words stay printed and the graph is read out of the correction.
+// § 1 of the fixture prints one Theorem 1 and no Proposition 12, so the printed
+// sentence has nowhere to go and the corrected one resolves.
+func TestAReferenceIsReadOutOfTheCorrectedBody(t *testing.T) {
+	ix := testIndex()
+	const printed = "This follows from Proposition 12."
+	errata := []corpus.Erratum{{
+		Says: "Proposition 12", Read: "Theorem 1",
+		Why: "§ 1 prints eight statements and no Proposition 12.",
+	}}
+	if got := corrected(printed, errata); got != "This follows from Theorem 1." {
+		t.Fatalf("the corrected body is %q", got)
+	}
+
+	res := &Result{Counts: map[string]int{}, Forms: map[Form]int{}, Index: ix}
+	at := where{section: "alg-viii-s1"}
+	res.lines(ix, "s1.md", corrected(printed, errata), 1, func(int) where { return at })
+	if len(res.Edges) != 1 {
+		t.Fatalf("built %d edges: %+v", len(res.Edges), res.Edges)
+	}
+	if res.Edges[0].ToLabel != "alg-viii-s1-thm-1" {
+		t.Errorf("the edge points at %q", res.Edges[0].ToLabel)
+	}
+
+	// Read as printed it is a Proposition the § does not have, which is the
+	// finding the manifest of errata exists to answer.
+	res = &Result{Counts: map[string]int{}, Forms: map[Form]int{}, Index: ix}
+	res.lines(ix, "s1.md", printed, 1, func(int) where { return at })
+	if len(res.Unresolved) != 1 {
+		t.Fatalf("the printed sentence left %d unresolved: %+v", len(res.Unresolved), res.Unresolved)
 	}
 }
 

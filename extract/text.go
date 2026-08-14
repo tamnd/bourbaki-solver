@@ -135,7 +135,14 @@ func statementHead(s, caps string) string {
 func tokens(l Line) []token {
 	var toks []token
 	var accents []Run
-	for _, r := range unhat(composed(l.Runs)) {
+	runs := unhat(composed(l.Runs))
+	for i, r := range runs {
+		if section(runs, i) {
+			// The sign is a mark and not a formula. See section.
+			toks = append(toks, token{text: "§", class: ClassText,
+				left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom()})
+			continue
+		}
 		if _, ok := Accent(r.Spec, r.Text); ok {
 			accents = append(accents, r)
 			continue

@@ -143,7 +143,10 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 			if err := writeExercises(root, lang, p, files, &cx, tagOf, errataOf, used); err != nil {
 				return nil, nil, sum, err
 			}
-			f := sectionFile(*b, ch, p, lang, tagOf)
+			f, err := sectionFile(root, *b, ch, p, lang, tagOf, errataOf, used)
+			if err != nil {
+				return nil, nil, sum, err
+			}
 			path := corpus.SectionPath(root, lang, f.Meta)
 			out, err := f.Bytes()
 			if err != nil {
@@ -157,8 +160,8 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 				Title:         f.Meta.SectionTitle,
 				Path:          filepath.ToSlash(rel),
 				Label:         labelOf(b.Book, ch.Numeral, p),
-				FirstPDFPage:  p.First,
-				LastPDFPage:   p.Last,
+				FirstPDFPage:  p.First(),
+				LastPDFPage:   p.Last(),
 				BookPages:     f.Meta.BookPages,
 				Subsections:   len(p.Subsections),
 				Statements:    len(p.Statements),
@@ -170,7 +173,7 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 			sum.exercises += len(p.Exercises)
 			if verbose {
 				fmt.Printf("%-46s %4d-%-4d %3d no. %3d statements %3d exercises\n",
-					filepath.Base(path), p.First, p.Last, len(p.Subsections),
+					filepath.Base(path), p.First(), p.Last(), len(p.Subsections),
 					len(p.Statements), len(p.Exercises))
 			}
 		}
@@ -234,9 +237,11 @@ func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte
 	}
 	for _, e := range p.Exercises {
 		e.Meta.Tag = string(tagOf[e.Meta.Label])
-		if x, ok := errataOf[e.Meta.Label]; ok {
-			e.Meta.Errata, used[e.Meta.Label] = x, true
+		x, err := errataFor(root, e.Meta.Label, e.Body, errataOf, used)
+		if err != nil {
+			return err
 		}
+		e.Meta.Errata = x
 		f := corpus.ExerciseFile{Meta: e.Meta, Body: e.Body}
 		out, err := f.Bytes()
 		if err != nil {
@@ -260,6 +265,32 @@ func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte
 	cx.Total += len(p.Exercises)
 	cx.Section = append(cx.Section, sx)
 	return nil
+}
+
+// errataFor is the errata of one labelled file, checked against the body they
+// are about to be stamped on to.
+//
+// The label being right is half of it. An erratum quotes the words it is
+// correcting, and a quotation that is nowhere in the body is the same quiet
+// failure as a label nothing is called: the file is written with a correction on
+// it that names a sentence the page does not have. It matters more since the
+// reference graph is read out of the corrected body, where a quotation that
+// matches nothing leaves the reference exactly as broken as it was and says
+// nothing about it.
+func errataFor(root, label, body string, errataOf map[string][]corpus.Erratum,
+	used map[string]bool) ([]corpus.Erratum, error) {
+	x, ok := errataOf[label]
+	if !ok {
+		return nil, nil
+	}
+	for _, e := range x {
+		if !strings.Contains(body, e.Says) {
+			return nil, fmt.Errorf("%s: the erratum on %s corrects %q and the file does not say that",
+				corpus.ErrataPath(root), label, e.Says)
+		}
+	}
+	used[label] = true
+	return x, nil
 }
 
 // errataApplied stops the run when an erratum of a chapter this run assembled
@@ -293,8 +324,9 @@ func errataApplied(root string, m *corpus.ErrataManifest, lang, book string,
 }
 
 // sectionFile is one assembled piece as it goes to disk.
-func sectionFile(b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string,
-	tagOf map[string]tags.Tag) corpus.SectionFile {
+func sectionFile(root string, b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string,
+	tagOf map[string]tags.Tag, errataOf map[string][]corpus.Erratum,
+	used map[string]bool) (corpus.SectionFile, error) {
 	m := corpus.SectionFrontMatter{
 		Book:          b.Book,
 		BookTitle:     corpus.BookTitle(b.Book),
@@ -306,8 +338,8 @@ func sectionFile(b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string
 		Lang:          lang,
 		Source:        b.ID,
 		SourceEdition: b.Edition,
-		BookPages:     pageRange(p.FirstLabel, p.LastLabel),
-		PDFPages:      fmt.Sprintf("%04d-%04d", p.First, p.Last),
+		BookPages:     bookPages(p.Runs),
+		PDFPages:      pdfPages(p.Runs),
 		Extraction:    p.Extraction(),
 		Subsections:   p.Subsections,
 		Statements:    len(p.Statements),
@@ -319,7 +351,17 @@ func sectionFile(b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string
 	case p.Historical:
 		m.Kind, m.SectionTitle = corpus.KindHistorical, "Historical Note"
 	}
-	return corpus.SectionFile{Meta: m, Body: tags.Apply(p.Body, tagOf)}
+	body := tags.Apply(p.Body, tagOf)
+	// The front matter and the historical note carry no label, and an erratum is
+	// found by one, so there is nothing to look up for them.
+	if label := labelOf(b.Book, ch.Numeral, p); label != "" {
+		x, err := errataFor(root, label, body, errataOf, used)
+		if err != nil {
+			return corpus.SectionFile{}, err
+		}
+		m.Errata = x
+	}
+	return corpus.SectionFile{Meta: m, Body: body}, nil
 }
 
 func kindOf(p assemble.Piece) string {
@@ -351,6 +393,32 @@ func pageRange(first, last string) string {
 		return first
 	}
 	return first + "-" + last
+}
+
+// bookPages and pdfPages write the pages a piece occupies, one range per run and
+// the runs separated by a comma.
+//
+// A § of Lie 7 to 9 is printed twice over, its body where it belongs and its
+// exercises at the end of the chapter, so "A VIII.69-A VIII.84, A VIII.218-A
+// VIII.226" is what that § really occupies. Writing the outer bounds instead
+// would claim the hundred and thirty pages in between, which belong to the twelve
+// other §§ of the chapter.
+func bookPages(runs []assemble.Run) string {
+	out := make([]string, 0, len(runs))
+	for _, r := range runs {
+		if s := pageRange(r.FirstLabel, r.LastLabel); s != "" {
+			out = append(out, s)
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+func pdfPages(runs []assemble.Run) string {
+	out := make([]string, 0, len(runs))
+	for _, r := range runs {
+		out = append(out, fmt.Sprintf("%04d-%04d", r.First, r.Last))
+	}
+	return strings.Join(out, ", ")
 }
 
 // readPages reads every page of a volume.
