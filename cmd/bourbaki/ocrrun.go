@@ -535,7 +535,14 @@ func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 // them is the claim the milestone is judged on, so it is committed. The usage
 // file is appended to rather than replaced, because the interesting number is
 // how the fleet behaved over a week and not during the last run.
+//
+// A report with no book is one from a run cancelled before it read the volume
+// out of the queue, and it has nothing in it to publish. It used to be written
+// to reports/ocr-.json, one file that every such run overwrote.
 func writeOCRReport(root string, report ocr.Report) error {
+	if report.Book == "" {
+		return nil
+	}
 	directory := filepath.Join(root, "reports")
 	if err := os.MkdirAll(directory, 0o755); err != nil {
 		return err
