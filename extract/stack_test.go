@@ -351,3 +351,171 @@ func TestEachSumOfADoubleSumKeepsItsOwnBound(t *testing.T) {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// Page 18 of Topologie algébrique sets the fibre of a B-space as the inverse
+// image of a point, and Bourbaki writes the inverse image with the -1 over the
+// letter rather than after it. TeX draws the -1 first and the p across the
+// middle of it, so the runs come back as minus, p, one, and the page said
+// "$^-p^1(b)$". The minus is drawn from 131 to 141, the one from 141 to 147 and
+// the p from 135 to 143, so every piece of the script is drawn across the
+// letter, the two pieces touch, and the letter lies inside what they span.
+const inverseImagePage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="18" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="PYGVNS+LMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="QWXCLB+LMMathItalic10" color="#000000"/>
+<fontspec id="8" size="12" family="BXXFTB+LMMathSymbols8" color="#000000"/>
+<fontspec id="9" size="12" family="GTNDLC+LMRoman8" color="#000000"/>
+<text top="278" left="81" width="46" height="21" font="2">espace</text>
+<text top="274" left="131" width="10" height="11" font="8">&#8722;</text>
+<text top="282" left="135" width="8" height="15" font="3"><i>p</i></text>
+<text top="275" left="141" width="6" height="11" font="9">1</text>
+<text top="278" left="147" width="6" height="21" font="2">(</text>
+<text top="282" left="154" width="7" height="15" font="3"><i>b</i></text>
+<text top="278" left="161" width="6" height="21" font="2">)</text>
+<text top="278" left="172" width="16" height="21" font="2">de</text>
+<text top="278" left="193" width="12" height="21" font="2">X</text>
+<text top="278" left="210" width="88" height="21" font="2">est appelé la</text>
+</page>
+</pdf2xml>
+`
+
+func TestAnInverseImageIsPutBackOverItsLetter(t *testing.T) {
+	lines := parse(t, inverseImagePage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `espace $\overset{-1}{p}(b)$ de X est appelé la`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// The same line with the -1 written where an exponent goes. The minus now
+// begins where the p ends, so neither piece of the script is drawn across the
+// letter, and an exponent that says what it means is left saying it.
+const exponentPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="18" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="PYGVNS+LMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="QWXCLB+LMMathItalic10" color="#000000"/>
+<fontspec id="8" size="12" family="BXXFTB+LMMathSymbols8" color="#000000"/>
+<fontspec id="9" size="12" family="GTNDLC+LMRoman8" color="#000000"/>
+<text top="278" left="81" width="46" height="21" font="2">espace</text>
+<text top="282" left="131" width="8" height="15" font="3"><i>p</i></text>
+<text top="274" left="139" width="10" height="11" font="8">&#8722;</text>
+<text top="275" left="149" width="6" height="11" font="9">1</text>
+<text top="278" left="155" width="6" height="21" font="2">(</text>
+<text top="282" left="162" width="7" height="15" font="3"><i>b</i></text>
+<text top="278" left="169" width="6" height="21" font="2">)</text>
+</page>
+</pdf2xml>
+`
+
+func TestAnExponentAfterItsLetterIsLeftAlone(t *testing.T) {
+	lines := parse(t, exponentPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `espace $p^{-1}(b)$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Two letters each carrying an exponent of its own, which is the shape that
+// would be taken by a rule that asked only that the letter lie between two
+// superscripts. The i ends at 139 and the j begins at 147, so the two stand
+// eight units apart, which is a letter's width and not the nothing the halves
+// of one script stand apart by.
+const twoExponentsPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="18" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="3" size="16" family="QWXCLB+LMMathItalic10" color="#000000"/>
+<fontspec id="9" size="12" family="GTNDLC+LMRoman8" color="#000000"/>
+<text top="282" left="123" width="8" height="15" font="3"><i>a</i></text>
+<text top="275" left="133" width="6" height="11" font="9">2</text>
+<text top="282" left="139" width="8" height="15" font="3"><i>b</i></text>
+<text top="275" left="147" width="6" height="11" font="9">3</text>
+</page>
+</pdf2xml>
+`
+
+func TestTwoLettersEachWithAnExponentAreLeftAlone(t *testing.T) {
+	lines := parse(t, twoExponentsPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `$a^2b^3$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Page 379 of Topologie algébrique prints the inverse image of p sub n, and the
+// -1 is drawn across the pair: the minus starts at 290 where the p starts, the
+// one ends at 306 where the n ends, and the n sits at 298 to 306 squarely under
+// the one. An index the script covers belongs inside the script with the letter.
+const indexUnderPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="379" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="PYGVNS+LMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="QWXCLB+LMMathItalic10" color="#000000"/>
+<fontspec id="7" size="12" family="SQGJWG+LMMathItalic8" color="#000000"/>
+<fontspec id="8" size="12" family="BXXFTB+LMMathSymbols8" color="#000000"/>
+<fontspec id="9" size="12" family="GTNDLC+LMRoman8" color="#000000"/>
+<text top="149" left="206" width="78" height="21" font="2">parcourant</text>
+<text top="146" left="290" width="10" height="11" font="8">&#8722;</text>
+<text top="154" left="290" width="8" height="15" font="3"><i>p</i></text>
+<text top="159" left="298" width="8" height="11" font="7"><i>n</i></text>
+<text top="147" left="300" width="6" height="11" font="9">1</text>
+<text top="149" left="307" width="6" height="21" font="2">(</text>
+<text top="154" left="313" width="7" height="15" font="3"><i>c</i></text>
+<text top="149" left="320" width="6" height="21" font="2">)</text>
+</page>
+</pdf2xml>
+`
+
+func TestAnIndexTheScriptIsDrawnOverGoesUnderIt(t *testing.T) {
+	lines := parse(t, indexUnderPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `parcourant $\overset{-1}{p_{n}}(c)$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Page 260 of the same volume prints the inverse image of phi sub 1, and the -1
+// is drawn across the phi alone: the minus starts at 95 and the one ends at 111,
+// where the phi ends at 109, and the index sits at 111 to 117, clear of the end
+// of the script. An index the script stops short of goes after it, which is
+// where the page drew it.
+const indexAfterPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="260" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="PYGVNS+LMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="QWXCLB+LMMathItalic10" color="#000000"/>
+<fontspec id="8" size="12" family="BXXFTB+LMMathSymbols8" color="#000000"/>
+<fontspec id="9" size="12" family="GTNDLC+LMRoman8" color="#000000"/>
+<text top="653" left="81" width="8" height="21" font="2">a</text>
+<text top="650" left="95" width="10" height="11" font="8">&#8722;</text>
+<text top="657" left="98" width="11" height="15" font="3"><i>&#981;</i></text>
+<text top="651" left="105" width="6" height="11" font="9">1</text>
+<text top="665" left="111" width="6" height="11" font="9">1</text>
+<text top="653" left="119" width="57" height="21" font="2">(0) = A</text>
+</page>
+</pdf2xml>
+`
+
+func TestAnIndexTheScriptStopsShortOfGoesAfterIt(t *testing.T) {
+	lines := parse(t, indexAfterPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `a $\overset{-1}{\varphi}_{1}(0) = A$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}

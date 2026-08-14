@@ -1,5 +1,10 @@
 package extract
 
+import (
+	"strings"
+	"unicode"
+)
+
 // A text layer has no rows in it. TeX sets a superscript and a subscript at the
 // same place on the line, one over the other, and pdftohtml reports the runs of
 // a page left to right, so a stack comes back interleaved. The -1 of an inverse
@@ -254,6 +259,255 @@ func gap(a, b token) int {
 		return -d
 	}
 	return d
+}
+
+// overset puts back the script Bourbaki draws over a symbol rather than after
+// it.
+//
+// The inverse image of a set is written with the -1 centred above the symbol,
+// and Topologie algébrique and Théories spectrales write it on nearly every
+// page: 444 of them across the two, against 2 in Algebra VIII. TeX draws the -1
+// first and the symbol across the middle of it, so the page hands back minus,
+// letter, one, and reading that left to right gives ^-p^1, where the page
+// printed the inverse image of p. Some of those are legal TeX and set as
+// nonsense; the rest are a second superscript on the same base and KaTeX
+// refuses them by name.
+//
+// restack cannot see it. It reads a cluster of scripts and this is not one: the
+// letter in the middle is on the line, at no level and at no depth, and restack
+// cuts the token list at every token that is.
+//
+// Where restack does see it, it reads it wrong and says nothing, which is worse.
+// Page 318 of Topologie algébrique writes the inverse image of o sub B, and the
+// -1 is wide enough to reach past the o, so the page draws the o first and then
+// the minus, the B and the one. Those last three are a cluster, they interleave,
+// and restack put them together as o^{-1}_B, which is good TeX for the inverse
+// of a function where the page printed the inverse image of a set.
+//
+// The two are told apart by where the script is centred, which is the only
+// thing that ever told them apart on paper either. An exponent is set after the
+// symbol and begins where the symbol ends. A script drawn over the symbol is
+// centred on it and spans the whole of it, the index included: page 318
+// measures o at 517 to 525 and its B at 525 to 534, and the minus and the one
+// span 518 to 534, which covers both. Page 481 of Algebra VIII measures theta
+// at 468 to 475 and its E at 475 to 483, and its minus and one span 475 to 490,
+// which covers neither. So the question asked is whether the symbol lies inside
+// what the script spans, and the answer is a measurement rather than a guess.
+//
+// The pieces of the script have to touch each other across the break the symbol
+// made in it, since they were one piece before it was drawn through them. That
+// is what refuses a^2b^3, where the b lies between two superscripts and inside
+// what they span and they stand a letter's width apart.
+//
+// A piece of the script has to be drawn across the symbol, give or take the
+// overhang one glyph box carries past another, which is what refuses the
+// exponent of the letter before. Page 38 sets the inverse image of f prime, and
+// f is a narrow box with a wide reach: the minus lies over the whole of it and
+// the one begins a single unit past its right edge, so the overhang is asked for
+// here for the same reason within asks for it.
+func overset(toks []token) []token {
+	out := make([]token, 0, len(toks))
+	for i := 0; i < len(toks); i++ {
+		script, under, after, at, end := laid(toks, i)
+		if end == 0 {
+			out = append(out, toks[i])
+			continue
+		}
+		out = append(out, drawn(script, toks[at], under, after))
+		i = end - 1
+	}
+	return out
+}
+
+// laid gathers the script drawn over the symbol that begins at i, the index the
+// symbol carries under it, where the symbol itself is and where the whole of it
+// ends. It gives an end of 0 where the tokens at i are not such a script.
+func laid(toks []token, i int) (script, under, after []token, at, end int) {
+	// Part of the script has to be drawn before the symbol. Nothing else on a
+	// page is: an exponent is set after the base it belongs to and a text layer
+	// reports a page in the order it is drawn, so a superscript standing in
+	// front of a symbol on the line is a superscript that was cut in half by
+	// something laid through it. That is the whole of what this reads, and it is
+	// a fact about the drawing rather than a threshold. See the head of the file
+	// for the shape it therefore leaves alone.
+	at = i
+	for at < len(toks) && toks[at].depth == 1 && toks[at].level == Sup {
+		at++
+	}
+	if at == i || at >= len(toks) {
+		return nil, nil, nil, 0, 0
+	}
+	b := toks[at]
+	// The symbol is on the line. A symbol at a level is an interleaved cluster,
+	// which is restack's, and one at depth inside a cluster is nobody's.
+	if b.depth != 0 || b.level != Base {
+		return nil, nil, nil, 0, 0
+	}
+	// A large operator carries limits and not a script drawn over it, and hoist
+	// has already put it in front of the limit written across it. Four pages of
+	// chapter VIII print a sum under a sum and the two limits land at the same
+	// place on the line, one read as above it and one as below, which is a sign
+	// with superscripts on both sides of it and inside what they span. restack
+	// leaves that alone on purpose, since merging the limits would write one of
+	// them out twice and say nothing about the two lines that were run together,
+	// and writing a script over the sign would be the same lie in another hand.
+	if b.sign {
+		return nil, nil, nil, 0, 0
+	}
+	for _, t := range toks[i:at] {
+		if !overlaid(t, b) {
+			return nil, nil, nil, 0, 0
+		}
+	}
+	script = append(script, toks[i:at]...)
+	// Everything the page draws after the symbol at the depth of the script
+	// belongs to the symbol, since a symbol on the line is what ends a run of
+	// scripts and begins the next, so the whole of the run is read and the
+	// superscripts in it are the rest of the script. It is read whole and not
+	// piece by piece because the far half of the script is drawn over the index
+	// rather than over the letter: page 318 draws the one of its -1 clear of the
+	// o and squarely over the B, and a walk that asked each piece whether it lay
+	// over the letter stopped at it and left the page saying o^{-1}_B.
+	//
+	// A script of a script is refused rather than flattened. Nothing in the six
+	// volumes writes one under an inverse image, and rebuilding one here would
+	// mean guessing at where its braces close.
+	var kept []token
+	end = at + 1
+	for end < len(toks) && toks[end].depth >= 1 {
+		if toks[end].depth > 1 {
+			return nil, nil, nil, 0, 0
+		}
+		if toks[end].level == Sup {
+			script = append(script, toks[end])
+		} else {
+			kept = append(kept, toks[end])
+		}
+		end++
+	}
+	// The script was cut in two by the symbol drawn through it, so there is a
+	// piece of it on each side. A script with nothing after the symbol is a
+	// superscript that ended where the symbol began, which is where a superscript
+	// is supposed to end.
+	//
+	// The symbol also has to occupy space, since nothing can be laid through a
+	// thing that takes up none. The arrows of the commutative diagrams are drawn
+	// out of the XY fonts and every one of them is reported a box of no width at
+	// all, so an arrow standing after the label written over it read as a label
+	// the arrow had been laid through, and three wrecked diagrams of chapter VIII
+	// came back saying \overset{u}{/}.
+	if len(script) == len(toks[i:at]) || b.right <= b.left {
+		return nil, nil, nil, 0, 0
+	}
+	for n := 1; n < len(script); n++ {
+		if script[n].left-script[n-1].right > restackGap {
+			return nil, nil, nil, 0, 0
+		}
+	}
+	// An index of the symbol is under the script or after it. Page 379 sets the
+	// -1 of its inverse image across the whole of p sub n, and page 260 sets the
+	// -1 of its inverse image of phi sub 1 across the phi alone, with the 1 six
+	// units clear of the end of it. The first is one symbol with a script over
+	// it and the second is a symbol with a script over it carrying an index, and
+	// the page says which by where it drew the index.
+	span := [2]int{script[0].left, script[len(script)-1].right}
+	for _, t := range kept {
+		if within([2]int{t.left, t.right}, span) {
+			under = append(under, t)
+		} else {
+			after = append(after, t)
+		}
+	}
+	body := [2]int{b.left, b.right}
+	for _, t := range under {
+		body = [2]int{min(body[0], t.left), max(body[1], t.right)}
+	}
+	if !within(body, span) {
+		return nil, nil, nil, 0, 0
+	}
+	return script, under, after, at, end
+}
+
+// overlaid reports whether a token is drawn across the symbol it stands against
+// rather than beside it, give or take the overhang one glyph box carries past
+// the other.
+func overlaid(t, b token) bool { return lap(t, b) > -overhang }
+
+// abut writes a piece of a script on to the end of the one before it. The
+// pieces are set side by side on the page and the text of them goes together
+// the same way, except where the join would change what it joins: a control
+// word runs on into a letter after it and stops being the word it was. The
+// display on page 359 of Lie 7 to 9 writes 1 tensor Ch over its arrow, and the
+// three pieces of that put end to end say \otimesCh, which is not a command
+// any renderer has. TeX ends a control word at the first character that cannot
+// be part of one, so a space is all that is wanted, and a space between two
+// pieces of mathematics sets as nothing.
+func abut(w *strings.Builder, text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	if s := w.String(); s != "" && unicode.IsLetter(rune(text[0])) {
+		if i := strings.LastIndexByte(s, '\\'); i >= 0 && word(s[i+1:]) {
+			w.WriteByte(' ')
+		}
+	}
+	w.WriteString(text)
+}
+
+// word reports whether what follows a backslash is a control word rather than
+// a control symbol. Only a word runs on: \, and \{ end at the character they
+// are made of and take no space after them.
+func word(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsLetter(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// drawn writes the symbol with the script over it, out of the pieces the page
+// drew each of them in.
+func drawn(script []token, b token, under, after []token) token {
+	var s, u, a strings.Builder
+	for _, t := range script {
+		abut(&s, t.text)
+	}
+	// An index the script is drawn over goes under the script with the letter,
+	// and one the script stops short of goes after it, because that is where the
+	// page put them. Page 379 prints the inverse image of p sub n with the -1
+	// spanning the pair exactly, and page 260 prints the inverse image of phi
+	// sub 1 with the -1 over the phi and the 1 clear of it to the right.
+	for _, t := range under {
+		abut(&u, t.text)
+	}
+	for _, t := range after {
+		abut(&a, t.text)
+	}
+	body := strings.TrimSpace(b.text)
+	if u.Len() > 0 {
+		body += `_{` + u.String() + `}`
+	}
+	// The whole of it is mathematics whatever the symbol was set in. The p of
+	// the inverse image comes out of the mathematics italic and the bracket after
+	// it out of the roman, and the roman is what a base level letter of a French
+	// page is more often than not.
+	b.text = `\overset{` + s.String() + `}{` + body + `}`
+	if a.Len() > 0 {
+		b.text += `_{` + a.String() + `}`
+	}
+	b.class, b.math = ClassMath, true
+	// The cluster keeps the reach it had, for the reason levels keeps it: what
+	// stands on either side measures its distance from the edge of the token,
+	// and the script reaches further to both sides than the symbol does.
+	for _, t := range append(append(append([]token(nil), script...), under...), after...) {
+		b.left, b.right = min(b.left, t.left), max(b.right, t.right)
+	}
+	return b
 }
 
 // restack puts the clusters of a line back into their levels.

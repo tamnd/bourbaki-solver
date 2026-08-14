@@ -45,6 +45,7 @@ type token struct {
 func Render(l Line) string {
 	toks := tokens(l)
 	toks = hoist(toks, l.Top, l.Bottom)
+	toks = overset(toks)
 	toks = restack(toks)
 	toks = extend(toks)
 	return statementHead(emit(toks), capsOpen(toks))
