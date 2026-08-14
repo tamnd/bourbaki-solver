@@ -17,6 +17,14 @@ func blocks(texts ...string) []block {
 
 var vii = corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1}
 
+func texts(bs []block) []string {
+	out := make([]string, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, b.text)
+	}
+	return out
+}
+
 func labels(ss []corpus.Statement) []string {
 	out := make([]string, 0, len(ss))
 	for _, s := range ss {
@@ -230,6 +238,11 @@ func TestItemOpenOnRealMarkers(t *testing.T) {
 		`$*19)$ Let A be an Artinian ring.`,
 		`$*\P 12)$ Let G be a finite group.`,
 		"12)$ Show that the ring A is simple.",
+		"**7)** Let E be a finite dimensional s-module.",
+		`$\P$ 13) Assume that $k=\mathbf{C}$.`,
+		"¶ **9)** Consider the operation of s on its enveloping algebra.",
+		"**¶5)** Assume that g is semi-simple.",
+		`$7)^*$Let $d_1, . . . , d_l$ be the characteristic degrees.`,
 	} {
 		if !itemOpen(s) {
 			t.Errorf("itemOpen(%q) = false", s)
@@ -334,12 +347,34 @@ func TestExercisesReadsTheMarks(t *testing.T) {
 	}
 }
 
-// A block after the exercises heading that is not exercise 1 means the § was
-// cut in the wrong place, and a wrong cut is not something to write out.
-func TestExercisesRefusesToOpenOnAnythingButOne(t *testing.T) {
-	in := blocks("### Exercises", "2) Let A be a ring.")
-	if _, err := exercises(in, printings["en"]); err == nil {
-		t.Fatal("exercises opening on 2 should be an error")
+// What stands between the heading and exercise 1 is the preamble, and it stays
+// in the section rather than going into the first exercise. Lie 7 to 9 prints
+// one over most of its runs and Algebra VIII prints none.
+func TestThePreambleIsNotPartOfExerciseOne(t *testing.T) {
+	in := blocks("### Exercises", "The notations are those of nos. 1, 2, 3 of § 4.", "1) Let A be a ring.")
+	got, err := exercises(in, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("read %d exercises, want 1", len(got))
+	}
+	if strings.Contains(got[0].Body, "The notations") {
+		t.Errorf("the preamble went into exercise 1: %q", got[0].Body)
+	}
+	out := cutExercises(in, 1, false, printings["en"])
+	if len(out) != 3 || !strings.HasPrefix(out[1].text, "The notations") {
+		t.Errorf("the preamble did not stay in the section: %v", texts(out))
+	}
+}
+
+// A run the reader never gets past the preamble of is a run whose first marker
+// was misread, and a wrong cut is not something to write out. The heading alone
+// satisfies the table of contents, so the count is what has to be checked.
+func TestARunWithNoExerciseReadOutOfItIsRefused(t *testing.T) {
+	p := Piece{Section: corpus.Section{Number: 1, Exercises: &corpus.Locator{PDFPage: 60}}, HasExercise: true}
+	if err := p.Verify(); err == nil {
+		t.Fatal("a § whose exercises were all read as preamble should be an error")
 	}
 }
 

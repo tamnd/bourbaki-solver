@@ -225,8 +225,17 @@ type Ref struct {
 	ParentKind   Kind
 	ParentNumber int
 
-	Subsec     int // the no. it stands in, set when the Kind is counted within one and for every unnumbered statement
-	Occurrence int // 1-based place within Subsec, only when Number is 0
+	Subsec int // the no. it stands in, set when the Kind is counted within one and for every unnumbered statement
+
+	// Occurrence is the 1-based place of an unnumbered statement among its own
+	// kind in the no., and is set only when Number is 0.
+	//
+	// It counts past the numbered ones rather than starting again at 1, because
+	// the two end up in the same shape of label and a no. can hold both: § 5 no.
+	// 1 of chapter VII of Lie 7 to 9 prints "Remarks. 1) ... 2) ..." and then,
+	// four paragraphs later, a bare "Remark." That last one is the third remark
+	// of the no. and is named so.
+	Occurrence int
 }
 
 // Label builds the permanent full label for a statement, the string that

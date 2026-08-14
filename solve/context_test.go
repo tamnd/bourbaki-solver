@@ -102,8 +102,14 @@ lang: en
 	}
 	ex(1, "0003", "The first exercise says nothing of interest.")
 	ex(2, "0004", "The second exercise cites VIII, p. 12, which names a page and no statement.")
+	// The forward citation stands in a sentence of its own, because a statement
+	// written straight after a locator and joined to it by "and" is a member of
+	// the same list and is read as one: "cf. §3, no. 4 and Exerc. 3" is exercise
+	// 3 of § 3 and not of the § doing the citing. Left in the list, the fourth
+	// exercise here would be the fourth exercise of the § that VIII, p. 9 falls
+	// in, which is § 2 and has one.
 	ex(3, "0005", "The third cites Proposition 1 of this section, and VIII, p. 9, Proposition 1, "+
-		"and Exercise 4 of this section, and Set Theory, III, §2, No. 4, p. 155.")
+		"and Set Theory, III, §2, No. 4, p. 155. It cites Exercise 4 of this section too.")
 	ex(4, "0006", "The fourth exercise is printed after the third and is cited by it.")
 	return root
 }

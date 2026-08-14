@@ -49,7 +49,13 @@ type SectionFrontMatter struct {
 	Statements      int          `yaml:"statements"`
 	Exercises       int          `yaml:"exercises"`
 	Tags            []string     `yaml:"tags,omitempty"`
-	ContentSHA256   string       `yaml:"content_sha256"`
+	// Errata are the printing's errors in the body of this §, under the § label
+	// rather than under the statement they fall in. A § is one file and the
+	// correction has to be found from the file, and a misprint is as often in the
+	// prose between two statements as in a statement: § 5 of chapter VIII says
+	// "Chap. VII, §13, no. 1" in a paragraph belonging to no statement at all.
+	Errata        []Erratum `yaml:"errata,omitempty"`
+	ContentSHA256 string    `yaml:"content_sha256"`
 
 	// Set only on a translation. TranslatedFrom is the path of the English
 	// file and SourceSHA256 is its content_sha256 at the time of translation.

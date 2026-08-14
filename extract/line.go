@@ -616,6 +616,28 @@ func across(r Run, runs []Run) bool {
 // else, so the sign is drawn there rather than set.
 func bend(r Run) bool { return family(r.Spec) == "BOUR" && strings.TrimSpace(r.Text) == "Z" }
 
+// section reports whether a run is the section sign standing as the mark of the
+// book rather than a glyph that came back wrong.
+//
+// TeX keeps \S in the mathematics symbol font, so a volume that prints §§ draws
+// them out of a family this reads as mathematics, and Lie 7 to 9 shipped 1268
+// cross references inside dollar signs on the strength of it: "$§1$", "$I,§6$",
+// "$(§2$", and every § heading of the volume written "$§$" and so set at the
+// wrong level. The sign is a mark of the book and never an operator.
+//
+// A § carrying an index is the exception, and there is one in the six volumes.
+// Page 363 of Topologie 1 to 4 writes the fundamental group of the circle,
+// \pi_1(S_1,1), and the S comes back from that page as a §. That one is inside
+// a formula and taking it out of the dollars would cut the formula in two,
+// where leaving it is a wrong letter in a formula that still parses. A citation
+// never subscripts its §, so the index is what tells them apart.
+func section(runs []Run, i int) bool {
+	if strings.TrimSpace(runs[i].Text) != "§" {
+		return false
+	}
+	return i+1 >= len(runs) || runs[i+1].Level == Base
+}
+
 // offband reports whether a run is drawn out of proportion to the line it
 // stands on and so can say nothing about where that line sits or how deep
 // anything beside it is nested.

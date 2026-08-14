@@ -121,7 +121,7 @@ func (res *Result) file(ix *Index, root, path string) error {
 			return fmt.Errorf("%s: %w", rel, err)
 		}
 		at := where{section: ref.SectionLabel(), label: f.Meta.Label, tag: f.Meta.Tag}
-		res.lines(ix, rel, f.Body, headLines(b, f.Body), func(int) where { return at })
+		res.lines(ix, rel, corrected(f.Body, f.Meta.Errata), headLines(b, f.Body), func(int) where { return at })
 		return nil
 	}
 	f, err := corpus.ParseFile[corpus.SectionFrontMatter](b)
@@ -132,8 +132,9 @@ func (res *Result) file(ix *Index, root, path string) error {
 		Book: f.Meta.Book, Chapter: f.Meta.Chapter, Section: f.Meta.Section, Appendix: f.Meta.Appendix,
 	}.SectionLabel()
 	at := where{section: sec}
-	lines := strings.Split(f.Body, "\n")
-	res.lines(ix, rel, f.Body, headLines(b, f.Body), func(i int) where {
+	body := corrected(f.Body, f.Meta.Errata)
+	lines := strings.Split(body, "\n")
+	res.lines(ix, rel, body, headLines(b, f.Body), func(i int) where {
 		switch m := statementRE.FindStringSubmatch(lines[i]); {
 		case m != nil:
 			at = where{section: sec, label: m[1], tag: m[2]}
@@ -151,6 +152,28 @@ func (res *Result) file(ix *Index, root, path string) error {
 		return at
 	})
 	return nil
+}
+
+// corrected is the body a reference is read out of, which is the printed body
+// with the errata of the file applied to it.
+//
+// The corpus transcribes a printing and keeps the printed words even where they
+// are wrong, and the correction goes in the front matter beside them. That is
+// right for a reader holding the book and wrong for a graph: § 10 of chapter
+// VIII prints no corollary under its Theorem 1, both corollaries stand under
+// Theorem 2, and four exercises cite "Cor. 2 of Th. 1". Read as printed those
+// four point at nothing and are reported four times over as a corollary the
+// corpus is missing, which it is not; the manifest already says what the
+// reference has to say to point where it means, so it is what the graph reads.
+//
+// The substitution is textual and stays on the line it was made on, since an
+// erratum corrects words inside one sentence and the corpus writes a paragraph
+// on one line. So the line a finding is reported at is still the file's own.
+func corrected(body string, errata []corpus.Erratum) string {
+	for _, e := range errata {
+		body = strings.ReplaceAll(body, e.Says, e.Read)
+	}
+	return body
 }
 
 // lines walks a body and resolves what each line cites. at is asked which

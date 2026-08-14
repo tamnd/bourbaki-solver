@@ -27,17 +27,57 @@ type Index struct {
 	tagOf    map[string]string
 }
 
-// Section is one § or Appendix, with the run of printed pages it occupies.
+// Section is one § or Appendix, with the runs of printed pages it occupies.
 type Section struct {
 	Label   string
+	Book    string // the Book as a label writes it, "alg" or "lie"
 	Chapter string
-	First   int // the first page the book prints it on, within the chapter
-	Last    int
+	// Number is the § number, and Appendix says whether that number counts
+	// appendices rather than §§. They are here because the other citation
+	// printing names a § by its number and not by a page it is printed on.
+	Number   int
+	Appendix bool
+	// Runs are the stretches of printed pages the § occupies, in order. Nearly
+	// every § is one run. A § of Lie 7 to 9 is two, because that volume gathers
+	// a chapter's exercises at its end: § 1 of chapter VIII is printed on pages
+	// 69 to 84 and again on 218 to 226, with twelve other §§ in between. Holding
+	// the outer bounds instead would put every page of the chapter in every § at
+	// once, and no citation to a page would resolve.
+	Runs    []Run
 	Subsecs []Subsec
 	// Exercises is how many the § has, which is all that is needed to say
 	// whether Exercise 9 of this § exists.
 	Exercises  int
 	Statements []*Statement
+}
+
+// Run is a stretch of printed pages, both ends included.
+type Run struct{ First, Last int }
+
+// Holds reports whether the page falls in any run of the section.
+func (s *Section) Holds(page int) bool {
+	for _, r := range s.Runs {
+		if r.First <= page && page <= r.Last {
+			return true
+		}
+	}
+	return false
+}
+
+// First is the page the § opens on, and Last the page it ends on, which is the
+// last page of its last run and not of its first.
+func (s *Section) First() int {
+	if len(s.Runs) == 0 {
+		return 0
+	}
+	return s.Runs[0].First
+}
+
+func (s *Section) Last() int {
+	if len(s.Runs) == 0 {
+		return 0
+	}
+	return s.Runs[len(s.Runs)-1].Last
 }
 
 // Subsec is a no. and the page it starts on.
@@ -239,10 +279,15 @@ func section(root, lang string, rec corpus.SectionRecord, swap bool) (*Section, 
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", rel, err)
 	}
-	s := &Section{Label: rec.Label, Chapter: f.Meta.Chapter}
-	if m := pageRangeRE.FindAllStringSubmatch(rec.BookPages, -1); len(m) > 0 {
-		s.First, _ = strconv.Atoi(m[0][2])
-		s.Last, _ = strconv.Atoi(m[len(m)-1][2])
+	s := &Section{Label: rec.Label, Book: f.Meta.Book, Chapter: f.Meta.Chapter,
+		Number: f.Meta.Section, Appendix: f.Meta.Appendix}
+	// The pages come in pairs, one pair per run, because that is how the front
+	// matter writes them: "A VIII.69-A VIII.84, A VIII.218-A VIII.226".
+	m := pageRangeRE.FindAllStringSubmatch(rec.BookPages, -1)
+	for i := 0; i+1 < len(m); i += 2 {
+		first, _ := strconv.Atoi(m[i][2])
+		last, _ := strconv.Atoi(m[i+1][2])
+		s.Runs = append(s.Runs, Run{First: first, Last: last})
 	}
 	for _, sub := range f.Meta.Subsections {
 		s.Subsecs = append(s.Subsecs, Subsec{No: sub.Number, Page: sub.Page})
@@ -278,8 +323,12 @@ func section(root, lang string, rec corpus.SectionRecord, swap bool) (*Section, 
 			follows = r
 		}
 	}
-	if first, last, ok := pdfRange(f.Meta.PDFPages); ok {
-		placePages(s, headings, readLeads(root, f.Meta.Source, first, last))
+	var leads []lead
+	for _, r := range pdfRuns(f.Meta.PDFPages) {
+		leads = append(leads, readLeads(root, f.Meta.Source, r.First, r.Last)...)
+	}
+	if len(leads) > 0 {
+		placePages(s, headings, leads)
 	}
 	return s, nil
 }
@@ -305,17 +354,23 @@ func printedAs(line string, r corpus.Ref) lead {
 
 var pdfRangeRE = regexp.MustCompile(`^(\d+)-(\d+)$`)
 
-// pdfRange is the run of PDF pages a § was assembled from, which is where its
-// statement leads are to be read. It is written in the front matter as
-// "0228-0245".
-func pdfRange(s string) (int, int, bool) {
-	m := pdfRangeRE.FindStringSubmatch(strings.TrimSpace(s))
-	if m == nil {
-		return 0, 0, false
+// pdfRuns are the runs of PDF pages a § was assembled from, which is where its
+// statement leads are to be read. The front matter writes them as "0228-0245",
+// or as "0077-0092, 0226-0234" for a § the volume printed in two places.
+func pdfRuns(s string) []Run {
+	var out []Run
+	for _, part := range strings.Split(s, ",") {
+		m := pdfRangeRE.FindStringSubmatch(strings.TrimSpace(part))
+		if m == nil {
+			continue
+		}
+		first, _ := strconv.Atoi(m[1])
+		last, _ := strconv.Atoi(m[2])
+		if first > 0 && last >= first {
+			out = append(out, Run{First: first, Last: last})
+		}
 	}
-	first, _ := strconv.Atoi(m[1])
-	last, _ := strconv.Atoi(m[2])
-	return first, last, first > 0 && last >= first
+	return out
 }
 
 // fathers says whether a statement is one an unnumbered corollary below it can
@@ -348,22 +403,52 @@ func subsecHeading(line string) (int, bool) {
 	return n, true
 }
 
-// SectionAt is the § the book prints on a page of the chapter.
+// SectionAt is the § the book prints on a page of a chapter.
 //
-// The page ranges of chapter VIII do not overlap: of the 467 pages the sections
-// span, 456 fall in exactly one and 11 in none, those being the leaves between
-// one § and the next. So this returns at most one section, and the ambiguity
-// spec 05 §4 anticipated is not one this chapter has. A chapter that does have
-// it will come back through here as two candidates and be reported.
-func (ix *Index) SectionAt(chapter string, page int) []*Section {
+// The Book is asked as well as the chapter, and has to be, because the corpus
+// now holds two chapters VIII: Algebra VIII and Lie VIII. On the chapter alone,
+// every page citation either chapter makes came back with two candidates and
+// resolved to nothing, 606 of them.
+//
+// The page ranges within a chapter do not overlap: of the 467 pages the sections
+// of Algebra VIII span, 456 fall in exactly one and 11 in none, those being the
+// leaves between one § and the next. So this returns at most one section, and
+// the ambiguity spec 05 §4 anticipated is not one these chapters have. A chapter
+// that does have it will come back through here as two candidates and be
+// reported.
+func (ix *Index) SectionAt(book, chapter string, page int) []*Section {
 	var out []*Section
 	for i := range ix.Sections {
 		s := &ix.Sections[i]
-		if s.Chapter == chapter && s.First <= page && page <= s.Last {
+		if s.Book == book && s.Chapter == chapter && s.Holds(page) {
 			out = append(out, s)
 		}
 	}
 	return out
+}
+
+// SectionIn is a § of a chapter by its number, which is how the other citation
+// printing names one. It is a plainer lookup than SectionAt and cannot be
+// ambiguous: a chapter has one § 2, where a page can belong to two §§ at once
+// because the second of them began part way down it.
+func (ix *Index) SectionIn(book, chapter string, n int, appendix bool) *Section {
+	for i := range ix.Sections {
+		s := &ix.Sections[i]
+		if s.Book == book && s.Chapter == chapter && s.Number == n && s.Appendix == appendix {
+			return s
+		}
+	}
+	return nil
+}
+
+// Holds reports whether the corpus has any of this Book in it.
+func (ix *Index) Holds(book string) bool {
+	for i := range ix.Sections {
+		if ix.Sections[i].Book == book {
+			return true
+		}
+	}
+	return false
 }
 
 // Statements is every statement of a § with this kind and number. More than one

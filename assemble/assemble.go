@@ -25,6 +25,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 )
@@ -37,15 +38,40 @@ type Piece struct {
 	Front      bool // what stands before § 1: the chapter title and its preamble
 	Historical bool // the historical note at the end of the chapter
 
-	First, Last           int    // the PDF pages it runs over
-	FirstLabel, LastLabel string // the pages the book prints on those
-	Methods               []corpus.PageMethod
+	// Runs are the stretches of pages the piece is made of, in printed order.
+	// Nearly every piece is one run, and a § whose exercises the chapter gathered
+	// at its end is two. See span.
+	Runs    []Run
+	Methods []corpus.PageMethod
 
 	Body        string
 	Subsections []corpus.Subsection
 	Statements  []corpus.Statement
 	Exercises   []corpus.Exercise
 	HasExercise bool // the § carries a block of exercises
+}
+
+// Run is one stretch of pages a piece is made of, by PDF page and by the page
+// the book prints on it.
+type Run struct {
+	First, Last           int
+	FirstLabel, LastLabel string
+}
+
+// First and Last are the PDF pages the piece opens and ends on. Between them
+// can lie pages of another piece, which is why they are not the piece.
+func (p Piece) First() int {
+	if len(p.Runs) == 0 {
+		return 0
+	}
+	return p.Runs[0].First
+}
+
+func (p Piece) Last() int {
+	if len(p.Runs) == 0 {
+		return 0
+	}
+	return p.Runs[len(p.Runs)-1].Last
 }
 
 // Name is what the piece is called in a message.
@@ -106,24 +132,32 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 	if err != nil {
 		return nil, err
 	}
-	marks, err := marks(ch, pages, pr)
+	out, spans, err := marks(ch, pages, pr)
 	if err != nil {
 		return nil, err
 	}
-	last := chapterEnd(ch, pages)
-	out := make([]Piece, 0, len(marks))
-	for i, m := range marks {
-		end := mark{page: last + 1}
-		if i+1 < len(marks) {
-			end = marks[i+1]
+	last := chapterEnd(ch, pages, pr)
+	runs := make([][][]part, len(out))
+	for i, s := range spans {
+		end := span{page: last + 1}
+		if i+1 < len(spans) {
+			end = spans[i+1]
 		}
-		parts, err := slice(pages, m, end)
+		parts, err := slice(pages, s, end)
 		if err != nil {
-			return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, m.piece.Name(), err)
+			return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, out[s.piece].Name(), err)
 		}
-		p := m.piece
-		p.First, p.Last = parts[0].page, parts[len(parts)-1].page
-		p.FirstLabel, p.LastLabel = parts[0].label, parts[len(parts)-1].label
+		runs[s.piece] = append(runs[s.piece], parts)
+	}
+	for i := range out {
+		parts := slices.Concat(runs[i]...)
+		p := out[i]
+		for _, r := range runs[i] {
+			p.Runs = append(p.Runs, Run{
+				First: r[0].page, Last: r[len(r)-1].page,
+				FirstLabel: r[0].label, LastLabel: r[len(r)-1].label,
+			})
+		}
 		for _, q := range parts {
 			p.Methods = append(p.Methods, q.method)
 		}
@@ -160,16 +194,26 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 		if err := p.Verify(); err != nil {
 			return nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
 		}
-		out = append(out, p)
+		out[i] = p
 	}
 	return out, nil
 }
 
-// mark is where a piece begins: a byte offset into the body of a page.
-type mark struct {
+// span is one run of pages a piece is made of: where it begins, and which piece
+// it belongs to.
+//
+// Most pieces are one run. A § whose exercises the chapter gathered at its end
+// is two, printed a hundred pages apart, and that is the whole reason a piece is
+// not simply the pages from one heading to the next. See gathered.
+type span struct {
 	page  int
 	off   int
-	piece Piece
+	piece int // index into the chapter's pieces
+
+	// head and mark are the two edits a gathered run of exercises needs, and
+	// are empty on every other run. See openRun.
+	head string
+	mark string
 }
 
 // marks finds where every piece of the chapter begins.
@@ -178,48 +222,169 @@ type mark struct {
 // have to agree. The page is what the run works from, since it is the only one
 // of the two that says where on the page the section starts, and the heading is
 // what says the page is the right one.
-func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]mark, error) {
-	var out []mark
-	off, err := find(pages, ch.PDFPage, pr.chapter)
-	if err != nil {
-		return nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
+func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Piece, []span, error) {
+	var out []Piece
+	var body []span
+	open := func(p Piece, page, off int) {
+		out = append(out, p)
+		body = append(body, span{page: page, off: off, piece: len(out) - 1})
 	}
-	out = append(out, mark{page: ch.PDFPage, off: off, piece: Piece{Front: true}})
+	off, _, err := find(pages, ch.PDFPage, pr.chapter)
+	if err != nil {
+		return nil, nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
+	}
+	open(Piece{Front: true}, ch.PDFPage, off)
 	for _, s := range ch.Sections {
-		prefix := fmt.Sprintf("## § %d.", s.Number)
+		want := []string{fmt.Sprintf("## § %d.", s.Number)}
 		if s.Appendix {
-			prefix = pr.appendixHead(s.Number)
+			want = pr.appendixHeads(s.Number)
 		}
-		off, err := find(pages, s.PDFPage, prefix)
+		off, prefix, err := find(pages, s.PDFPage, want...)
 		if err != nil {
-			return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, name(s), err)
+			return nil, nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, name(s), err)
 		}
-		// The heading is set in capitals and the contents lists it in title
-		// case, so the two are compared with the case taken off. A § whose title
-		// carried mathematics would defeat this; none of the twenty-five of
-		// chapter VIII does, and the subsection titles, which do, are read off
-		// the page instead. See subsections.
+		// The heading and the contents entry are compared on what survives
+		// both of them. See flat.
 		head := headingText(pages[s.PDFPage].Body, off)
-		if got, want := strings.TrimPrefix(head, prefix), " "+strings.ToUpper(s.Title); got != want {
-			return nil, fmt.Errorf("chapter %s %s: pdf page %d is headed %q, the table of contents calls it %q",
-				ch.Numeral, name(s), s.PDFPage, head, s.Title)
+		title := strings.TrimPrefix(head, prefix)
+		if flat(title) == "" {
+			// An appendix whose heading is the word and the numeral alone,
+			// with the title set under it. See titleUnder.
+			title = titleUnder(pages[s.PDFPage].Body, off)
 		}
-		out = append(out, mark{page: s.PDFPage, off: off, piece: Piece{Section: s}})
+		if got, want := flat(title), flat(s.Title); got != want {
+			return nil, nil, fmt.Errorf("chapter %s %s: pdf page %d titles it %q, the table of contents calls it %q",
+				ch.Numeral, name(s), s.PDFPage, title, s.Title)
+		}
+		open(Piece{Section: s}, s.PDFPage, off)
 	}
 	if ch.Historical != nil {
-		off, err := find(pages, ch.Historical.PDFPage, pr.historical)
+		off, _, err := find(pages, ch.Historical.PDFPage, pr.historical)
 		if err != nil {
-			return nil, fmt.Errorf("chapter %s historical note: %w", ch.Numeral, err)
+			return nil, nil, fmt.Errorf("chapter %s historical note: %w", ch.Numeral, err)
 		}
-		out = append(out, mark{page: ch.Historical.PDFPage, off: off, piece: Piece{Historical: true}})
+		open(Piece{Historical: true}, ch.Historical.PDFPage, off)
 	}
+	for i := 1; i < len(body); i++ {
+		if a, b := body[i-1], body[i]; b.page < a.page || (b.page == a.page && b.off <= a.off) {
+			return nil, nil, fmt.Errorf("chapter %s: %s opens on page %d, which is not after %s on page %d",
+				ch.Numeral, out[b.piece].Name(), b.page, out[a.piece].Name(), a.page)
+		}
+	}
+	spans, err := gathered(out, body, pages, pr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
+	}
+	return out, spans, nil
+}
+
+// gathered adds a run for every block of exercises the chapter prints away from
+// the § it belongs to, and returns every run of the chapter in printed order.
+//
+// Algebra VIII prints the exercises of a § at the end of that §, and there is
+// nothing to add: the block is already inside the pages the § covers. Lie 7 to 9
+// gathers all the exercises of a chapter at the end of it, under one EXERCISES
+// heading, and marks off inside that run which § or appendix each block belongs
+// to. There the § is two runs of pages a hundred and fifty pages apart.
+//
+// Which of the two a chapter does is asked of the page and not worked out from
+// the numbers, the same way the numbering of an appendix is. The table of
+// contents already says what page each block of exercises begins on; that page
+// either carries the printing's own Exercises heading, and the block is the §'s
+// own, or it does not, and the block was gathered.
+func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr printing) ([]span, error) {
+	out := slices.Clone(body)
+	for _, b := range body {
+		s := pieces[b.piece].Section
+		if s.Exercises == nil {
+			continue
+		}
+		page := s.Exercises.PDFPage
+		if _, err := findLine(pages, page, func(l string) bool { return l == pr.exercises }); err == nil {
+			continue
+		}
+		mark := runMark(s)
+		off, err := findLine(pages, page, mark.MatchString)
+		if err != nil {
+			return nil, fmt.Errorf("%s: pdf page %d carries neither the heading %q nor a mark %s: %w",
+				name(s), page, pr.exercises, mark, err)
+		}
+		// The chapter's own note on its exercises stands above the first mark,
+		// under the gathered heading: chapter VII of Lie 7 to 9 says there that
+		// its Lie algebras are finite dimensional and that k has characteristic
+		// zero from § 3 on. It is printed where it is printed, immediately
+		// before the exercises of § 1, and it is kept there rather than moved or
+		// copied to each §, so that the file reads as the page does.
+		head := off
+		if at, err := findLine(pages, page, func(l string) bool { return l == pr.gathered }); err == nil && at < off {
+			head = at
+		}
+		out = append(out, span{page: page, off: head, piece: b.piece,
+			head: pr.exercises, mark: headingText(pages[page].Body, off)})
+	}
+	slices.SortFunc(out, func(a, b span) int {
+		if a.page != b.page {
+			return a.page - b.page
+		}
+		return a.off - b.off
+	})
 	for i := 1; i < len(out); i++ {
-		if a, b := out[i-1], out[i]; b.page < a.page || (b.page == a.page && b.off <= a.off) {
-			return nil, fmt.Errorf("chapter %s: %s opens on page %d, which is not after %s on page %d",
-				ch.Numeral, b.piece.Name(), b.page, a.piece.Name(), a.page)
+		if a, b := out[i-1], out[i]; a.page == b.page && a.off == b.off {
+			return nil, fmt.Errorf("%s and %s both open at the same place on pdf page %d",
+				pieces[a.piece].Name(), pieces[b.piece].Name(), a.page)
 		}
 	}
 	return out, nil
+}
+
+// runMark is the mark a chapter that gathers its exercises puts at the head of
+// the block belonging to one § or appendix.
+//
+// A § is marked with the sign and the number in bold and nothing else, and the
+// gap after the sign is as wide as the press left it: of the 27 blocks of Lie 7
+// to 9, 25 came out "§**1**" and 2 came out "§ **4**" off the same press, which
+// is the same gap that the § headings themselves carry.
+//
+// An appendix is marked with its name, at whatever heading level extraction read
+// off the size of the type. That is not one level: chapter VII of Lie 7 to 9
+// marks its two "### Appendix I" and "### Appendix II" and chapter IX marks its
+// one "## APPENDIX I", in the same volume off the same press, so the level and
+// the case are both left out of the reading and only the word and the numeral
+// are asked for.
+func runMark(s corpus.Section) *regexp.Regexp {
+	if s.Appendix {
+		return regexp.MustCompile(fmt.Sprintf(`(?i)^#{1,4} +appendi[xc]e? +(?:%d|%s)\.?$`,
+			s.Number, roman(s.Number)))
+	}
+	return regexp.MustCompile(fmt.Sprintf(`^§\s*\*\*%d\*\*\.?$`, s.Number))
+}
+
+// openRun writes the corpus's own exercises heading at the head of a gathered
+// block and takes the volume's mark out of it.
+//
+// Everything downstream of assembly looks for that heading: it is what anchors
+// "VIII, p. 15, Exercise 9", what cutExercises leaves behind in the section, and
+// what tells exercises where the run begins. A volume that gathers its exercises
+// writes the same fact a different way, so the fact is written the one way here
+// and the difference stops at this line.
+func openRun(body, head, mark string) string {
+	lines := strings.Split(body, "\n")
+	if len(lines) == 0 {
+		return body
+	}
+	first := lines[0]
+	lines[0] = head
+	if first != mark {
+		// The run opens on the gathered heading and the § is marked a few lines
+		// below it, with the chapter's note on its exercises in between.
+		for i, l := range lines {
+			if l == mark {
+				lines = slices.Delete(lines, i, i+1)
+				break
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func name(s corpus.Section) string {
@@ -229,14 +394,46 @@ func name(s corpus.Section) string {
 	return fmt.Sprintf("§ %d", s.Number)
 }
 
-// find is where on a page a heading with this prefix begins.
-func find(pages map[int]corpus.PageFile, page int, prefix string) (int, error) {
+// find is where on a page a heading with one of these prefixes begins, and
+// which of them it was.
+//
+// There is more than one because the printings do not all number an appendix
+// the same way. Algebra VIII heads its four APPENDIX 1 to APPENDIX 4 and Lie 7
+// to 9 heads its two APPENDIX I and APPENDIX II, in the same language and the
+// same series, so the caller offers both and the page says which it is. What
+// comes back is the one that matched, since the title is checked against what
+// follows it.
+func find(pages map[int]corpus.PageFile, page int, prefixes ...string) (int, string, error) {
 	p, ok := pages[page]
 	if !ok {
+		return 0, "", fmt.Errorf("pdf page %d has not been read", page)
+	}
+	for off := 0; off < len(p.Body); {
+		for _, prefix := range prefixes {
+			if strings.HasPrefix(p.Body[off:], prefix) {
+				return off, prefix, nil
+			}
+		}
+		i := strings.IndexByte(p.Body[off:], '\n')
+		if i < 0 {
+			break
+		}
+		off += i + 1
+	}
+	if len(prefixes) == 1 {
+		return 0, "", fmt.Errorf("pdf page %d carries no heading %q", page, prefixes[0])
+	}
+	return 0, "", fmt.Errorf("pdf page %d carries no heading, of %q", page, prefixes)
+}
+
+// findLine is where on a page the first line the reader accepts begins.
+func findLine(pages map[int]corpus.PageFile, page int, ok func(string) bool) (int, error) {
+	p, found := pages[page]
+	if !found {
 		return 0, fmt.Errorf("pdf page %d has not been read", page)
 	}
 	for off := 0; off < len(p.Body); {
-		if strings.HasPrefix(p.Body[off:], prefix) {
+		if ok(headingText(p.Body, off)) {
 			return off, nil
 		}
 		i := strings.IndexByte(p.Body[off:], '\n')
@@ -245,8 +442,34 @@ func find(pages map[int]corpus.PageFile, page int, prefix string) (int, error) {
 		}
 		off += i + 1
 	}
-	return 0, fmt.Errorf("pdf page %d carries no heading %q", page, prefix)
+	return 0, fmt.Errorf("no line of pdf page %d is the one being looked for", page)
 }
+
+// flat reduces a title to the letters and digits in it, which is as much of one
+// as the page and the table of contents can be relied on to agree about.
+//
+// The contents lists a title on one line, in title case, with the mathematics
+// flattened out of it; the page sets the same title in capitals with the
+// mathematics set as mathematics. § 1 of chapter VIII of Lie 7 to 9 is listed
+// "The Lie algebra sl(2, k) and its representations" and headed "§ 1. THE LIE
+// ALGEBRA $\mathfrak{s}\mathfrak{l}$(2$\boldsymbol{, k}$) AND ITS
+// REPRESENTATIONS". Neither is wrong and neither can be turned into the other,
+// since the capitals stop at the formula and the flattening does not, so what is
+// compared is what is left when both are taken away. It is still enough to say
+// the reading landed on the right page, which is all this check is for.
+func flat(s string) string {
+	var b strings.Builder
+	for _, r := range texWord.ReplaceAllString(s, "") {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToUpper(r))
+		}
+	}
+	return b.String()
+}
+
+// texWord is the name of a TeX command, which is a word in the source and no
+// part of the title: \mathfrak sets the letters after it, it does not add an M.
+var texWord = regexp.MustCompile(`\\[a-zA-Z]+`)
 
 // headingText is the heading line beginning at off.
 func headingText(body string, off int) string {
@@ -257,22 +480,63 @@ func headingText(body string, off int) string {
 	return line
 }
 
+// titleUnder is the heading that stands immediately under the one at off, and
+// is empty when the next thing on the page is not a heading.
+//
+// The two appendices of chapter VII of Lie 7 to 9 are headed "APPENDIX I
+// POLYNOMIAL MAPS AND ZARISKI TOPOLOGY", the word and the numeral and the title
+// on one line. The two of chapter IX are headed "APPENDIX I" with "STRUCTURE OF
+// COMPACT GROUPS" set under it, larger, on a line of its own. It is the same
+// book and the same kind of piece, so the difference is in the setting rather
+// than in the structure, and both are read the same way.
+func titleUnder(body string, off int) string {
+	rest := body[off:]
+	i := strings.IndexByte(rest, '\n')
+	if i < 0 {
+		return ""
+	}
+	for _, l := range strings.Split(rest[i+1:], "\n") {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if h := strings.TrimLeft(l, "#"); h != l {
+			return strings.TrimSpace(h)
+		}
+		return ""
+	}
+	return ""
+}
+
 // chapterEnd is the last page of the chapter.
 //
-// The historical note is the last piece and nothing says where it stops. What
-// comes after it is the back matter of the volume, which opens on a heading of
-// its own: the note of chapter VIII runs from page 485 to 492 and page 493 is
-// headed BIBLIOGRAPHY. So the chapter ends at the page before the next one that
-// opens on a first-level heading.
-func chapterEnd(ch corpus.Chapter, pages map[int]corpus.PageFile) int {
+// Nothing says where the last piece stops, so the search starts at the last page
+// the table of contents names for anything in the chapter and runs on until it
+// meets something belonging to neither the chapter nor the body of the book.
+//
+// That is either the back matter of the volume, which opens on a heading of its
+// own, or the next chapter. The note of chapter VIII of Algebra runs from page
+// 485 to 492 and page 493 is headed BIBLIOGRAPHY; the gathered exercises of
+// chapter VII of Lie 7 to 9 run to page 76 and page 77 opens chapter VIII. A
+// volume of one chapter never meets the second case, which is why it took a
+// volume of three to find it.
+func chapterEnd(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) int {
 	from := ch.PDFPage
+	for _, s := range ch.Sections {
+		from = max(from, s.PDFPage)
+		if s.Exercises != nil {
+			from = max(from, s.Exercises.PDFPage)
+		}
+	}
+	if ch.Exercises != nil {
+		from = max(from, ch.Exercises.PDFPage)
+	}
 	if ch.Historical != nil {
-		from = ch.Historical.PDFPage
+		from = max(from, ch.Historical.PDFPage)
 	}
 	last := from
 	for p := from + 1; ; p++ {
 		f, ok := pages[p]
-		if !ok || strings.HasPrefix(f.Body, "# ") {
+		if !ok || strings.HasPrefix(f.Body, "# ") || strings.HasPrefix(f.Body, pr.chapter) {
 			return last
 		}
 		last = p
@@ -288,8 +552,9 @@ type part struct {
 	continues bool
 }
 
-// slice cuts the pages from one mark to the next into the parts of one piece.
-func slice(pages map[int]corpus.PageFile, from, to mark) ([]part, error) {
+// slice cuts the pages from the head of one run to the head of the next into the
+// parts of one piece.
+func slice(pages map[int]corpus.PageFile, from, to span) ([]part, error) {
 	var out []part
 	for p := from.page; p <= to.page; p++ {
 		if p == to.page && to.off == 0 {
@@ -319,6 +584,9 @@ func slice(pages map[int]corpus.PageFile, from, to mark) ([]part, error) {
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("pdf pages %d to %d are empty", from.page, to.page)
+	}
+	if from.head != "" {
+		out[0].body = openRun(out[0].body, from.head, from.mark)
 	}
 	return out, nil
 }
@@ -469,21 +737,34 @@ func spanning(pages []int, b block) []int {
 // well would put every exercise of the chapter in the corpus twice, and a
 // corpus with two copies of a text has two things to translate, two to tag and
 // two to keep in step. What stays behind is the anchored heading, which is what
-// a cross-reference to "VIII, p. 15, Exercise 9" points at, and one line under
-// it saying where the exercises went.
+// a cross-reference to "VIII, p. 15, Exercise 9" points at, the preamble the
+// book prints under it, and one line saying where the exercises went.
 func cutExercises(blocks []block, section int, appendix bool, pr printing) []block {
 	for i, b := range blocks {
 		if !strings.HasPrefix(b.text, pr.exercises) {
 			continue
+		}
+		out := blocks[: i+1 : i+1]
+		for _, b := range blocks[i+1:] {
+			at, _ := itemStart(b.text, 1)
+			if at < 0 {
+				out = append(out, b)
+				continue
+			}
+			// Exercise 1 begins partway down the block, so what is in front of
+			// it is the last of the preamble and the rest is an exercise.
+			if head := strings.TrimSpace(b.text[:at]); head != "" {
+				out = append(out, block{text: head, page: b.page, last: b.last, label: b.label})
+			}
+			break
 		}
 		dir := corpus.ExerciseDir(section, appendix)
 		name := fmt.Sprintf("§ %d", section)
 		if appendix {
 			name = fmt.Sprintf("Appendix %d", section)
 		}
-		link := block{text: fmt.Sprintf("See the [exercises for %s](exercises/%s/).", name, dir),
-			page: b.page, label: b.label}
-		return append(blocks[:i+1:i+1], link)
+		return append(out, block{text: fmt.Sprintf("See the [exercises for %s](exercises/%s/).", name, dir),
+			page: b.page, label: b.label})
 	}
 	return blocks
 }

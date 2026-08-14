@@ -245,6 +245,79 @@ func TestAnErratumAgainstNothingStopsTheRun(t *testing.T) {
 	}
 }
 
+// A misprint is as often in the prose between two statements as in a statement,
+// so an erratum goes on the § as well as on an exercise. § 5 of chapter VIII is
+// the one that made this necessary: it says "Chap. VII, §13, no. 1" in a
+// paragraph belonging to no statement at all, and chapter VII has five sections.
+func TestAnErratumGoesOnASectionToo(t *testing.T) {
+	root := smallCorpus(t)
+	t.Setenv("BOURBAKI_CORPUS", root)
+	m := &corpus.ErrataManifest{Entries: []corpus.LabelErrata{{
+		Label: "alg-viii-s1", Lang: "en",
+		Errata: []corpus.Erratum{{Says: "a minimal element", Read: "a maximal element",
+			Why: "The § is about Artinian modules and prints the wrong end of the order."}},
+	}}}
+	b, err := m.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(corpus.ErrataPath(root), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "content", "en", "alg", "VIII",
+		"01_s1_artinian_modules_and_noetherian_modules.md")
+	sec, err := corpus.ReadFile[corpus.SectionFrontMatter](path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sec.Meta.Errata) != 1 || sec.Meta.Errata[0].Read != "a maximal element" {
+		t.Fatalf("§ 1 carries %+v", sec.Meta.Errata)
+	}
+	if !strings.Contains(sec.Body, "a minimal element") {
+		t.Errorf("the printed text was edited:\n%s", sec.Body)
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-check", "-q"}); err != nil {
+		t.Errorf("the erratum did not survive the second run: %v", err)
+	}
+}
+
+// The label being right is half of it. An erratum quotes the words it is
+// correcting, and a quotation the file does not have is the same quiet failure
+// as a label nothing is called, and worse: the graph is read out of the
+// corrected body, so the reference stays exactly as broken as it was and nothing
+// says why.
+func TestAnErratumThatQuotesNothingStopsTheRun(t *testing.T) {
+	root := smallCorpus(t)
+	t.Setenv("BOURBAKI_CORPUS", root)
+	for _, label := range []string{"alg-viii-s1", "alg-viii-s1-ex-2"} {
+		t.Run(label, func(t *testing.T) {
+			m := &corpus.ErrataManifest{Entries: []corpus.LabelErrata{{
+				Label: label, Lang: "en",
+				Errata: []corpus.Erratum{{Says: "a sentence the page does not have",
+					Read: "something else", Why: "a quotation that matches nothing"}},
+			}}}
+			b, err := m.Bytes()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(corpus.ErrataPath(root), b, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err = runAssemble([]string{"-book", "alg-viii", "-q"})
+			if err == nil {
+				t.Fatal("an erratum quoting nothing should stop the run")
+			}
+			if !strings.Contains(err.Error(), label) ||
+				!strings.Contains(err.Error(), "a sentence the page does not have") {
+				t.Errorf("the error does not say what went wrong: %v", err)
+			}
+		})
+	}
+}
+
 // A section file is named for its title and an exercise file for its number, so
 // correcting either renames or drops a file. The old one has to go, or it sits
 // there for ever looking like part of the book.

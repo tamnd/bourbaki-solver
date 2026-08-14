@@ -100,7 +100,7 @@ func placePages(s *Section, headings, leads []lead) {
 	pairs := align(headings, leads)
 	placed := map[int]bool{}
 	for _, p := range pairs {
-		if page := leads[p.lead].page; page >= s.First && page <= s.Last {
+		if page := leads[p.lead].page; s.Holds(page) {
 			s.Statements[p.stmt].Page = page
 			placed[p.stmt] = true
 		}
@@ -116,7 +116,7 @@ func placePages(s *Section, headings, leads []lead) {
 		lo, hi := gap(pairs, i, len(leads))
 		for j := lo; j < hi; j++ {
 			l := leads[j]
-			if l.plural && l.kind == headings[i].kind && l.page >= s.First && l.page <= s.Last {
+			if l.plural && l.kind == headings[i].kind && s.Holds(l.page) {
 				st.Page = l.page
 				break
 			}

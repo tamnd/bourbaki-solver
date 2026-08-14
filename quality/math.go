@@ -365,11 +365,19 @@ func m06(c *Corpus) ([]Finding, error) {
 		if d.Section == nil || d.Lang != "en" {
 			continue
 		}
-		first, last, err := pdfRange(d.Section.PDFPages)
-		if err != nil || last < first {
+		runs, err := pdfRuns(d.Section.PDFPages)
+		if err != nil {
 			continue
 		}
-		pages := last - first + 1
+		pages := 0
+		for _, r := range runs {
+			if r[1] >= r[0] {
+				pages += r[1] - r[0] + 1
+			}
+		}
+		if pages == 0 {
+			continue
+		}
 		n := 0
 		spans, _ := Math(d.Body)
 		for _, s := range spans {

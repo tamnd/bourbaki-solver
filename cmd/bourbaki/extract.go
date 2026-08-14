@@ -303,7 +303,7 @@ func extractRun(args []string) error {
 		return nil
 	}
 	if len(kept) > 0 {
-		fmt.Printf("  %d pages were repaired by hand and were left alone: %v\n", len(kept), kept)
+		fmt.Printf("  %d pages were repaired by hand or read as pictures and were left alone: %v\n", len(kept), kept)
 	}
 	fmt.Printf("  pages written to %s\n", corpus.PagesDir(root, b.ID))
 	out, err := json.MarshalIndent(res, "", "  ")
@@ -748,6 +748,15 @@ func common(a, b []string) [][2]int {
 // repairedByHand says whether the page already at path was repaired by hand and
 // must be left alone.
 //
+// A page read through a model is left alone too, and it is not repaired by hand
+// in any sense: it is a flagged page of a born-digital volume that the text
+// layer could not carry, rendered and read as a picture and accepted against
+// the rules. Extraction cannot produce that page. It produced the reading that
+// was replaced, which is the one thing on disk it must not write back, and this
+// is the second time that has had to be said in this repo. The first was
+// render -blanks, which overwrote eleven of them with a note saying the page
+// was blank.
+//
 // A page that is there and will not parse is an error and not a false. It used
 // to be a false, because the read and the check were one condition, so a page
 // the reader choked on fell through to the write as though it had said nothing
@@ -759,7 +768,7 @@ func common(a, b []string) [][2]int {
 func repairedByHand(path string) (bool, error) {
 	old, err := corpus.ReadFile[corpus.PageFrontMatter](path)
 	if err == nil {
-		return old.Meta.Manual, nil
+		return old.Meta.Manual || old.Meta.Method == corpus.MethodOCR, nil
 	}
 	if os.IsNotExist(err) {
 		return false, nil // no page yet, which is every page of a first run

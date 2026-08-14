@@ -78,6 +78,14 @@ func (p Piece) Verify() error {
 		return fmt.Errorf("%s: the table of contents gives exercises on page %d and the pages carry none",
 			p.Name(), p.Section.Exercises.PDFPage)
 	}
+	// A run that begins and never gets to exercise 1 is a run whose first
+	// marker was misread, and it reads as a long preamble and nothing else.
+	// Without this it would go by quietly, since the heading is there and the
+	// contents is satisfied by it.
+	if p.Section.Exercises != nil && len(p.Exercises) == 0 {
+		return fmt.Errorf("%s: the exercises begin on page %d and none of them was read",
+			p.Name(), p.Section.Exercises.PDFPage)
+	}
 	if p.Section.Exercises == nil && p.HasExercise {
 		return fmt.Errorf("%s: the pages carry exercises and the table of contents gives none", p.Name())
 	}
@@ -231,6 +239,22 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		}
 		return strings.TrimSpace(corpus.Bend + " " + s)
 	}
+	// took records a number a statement of this kind carries in this no., so that
+	// one standing later with no number of its own is not named as though the
+	// numbered ones were not there. See the note on Occurrence.
+	bucket := func(kind corpus.Kind) corpus.Ref {
+		key := id
+		key.Kind, key.Subsec = kind, no
+		return key
+	}
+	took := func(r corpus.Ref) {
+		if r.Kind.Scope() != corpus.ScopeSubsec {
+			return
+		}
+		key := bucket(r.Kind)
+		occ[key] = max(occ[key], r.Number)
+	}
+	text = pr.unswallow(text)
 	m := pr.head.FindStringSubmatch(text)
 	if m == nil {
 		// A paragraph opening on the number the open run is up to is the next
@@ -241,12 +265,16 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		}
 		r := run
 		r.Number = next
+		took(r)
 		return r, body(afterMarker(i[0], text[markerLen(i):])), true, nil
 	}
-	// The head matched one of the branches of pr.head and left the others empty.
-	word, num := m[1]+m[3]+m[5], m[2]+m[4]+m[6]
-	if len(m) > 7 {
-		word, num = word+m[7], num+m[8]
+	// The head matched one of the branches of pr.head and left the others empty,
+	// and every branch pairs its kind with its number, so running the pairs
+	// together leaves the one that matched. A branch can be added to a grammar
+	// without anything here having to know how many there now are.
+	var word, num string
+	for i := 1; i+1 < len(m); i += 2 {
+		word, num = word+m[i], num+m[i+1]
 	}
 	kind, ok := corpus.KindFromHeading(word)
 	if !ok {
@@ -255,15 +283,22 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	r := id
 	r.Kind = kind
 	rest := text[len(m[0]):]
-	if m[5] != "" {
-		rest = "$*$" + rest
-	}
 	if num == "" && kind.Scope() == corpus.ScopeSubsec {
 		// A run is headed by its kind in the plural and numbered inside:
 		// "Remarks. — 2)" is Remark 2 and the head carries no number of its own.
 		if i := exNumRE.FindStringSubmatch(rest); i != nil {
 			num, rest = i[3], afterMarker(i[0], rest[markerLen(i):])
 		}
+	}
+	// The mark that opens a passage in small type stands in front of the head and
+	// is taken with it, so it is put back on the front of the body. It is put back
+	// exactly as it was read rather than as a canonical "$*$", because the two
+	// English volumes set it differently and the body is a transcription, and it
+	// is put back after the run has been numbered rather than before, or the mark
+	// would stand between the head and the number of the run's first member and
+	// "*Remarks 1)" would come out as one Remark with no number at all.
+	if star := smallTypeOpen.FindString(m[0]); star != "" {
+		rest = star + rest
 	}
 	// An unnumbered statement has no number to be numbered under, so it is
 	// named by where it stands: the no. and how many of its kind came before it
@@ -273,8 +308,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	// same string, and the 45 unnumbered corollaries of chapter VIII include a
 	// pair in § 1 that collide that way.
 	if num == "" {
-		key := r
-		key.Subsec = no
+		key := bucket(kind)
 		occ[key]++
 		r.Subsec, r.Occurrence = no, occ[key]
 		return r, body(strings.TrimSpace(rest)), true, nil
@@ -283,6 +317,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	switch kind.Scope() {
 	case corpus.ScopeSubsec:
 		r.Subsec = no
+		took(r)
 	case corpus.ScopeParent:
 		if parent.Number == 0 {
 			return corpus.Ref{}, "", false, fmt.Errorf(
@@ -339,7 +374,39 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // after the number, and it is as good a separator as a space: § 6 of the French
 // chapter sets the second of its examples "$2)*$Soient A une $k$-algèbre", with
 // the number, the asterisk and the closing dollar run straight into the word.
-var exNumRE = regexp.MustCompile(`^(?:\$\s*(\*)?\s*(\\P)?\s*)?(\d+)\)(?:\*?\$|(\s|[a-z]\)))`)
+// Lie 7 to 9 adds two more ways of writing the same marker, both on pages the
+// model read rather than pages taken out of the type. It marks the number in
+// bold, "**7)** Let E be a finite dimensional s-module", seven times; and it
+// closes the pilcrow's own span before the number instead of after it, "$\P$
+// 13)" against "$\P 12)$", three times. Ten markers is not many, but a marker
+// that is not seen does not lose one exercise, it loses every exercise after it:
+// the reader looks for one number and one only, so the unread "**7)**" of § 1 of
+// chapter VIII kept exercises 7 to 18 inside exercise 6 and left twelve
+// citations pointing at exercises the § appeared not to have. Neither shape
+// occurs in any other volume.
+//
+// The pilcrow is the other half of the same thing. A page taken out of the type
+// gives it as the control word "\P" inside the mathematics the number was set
+// in, but a page the model read gives the mark itself, "¶ **9)**" and
+// "**¶5)**", with no mathematics anywhere near it. So the mark is read on its
+// own as well as inside a span, and the bold is allowed to open in front of it
+// as well as after it. Four lines of Lie 7 to 9 are written this way and no line
+// of any English volume is; the two of the French Topology that are left over
+// are exercise 6 of I, p. 126 and a lettered part, which is not a number and
+// does not open an item whichever way it is marked.
+//
+// The star that says an exercise draws on something the reader has not reached
+// yet is set as a superscript five times in Lie 7 to 9, "$7)^*$Let $d_1, ...,
+// d_l$ be the characteristic degrees", where the other volumes set it on the
+// line. It closes the marker's span the same way an ordinary star does, so it is
+// read the same way, and § 8 of chapter VIII stopped at its sixth exercise
+// without it where the volume prints eighteen.
+//
+// The closing dollar hangs off the pilcrow rather than standing on its own,
+// because on its own it would read "$$ 5) $$", the opening of a display, as a
+// marker.
+var exNumRE = regexp.MustCompile(
+	`^(?:\*\*)?(?:\$\s*(\*)?\s*)?(?:(\\P|¶)\s*\$?\s*)?(?:\*\*)?(\d+)\)(?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // markerLen is how much of a block the marker takes, which is not always the
 // whole of what matched: a lettered part is matched to prove the number opens
@@ -372,6 +439,17 @@ func itemOpen(s string) bool { return exNumRE.MatchString(s) }
 // each block is searched through rather than only looked at, and the search is
 // for one number and not for any number, which is what keeps the "13)" of a
 // cross-reference out of it.
+//
+// What stands between the heading and exercise 1 is the preamble, and it is not
+// an exercise. Algebra VIII has none, and the run of a § there opens on its
+// first exercise; Lie 7 to 9 has one over most of its runs, saying what the
+// letters mean or what is assumed throughout, as § 4 of chapter VII does with
+// "The notations and assumptions are those of nos. 1, 2, 3 of § 4." It is left
+// where the book sets it, under the heading and above the exercises, which is
+// where cutExercises keeps it: it is one statement about the whole run and
+// copying it into each of the nineteen files of the run would say it nineteen
+// times. A run whose exercises are all preamble is a run whose first marker was
+// misread, and Verify is what catches that.
 func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 	var out []corpus.Exercise
 	in := false
@@ -393,16 +471,13 @@ func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 			i, m := itemStart(text, len(out)+1)
 			if i < 0 {
 				if len(out) == 0 {
-					return nil, fmt.Errorf("the exercises open on %q, which is not exercise 1", first(text, 40))
+					break // the preamble, see preamble
 				}
 				out[len(out)-1].Body += "\n\n" + text
 				onPage(&out[len(out)-1], b)
 				break
 			}
-			if head := strings.TrimSpace(text[:i]); head != "" {
-				if len(out) == 0 {
-					return nil, fmt.Errorf("the exercises open on %q, which is not exercise 1", first(head, 40))
-				}
+			if head := strings.TrimSpace(text[:i]); head != "" && len(out) > 0 {
 				out[len(out)-1].Body += "\n\n" + head
 				onPage(&out[len(out)-1], b)
 			}
@@ -455,6 +530,15 @@ func itemStart(text string, n int) (int, []string) {
 		at := off + loc[0] + 1 // the byte matched before the number is not part of it
 		got, _ := strconv.Atoi(text[off+loc[2] : off+loc[3]])
 		if got == n && sentenceEnd(text[:at]) {
+			// A pilcrow in front of the number is part of the marker and is
+			// taken with it. Left where it stands it would be pushed onto the
+			// end of the exercise before this one, and the exercise it marks
+			// would come out unmarked. The asterisk is not backed up over,
+			// because the one that turns up here is the one that closes the
+			// passage before rather than the one that marks what follows.
+			if l := pilcrowBefore.FindStringIndex(text[:at]); l != nil {
+				at = l[0]
+			}
 			m := exNumRE.FindStringSubmatch(text[at:] + " ")
 			if m == nil {
 				// The marker is set in mathematics the head-of-block form does
@@ -510,10 +594,18 @@ func markOf(raw, c string) string {
 	return ""
 }
 
+// pilcrowBefore is a pilcrow standing between the end of a sentence and the
+// number of the exercise it marks, with whatever is left of the math span it
+// was written in around it. § 1 of chapter VIII runs "it suffices that the
+// eigenvalue 0. $\P 14)$ The notations are those of the preceding exercise",
+// with the whole of exercise 14 opening in the paragraph that ended exercise 13.
+var pilcrowBefore = regexp.MustCompile(`\$?\s*(?:\\P|¶)\s*\$?\s*$`)
+
 // sentenceEnd reports whether the text before a number is the end of a
-// sentence, with the marks the book closes a passage with taken off.
+// sentence, with the marks the book closes a passage with, and the mark it
+// opens one with, taken off.
 func sentenceEnd(s string) bool {
-	s = strings.TrimRight(s, " $*")
+	s = strings.TrimRight(pilcrowBefore.ReplaceAllString(s, ""), " $*")
 	return strings.HasSuffix(s, ".") || strings.HasSuffix(s, ")")
 }
 
