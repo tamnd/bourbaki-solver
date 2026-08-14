@@ -18,6 +18,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/fleet"
 	"github.com/tamnd/bourbaki-solver/ocr"
+	"github.com/tamnd/bourbaki-solver/pdfsrc"
 	"github.com/tamnd/bourbaki-solver/prompt"
 )
 
@@ -27,6 +28,7 @@ commands:
   cut      cut what a query names out of the PDF as pictures
   read     send the pictures to the fleet and pull the readings back
   audit    compare what came back with what the extractor reads
+  repair   put back the displays that came apart, and nothing else
 
 flags for cut:
   -book ID       book id from manifests/books.yaml
@@ -55,6 +57,12 @@ flags for audit:
   -fresh         judge against what the extractor reads today rather than what
                  it read when the clips were cut
   -v             print every disagreement rather than the first few
+
+flags for repair:
+  -book ID       book id
+  -pages LIST    only these pdf pages, comma separated
+  -n             say what would change and write nothing
+  -v             print the replacement as well as what it replaced
 
 The extractor reads a born-digital volume out of its text layer, which is exact
 where the font says what it draws and guesswork where it does not. A picture
@@ -85,6 +93,8 @@ func runClip(args []string) error {
 		return clipRead(args[1:])
 	case "audit":
 		return clipAudit(args[1:])
+	case "repair":
+		return clipRepair(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, clipUsage)
 		return nil
@@ -149,6 +159,12 @@ func clipCut(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The boxes are measured in the prepared copy and the pictures are cut
+	// from the volume. clip.Options.Paper says why.
+	paper, err := pdfsrc.Open(filepath.Join(root, entry.PDF))
+	if err != nil {
+		return err
+	}
 	ctx := context.Background()
 	info, err := source.Info(ctx)
 	if err != nil {
@@ -184,20 +200,23 @@ func clipCut(args []string) error {
 			*dpi = clip.PageDPI
 		}
 	}
-	sum, err := source.SHA256()
+	// The volume, not the prepared copy: the index says where the pictures
+	// came from, and a reader who wants to look at one again wants the file
+	// that was drawn.
+	sum, err := paper.SHA256()
 	if err != nil {
 		return err
 	}
 
 	directory := clip.Dir(root, entry.ID)
-	options := clip.Options{DPI: *dpi, Pad: *pad, Zoom: zoom, Logf: func(format string, args ...any) {
+	options := clip.Options{DPI: *dpi, Pad: *pad, Zoom: zoom, Paper: paper, Logf: func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, format+"\n", args...)
 	}}
 	if err := clip.Cut(ctx, source, directory, options, targets); err != nil {
 		return err
 	}
 	index := clip.Index{
-		Book: entry.ID, PDF: source.Path, PDFSHA256: sum,
+		Book: entry.ID, PDF: paper.Path, PDFSHA256: sum,
 		DPI: *dpi, Zoom: zoom, Pad: *pad, Match: *match,
 		Generated: time.Now().UTC(), Targets: targets,
 	}

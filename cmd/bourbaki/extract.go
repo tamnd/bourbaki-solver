@@ -768,7 +768,7 @@ func common(a, b []string) [][2]int {
 func repairedByHand(path string) (bool, error) {
 	old, err := corpus.ReadFile[corpus.PageFrontMatter](path)
 	if err == nil {
-		return old.Meta.Manual || old.Meta.Method == corpus.MethodOCR, nil
+		return old.Meta.Manual || old.Meta.Pictured || old.Meta.Method == corpus.MethodOCR, nil
 	}
 	if os.IsNotExist(err) {
 		return false, nil // no page yet, which is every page of a first run

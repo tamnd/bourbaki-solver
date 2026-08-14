@@ -201,7 +201,37 @@ type Options struct {
 	// A clip is thirty kilobytes either way, and these volumes are set in black
 	// on white, so there is nothing to gain by throwing a channel away.
 	Gray bool
-	Logf func(string, ...any)
+	// Paper is the volume the picture is drawn from, when that is not the
+	// volume the boxes were measured in.
+	//
+	// The extractor reads a French printing through a prepared copy, which
+	// renames the TeX glyphs to names poppler resolves so that the prime of M'
+	// and the ell of P^ell arrive as characters rather than as empty runs. The
+	// name is all that is rewritten, and poppler looks the new name up in the
+	// embedded subset when it comes to draw the glyph, does not find it there,
+	// and draws nothing. So the prepared copy reads correctly and prints with
+	// holes in it, and a clip cut from it is a picture of a page with the
+	// primes and the ells missing.
+	//
+	// That is the worst shape a fault can take here, because nothing looks
+	// wrong. Page 302 of Théories spectrales II went to the model as a picture
+	// with twenty ells rubbed out of it and came back as clean mathematics with
+	// the exponents gone, and the audit called it agreement.
+	//
+	// So the layout comes from the prepared copy and the picture comes from
+	// the volume. The two files are the same bytes apart from names inside
+	// /Differences arrays, so a box measured in one lands in the other.
+	Paper *pdfsrc.Source
+	Logf  func(string, ...any)
+}
+
+// paper is the volume to draw from, which is the one that was read when nobody
+// says otherwise.
+func (o Options) paper(read *pdfsrc.Source) *pdfsrc.Source {
+	if o.Paper != nil {
+		return o.Paper
+	}
+	return read
 }
 
 func (o Options) dpi() int {
@@ -256,6 +286,7 @@ func Cut(ctx context.Context, source *pdfsrc.Source, dir string, options Options
 		return err
 	}
 	defer os.RemoveAll(scratch)
+	paper := options.paper(source)
 
 	for index, target := range targets {
 		if err := ctx.Err(); err != nil {
@@ -263,7 +294,7 @@ func Cut(ctx context.Context, source *pdfsrc.Source, dir string, options Options
 		}
 		box := target.Box.Pixels(options.dpi(), options.zoom(), options.pad())
 		prefix := filepath.Join(scratch, "c")
-		if err := source.Crop(ctx, target.Page, options.dpi(), options.Gray, box, prefix); err != nil {
+		if err := paper.Crop(ctx, target.Page, options.dpi(), options.Gray, box, prefix); err != nil {
 			return fmt.Errorf("cut page %d line %d: %w", target.Page, target.Line, err)
 		}
 		written, err := only(scratch)
