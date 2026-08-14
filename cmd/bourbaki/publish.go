@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -42,10 +43,20 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
   -max-broken          the most refused formulae a build may carry before this
                        exits 1. It marks them rather than stopping at the first,
                        so one run names all of them. This is the pull request
-                       gate while the chapter still carries the damage the text
-                       layer did to it: the number is a ceiling that may only be
-                       lowered, never raised, and the deploy does not use it. Use
+                       gate while the chapters still carry the damage the text
+                       layer did to them: a ceiling may only be lowered, never
+                       raised, and the deploy does not use it. Use
                        -allow-broken-math to look at such a site.
+
+                       A bare number is the ceiling for the whole corpus. A list
+                       of volume=n, comma separated, is a ceiling apiece, and a
+                       volume is named the way its files are: -max-broken
+                       en/alg=17,en/lie=37,fr/alg=20. One number for everything
+                       lets a volume that got worse hide behind a volume that
+                       got better, which is the one thing this is here to catch,
+                       so a list is what the workflow uses. A volume carrying a
+                       refused formula and no ceiling of its own is an error,
+                       since that is a volume nobody has measured yet.
 `)
 	}
 	out := fs.String("out", "site", "directory to write")
@@ -55,8 +66,12 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 	check := fs.Bool("check", false, "build in memory and write nothing")
 	drafts := fs.Bool("drafts", false, "offer the languages under the coverage floor in the switcher")
 	allowBroken := fs.Bool("allow-broken-math", false, "mark refused formulae instead of stopping")
-	maxBroken := fs.Int("max-broken", -1, "the most refused formulae this build may carry")
+	maxBroken := fs.String("max-broken", "", "the most refused formulae this build may carry")
 	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	ceiling, err := parseCeilings(*maxBroken)
+	if err != nil {
 		return err
 	}
 	root, err := corpus.Root()
@@ -76,7 +91,7 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 	// A ceiling is a promise about a count, and a count nobody finished taking
 	// is not one. Stopping at the first refusal would give the number 1 on a
 	// corpus that has two hundred of them, so the ceiling marks and counts.
-	site.AllowBrokenMath = *allowBroken || *maxBroken >= 0
+	site.AllowBrokenMath = *allowBroken || ceiling.set()
 	site.Drafts = *drafts
 
 	langs := map[string]int{}
@@ -121,6 +136,7 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		return err
 	}
 	fmt.Printf("publish: %d pages\n", len(wrote))
+	broken := map[string]int{}
 	if n := len(site.Broken); n > 0 {
 		// On standard error and named a site that cannot be published, because
 		// this is the one build whose output looks finished and is not.
@@ -128,19 +144,20 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		for _, ref := range site.Broken {
 			file, _, _ := strings.Cut(ref.At, ":")
 			files[file] = true
+			broken[volumeOf(file)]++
 		}
 		fmt.Fprintf(os.Stderr, "publish: %d formulae are marked broken across %d files, "+
 			"so this site is not publishable. Run bourbaki audit -only P04 for the list.\n", n, len(files))
-		if *maxBroken >= 0 && n > *maxBroken {
-			return fmt.Errorf("%d formulae are marked broken across %d files, over the ceiling of %d. "+
-				"The ceiling comes down as the pages are repaired and it does not go up",
-				n, len(files), *maxBroken)
-		}
 	}
-	if *maxBroken >= 0 {
+	if ceiling.set() {
 		// Said even at zero, because the run that clears the last one is the run
 		// worth reading, and it is the run that says the ceiling can be dropped.
-		fmt.Printf("publish: %d formulae marked broken, ceiling %d\n", len(site.Broken), *maxBroken)
+		for _, line := range ceiling.report(broken) {
+			fmt.Printf("publish: %s\n", line)
+		}
+		if err := ceiling.check(broken); err != nil {
+			return err
+		}
 	}
 	if *check {
 		return nil
@@ -185,5 +202,143 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		fmt.Printf("\t%d %s\n", byKind[k], k)
 	}
 	fmt.Printf("\t%s/\n", dest)
+	return nil
+}
+
+// ceilings is what -max-broken was given: how many formulae KaTeX may refuse
+// before the build fails.
+//
+// One number for the whole corpus was enough while the corpus was one volume,
+// and it stopped being enough the moment a second went in. A total lets a
+// volume that got worse hide behind a volume that got better, and catching a
+// formula that used to set and no longer does is the entire job of this gate,
+// so the number that holds the line is one number per volume. The volumes are
+// named the way the files are, en/alg and fr/alg and en/lie, because that is
+// what a reader of the failure has in front of them.
+//
+// A ceiling of its own is also what lets a new volume in. The 204 the first
+// chapter arrived with came down to 51 over five rounds of repair, and a volume
+// that has had none of those rounds cannot enter under a number tuned by them.
+// It enters at what it measures and comes down from there like the others did.
+type ceilings struct {
+	// total is the ceiling for everything at once, for -max-broken 51 and the
+	// hand runs that still say it that way. -1 when the argument named volumes.
+	total int
+	each  map[string]int
+}
+
+func (c ceilings) set() bool { return c.total >= 0 || c.each != nil }
+
+// parseCeilings reads the argument. A bare number is a total and anything else
+// is a list of volume=n.
+func parseCeilings(s string) (ceilings, error) {
+	c := ceilings{total: -1}
+	if s == "" {
+		return c, nil
+	}
+	if n, err := strconv.Atoi(s); err == nil {
+		if n < 0 {
+			return c, fmt.Errorf("-max-broken %s: a ceiling is a count and counts are not negative", s)
+		}
+		c.total = n
+		return c, nil
+	}
+	c.each = map[string]int{}
+	for _, part := range strings.Split(s, ",") {
+		name, count, ok := strings.Cut(strings.TrimSpace(part), "=")
+		if !ok {
+			return c, fmt.Errorf("-max-broken %s: %q is neither a number nor volume=n", s, part)
+		}
+		n, err := strconv.Atoi(count)
+		if err != nil || n < 0 {
+			return c, fmt.Errorf("-max-broken %s: %q does not name a count", s, part)
+		}
+		c.each[name] = n
+	}
+	return c, nil
+}
+
+// volumeOf names the volume a content file belongs to, which is its language
+// and its book: content/en/lie/VIII/06_....md is en/lie. Anything shorter than
+// that is not a content file and answers for itself, so a path this does not
+// recognise still gets counted somewhere rather than quietly going missing.
+func volumeOf(file string) string {
+	parts := strings.Split(file, "/")
+	if len(parts) >= 3 && parts[0] == "content" {
+		return parts[1] + "/" + parts[2]
+	}
+	return file
+}
+
+// report is what the run prints about the ceilings it was given, one line per
+// volume in the order a person would read them, and it is printed at zero as
+// well: the run that clears the last refusal is the run that says a ceiling can
+// come down.
+func (c ceilings) report(broken map[string]int) []string {
+	if c.each == nil {
+		n := 0
+		for _, v := range broken {
+			n += v
+		}
+		return []string{fmt.Sprintf("%d formulae marked broken, ceiling %d", n, c.total)}
+	}
+	names := make([]string, 0, len(c.each))
+	for name := range c.each {
+		names = append(names, name)
+	}
+	for name := range broken {
+		if _, ok := c.each[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	sort.Strings(names)
+	out := make([]string, 0, len(names))
+	for _, name := range names {
+		if limit, ok := c.each[name]; ok {
+			out = append(out, fmt.Sprintf("%s\t%d formulae marked broken, ceiling %d", name, broken[name], limit))
+		} else {
+			out = append(out, fmt.Sprintf("%s\t%d formulae marked broken, no ceiling", name, broken[name]))
+		}
+	}
+	return out
+}
+
+// check fails the build on a volume over its ceiling, and on a volume carrying
+// a refused formula that has no ceiling at all. The second is not pedantry: a
+// volume nobody has measured is a volume this gate is not watching, and it
+// would go in silently under a rule whose whole promise is that nothing does.
+func (c ceilings) check(broken map[string]int) error {
+	if c.each == nil {
+		n := 0
+		for _, v := range broken {
+			n += v
+		}
+		if n > c.total {
+			return fmt.Errorf("%d formulae are marked broken, over the ceiling of %d. "+
+				"A ceiling comes down as the pages are repaired and it does not go up", n, c.total)
+		}
+		return nil
+	}
+	names := make([]string, 0, len(broken))
+	for name := range broken {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var over []string
+	for _, name := range names {
+		limit, ok := c.each[name]
+		switch {
+		case !ok:
+			over = append(over, fmt.Sprintf("%s has %d and no ceiling of its own, "+
+				"so nothing here is watching it", name, broken[name]))
+		case broken[name] > limit:
+			over = append(over, fmt.Sprintf("%s has %d, over its ceiling of %d",
+				name, broken[name], limit))
+		}
+	}
+	if len(over) > 0 {
+		return fmt.Errorf("formulae KaTeX refuses: %s. A ceiling comes down as the "+
+			"pages are repaired and it does not go up", strings.Join(over, "; "))
+	}
 	return nil
 }
