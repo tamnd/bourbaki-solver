@@ -24,7 +24,7 @@ func TestVerifyGreen(t *testing.T) {
 			{Path: "content/vi/alg/VIII/01.md", Line: 44, Label: "alg-viii-s1-def-1", Tag: "0001"},
 		},
 	}
-	if bad := Verify(s, found); len(bad) != 0 {
+	if bad := Verify(s, found, []string{"en", "fr"}); len(bad) != 0 {
 		t.Errorf("a corpus that holds every invariant failed: %v", bad)
 	}
 }
@@ -80,6 +80,28 @@ func TestVerifyCatchesEachInvariant(t *testing.T) {
 		},
 		want: "T07",
 	}, {
+		// Théories spectrales and Topologie algébrique have never been printed
+		// in English. Their statements are statements of the Éléments all the
+		// same, so they are tagged off the only printing there is, and a rule
+		// that asked them for an English original would leave a whole Book with
+		// no permanent name.
+		name: "a statement printed in French alone is tagged, not faulted",
+		set:  &Set{Tags: []Entry{{Tag: "0001", Label: "ts-i-s1-prop-1"}}},
+		found: map[string][]Item{
+			"fr": {{Path: "fr.md", Line: 3, Label: "ts-i-s1-prop-1", Tag: "0001"}},
+		},
+		want: "",
+	}, {
+		// And a translation of it reuses that tag, exactly as a translation of
+		// an English statement reuses the English one.
+		name: "a translation reuses the tag of the printing it was made from",
+		set:  &Set{Tags: []Entry{{Tag: "0001", Label: "ts-i-s1-prop-1"}}},
+		found: map[string][]Item{
+			"fr": {{Path: "fr.md", Line: 3, Label: "ts-i-s1-prop-1", Tag: "0001"}},
+			"vi": {{Path: "vi.md", Line: 3, Label: "ts-i-s1-prop-1", Tag: "0002"}},
+		},
+		want: "T07",
+	}, {
 		name:  "T09 a hand-written tag in the wrong case",
 		set:   &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}},
 		found: map[string][]Item{"en": {{Path: "f.md", Line: 3, Label: "a", Bad: "000a"}}},
@@ -95,7 +117,7 @@ func TestVerifyCatchesEachInvariant(t *testing.T) {
 	}}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := rules(Verify(c.set, c.found)); got != c.want {
+			if got := rules(Verify(c.set, c.found, []string{"en", "fr"})); got != c.want {
 				t.Errorf("Verify reported %q, want %q", got, c.want)
 			}
 		})

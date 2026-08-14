@@ -152,9 +152,51 @@ func (p Piece) Verify() error {
 // it hangs from, so the last numbered Definition, Proposition, Theorem, Lemma
 // or Scholium is carried along as the run goes.
 func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.Statement, error) {
+	taken, err := numbers(blocks, id, pr)
+	if err != nil {
+		return nil, nil, err
+	}
 	out := make([]block, 0, len(blocks)*2)
 	var found []corpus.Statement
 	seen := map[string]bool{}
+	err = walk(blocks, id, pr, taken, func(b block, r corpus.Ref, name, body string, ok bool) error {
+		if !ok {
+			out = append(out, b)
+			return nil
+		}
+		label := r.Label()
+		if seen[label] {
+			return fmt.Errorf("two statements are labelled %s", label)
+		}
+		seen[label] = true
+		s := corpus.Statement{Ref: r, PDFPage: b.page, Body: body}
+		if l, ok := corpus.ParsePageLabel(b.label); ok {
+			s.Page = l.Page
+		}
+		found = append(found, s)
+		out = append(out, block{text: heading(r, label, name, pr), page: b.page, last: b.last, label: b.label})
+		if body != "" {
+			out = append(out, block{text: body, page: b.page, last: b.last, label: b.label})
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return out, found, nil
+}
+
+// walk reads the blocks of a piece in printed order and hands each one to f,
+// with the statement it turned out to be, or ok false where it turned out not to
+// be one.
+//
+// What makes this worth naming is the state a head is read against: the no. the
+// reader stands in, the last statement a Corollary could be numbered under, and
+// the run of remarks or examples now open. None of it is on the block in hand,
+// all of it is built up from the top of the piece, and the piece is read twice.
+// See numbers.
+func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[int]bool,
+	f func(b block, r corpus.Ref, name, body string, ok bool) error) error {
 	no := 0
 	var parent corpus.Ref // the last statement a Corollary could be numbered under
 	var run corpus.Ref    // the run of remarks or examples now open, if any
@@ -164,23 +206,23 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 		if m := subsecRE.FindStringSubmatch(b.text); m != nil {
 			no, _ = strconv.Atoi(m[1])
 			next = 0
-			out = append(out, b)
+			if err := f(b, corpus.Ref{}, "", "", false); err != nil {
+				return err
+			}
 			continue
 		}
 		if strings.HasPrefix(b.text, "#") {
 			next = 0
-			out = append(out, b)
+			if err := f(b, corpus.Ref{}, "", "", false); err != nil {
+				return err
+			}
 			continue
 		}
-		r, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, pr)
+		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, taken, pr)
 		if err != nil {
-			return nil, nil, err
+			return err
 		}
-		if !ok {
-			out = append(out, b)
-			continue
-		}
-		if r.Number > 0 {
+		if ok && r.Number > 0 {
 			switch r.Kind.Scope() {
 			case corpus.ScopeSection:
 				parent = r
@@ -188,22 +230,47 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 				run, next = r, r.Number+1
 			}
 		}
-		label := r.Label()
-		if seen[label] {
-			return nil, nil, fmt.Errorf("two statements are labelled %s", label)
-		}
-		seen[label] = true
-		s := corpus.Statement{Ref: r, PDFPage: b.page, Body: body}
-		if l, ok := corpus.ParsePageLabel(b.label); ok {
-			s.Page = l.Page
-		}
-		found = append(found, s)
-		out = append(out, block{text: heading(r, label, pr), page: b.page, last: b.last, label: b.label})
-		if body != "" {
-			out = append(out, block{text: body, page: b.page, last: b.last, label: b.label})
+		if err := f(b, r, name, body, ok); err != nil {
+			return err
 		}
 	}
-	return out, found, nil
+	return nil
+}
+
+// numbers is every number the book gives a statement of the piece, by the kind
+// and the no. it is counted in.
+//
+// An unnumbered statement is named by its place among the statements of its kind
+// in its no., and that place cannot be one the book has already given a numbered
+// one, whichever of the two is printed first. Reading forwards is enough while
+// the numbered one comes first, and that is what took does. It does not come
+// first everywhere: no. 3 of § 1 of chapter II of Théories spectrales prints an
+// unnumbered Remarque on page 222 and opens a run of Remarques on the page
+// after, so both would be called Remark 1 and the chapter would not assemble at
+// all. So the piece is read once for the numbers before it is read for the
+// statements, and an unnumbered statement steps over a place claimed later.
+//
+// The unnumbered one then stands second while it is printed first, which is the
+// right way round: the number in the second is the book's own and the place of
+// the first is this corpus's, so the one that can move is the one that moves.
+func numbers(blocks []block, id corpus.Ref, pr printing) (map[corpus.Ref]map[int]bool, error) {
+	taken := map[corpus.Ref]map[int]bool{}
+	err := walk(blocks, id, pr, nil, func(b block, r corpus.Ref, name, body string, ok bool) error {
+		if !ok || r.Number == 0 || r.Kind.Scope() != corpus.ScopeSubsec {
+			return nil
+		}
+		key := r
+		key.Number, key.Occurrence = 0, 0
+		if taken[key] == nil {
+			taken[key] = map[int]bool{}
+		}
+		taken[key][r.Number] = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return taken, nil
 }
 
 // heading is the heading a statement is given.
@@ -211,18 +278,32 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 // The word is the corpus's singular, not the one printed: a run of remarks is
 // headed "Remarks. —" in the book and each of its members comes out as a Remark
 // of its own here, because each of them is one statement and has one label.
-func heading(r corpus.Ref, label string, pr printing) string {
+//
+// name is the name the printing gives the result and is empty for the great
+// majority that are given none. It is kept, and kept where the printing put it,
+// because it is how a reader finds the thing: "Théorème 2 (« lemme de
+// Nakayama »)" and "Theorem 1 (Wedderburn)" are what those results are called,
+// and a heading reading Theorem 1 says nothing. It goes in the heading rather
+// than in the body because it is part of the head, and 85 of them across the
+// corpus, 23 in the English and 62 in the French, were being dropped on the
+// floor with the rest of the head.
+func heading(r corpus.Ref, label, name string, pr printing) string {
 	head := r.Kind.HeadingIn(pr.lang)
 	if r.Number > 0 {
 		head += fmt.Sprintf(" %d", r.Number)
+	}
+	if name != "" {
+		head += " (" + name + ")"
 	}
 	return fmt.Sprintf("#### %s {#%s .statement}", head, label)
 }
 
 // statementAt reads one block as a statement, and returns false if it is not
-// one. body is the statement with the head taken off.
+// one. body is the statement with the head taken off, and name is the name the
+// head gave it, empty where it gave it none.
 func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, next int,
-	occ map[corpus.Ref]int, pr printing) (corpus.Ref, string, bool, error) {
+	occ map[corpus.Ref]int, taken map[corpus.Ref]map[int]bool, pr printing,
+) (corpus.Ref, string, string, bool, error) {
 	// Extraction writes the dangerous bend at the head of the passage it marks,
 	// and a marked passage often opens on a statement: the French printing marks
 	// Remark 2 of § 7 no. 1, two of the Examples of § 9 no. 2 and the Remark of
@@ -261,12 +342,12 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		// member of that run.
 		i := exNumRE.FindStringSubmatch(text)
 		if next == 0 || i == nil || i[3] != strconv.Itoa(next) {
-			return corpus.Ref{}, "", false, nil
+			return corpus.Ref{}, "", "", false, nil
 		}
 		r := run
 		r.Number = next
 		took(r)
-		return r, body(afterMarker(i[0], text[markerLen(i):])), true, nil
+		return r, "", body(afterMarker(i[0], text[markerLen(i):])), true, nil
 	}
 	// The head matched one of the branches of pr.head and left the others empty,
 	// and every branch pairs its kind with its number, so running the pairs
@@ -278,7 +359,15 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	}
 	kind, ok := corpus.KindFromHeading(word)
 	if !ok {
-		return corpus.Ref{}, "", false, fmt.Errorf("nothing in the corpus is called a %q", word)
+		return corpus.Ref{}, "", "", false, fmt.Errorf("nothing in the corpus is called a %q", word)
+	}
+	// The name the printing gives the result, where it gives one. It is taken
+	// out of the head that was just matched and carried to the heading, and it
+	// is the one part of a head that is not said again by the heading: the rest
+	// of what is dropped here is the kind, the number and the dash. See heading.
+	name := ""
+	if n := headName.FindStringSubmatch(m[0]); n != nil {
+		name = n[1]
 	}
 	r := id
 	r.Kind = kind
@@ -310,8 +399,13 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	if num == "" {
 		key := bucket(kind)
 		occ[key]++
+		// A place the book gives a numbered statement of the same kind later in
+		// the same no. is not free, however far ahead it is printed. See numbers.
+		for taken[key][occ[key]] {
+			occ[key]++
+		}
 		r.Subsec, r.Occurrence = no, occ[key]
-		return r, body(strings.TrimSpace(rest)), true, nil
+		return r, name, body(strings.TrimSpace(rest)), true, nil
 	}
 	r.Number, _ = strconv.Atoi(num)
 	switch kind.Scope() {
@@ -320,12 +414,12 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		took(r)
 	case corpus.ScopeParent:
 		if parent.Number == 0 {
-			return corpus.Ref{}, "", false, fmt.Errorf(
+			return corpus.Ref{}, "", "", false, fmt.Errorf(
 				"%s %d stands under no statement it could be numbered under", kind.Heading(), r.Number)
 		}
 		r.ParentKind, r.ParentNumber = parent.Kind, parent.Number
 	}
-	return r, body(strings.TrimSpace(rest)), true, nil
+	return r, name, body(strings.TrimSpace(rest)), true, nil
 }
 
 // anchorExercises gives the block of exercises an anchor, so that a reference

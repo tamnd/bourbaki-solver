@@ -48,7 +48,7 @@ func init() {
 // does.
 func (c *Corpus) verified() []tags.Failure {
 	if c.tagFailures == nil {
-		c.tagFailures = append([]tags.Failure{}, tags.Verify(c.Tags, c.Items)...)
+		c.tagFailures = append([]tags.Failure{}, tags.Verify(c.Tags, c.Items, c.Books.Printings())...)
 	}
 	return c.tagFailures
 }

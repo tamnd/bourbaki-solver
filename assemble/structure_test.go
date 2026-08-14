@@ -195,6 +195,30 @@ func TestStatementsReadsAHeadBehindTheDangerousBend(t *testing.T) {
 	}
 }
 
+// No. 3 of § 1 of chapter II of Théories spectrales, as pages 227 and 228 set
+// it: an unnumbered Remarque, then a run of Remarques opening at 1). Named by
+// where it stands, the unnumbered one would be Remark 1 and so would the first
+// member of the run, and the chapter stopped assembling on the pair. The number
+// in the run is the book's own, so it keeps it and the unnumbered one steps over
+// it.
+func TestStatementsLeavesTheBookItsNumber(t *testing.T) {
+	in := blocks(
+		"### 3. Le théorème de Plancherel",
+		"**Remarque.** — Soit $a$ un nombre réel $>0$.",
+		"**Remarques.** — 1) Certaines des formules concernant la transformation de Fourier s’étendent.",
+		"2) La transformation de Fourier est un isomorphisme d’espaces hilbertiens.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "ts", Chapter: "II", Section: 1}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ts-ii-s1-n3-rem-3",
+		"ts-ii-s1-n3-rem-1",
+		"ts-ii-s1-n3-rem-2",
+	})
+}
+
 // A Corollary standing under nothing is a section boundary read wrong, not a
 // statement to guess a number for.
 func TestStatementsRefusesAnOrphanCorollary(t *testing.T) {
@@ -217,14 +241,54 @@ func TestStatementsRefusesTwoStatementsAtOneLabel(t *testing.T) {
 
 func TestHeadingCarriesTheLabel(t *testing.T) {
 	r := corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: corpus.KindProposition, Number: 6}
-	if got, want := heading(r, r.Label(), printings["en"]),
+	if got, want := heading(r, r.Label(), "", printings["en"]),
 		"#### Proposition 6 {#alg-viii-s1-prop-6 .statement}"; got != want {
 		t.Errorf("heading() = %q, want %q", got, want)
 	}
 	u := corpus.Ref{Book: "alg", Chapter: "VIII", Section: 1, Kind: corpus.KindRemark, Subsec: 3, Occurrence: 2}
-	if got, want := heading(u, u.Label(), printings["en"]),
+	if got, want := heading(u, u.Label(), "", printings["en"]),
 		"#### Remark {#alg-viii-s1-n3-rem-2 .statement}"; got != want {
 		t.Errorf("heading() = %q, want %q", got, want)
+	}
+}
+
+// The name the printing gives a result is kept, and the label is not touched by
+// it: Theorem 1 of § 2 of chapter VIII is one statement of the Éléments whether
+// the printing in hand calls it Wedderburn's or not, so both printings label it
+// alg-viii-s2-thm-1 and both carry the same tag.
+func TestHeadingKeepsTheNameThePrintingGives(t *testing.T) {
+	r := corpus.Ref{Book: "alg", Chapter: "VIII", Section: 2, Kind: corpus.KindTheorem, Number: 1}
+	if got, want := heading(r, r.Label(), "Wedderburn", printings["en"]),
+		"#### Theorem 1 (Wedderburn) {#alg-viii-s2-thm-1 .statement}"; got != want {
+		t.Errorf("heading() = %q, want %q", got, want)
+	}
+	if got, want := heading(r, r.Label(), "Wedderburn", printings["fr"]),
+		"#### Théorème 1 (Wedderburn) {#alg-viii-s2-thm-1 .statement}"; got != want {
+		t.Errorf("heading() = %q, want %q", got, want)
+	}
+}
+
+// And the name is read off the head, footnote mark and all. Page 382 of
+// Topologie algébrique IV states Shelah's theorem with a note on the name, and
+// the note is printed at the foot of that page: dropping the mark with the head
+// left the note pointing at nothing, which is what assembly of that chapter
+// stopped on.
+func TestANameCarriesItsFootnoteMark(t *testing.T) {
+	text := `Théorème 2 (Shelah[^2]). — Soit X un espace polonais connexe et localement connexe par arcs.`
+	occ := map[corpus.Ref]int{}
+	id := corpus.Ref{Book: "ta", Chapter: "IV", Section: 2}
+	r, name, body, ok, err := statementAt(text, id, 1, corpus.Ref{}, corpus.Ref{}, 0, occ, nil, printings["fr"])
+	if err != nil || !ok {
+		t.Fatalf("statementAt() = %v, %v, want a Théorème", ok, err)
+	}
+	if r.Kind != corpus.KindTheorem || r.Number != 2 {
+		t.Errorf("statementAt() read %s, want Théorème 2", r.Label())
+	}
+	if want := "Shelah[^2]"; name != want {
+		t.Errorf("name = %q, want %q", name, want)
+	}
+	if want := "Soit X un espace polonais connexe et localement connexe par arcs."; body != want {
+		t.Errorf("body = %q, want %q", body, want)
 	}
 }
 
