@@ -995,7 +995,18 @@ func emit(toks []token) string {
 		// typeset as a minus sign, and the compound word is broken by a space
 		// that is not on the page. Measured on Algebra VIII before this: 64 of
 		// them across 50 of its 505 pages.
-		if compound && strings.HasSuffix(out, "-") {
+		//
+		// The hyphen has to be written on the line. One that is the whole of an
+		// index is a minus sign, part of what the formula says rather than the
+		// spelling of the word after it, and taking it out leaves the underscore
+		// that opened the index with nothing after it. Page 207 of Lie 7 to 9
+		// prints "X_+ and X_-, introduce a basis" and shipped as "$X_$-,introduce",
+		// which KaTeX will not set and which puts a hyphen in front of a word the
+		// page does not hyphenate. Braces are dropped from an index of one
+		// character, so an index that is nothing but the minus is the one way a
+		// formula can end in an underscore and a hyphen.
+		indexed := len(out) > 1 && (out[len(out)-2] == '_' || out[len(out)-2] == '^')
+		if compound && !indexed && strings.HasSuffix(out, "-") {
 			out = strings.TrimRight(out[:len(out)-1], " ")
 			tail = "-" + tail
 			hyphenated = true

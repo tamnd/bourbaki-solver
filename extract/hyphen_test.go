@@ -128,3 +128,42 @@ func TestWhatRunsOnAtTheEndOfALine(t *testing.T) {
 		})
 	}
 }
+
+// Page 207 of Lie 7 to 9, where the hyphen is an index and not a hyphen at all.
+// The line prints "To calculate X_+ and X_-, introduce a basis", and the comma
+// after the minus is close enough to the formula to be read into it, so the
+// formula ends in a minus with a lower case word after it, which is the shape
+// the compound word is recognised by. Taking the minus out leaves the
+// underscore that opened the index with nothing after it: the page shipped as
+// "$X_$-,introduce", which KaTeX will not set and which hyphenates a word the
+// page does not hyphenate. The plus beside it is drawn from the roman font
+// rather than the symbol font and was never in any danger, which is why this
+// went out with its own counterexample printed four words to the left of it.
+const indexMinusXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="215" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="1" size="15" family="DGLKJH+CMR10" color="#000000"/>
+<fontspec id="3" size="15" family="DGLMMN+CMMI10" color="#000000"/>
+<fontspec id="4" size="10" family="DGLOII+CMR7" color="#000000"/>
+<fontspec id="5" size="10" family="DGLNOH+CMSY7" color="#000000"/>
+<text top="82" left="105" width="79" height="13" font="1">To calculate</text>
+<text top="82" left="190" width="12" height="13" font="3"><i>X</i></text>
+<text top="87" left="202" width="9" height="9" font="4">+</text>
+<text top="82" left="217" width="24" height="13" font="1">and</text>
+<text top="82" left="246" width="12" height="13" font="3"><i>X</i></text>
+<text top="85" left="259" width="9" height="14" font="5"><i>−</i></text>
+<text top="82" left="269" width="138" height="13" font="1">, introduce a basis of</text>
+</page>
+</pdf2xml>
+`
+
+func TestAMinusThatIsAnIndexIsNotAHyphen(t *testing.T) {
+	lines := parse(t, indexMinusXML)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `To calculate $X_+$ and $X_-$, introduce a basis of`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
