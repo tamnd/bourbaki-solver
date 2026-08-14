@@ -60,8 +60,20 @@ func runTags(args []string) error {
 	return fmt.Errorf("unknown tags command %q", args[0])
 }
 
-// runTagsAssign walks the English corpus in book order and hands a tag to
-// everything that has none.
+// runTagsAssign walks the printings in book order and hands a tag to everything
+// that has none.
+//
+// A printing is a language the corpus holds volumes of, and the tag names the
+// statement of the Éléments rather than the printing it was read out of, so the
+// two printings of Algebra VIII share every tag between them and a statement
+// printed in only one of them is tagged off that one. Théories spectrales and
+// Topologie algébrique are here in French alone and are tagged off the French;
+// if the English of either ever arrives it will carry the same labels and so
+// take the same tags, which is the whole point of a label being permanent.
+//
+// The English is read first, and not because it is worth more. Tags are handed
+// out in the order the corpus is walked and they never move, so the order has to
+// be the order they were first handed out in. See BooksManifest.Printings.
 //
 // Two things are written: the allocations, which go to tags/new-tags and wait
 // there for a person, and the files themselves, since the tag lives in the
@@ -70,7 +82,6 @@ func runTags(args []string) error {
 // after an assignment.
 func runTagsAssign(args []string) error {
 	fs := flag.NewFlagSet("tags assign", flag.ExitOnError)
-	lang := fs.String("lang", "en", "language of the corpus to assign over, which is the English one")
 	dry := fs.Bool("dry-run", false, "print what would be allocated and write nothing")
 	quiet := fs.Bool("q", false, "print only the totals")
 	if _, err := parseFlags(fs, args); err != nil {
@@ -80,21 +91,40 @@ func runTagsAssign(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *lang != "en" {
-		return fmt.Errorf("only the English corpus is assigned tags: a translation reuses the tag of the English it translates")
-	}
 	set, err := tags.Load(root)
 	if err != nil {
 		return err
 	}
-	items, err := tags.Walk(root, *lang)
+	books, err := corpus.LoadBooks(root)
 	if err != nil {
 		return err
 	}
-	if len(items) == 0 {
-		return fmt.Errorf("no statement in content/%s: run bourbaki assemble first", *lang)
+	langs := books.Printings()
+	// A label the corpus has twice in one printing is a mistake in assembly, and
+	// Assign stops on it. Across printings it is not a mistake but the point:
+	// Proposition 6 of § 1 is one statement whichever printing it is read in, so
+	// the second printing to name it adds nothing to the list.
+	var labels []string
+	seen := map[string]bool{}
+	total := 0
+	for _, lang := range langs {
+		items, err := tags.Walk(root, lang)
+		if err != nil {
+			return err
+		}
+		total += len(items)
+		for _, it := range items {
+			if seen[it.Label] {
+				continue
+			}
+			seen[it.Label] = true
+			labels = append(labels, it.Label)
+		}
 	}
-	made, err := set.Assign(tags.Labels(items))
+	if total == 0 {
+		return fmt.Errorf("no statement in content/: run bourbaki assemble first")
+	}
+	made, err := set.Assign(labels)
 	if err != nil {
 		return err
 	}
@@ -104,19 +134,23 @@ func runTagsAssign(args []string) error {
 		}
 	}
 	if *dry {
-		fmt.Printf("tags assign -dry-run: %d statements and exercises, %d would be allocated, %d already have a tag\n",
-			len(items), len(made), len(items)-len(made))
+		fmt.Printf("tags assign -dry-run: %d statements and exercises over %s, %d labels, %d would be allocated\n",
+			total, strings.Join(langs, " and "), len(labels), len(made))
 		return nil
 	}
 	if err := set.Save(root); err != nil {
 		return err
 	}
-	n, err := writeTags(root, *lang, set.Lookup())
-	if err != nil {
-		return err
+	n := 0
+	for _, lang := range langs {
+		w, err := writeTags(root, lang, set.Lookup())
+		if err != nil {
+			return err
+		}
+		n += w
 	}
-	fmt.Printf("tags assign: %d statements and exercises, %d allocated to tags/new-tags, %d files rewritten\n",
-		len(items), len(made), n)
+	fmt.Printf("tags assign: %d statements and exercises over %s, %d allocated to tags/new-tags, %d files rewritten\n",
+		total, strings.Join(langs, " and "), len(made), n)
 	if len(made) > 0 {
 		fmt.Println("review tags/new-tags, then run bourbaki tags merge")
 	}
@@ -326,7 +360,11 @@ func runTagsVerify(args []string) error {
 		}
 		found[l.Name()] = items
 	}
-	bad := tags.Verify(set, found)
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		return err
+	}
+	bad := tags.Verify(set, found, books.Printings())
 	diff, gitErr := tagsDiff(root, *base)
 	switch {
 	case gitErr != nil:

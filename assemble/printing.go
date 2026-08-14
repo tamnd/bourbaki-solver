@@ -163,6 +163,16 @@ const smallTypeSup = `\$\^\*\$`
 // body it belongs to.
 var smallTypeOpen = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup + `)`)
 
+// headName is the name a printing gives a result, in parentheses between the
+// kind and the dash: "Theorem 1 (Wedderburn). —", "Théorème 2 (« lemme de
+// Nakayama »). —". Both grammars have a branch for it and neither sets anything
+// else in a head between parentheses, so the parentheses alone find it once the
+// head has been matched.
+//
+// It is searched for in the head and not in the line, or the parenthesis of a
+// head that has none would be found in the statement under it.
+var headName = regexp.MustCompile(`\(([^)]*)\)`)
+
 const enKinds = `Definitions?|Propositions?|Theorems?|Lemmas?|Corollary|Corollaries|Remarks?|Examples?|Scholium`
 
 // enCapKinds and enPlainKinds are the two ways the other English printing sets a

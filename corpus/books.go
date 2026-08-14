@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"gopkg.in/yaml.v3"
@@ -196,6 +197,37 @@ func (m *BooksManifest) Upsert(b Book) {
 		}
 	}
 	m.Books = append(m.Books, b)
+}
+
+// Printings are the languages the corpus holds volumes in.
+//
+// That is not the same list as the languages there is content in. A printing is
+// the book itself, set by Hermann or by Springer and read out of a PDF; every
+// other language here is a translation this corpus made. The difference is what
+// tagging turns on: a statement is tagged off a printing, because a printing is
+// where a statement of the Éléments is to be found, and a translation reuses the
+// tag of the printing it was made from. Théories spectrales and Topologie
+// algébrique were never translated into English, so their statements are tagged
+// off the French, which is the only printing of them there is.
+//
+// English comes first and the rest in alphabetical order. That is not a
+// preference between two printings of one thing, it is the order the tags were
+// handed out in and it has to stay fixed: the English Algebra VIII was read
+// first and its tags are permanent, so it goes on being read first.
+func (m *BooksManifest) Printings() []string {
+	var out []string
+	for _, b := range m.Books {
+		if b.Lang != "" && !slices.Contains(out, b.Lang) {
+			out = append(out, b.Lang)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if (out[i] == "en") != (out[j] == "en") {
+			return out[i] == "en"
+		}
+		return out[i] < out[j]
+	})
+	return out
 }
 
 // Pages is the total page count across all volumes.

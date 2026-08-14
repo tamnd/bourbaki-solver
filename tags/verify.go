@@ -16,7 +16,7 @@ const (
 	T04 = "T04" // every tag in tags names a statement that is in the corpus
 	T05 = "T05" // tags is only ever appended to
 	T06 = "T06" // no tag is in both tags and inactive
-	T07 = "T07" // a translation reuses the English tag and never gets its own
+	T07 = "T07" // a translation reuses the tag of the printing and never gets its own
 	T09 = "T09" // every tag= in the Markdown is four of [0-9A-Z]; that it is also in tags is T03
 	T10 = "T10" // the tags of a file climb, as they do on the run that assigned them
 )
@@ -37,12 +37,15 @@ func (f Failure) String() string { return f.Rule + ": " + f.Msg }
 // every invariant but T05. T05 is about the history of the file rather than its
 // contents, so it is checked against git by the command.
 //
-// found is the corpus, per language, as Walk returns it. English is the corpus
-// proper; every other language is a translation and is held to T07.
-func Verify(s *Set, found map[string][]Item) []Failure {
+// found is the corpus, per language, as Walk returns it. printings are the
+// languages the Éléments is printed in and this corpus holds volumes of, which
+// is where a statement is to be found and so what carries a tag; every other
+// language in found is a translation and is held to T07. See BooksManifest.
+// Printings, and spec 01 §5.3.
+func Verify(s *Set, found map[string][]Item, printings []string) []Failure {
 	var out []Failure
 	out = append(out, s.check()...)
-	out = append(out, checkCorpus(s, found)...)
+	out = append(out, checkCorpus(s, found, printings)...)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Rule != out[j].Rule {
 			return out[i].Rule < out[j].Rule
@@ -84,34 +87,49 @@ func (s *Set) check() []Failure {
 
 // checkCorpus is what the files say about the Markdown, and the Markdown about
 // the files.
-func checkCorpus(s *Set, found map[string][]Item) []Failure {
+//
+// The printings are read first and together. A statement printed in both of them
+// is one statement of the Éléments with one tag, and a statement printed in only
+// one is still a statement of the Éléments: Théories spectrales and Topologie
+// algébrique are in this corpus in French alone, and holding them to an English
+// printing that does not exist would leave 1382 statements with no permanent
+// name and no way to get one.
+func checkCorpus(s *Set, found map[string][]Item, printings []string) []Failure {
 	var out []Failure
 	byLabel := s.Lookup()
-	english := map[string]Tag{}
-	for _, it := range found["en"] {
-		english[it.Label] = it.Tag
-		switch {
-		case it.Bad != "":
-			out = append(out, Failure{T09, fmt.Sprintf("%s is tagged %q, which is not four of 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
-				at(it), it.Bad)})
-		case it.Tag == "":
-			out = append(out, Failure{T03, fmt.Sprintf("%s has no tag", at(it))})
-		case byLabel[it.Label] == "":
-			out = append(out, Failure{T03, fmt.Sprintf("%s carries the tag %s, which is in no file of tags/", at(it), it.Tag)})
-		case byLabel[it.Label] != it.Tag:
-			out = append(out, Failure{T03, fmt.Sprintf("%s carries the tag %s and tags/ gives it %s",
-				at(it), it.Tag, byLabel[it.Label])})
+	printed := map[string]Tag{}
+	isPrinting := map[string]bool{}
+	for _, lang := range printings {
+		isPrinting[lang] = true
+	}
+	for _, lang := range printings {
+		for _, it := range found[lang] {
+			if _, seen := printed[it.Label]; !seen {
+				printed[it.Label] = it.Tag
+			}
+			switch {
+			case it.Bad != "":
+				out = append(out, Failure{T09, fmt.Sprintf("%s is tagged %q, which is not four of 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+					at(it), it.Bad)})
+			case it.Tag == "":
+				out = append(out, Failure{T03, fmt.Sprintf("%s has no tag", at(it))})
+			case byLabel[it.Label] == "":
+				out = append(out, Failure{T03, fmt.Sprintf("%s carries the tag %s, which is in no file of tags/", at(it), it.Tag)})
+			case byLabel[it.Label] != it.Tag:
+				out = append(out, Failure{T03, fmt.Sprintf("%s carries the tag %s and tags/ gives it %s",
+					at(it), it.Tag, byLabel[it.Label])})
+			}
 		}
 	}
-	if len(found["en"]) > 0 {
+	if len(printed) > 0 {
 		for _, e := range s.Tags {
-			if _, ok := english[e.Label]; !ok {
+			if _, ok := printed[e.Label]; !ok {
 				out = append(out, Failure{T04, fmt.Sprintf("the tag %s names %s, which is in no file of the corpus", e.Tag, e.Label)})
 			}
 		}
 	}
 	for lang, items := range found {
-		if lang == "en" {
+		if isPrinting[lang] {
 			continue
 		}
 		for _, it := range items {
@@ -120,9 +138,9 @@ func checkCorpus(s *Set, found map[string][]Item) []Failure {
 					at(it), it.Bad)})
 				continue
 			}
-			want, ok := english[it.Label]
+			want, ok := printed[it.Label]
 			if !ok {
-				out = append(out, Failure{T07, fmt.Sprintf("%s translates %s, which the English corpus does not have", at(it), it.Label)})
+				out = append(out, Failure{T07, fmt.Sprintf("%s translates %s, which no printing in the corpus has", at(it), it.Label)})
 				continue
 			}
 			if it.Tag != want {

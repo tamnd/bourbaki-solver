@@ -315,8 +315,14 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 		// zero from § 3 on. It is printed where it is printed, immediately
 		// before the exercises of § 1, and it is kept there rather than moved or
 		// copied to each §, so that the file reads as the page does.
+		// The case of the heading is the press's and not the printing's, the
+		// same way the case of an appendix mark is. Lie 7 to 9 sets it in
+		// capitals and the three recent French volumes set it "Exercices", and
+		// both are the one heading over a chapter's worth of exercises.
 		head := off
-		if at, err := findLine(pages, page, func(l string) bool { return l == pr.gathered }); err == nil && at < off {
+		if at, err := findLine(pages, page, func(l string) bool {
+			return strings.EqualFold(l, pr.gathered)
+		}); err == nil && at < off {
 			head = at
 		}
 		out = append(out, span{page: page, off: head, piece: b.piece,
@@ -340,10 +346,19 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 // runMark is the mark a chapter that gathers its exercises puts at the head of
 // the block belonging to one § or appendix.
 //
-// A § is marked with the sign and the number in bold and nothing else, and the
-// gap after the sign is as wide as the press left it: of the 27 blocks of Lie 7
-// to 9, 25 came out "§**1**" and 2 came out "§ **4**" off the same press, which
-// is the same gap that the § headings themselves carry.
+// A § is marked with the sign and the number and nothing else, and the gap after
+// the sign is as wide as the press left it: of the 27 blocks of Lie 7 to 9, 25
+// came out "§**1**" and 2 came out "§ **4**" off the same press, which is the
+// same gap that the § headings themselves carry.
+//
+// What the mark is set in is the press's business too. Lie 7 to 9 sets it in
+// bold at the size of the text and it is read as text; the three recent French
+// volumes set it in the face and at the size they set a § heading in, so it is
+// read as a heading and reaches here "## § 1". Neither is a heading of the
+// corpus, since the § it names already has one a hundred pages back, so the
+// level and the bold are both left out of the reading, exactly as the level and
+// the case of an appendix mark are, and what is asked for is the sign and the
+// number.
 //
 // An appendix is marked with its name, at whatever heading level extraction read
 // off the size of the type. That is not one level: chapter VII of Lie 7 to 9
@@ -356,7 +371,7 @@ func runMark(s corpus.Section) *regexp.Regexp {
 		return regexp.MustCompile(fmt.Sprintf(`(?i)^#{1,4} +appendi[xc]e? +(?:%d|%s)\.?$`,
 			s.Number, roman(s.Number)))
 	}
-	return regexp.MustCompile(fmt.Sprintf(`^§\s*\*\*%d\*\*\.?$`, s.Number))
+	return regexp.MustCompile(fmt.Sprintf(`^(?:#{1,4} +)?§\s*(?:\*\*)?%d(?:\*\*)?\.?$`, s.Number))
 }
 
 // openRun writes the corpus's own exercises heading at the head of a gathered
