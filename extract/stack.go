@@ -330,17 +330,25 @@ func laid(toks []token, i int) (script, under, after []token, at, end int) {
 	// something laid through it. That is the whole of what this reads, and it is
 	// a fact about the drawing rather than a threshold. See the head of the file
 	// for the shape it therefore leaves alone.
+	d := toks[i].depth
+	if d == 0 || toks[i].level != Sup {
+		return nil, nil, nil, 0, 0
+	}
 	at = i
-	for at < len(toks) && toks[at].depth == 1 && toks[at].level == Sup {
+	for at < len(toks) && toks[at].depth == d && toks[at].level == Sup {
 		at++
 	}
-	if at == i || at >= len(toks) {
+	if at >= len(toks) {
 		return nil, nil, nil, 0, 0
 	}
 	b := toks[at]
-	// The symbol is on the line. A symbol at a level is an interleaved cluster,
-	// which is restack's, and one at depth inside a cluster is nobody's.
-	if b.depth != 0 || b.level != Base {
+	// The symbol is one level out from the script written over it, wherever that
+	// leaves the pair. An inverse image is written inside a subscript as readily
+	// as on the line: page 77 sets the restriction of a section to the inverse
+	// image of V as a subscript of f, so the u is at a level and its -1 is at a
+	// level inside that. A symbol beside the script rather than under it is an
+	// interleaved cluster, which is restack's.
+	if b.depth != d-1 {
 		return nil, nil, nil, 0, 0
 	}
 	// A large operator carries limits and not a script drawn over it, and hoist
@@ -374,8 +382,8 @@ func laid(toks []token, i int) (script, under, after []token, at, end int) {
 	// mean guessing at where its braces close.
 	var kept []token
 	end = at + 1
-	for end < len(toks) && toks[end].depth >= 1 {
-		if toks[end].depth > 1 {
+	for end < len(toks) && toks[end].depth >= d {
+		if toks[end].depth > d {
 			return nil, nil, nil, 0, 0
 		}
 		if toks[end].level == Sup {
@@ -431,6 +439,13 @@ func laid(toks []token, i int) (script, under, after []token, at, end int) {
 // overlaid reports whether a token is drawn across the symbol it stands against
 // rather than beside it, give or take the overhang one glyph box carries past
 // the other.
+//
+// Across the page and not down it. Whether the script overlaps the band of the
+// symbol tells nothing, which is the opposite of what it looks like it should
+// tell: page 18 draws the minus of its inverse image three units into the band
+// of the p and page 25 draws it two units clear of the band of the p, in the
+// same volume and in the same face, and the difference is where the line put
+// the letter rather than anything about the script.
 func overlaid(t, b token) bool { return lap(t, b) > -overhang }
 
 // abut writes a piece of a script on to the end of the one before it. The
