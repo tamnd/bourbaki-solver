@@ -28,22 +28,24 @@ var frlay = &pdfsrc.Layout{Fonts: map[int]pdfsrc.FontSpec{
 	10: {ID: 10, Size: 10, Family: "LMRoman7"},
 	11: {ID: 11, Size: 10, Family: "LMMathItalic7"},
 	12: {ID: 12, Size: 7, Family: "LMMathItalic5"},
+	13: {ID: 13, Size: 12, Family: "LMMathSymbols8"},
 }}
 
 // enlay is what the English volumes declare. Algebra VIII is set in the Latin
 // Modern fonts and Lie 7 to 9 in the Computer Modern ones it was scanned from,
 // and both put the body at 15.
 var enlay = &pdfsrc.Layout{Fonts: map[int]pdfsrc.FontSpec{
-	0: {ID: 0, Size: 15, Family: "LMRoman10"},
-	1: {ID: 1, Size: 13, Family: "LMRoman9"},
-	2: {ID: 2, Size: 10, Family: "LMRoman7"},
-	3: {ID: 3, Size: 15, Family: "CMR10"},
-	4: {ID: 4, Size: 15, Family: "CMMI10"},
-	5: {ID: 5, Size: 10, Family: "CMR7"},
-	6: {ID: 6, Size: 10, Family: "CMMI7"},
-	7: {ID: 7, Size: 10, Family: "CMSY7"},
-	8: {ID: 8, Size: 15, Family: "CMEX10"},
-	9: {ID: 9, Size: 10, Family: "EUFM7"},
+	0:  {ID: 0, Size: 15, Family: "LMRoman10"},
+	1:  {ID: 1, Size: 13, Family: "LMRoman9"},
+	2:  {ID: 2, Size: 10, Family: "LMRoman7"},
+	3:  {ID: 3, Size: 15, Family: "CMR10"},
+	4:  {ID: 4, Size: 15, Family: "CMMI10"},
+	5:  {ID: 5, Size: 10, Family: "CMR7"},
+	6:  {ID: 6, Size: 10, Family: "CMMI7"},
+	7:  {ID: 7, Size: 10, Family: "CMSY7"},
+	8:  {ID: 8, Size: 15, Family: "CMEX10"},
+	9:  {ID: 9, Size: 10, Family: "EUFM7"},
+	10: {ID: 10, Size: 7, Family: "LMMathSymbols5"},
 }}
 
 // sole renders the one line a fixture page holds.
