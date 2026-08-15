@@ -3,6 +3,9 @@ package corpus
 import (
 	"fmt"
 	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 // A page file is the output of extraction and the input to assembly. It is one
@@ -43,6 +46,21 @@ type PageFrontMatter struct {
 	PDFPage     int          `yaml:"pdf_page"`
 	PageLabel   string       `yaml:"page_label,omitempty"`
 	RunningHead string       `yaml:"running_head,omitempty"`
+
+	// Folio is the page number as the volume prints it, and it is here because
+	// half the corpus does not print a page label. Theory of Sets and Algebra I
+	// to III number their pages straight through the book and set the number
+	// bare at the foot, so there is no "E IV.289" to record and no honest way to
+	// invent one: chapter IV of Theory of Sets is sixty pages long, so that
+	// label would say something false. The number itself is worth keeping, since
+	// it is how a reader holding the printed book finds the page, and it is not
+	// worth keeping in the body, where an assembled section would carry twenty
+	// of them standing between its paragraphs.
+	//
+	// A volume that prints a label carries both: the label in PageLabel and the
+	// page within the chapter here.
+	Folio int `yaml:"folio,omitempty"`
+
 	Locator     *PageLocator `yaml:"locator,omitempty"`
 
 	// Continues says the first line of this page carries on the last paragraph
@@ -127,6 +145,46 @@ type PageFile = File[PageFrontMatter]
 // and assembly has to read past it to find the head of a statement, since a
 // marked passage often opens on one.
 const Bend = "☡"
+
+// folioRE is the folio as a page of a foot-number volume ends on: the printed
+// number, alone on the last line of the body, with nothing else on it. Theory of
+// Sets prints it at the foot and Algebra I to III prints it there on the pages
+// that open a §, and a reading of such a page ends "...\n\n289".
+var folioRE = regexp.MustCompile(`\A\d{1,4}\z`)
+
+// CutFolio takes the printed page number off the foot of a page body and
+// returns it.
+//
+// The folio is furniture and not text, the same as the running head, and the
+// same thing is done with both: it comes out of the body and goes into the front
+// matter, so that a section assembled out of twenty pages does not have twenty
+// stray numbers standing between its paragraphs. It is cut here rather than at
+// reading time because the reading is faithful to the page, and because a
+// volume with no text layer has its page map built out of these bodies and the
+// map is what reads the foot.
+//
+// A body whose last line is anything else is returned unchanged and reports 0.
+// Nothing is guessed: a page whose number the model dropped keeps no number, and
+// a last line that is a number inside a sentence is not alone on its line.
+func CutFolio(body string) (string, int) {
+	trimmed := strings.TrimRight(body, "\n")
+	at := strings.LastIndex(trimmed, "\n")
+	last := strings.TrimSpace(trimmed[at+1:])
+	if !folioRE.MatchString(last) {
+		return body, 0
+	}
+	n, err := strconv.Atoi(last)
+	if err != nil || n == 0 {
+		return body, 0
+	}
+	if at < 0 {
+		// The whole body is the number, which is what a page carrying nothing
+		// but its folio reads as. It leaves an empty page rather than a page of
+		// furniture.
+		return "", n
+	}
+	return strings.TrimRight(trimmed[:at], "\n") + "\n", n
+}
 
 // PagesDir is where the pages of one volume are written.
 //

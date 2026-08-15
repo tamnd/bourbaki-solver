@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/extract"
 	"github.com/tamnd/bourbaki-solver/mathtex"
+	"github.com/tamnd/bourbaki-solver/pagemap"
 )
 
 // fix is the repairs that are a function of the Markdown alone: no PDF, no
@@ -34,13 +36,49 @@ commands:
   stray     take out a delimiter that opens mathematics and closes nothing
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
+  folio     move the printed page number off the foot and into the front matter
 
-Run them in that order. Everything after an unclosed delimiter reads as
-mathematics, so stray comes first and the other two will not touch a span whose
-end they cannot see, and parens comes before math so that math reads the spans
-as they will be rather than as they are.
+Run the first three in that order. Everything after an unclosed delimiter reads
+as mathematics, so stray comes first and the other two will not touch a span
+whose end they cannot see, and parens comes before math so that math reads the
+spans as they will be rather than as they are. folio touches no mathematics and
+can be run at any point before assemble.
 
 Run bourbaki fix <command> -h for the flags of a command.
+`
+
+const fixFolioUsage = `usage: bourbaki fix folio [flags]
+
+Moves the printed page number off the foot of a page body and into the front
+matter, on the volumes that print it there.
+
+Five of the volumes print the number in the running head, where SplitHead files
+it as the page is read. Theory of Sets and Algebra I to III print it at the foot
+instead, so it comes back at the end of the body and stays there, and a section
+assembled out of twenty such pages carries twenty bare numbers standing between
+its paragraphs. The number is furniture in both printings and belongs in the
+same place in both.
+
+It runs after the reading and not during it, for two reasons. The reading is
+faithful to the page and a page that prints a number has one. And a volume with
+no text layer has its page map built out of these bodies, by reading the number
+off the foot, so the number has to be there when pagemap build runs.
+
+The page map is the check. It already says what number is printed on each PDF
+page, and a page whose foot disagrees with it is left alone and named, since a
+disagreement means one of the two is wrong and quietly believing either is how a
+corpus ends up mispaginated. Where they agree the number is written to folio.
+
+A page label is not built from it. A label such as "A VIII.13" counts pages
+inside a chapter, and both volumes that print their number at the foot number
+their pages straight through the book, so "E IV.289" would claim a page 289 of a
+chapter that runs to sixty pages. The bare number is what those volumes print
+and it is all that is recorded. A foot-number volume paginated per chapter would
+get a label, and there is none in the corpus today.
+
+flags:
+  -book ID   only this volume, default every volume that prints its folio at the foot
+  -check     say what would change and change nothing
 `
 
 const fixParensUsage = `usage: bourbaki fix parens [flags]
@@ -123,6 +161,8 @@ func runFix(args []string) error {
 		return fixStray(args[1:])
 	case "parens":
 		return fixParens(args[1:])
+	case "folio":
+		return fixFolio(args[1:])
 	}
 	fmt.Fprint(os.Stderr, fixUsage)
 	os.Exit(2)
@@ -290,6 +330,96 @@ func fixParens(args []string) error {
 	fmt.Printf("fix parens: %d pages read, %s %d spans in %d of them\n", pages, verb, spans, changed)
 	if changed > 0 && !*check {
 		fmt.Println("fix parens: run bourbaki fix math, then bourbaki assemble")
+	}
+	return nil
+}
+
+func fixFolio(args []string) error {
+	fs := flag.NewFlagSet("fix folio", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFolioUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, labelled, disagreed, missing int
+	for _, b := range books.Books {
+		if *book != "" && b.ID != *book {
+			continue
+		}
+		if pagemap.Grammar(b.Grammar) != pagemap.FootNumber {
+			continue
+		}
+		pm, err := pagemap.Load(root, b.ID)
+		if err != nil {
+			return fmt.Errorf("%s: %w: run bourbaki pagemap build -book %s first", b.ID, err, b.ID)
+		}
+		// A label is only built for a volume that numbers its pages inside the
+		// chapter, because that is what a label says. Both foot-number volumes
+		// in the corpus number straight through the book, so in practice this
+		// writes the number and no label, and says so in the summary.
+		letter := corpus.BookLetter(b.Book)
+		if pagemap.Pagination(b.Pagination) != pagemap.PerChapter {
+			letter = ""
+		}
+		err = eachPage(root, books, b.ID, func(path string, f *corpus.PageFile) error {
+			pages++
+			body, folio := corpus.CutFolio(f.Body)
+			if folio == 0 {
+				// Most of these are a page the volume prints no number on: the
+				// opener of a chapter, a plate, the blank facing one. They are
+				// not worth a line each, only a count.
+				missing++
+				return nil
+			}
+			e, ok := pm.Lookup(f.Meta.PDFPage)
+			if !ok || e.Page != folio {
+				want := 0
+				if ok {
+					want = e.Page
+				}
+				disagreed++
+				fmt.Fprintf(os.Stderr, "fix folio: left alone, %s prints %d and the page map says %d\n",
+					rel(root, path), folio, want)
+				return nil
+			}
+			label := f.Meta.PageLabel
+			if label == "" && letter != "" && e.Chapter != "" {
+				label = fmt.Sprintf("%s %s.%d", letter, e.Chapter, folio)
+			}
+			changed++
+			if label != f.Meta.PageLabel {
+				labelled++
+			}
+			if *check {
+				fmt.Printf("%s  %d  %s\n", rel(root, path), folio, label)
+				return nil
+			}
+			f.Body, f.Meta.Folio, f.Meta.PageLabel = body, folio, label
+			f.Meta.Lines = len(strings.Split(strings.TrimSpace(body), "\n"))
+			return f.Write(path)
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	verb := "took"
+	if *check {
+		verb = "would take"
+	}
+	fmt.Printf("fix folio: %d pages read, %s the number off %d of them, %d print none, %d left alone\n",
+		pages, verb, changed, missing, disagreed)
+	if labelled > 0 {
+		fmt.Printf("fix folio: %d pages got a page label\n", labelled)
+	}
+	if changed > 0 && !*check {
+		fmt.Println("fix folio: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }

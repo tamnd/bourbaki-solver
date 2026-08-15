@@ -75,6 +75,36 @@ var bookTitles = map[string]string{
 	"hist": "Elements of the History of Mathematics",
 }
 
+// bookLetters is the abbreviation each Book of the Éléments is cited by, and it
+// is not invented here. Page vii of every recent volume prints the table under
+// item 3 of the Mode d'emploi, "Théorie des ensembles désigné par E", "Algèbre —
+// A", and so on down to "Topologie algébrique — TA", and this is that table.
+//
+// It is what stands in front of a page label. The label of the twenty fourth
+// page of chapter I is "A I.24" in Algebra and "E I.24" in Theory of Sets, and
+// the two are different pages of different Books, so a label that spelled both
+// "A I.24" would be a collision rather than a shorthand. Elements of the History
+// of Mathematics is not one of the Books and is cited by name, so it has no
+// letter here and gets none.
+var bookLetters = map[string]string{
+	"ens": "E",
+	"alg": "A",
+	"top": "TG",
+	"fvr": "FVR",
+	"evt": "EVT",
+	"int": "INT",
+	"ac":  "AC",
+	"var": "VAR",
+	"lie": "LIE",
+	"ts":  "TS",
+	"ta":  "TA",
+}
+
+// BookLetter is the abbreviation a Book is cited by, or "" for something the
+// Éléments do not abbreviate. A caller with no letter has no page label to
+// build and should leave the label empty rather than make one up.
+func BookLetter(book string) string { return bookLetters[book] }
+
 // bookOrder is the order the Éléments print their Books in, which is the order
 // a reader expects to find them shelved and is not alphabetical. A slug nobody
 // has numbered here sorts after the ones that are.
