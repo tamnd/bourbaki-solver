@@ -662,7 +662,7 @@ func WriteCandidates(path string, c Candidates) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return writeAtomic(path, b)
 }
 
 // LoadCandidates reads the mined list back, for the curation pass.
