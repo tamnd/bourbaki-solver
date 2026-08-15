@@ -22,6 +22,36 @@ var ocrBourbaki string
 // OCR is the prompt for reading a page of a scanned volume.
 func OCR() string { return strings.TrimSpace(ocrBourbaki) + "\n" }
 
+//go:embed ocr_ens.md
+var ocrENS string
+
+// volumeNote is what a Book adds to the scanned prompt, by book id.
+//
+// The prompt above was written against Algebra and says so, and a Book that
+// sets a notation of its own writes it here rather than there. A note is added
+// and the prompt above is not touched, because the prompt hash goes in the
+// front matter of every page it produced: a sentence about the sign for a
+// theory, put in the shared prompt, would put every page of every other volume
+// back in the queue for a rule that is about none of them.
+//
+// A Book with nothing to add gets the shared prompt byte for byte, so its pages
+// do not go stale for a note about a volume it has no part in.
+var volumeNote = map[string]string{
+	"ens-i-iv": ocrENS,
+}
+
+// OCRFor is the prompt for reading a page of one scanned volume.
+func OCRFor(book string) string {
+	note, ok := volumeNote[book]
+	if !ok {
+		return OCR()
+	}
+	return OCR() + "\n" + strings.TrimSpace(note) + "\n"
+}
+
+// OCRForSHA256 is the hash of the prompt one volume is read with.
+func OCRForSHA256(book string) string { return SHA256(OCRFor(book)) }
+
 //go:embed ocr_native.md
 var ocrNative string
 

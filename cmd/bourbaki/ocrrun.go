@@ -79,7 +79,7 @@ func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
 		return out, fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract, or -flagged for the pages it could not read",
 			entry.ID, entry.Nature, entry.Extraction)
 	}
-	out.ask = prompt.OCR()
+	out.ask = prompt.OCRFor(entry.ID)
 	var only map[int]bool
 	if flagged {
 		out.ask = prompt.OCRNative()
