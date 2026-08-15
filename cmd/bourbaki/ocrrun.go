@@ -440,9 +440,22 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 		return nil, err
 	}
 
+	asked := strings.TrimSpace(names) != ""
+
 	var out []ocr.Host
 	var refused []string
 	for _, value := range registry.Enabled() {
+		if value.Gateway {
+			// A gateway answers HTTP and has no box to run chatgpt-tool on, so
+			// it was never a candidate to read a page. Saying so on every run
+			// of every volume would be a line of stderr forever about a route
+			// behaving exactly as it is meant to. It is said when it was asked
+			// for by name, because then somebody is waiting to hear why.
+			if asked {
+				refused = append(refused, value.Name+": a gateway reads no page images, it has no box to run chatgpt-tool on")
+			}
+			continue
+		}
 		if strings.TrimSpace(value.Host) == "" {
 			refused = append(refused, value.Name+": no ssh host in "+path)
 			continue

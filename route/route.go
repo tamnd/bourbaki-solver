@@ -60,6 +60,20 @@ type Route struct {
 	// Note carries why a route is ranked or disabled where it is. A disabled
 	// row with no explanation reads as an oversight.
 	Note string `json:"note,omitempty"`
+
+	// Gateway says this route is a plain OpenAI-compatible endpoint rather than
+	// a chatgpt-tool fronting a pool of browser sessions.
+	//
+	// Everything else in the table is the fleet, and the fleet answers /health
+	// with the size of its pool, which is how a route is judged live and how a
+	// host with nothing to answer with is caught before it is sent a chapter. A
+	// public gateway has neither: no /health to ask and no pool to count. Asked
+	// anyway it returns 404, and the route reads as broken when it is working.
+	//
+	// It is also what says the route cannot read a page image. OCR runs
+	// chatgpt-tool ocr-batch over ssh and a gateway has no box to run it on, so
+	// the two are not interchangeable and nothing should quietly try.
+	Gateway bool `json:"gateway,omitempty"`
 }
 
 // WireChat is the only wire: POST /v1/chat/completions, streaming.
@@ -316,6 +330,12 @@ func Default() Registry {
 			Rank: 30, Concurrency: 1, Timeout: Duration(20 * time.Minute),
 			Note: "1 profile, 4 cores, under a gigabyte free, no OCR",
 		},
+		{
+			Name: "zen", Wire: WireChat, Gateway: true,
+			BaseURL: ZenBaseURL, Model: ZenModel, APIKeyEnv: ZenKeyEnv,
+			Rank: 40, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "free text models, no vision, ranked last so nothing moves to it by accident",
+		},
 	}}
 	registry.sort()
 	return registry
@@ -327,6 +347,28 @@ const DefaultModel = "gpt-5"
 // KeyEnv is the environment variable every route reads its key from. The key
 // itself is never written to a file this repo can see.
 const KeyEnv = "BOURBAKI_PROXY_KEY"
+
+// The zen gateway is an OpenAI-compatible endpoint with a handful of models
+// that cost nothing to call. It is here because the fleet's scarce resource is
+// uploads, not tokens: reading a page image spends one, and a host that runs
+// out is out for hours. Translating a volume, solving an exercise and asking
+// for the Vietnamese of a term are all text, and text sent here is text the
+// fleet does not have to pay an upload for.
+//
+// It cannot read a page. None of the free models on this gateway accepts an
+// image, which was measured and not assumed: every one of them answers a
+// request carrying an image with "404 No endpoints found that support image
+// input". So OCR stays on the fleet and everything downstream of it can move.
+const (
+	ZenBaseURL = "https://opencode.ai/zen/v1"
+	// ZenModel is the strongest of the free slugs. The gateway lists sixty two
+	// models and six of them are free, and the others are metered, which this
+	// corpus does not spend.
+	ZenModel = "nemotron-3-ultra-free"
+	// ZenKeyEnv is the variable opencode itself writes, so a machine that has
+	// the CLI set up has the route working already.
+	ZenKeyEnv = "OPENCODE_API_KEY"
+)
 
 // Key is the credential to send, preferring a literal one from the command line
 // over the environment variable the route file names.

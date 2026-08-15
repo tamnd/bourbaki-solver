@@ -264,22 +264,35 @@ func (p Prober) Probe(ctx context.Context, value Route) Health {
 		return finish(Signal{State: StateBroken, Detail: err.Error()})
 	}
 
-	body, signal := p.health(ctx, value)
-	if signal.State != StateLive {
-		return finish(signal)
-	}
-	result.Transport = body.Transport
-	result.Verified = body.Pool.Verified
-	result.Declared = body.Pool.Concurrency
-	if body.Pool.Verified == 0 {
-		// The host is up and has nothing to answer with. Sending it work would
-		// produce refusals that read like model failures on every page.
-		return finish(Signal{State: StateBroken, Detail: "no verified sessions in the pool, run chatgpt-tool heal-sessions"})
+	// A gateway has no /health and no pool, so the catalogue below is the whole
+	// probe: it answers only if the endpoint is up and the key is accepted, and
+	// it is the same answer that says whether the model is still there.
+	var body healthBody
+	if !value.Gateway {
+		var signal Signal
+		body, signal = p.health(ctx, value)
+		if signal.State != StateLive {
+			return finish(signal)
+		}
+		result.Transport = body.Transport
+		result.Verified = body.Pool.Verified
+		result.Declared = body.Pool.Concurrency
+		if body.Pool.Verified == 0 {
+			// The host is up and has nothing to answer with. Sending it work
+			// would produce refusals that read like model failures on every page.
+			return finish(Signal{State: StateBroken, Detail: "no verified sessions in the pool, run chatgpt-tool heal-sessions"})
+		}
 	}
 
 	catalogue, signal := p.catalogue(ctx, value)
 	result.Catalogue = catalogue
 	if signal.State == StateUnreachable || signal.State == StateUnauthorized {
+		return finish(signal)
+	}
+	// For a gateway this is the only question that was asked, so any answer
+	// short of live is the state of the route and there is nothing to fall
+	// through to.
+	if value.Gateway && signal.State != StateLive {
 		return finish(signal)
 	}
 	// A catalogue that answers and does not name the model is the clearest
@@ -291,6 +304,10 @@ func (p Prober) Probe(ctx context.Context, value Route) Health {
 	}
 
 	detail := fmt.Sprintf("%s, %d verified", body.Transport, body.Pool.Verified)
+	if value.Gateway {
+		result.Transport = "gateway"
+		detail = fmt.Sprintf("gateway, %d models", len(catalogue))
+	}
 	if !p.Deep {
 		return finish(Signal{State: StateLive, Detail: detail})
 	}

@@ -155,8 +155,12 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 	if err := registry.Validate(); err != nil {
 		t.Fatalf("the built-in fleet does not validate: %v", err)
 	}
-	if got := registry.Names(); strings.Join(got, ",") != "server3,server2,server1" {
-		t.Errorf("Names = %v; the order is verified profiles then free memory", got)
+	// The fleet first, in the order of verified profiles then free memory, and
+	// the gateway last. Last is the point of it: it costs nothing and it cannot
+	// read a page, so it is what the text stages fall through to and never what
+	// anything lands on by default.
+	if got := registry.Names(); strings.Join(got, ",") != "server3,server2,server1,zen" {
+		t.Errorf("Names = %v; the fleet ranks on verified profiles then free memory, and the gateway ranks last", got)
 	}
 	// Every route is enabled and every one carries the numbers it was ranked
 	// on, so a rank that stops matching the fleet is visible in the diff rather
@@ -164,7 +168,7 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 	for _, want := range []struct {
 		name        string
 		concurrency int
-	}{{"server3", 4}, {"server2", 3}, {"server1", 1}} {
+	}{{"server3", 4}, {"server2", 3}, {"server1", 1}, {"zen", 2}} {
 		value, ok := registry.Find(want.name)
 		if !ok {
 			t.Fatalf("%s is missing from the built-in fleet", want.name)
@@ -180,8 +184,21 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 			t.Errorf("%s has no note saying what it was ranked on", want.name)
 		}
 	}
-	if got := NewPool(registry).Lanes(); got != 8 {
-		t.Errorf("the fleet carries %d calls at once, want 8", got)
+	if got := NewPool(registry).Lanes(); got != 10 {
+		t.Errorf("the fleet and the gateway carry %d calls at once, want 10", got)
+	}
+	// The gateway is the only route with no box behind it, and that is what
+	// keeps OCR off it.
+	for _, value := range registry.Routes {
+		if (value.Name == "zen") != value.Gateway {
+			t.Errorf("%s: gateway = %v", value.Name, value.Gateway)
+		}
+		if value.Gateway && value.Host != "" {
+			t.Errorf("%s is a gateway and names an ssh host %q", value.Name, value.Host)
+		}
+		if !value.Gateway && value.Host == "" {
+			t.Errorf("%s is not a gateway and names no ssh host, so it can neither be probed nor read a page", value.Name)
+		}
 	}
 }
 
