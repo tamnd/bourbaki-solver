@@ -764,18 +764,33 @@ const OutOfTurnsMark = "the model is out of turns"
 // ten pages it had failed to read, spent an attempt on each, and killed all ten
 // inside two minutes over an account that would be back the same evening. The
 // tool had said exactly what was wrong in its log the whole time.
+// The last two are the same pause in the tool's other voice, the one it uses
+// when the batch as a whole cannot start: "no account here can upload: all 11
+// verified slot(s) are banned, the earliest lifts at 20:14:17", and then an
+// "upload cap:" line per lane. A tail of twenty five lines can hold nothing but
+// those, so the phrase that names the host has to be matched as well.
 var outOfTurnsMarks = []string{
 	OutOfTurnsMark,
 	"out of uploads until",
 	"no uploads left",
 	"has no uploads",
+	"no account here can upload",
+	"upload cap:",
 }
 
 // OutOfTurns says whether a batch log carries one of those marks.
+//
+// It reads the log with its whitespace flattened, and that is not tidiness. The
+// tool wraps its log to the width of the terminal it thinks it has, so the line
+// that says a host is spent comes back as "every account on this host is out
+// of\nuploads until 20:14:17", with the break falling inside the phrase. Matched
+// as it stands, none of the marks above are there. That is how the fix for this
+// went out, passed its tests on unwrapped lines, and let server3 kill another
+// ten pages in forty seven seconds on the first run after it landed.
 func OutOfTurns(log string) bool {
-	lower := strings.ToLower(log)
+	flat := strings.Join(strings.Fields(strings.ToLower(log)), " ")
 	for _, mark := range outOfTurnsMarks {
-		if strings.Contains(lower, mark) {
+		if strings.Contains(flat, mark) {
 			return true
 		}
 	}
