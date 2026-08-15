@@ -661,3 +661,62 @@ func TestASentenceOpeningOnABoldWordIsNotAHead(t *testing.T) {
 		}
 	}
 }
+
+// Theory of Sets sets the kind in the plural alone on a line and puts the
+// members under it, each opening on its own number in brackets.
+func TestARunOpensOnItsKindAloneOnALine(t *testing.T) {
+	in := blocks(
+		"### 3. Order Relations",
+		"*Examples*",
+		"(1) The relations of equality and inclusion are not order relations.",
+		"(2) Let E be a set such that $x \\in E$.",
+		"*Remarks*",
+		"(1) The empty set satisfies this condition.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "III", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-iii-s1-n3-exa-1",
+		"ens-iii-s1-n3-exa-2",
+		"ens-iii-s1-n3-rem-1",
+	})
+	if !strings.HasPrefix(got[0].Body, "The relations of equality") {
+		t.Errorf("the number was not taken off the body: %q", got[0].Body)
+	}
+	if !slices.Contains(texts(out), "*Examples*") {
+		t.Errorf("the lead carries no statement, so it stays where it is: %v", texts(out))
+	}
+}
+
+// The second run of a kind in one no. is left as prose. Numbering it on from
+// the first would put a number on a statement that the book does not give it,
+// and its own numbers are already spoken for. See walk.
+func TestASecondRunOfOneKindInANoIsLeftAlone(t *testing.T) {
+	in := blocks(
+		"### 1. Definition of an Order Relation",
+		"*Examples*",
+		"(1) The relation $x = x$ is not collectivizing.",
+		"(2) An order relation on a set E.",
+		"An *ordering* on a set E is a correspondence.",
+		"*Examples*",
+		"(1) The relations of equality and inclusion.",
+		"(2) The order relation induced on E.",
+		"(3) The relation g extends f.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "III", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"ens-iii-s1-n1-exa-1", "ens-iii-s1-n1-exa-2"})
+	for _, want := range []string{
+		"(1) The relations of equality and inclusion.",
+		"(2) The order relation induced on E.",
+		"(3) The relation g extends f.",
+	} {
+		if !slices.Contains(texts(out), want) {
+			t.Errorf("the second run was taken apart: %q", want)
+		}
+	}
+}

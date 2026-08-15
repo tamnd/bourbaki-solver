@@ -40,6 +40,11 @@ type printing struct {
 	// head is a statement as the printing sets it and extraction writes it.
 	head *regexp.Regexp
 
+	// runHead is a head that opens a run of statements and carries none of them:
+	// the kind in the plural, alone on a line, with the members under it. Empty
+	// for a printing that does not set one. See walk.
+	runHead *regexp.Regexp
+
 	// swallowed is a head whose number was drawn into the maths that follows it,
 	// which is a thing that happens to a printing that sets the number hard
 	// against the first word. Empty for a printing it does not happen to. See
@@ -134,6 +139,7 @@ var printings = map[string]printing{
 				`|\*\*(` + enCapKinds + `)(?: (\d+))?\.\*\*\s*` +
 				`|\*(` + enPlainKinds + `)(?: (\d+))?\.\*\s+` +
 				`|` + smallTypeSup + `(` + enPlainKinds + `)(?: (\d+))?\.?\s+)`),
+		runHead:   regexp.MustCompile(`^\*(` + enRunKinds + `)\*\s*$`),
 		swallowed: regexp.MustCompile(`^(` + enCapKinds + `|` + enPlainKinds + `) \$(\d+)(?:(\^\d+)\$)?\.`),
 	},
 	"fr": {
@@ -261,6 +267,20 @@ const enCapKinds = `DEFINITIONS?|PROPOSITIONS?|THEOREMS?|LEMMAS?|COROLLARY|COROL
 // line of the volume is written this way, and left unread it costs the two
 // Remarks of § 8 and the three citations to them.
 const enPlainKinds = `Lemmas?|Remarks?|Examples?|Scholium`
+
+// enRunKinds are the kinds Theory of Sets gathers into a run under a head that
+// carries none of them, which it sets in italic, in the plural, with no period
+// and on a line of its own. Page 16 prints "Examples" that way and then "(1)"
+// and "(2)" as paragraphs under it, and the volume does this 34 times, 30 of
+// them Examples and 4 Remarks. No other volume of the corpus sets a line this
+// way at all, so nothing else is being read differently for it.
+//
+// The head is the whole line, which is what keeps a sentence out: a paragraph
+// opening on the word Examples in italic and going on is not this. And the head
+// gives no statement of its own, because the book gives it none: it is a lead,
+// the way "Remarks. —" is a lead in Algebra VIII, except that this printing
+// puts nothing after it on the line.
+const enRunKinds = `Examples|Remarks|Lemmas|Scholia`
 
 // frKinds are the words the French printing states its results in. The accents
 // are the volume's own and the plurals are too: it sets "Remarques. —" over a

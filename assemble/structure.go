@@ -207,6 +207,7 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 	var run corpus.Ref    // the run of remarks or examples now open, if any
 	next := 0             // the number the next member of that run would carry
 	occ := map[corpus.Ref]int{}
+	opened := map[corpus.Ref]bool{} // the runs a bare lead has already opened, by no.
 	for _, b := range blocks {
 		if m := subsecRE.FindStringSubmatch(b.text); m != nil {
 			no, _ = strconv.Atoi(m[1])
@@ -222,6 +223,41 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 				return err
 			}
 			continue
+		}
+		// A lead that carries none of the run it opens. It is a statement of
+		// nothing, so it is passed through as prose and only the run bookkeeping
+		// moves: the members number from 1 under it, and each of them becomes a
+		// statement of its own the same way a member of any other run does.
+		//
+		// A second run of the same kind in one no. is left alone. Three no. of
+		// Theory of Sets print one: no. 1 of § 1 of chapter III sets three
+		// examples on page 131 and four more on page 132, and the second lot
+		// starts again at (1). The volume cites both by their printed numbers,
+		// "no. 1, Example 3" on one page meaning the third of the second lot, so
+		// there are two Example 3 in that no. and a label can hold one. Numbering
+		// the second lot on from the first would put a number on a statement that
+		// the book does not give it, so the members stay as they are printed and
+		// the audit goes on saying the § has no Example 4. What is not done here
+		// is guessing.
+		if pr.runHead != nil {
+			if k := pr.runHead.FindStringSubmatch(b.text); k != nil {
+				kind, ok := corpus.KindFromHeading(k[1])
+				if !ok {
+					return fmt.Errorf("nothing in the corpus is called a %q", k[1])
+				}
+				key := corpus.Ref{Book: id.Book, Chapter: id.Chapter, Section: id.Section,
+					Kind: kind, Subsec: no}
+				if opened[key] {
+					next = 0 // the run is closed, so its members do not carry on into this one
+				} else {
+					opened[key] = true
+					run, next = key, 1
+				}
+				if err := f(b, corpus.Ref{}, "", "", false); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, taken, pr)
 		if err != nil {
@@ -345,14 +381,14 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	if m == nil {
 		// A paragraph opening on the number the open run is up to is the next
 		// member of that run.
-		i := exNumRE.FindStringSubmatch(text)
-		if next == 0 || i == nil || i[3] != strconv.Itoa(next) {
+		num, marker, tail, ok := runItem(text)
+		if next == 0 || !ok || num != strconv.Itoa(next) {
 			return corpus.Ref{}, "", "", false, nil
 		}
 		r := run
 		r.Number = next
 		took(r)
-		return r, "", body(afterMarker(i[0], text[markerLen(i):])), true, nil
+		return r, "", body(afterMarker(marker, tail)), true, nil
 	}
 	// The head matched one of the branches of pr.head and left the others empty,
 	// and every branch pairs its kind with its number, so running the pairs
@@ -522,6 +558,36 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // carries the number the run is up to.
 var exNumRE = regexp.MustCompile(
 	`^(?:\*\*)?(?:\$\s*(\*)?\s*)?(?:(\\P|¶)\s*\$?\s*)?(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
+
+// runNumRE is the other way a volume numbers a member of a run: the number in
+// parentheses, at the head of a paragraph of its own.
+//
+// Theory of Sets writes every run this way. Page 16 sets its examples under
+// "Examples" in italic and then "(1) The assembly ∨1 is represented by ⇒." and
+// "(2) The following symbols represent assemblies", each a paragraph of its own,
+// and 30 of the volume's 34 runs open exactly like that. The other four open on
+// the star that brackets a passage in small type, which is why the star is read
+// here as well and put back with the rest of the body.
+//
+// This is only ever asked of a paragraph while a run is open and only ever
+// accepted when the number is the one the run is up to, which is what keeps the
+// enumerations out. Page 15 lists the signs of a theory as "(1) The logical
+// signs", "(2) The letters", "(3) The specific signs", under no head and inside
+// a sentence that runs into them, and no run is open there.
+var runNumRE = regexp.MustCompile(`^(?:\\?\*\s*)?\((\d+)\)\s+`)
+
+// runItem reads the marker on a member of a run, either way a volume writes it,
+// and says what the number is, how much of the block the marker takes, and what
+// is left after it.
+func runItem(text string) (num, marker, rest string, ok bool) {
+	if i := exNumRE.FindStringSubmatch(text); i != nil {
+		return i[3], i[0], text[markerLen(i):], true
+	}
+	if i := runNumRE.FindStringSubmatch(text); i != nil {
+		return i[1], i[0], text[len(i[0]):], true
+	}
+	return "", "", "", false
+}
 
 // markerLen is how much of a block the marker takes, which is not always the
 // whole of what matched: a lettered part is matched to prove the number opens
