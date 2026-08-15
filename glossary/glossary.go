@@ -243,6 +243,14 @@ func SameTerms(a, b []Term) bool {
 }
 
 // Write renders the glossary to a path, creating the directory.
+//
+// Through a temporary file in the same directory and a rename, because
+// os.WriteFile empties the file first and then fills it, and a write that
+// fails between the two leaves nothing there. The disk filled during a run of
+// glossary translate and that is exactly what happened: manifests/glossary.yaml
+// went to zero bytes, taking the renderings of a thousand terms with it, and
+// only a checkout brought it back. The rename is the whole fix. Either the new
+// file is complete and takes the name, or the old one keeps it.
 func (g Glossary) Write(path string) error {
 	b, err := yaml.Marshal(g)
 	if err != nil {
@@ -251,5 +259,40 @@ func (g Glossary) Write(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, b, 0o644)
+	return writeAtomic(path, b)
+}
+
+// writeAtomic writes the bytes beside the path and renames them onto it.
+//
+// The temporary file has to be in the same directory, because a rename across
+// devices is not one, and the whole point here is the rename.
+func writeAtomic(path string, b []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	name := file.Name()
+	// Removed on every path that does not end in a rename, including the ones
+	// that already failed, so a full disk does not also leave litter behind.
+	defer os.Remove(name)
+
+	if _, err := file.Write(b); err != nil {
+		file.Close()
+		return err
+	}
+	// Sync before the rename. Without it the rename can reach the disk before
+	// the bytes do, and a machine that loses power in between has a file with
+	// the right name and nothing in it, which is the failure this is here to
+	// prevent.
+	if err := file.Sync(); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(name, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(name, path)
 }

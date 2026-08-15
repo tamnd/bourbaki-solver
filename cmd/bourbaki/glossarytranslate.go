@@ -56,6 +56,14 @@ audits each line, and merges what survives into manifests/glossary.yaml.
                  sending the four hundred prose phrases above them.
   -batch N       terms per question, default 40
   -limit N       stop after this many questions
+  -votes N       ask every question this many times and keep only the
+                 renderings a majority of the rounds agreed about. The same
+                 337 terms asked twice an hour apart agreed about 234 of
+                 them, so a single answer to a term is a coin with a heavy
+                 bias and not a fact. What the rounds split on is listed at
+                 the end for a person, which is where those terms belonged
+                 all along. Worth doing over a gateway, which costs nothing
+                 and where the price of asking three times is some minutes.
   -hosts LIST    comma separated route names
   -routes PATH   route file
   -dry           print the first question and stop, without asking anything
@@ -86,6 +94,7 @@ func glossaryTranslate(args []string) error {
 	only := fs.String("only", "", "when adding, only candidates from this source")
 	size := fs.Int("batch", glossary.DefaultBatch, "terms per question")
 	limit := fs.Int("limit", 0, "stop after this many questions")
+	votes := fs.Int("votes", 1, "ask every question this many times and keep what agrees")
 	hostList := fs.String("hosts", "", "comma separated route names")
 	routeFile := fs.String("routes", "", "route file")
 	dry := fs.Bool("dry", false, "print the first question and stop")
@@ -113,6 +122,9 @@ func glossaryTranslate(args []string) error {
 		fmt.Printf("glossary translate: every term already has a %s rendering, and -add would bring in none\n", *lang)
 		return nil
 	}
+	if *votes < 1 {
+		return fmt.Errorf("-votes %d asks nothing", *votes)
+	}
 	batches := glossary.Batches(*lang, terms, *size)
 	if *limit > 0 && len(batches) > *limit {
 		batches = batches[:*limit]
@@ -139,15 +151,26 @@ func glossaryTranslate(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	replies := askEveryBatch(ctx, root, hosts, batches, *keep, logf)
+	// The rounds go out as one list of questions rather than one round after
+	// another, so every lane stays busy to the end. A question knows which round
+	// it belongs to by its place in the list.
+	polls := make([]glossary.Batch, 0, len(batches)**votes)
+	for _, batch := range batches {
+		for range *votes {
+			polls = append(polls, batch)
+		}
+	}
+	replies := askEveryBatch(ctx, root, hosts, polls, *keep, logf)
 
 	var rows, suspect []glossary.Row
 	var unknown []string
 	var rejects, collisions int
+	rounds := make([][]glossary.Row, *votes)
 	for i, reply := range replies {
 		if reply == nil {
 			continue
 		}
+		rounds[i%*votes] = append(rounds[i%*votes], reply.Rows...)
 		rows = append(rows, reply.Rows...)
 		suspect = append(suspect, reply.Suspect...)
 		unknown = append(unknown, reply.Unknown...)
@@ -162,6 +185,16 @@ func glossaryTranslate(args []string) error {
 		}
 	}
 
+	// A term the model refused is refused once, however many rounds asked about
+	// it, or the summary counts the same term three times and reports more
+	// unknowns than there are terms.
+	sort.Strings(unknown)
+	unknown = slices.Compact(unknown)
+
+	var split []glossary.Split
+	if *votes > 1 {
+		rows, split = glossary.Consensus(rounds)
+	}
 	added, kept := g.Merge(*lang, rows)
 	if err := g.Validate(); err != nil {
 		return fmt.Errorf("the merge would leave the glossary invalid, nothing was written: %w", err)
@@ -184,6 +217,16 @@ func glossaryTranslate(args []string) error {
 	if bumped {
 		fmt.Printf("\tversion %d, so every translated file is stale and bourbaki translate will do it again\n", version)
 	}
+	if *votes > 1 {
+		fmt.Printf("\t%d questions in %d rounds, and the rounds split on %d terms\n",
+			len(polls), *votes, len(split))
+	}
+	if len(split) > 0 {
+		fmt.Printf("\nthe %d rounds did not agree about these %d, which is what a term nobody\nhas settled looks like, so they have to be written by hand:\n", *votes, len(split))
+		for _, s := range split {
+			fmt.Printf("\t%-30s %s\n", s.EN, strings.Join(s.TR, "  |  "))
+		}
+	}
 	if len(suspect) > 0 {
 		fmt.Printf("\nthese %d were accepted and are worth an eye, because nothing here can tell\na diacritic-free Vietnamese word from an English one left standing:\n", len(suspect))
 		for _, s := range suspect {
@@ -191,7 +234,6 @@ func glossaryTranslate(args []string) error {
 		}
 	}
 	if len(unknown) > 0 {
-		sort.Strings(unknown)
 		fmt.Printf("\nthe model said it does not know these %d, they have to be written by hand:\n", len(unknown))
 		for _, u := range unknown {
 			fmt.Printf("\t%s\n", u)
