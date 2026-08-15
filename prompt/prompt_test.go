@@ -159,3 +159,34 @@ func TestTheBornDigitalPromptSaysWhatThePilotFound(t *testing.T) {
 		t.Error("the two prompts hash the same, so a page cannot say which read it")
 	}
 }
+
+// A volume with a notation of its own reads the shared prompt and its own note,
+// and a volume with nothing to add reads the shared prompt byte for byte. The
+// second half is the one that matters: a note about the sign for a theory must
+// not put a page of Algebra back in the queue.
+func TestAVolumeNoteIsAddedAndChangesNoOtherVolume(t *testing.T) {
+	ens := OCRFor("ens-i-iv")
+	if !strings.HasPrefix(ens, OCR()) {
+		t.Error("the shared prompt is not the head of the volume prompt")
+	}
+	for _, want := range []string{
+		`\mathscr{T}`,
+		"Theory of Sets and not Algebra",
+		"printed at the foot of the page",
+	} {
+		if !strings.Contains(ens, want) {
+			t.Errorf("the Theory of Sets note does not say %q", want)
+		}
+	}
+	if OCRForSHA256("ens-i-iv") == OCRSHA256() {
+		t.Error("the note did not change the hash, so nothing would be re-read")
+	}
+	for _, book := range []string{"alg-i-iii", "alg-x-fr", "top-v-x", "ac-i-vii"} {
+		if OCRFor(book) != OCR() {
+			t.Errorf("%s no longer reads the shared prompt", book)
+		}
+		if OCRForSHA256(book) != OCRSHA256() {
+			t.Errorf("%s went stale for a note about another volume", book)
+		}
+	}
+}
