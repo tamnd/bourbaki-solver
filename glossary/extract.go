@@ -477,6 +477,15 @@ func runs(line string) [][]string {
 // words cuts a line into lower case word tokens. A hyphen and an apostrophe are
 // part of a word, because "A-module" and "Schur's lemma" are terms; a digit is
 // not, because a number in Bourbaki is a cross reference and never a term.
+//
+// An apostrophe is kept as the apostrophe the volume prints, U+2019, and not
+// turned into a hyphen. It was a hyphen, and the row it made was "schur-s
+// lemma", a string that occurs nowhere in the corpus. Nine rows of the glossary
+// went in spelled that way, six of them real terms: schur-s lemma,
+// burnside-s theorem, nakayama-s lemma, maschke-s theorem,
+// hilbert-s nullstellensatz, zermelo-s theorem. A term is found in a section by
+// literal search, so none of the six could ever be found, none could reach a
+// translation prompt, and the adherence check could never hold a file to one.
 func words(line string) []string {
 	var out []string
 	var b strings.Builder
@@ -485,7 +494,7 @@ func words(line string) []string {
 			// Every token is emitted, including the one-letter ones. They are
 			// dropped in runs, where dropping them breaks the phrase around
 			// them rather than closing it up over the gap.
-			if w := strings.Trim(b.String(), "-'"); w != "" {
+			if w := strings.Trim(b.String(), "-'’"); w != "" {
 				out = append(out, w)
 			}
 			b.Reset()
@@ -495,9 +504,13 @@ func words(line string) []string {
 		switch {
 		case unicode.IsLetter(r):
 			b.WriteRune(r)
-		case r == '-' || r == '\'' || r == '’':
+		case r == '-':
 			if b.Len() > 0 {
 				b.WriteRune('-')
+			}
+		case r == '\'' || r == '’':
+			if b.Len() > 0 {
+				b.WriteRune('’')
 			}
 		default:
 			flush()

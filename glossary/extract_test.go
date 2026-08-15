@@ -176,6 +176,38 @@ func TestSetIsATermAndNotAStopWord(t *testing.T) {
 	}
 }
 
+// A possessive keeps the apostrophe the volume prints, U+2019.
+//
+// It used to be folded to a hyphen, so "Schur's lemma" was mined as
+// "schur-s lemma" and nine rows went into the glossary spelled that way. A term
+// is found in a section by literal search over the section's own characters, so
+// a row spelled with a hyphen matches nothing, reaches no translation prompt,
+// and is never checked for.
+func TestAPossessiveKeepsTheApostropheTheBookPrints(t *testing.T) {
+	body := strings.Repeat("By Gribble’s lemma every quiver is flat.\n", 4)
+	got := mine(t, []Doc{{Path: "a.md", Body: body}}, Options{MinCount: 2, MaxWords: 4})
+	if _, ok := find(got, "gribble-s lemma"); ok {
+		t.Errorf("the possessive was mined with a hyphen: %v", ens(got))
+	}
+	if _, ok := find(got, "gribble’s lemma"); !ok {
+		t.Errorf("the possessive was not mined at all: %v", ens(got))
+	}
+}
+
+// The typewriter apostrophe and the printed one are one word. The corpus prints
+// U+2019 and a stray U+0027 is a transcription slip, not a second term.
+func TestBothApostrophesAreOneWord(t *testing.T) {
+	body := strings.Repeat("Gribble's lemma holds. Gribble’s lemma is sharp.\n", 3)
+	got := mine(t, []Doc{{Path: "a.md", Body: body}}, Options{MinCount: 2, MaxWords: 4})
+	c, ok := find(got, "gribble’s lemma")
+	if !ok {
+		t.Fatalf("not found: %v", ens(got))
+	}
+	if c.Count != 6 {
+		t.Errorf("the two spellings count %d, want 6 on one row", c.Count)
+	}
+}
+
 // The sentence form of a definition, which is thin on chapter VIII but always
 // right when it hits.
 func TestADefinedTermIsFound(t *testing.T) {

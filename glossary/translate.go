@@ -2,6 +2,7 @@ package glossary
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode"
@@ -427,6 +428,14 @@ func (g *Glossary) Tidy() (dropped []Reject) {
 // Only the two things that have actually been measured coming out of the miner.
 // A rule here that guessed at what a term looks like would throw away real
 // vocabulary, and the miner's output is already a list for a person to read.
+// possessiveRE is a possessive the miner mangled: it used to write an
+// apostrophe as a hyphen, so "Schur's lemma" came out "schur-s lemma". Nine
+// rows went into the glossary spelled that way and six of them are real terms.
+// A term is found in a section by literal search, so not one of the nine could
+// ever be found, could reach a translation prompt, or could be checked for.
+// They come out here and go back in correctly spelled on the next mining pass.
+var possessiveRE = regexp.MustCompile(`(^|[a-z])-s($| )`)
+
 func badTerm(en string) string {
 	term := strings.ToLower(strings.TrimSpace(en))
 	switch {
@@ -436,6 +445,8 @@ func badTerm(en string) string {
 		return "is one of Bourbaki's operators and belongs inside the mathematics, not in the glossary"
 	case stop[term] || notTerms[term]:
 		return "is an ordinary English word and not a term"
+	case possessiveRE.MatchString(term):
+		return "carries -s where the book prints an apostrophe, which is the miner's old reading of Schur's, and the string occurs nowhere in the corpus"
 	}
 	// A phrase breaks at an operator, so a phrase with one inside it is not a
 	// phrase the miner would hand back today. The rows that carry one were
