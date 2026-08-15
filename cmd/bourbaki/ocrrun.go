@@ -269,7 +269,12 @@ func ocrRun(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	hosts, err := ocrHostsNow(ctx, *routeFile, *hostList, *wait, logf)
+	var hosts []ocr.Host
+	if hereOnly(*hostList) {
+		hosts, err = localHosts(*lanes)
+	} else {
+		hosts, err = ocrHostsNow(ctx, *routeFile, *hostList, *wait, logf)
+	}
 	if err != nil {
 		return err
 	}
@@ -281,8 +286,10 @@ func ocrRun(args []string) error {
 
 	runner := &ocr.Runner{
 		Book: state.entry.ID, Root: state.root, Queue: state.queue,
-		Prompt: state.ask, Model: route.DefaultModel,
-		Hosts: hosts, Shell: fleet.SSH{Timeout: 2 * time.Minute}, Copy: ocr.Rsync{Timeout: 30 * time.Minute},
+		Prompt: state.ask, Model: runModel(hosts),
+		Hosts: hosts,
+		Shell: ocr.LocalShell{Remote: fleet.SSH{Timeout: 2 * time.Minute}},
+		Copy:  ocr.LocalCopy{Remote: ocr.Rsync{Timeout: 30 * time.Minute}},
 		Batch: *batch, Limit: *limit, Keep: *keep,
 		First: *first, Last: *last,
 		Expect: state.expect, RetryDPI: render.RetryDPI,
@@ -293,7 +300,10 @@ func ocrRun(args []string) error {
 	// it is sent back to the queue for another full reading. The queue is the
 	// fallback, not the first move: a follow up costs one turn and a re-read
 	// costs a page.
-	if !*noRepair {
+	//
+	// Not here. A page read on this machine is in no conversation to go back
+	// to, and a re-read is fifteen seconds, so the queue is the whole repair.
+	if !*noRepair && !hereOnly(*hostList) {
 		runner.Repair = mender(state.root, hosts, state.expect, logf)
 	}
 
@@ -347,6 +357,65 @@ func rerender(state setup) func(context.Context, int, int) (int, error) {
 		return manifest.DPI, nil
 	}
 }
+
+// hereOnly says whether -hosts named this machine and nothing else.
+//
+// Nothing else, on purpose. A run that mixed the two would write one model name
+// into the front matter of pages two different models read, and the front
+// matter is where a page says what read it. Two runs cost one more command and
+// keep that honest, and the queue is shared anyway, so they can be started
+// together against the same volume and neither will read the other's pages.
+func hereOnly(names string) bool {
+	fields := strings.Split(strings.TrimSpace(names), ",")
+	if len(fields) != 1 {
+		return false
+	}
+	return strings.TrimSpace(fields[0]) == ocr.LocalHost
+}
+
+// localHosts is this machine as a host, which needs no route file and no probe.
+//
+// The tool is this binary. The batch protocol starts <tool> ocr-batch on the
+// host, and the local half of that is a subcommand here, so the reader a run
+// starts is the build the run itself came from rather than whatever is on PATH
+// under that name.
+func localHosts(lanes int) ([]ocr.Host, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("cannot find this binary, which is what reads the pages here: %w", err)
+	}
+	if lanes <= 0 {
+		lanes = localLanes
+	}
+	return []ocr.Host{{Name: ocr.LocalHost, Tool: self, Lanes: lanes, RateDelay: localRateDelay}}, nil
+}
+
+// localLanes is how many pages this machine reads at once by default.
+//
+// Six. Each lane is one CLI process waiting on a network call, so this is not
+// bounded by the cores here; it is bounded at the other end, and six pages in
+// thirty six seconds is what the pilot measured. The number is worth raising
+// when the account is fresh and lowering when it is not, which is what -lanes
+// is for.
+const localLanes = 6
+
+// localRateDelay is the gap between starting one page and the next. Small, but
+// not nothing: six processes started in the same instant all open a connection
+// in the same instant.
+const localRateDelay = 1.0
+
+// runModel is what the pages of this run will say read them.
+func runModel(hosts []ocr.Host) string {
+	if len(hosts) > 0 && hosts[0].Local() {
+		return localModelName
+	}
+	return route.DefaultModel
+}
+
+// localModelName is what a page read here records in its front matter. The CLI
+// is asked for opus and resolves it to whichever Opus is current, so the name
+// kept here is the family and not a build.
+const localModelName = "claude-opus"
 
 // ocrHosts turns the route file and what fleet doctor found into the boxes that
 // can read pages.

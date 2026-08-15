@@ -36,6 +36,11 @@ type fleet struct {
 	// images arrive under in/<id> and are collected from out/<id>.
 	pending map[string][]string
 	started int
+	// stopped is a batch that died before it had written every page, and log is
+	// what the tail of its log file says about why.
+	stopped bool
+	wrote   int
+	log     string
 }
 
 // batchOf takes the id out of a remote path such as bourbaki-ocr/out/alg-0001-ab12/.
@@ -56,9 +61,14 @@ func (f *fleet) Run(ctx context.Context, host, command string) (string, error) {
 		f.started++
 		return "1234\n", nil
 	case strings.Contains(command, "kill -0"):
+		if f.stopped {
+			return fmt.Sprintf("%d\ngone\n", f.wrote), nil
+		}
 		// Everything finished between the start and the first poll, which is
 		// what a fake fleet is for.
 		return "1000000\nrunning\n", nil
+	case strings.HasPrefix(strings.TrimSpace(command), "tail"):
+		return f.log, nil
 	}
 	return "", nil
 }
@@ -929,6 +939,52 @@ func TestABatchThatNeverWentOutCostsNoAttempts(t *testing.T) {
 		}
 		if len(job.History) != 1 || job.History[0].Reason == "" {
 			t.Errorf("%s says nothing about being handed back: %+v", job.Target, job.History)
+		}
+	}
+}
+
+// The model being out of turns is a pause, not four bad pages.
+//
+// A reader whose account has no turns left refuses every page after the first
+// in about a second each. Filing those as attempts spends a page's four tries
+// on an account that will be back within the hour, and the fourth one kills the
+// page for good. So the pages that were not reached go back untouched, the ones
+// that were read are still filed, and nothing more is sent to that host in this
+// run.
+func TestAPauseCostsThePagesNoAttempts(t *testing.T) {
+	w := newWorld(t, 4)
+	machine := newFleet(func(image string) string {
+		if strings.HasSuffix(image, "0001.png") {
+			return page("A IV.1")
+		}
+		return ""
+	})
+	machine.stopped, machine.wrote = true, 1
+	machine.log = "0002.png: " + OutOfTurnsMark + " for now, stopping the batch: You've hit your session limit"
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Accepted != 1 {
+		t.Errorf("accepted %d, want the one page that was read before the pause", report.Accepted)
+	}
+	if report.Rejected != 0 || report.Dead != 0 {
+		t.Errorf("a pause rejected %d pages and killed %d", report.Rejected, report.Dead)
+	}
+	if report.Released != 3 {
+		t.Errorf("released %d, want the 3 pages the reader never reached", report.Released)
+	}
+	if machine.started != 1 {
+		t.Errorf("the run started %d batches against a reader that is out of turns, want 1", machine.started)
+	}
+	for _, job := range mustList(t, w.queue, queue.Pending) {
+		if job.Attempts != 0 {
+			t.Errorf("%s came back with %d attempts spent, want 0", job.Target, job.Attempts)
 		}
 	}
 }

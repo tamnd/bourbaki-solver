@@ -29,7 +29,10 @@ flags for fill and run:
   -f N -l N      first and last pdf page, default the whole volume
   -batch N       pages per batch, default 25
   -limit N       stop after this many pages, for a pilot
-  -hosts LIST    comma separated route names, default every route that does OCR
+  -hosts LIST    comma separated route names, default every route that does OCR.
+                 -hosts local reads the pages on this machine with the Claude
+                 Code CLI instead of the fleet, which needs no browser account
+                 and reads a page in about fifteen seconds
   -routes PATH   route file, default ~/.config/bourbaki/routes.json
   -queue PATH    queue directory
   -keep          leave the page images on the hosts, for debugging

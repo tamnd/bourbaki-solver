@@ -457,6 +457,14 @@ func prepare(ctx context.Context, shell Shell, host Host, clear string, dirs ...
 	if clear != "" {
 		command = "rm -rf " + quote(clear) + " && " + command
 	}
+	// This machine opens no browser, so there is no display to ask about. The
+	// directories are still made, because the protocol below is the same one.
+	if host.Local() {
+		if _, err := shell.Run(ctx, host.Name, command); err != nil {
+			return fmt.Errorf("prepare %s: %w", host.Name, err)
+		}
+		return nil
+	}
 	ready, err := shell.Run(ctx, host.Name, fmt.Sprintf(
 		"%s && (pgrep -f %s >/dev/null && echo display-up || echo display-down)",
 		command, quote("Xvfb "+host.display()+" ")))
@@ -513,11 +521,26 @@ func (b Batch) pushPrompt(ctx context.Context, root string) (string, error) {
 // opened a page, and the run reported four pages missing with an empty log,
 // because there was no log. Forty seconds for four pages of mathematics was the
 // tell.
+// launcher is what puts the tool in the background and keeps it there.
+//
+// A rented box gets DISPLAY and setsid: Chrome needs the first and the second
+// makes the pid a process group leader, which is what stop kills. This machine
+// gets neither. There is no browser here, and macOS has no setsid at all, so a
+// command built with one starts nothing and the run reads the empty output as a
+// batch that would not start. The reader here puts itself in its own group
+// instead, so stop reaches its children the same way.
+func (b Batch) launcher() string {
+	if b.Host.Local() {
+		return "nohup"
+	}
+	return "DISPLAY=" + quote(b.Host.display()) + " setsid nohup"
+}
+
 func (b Batch) start(ctx context.Context, _, in, out, prompt, logFile string) (int, error) {
 	command := fmt.Sprintf(
-		"DISPLAY=%s setsid nohup %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
+		"%s %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
 			"--skip-existing --recursive --timeout %d --prompt \"$(cat %s)\" >%s 2>&1 </dev/null & echo $!",
-		quote(b.Host.display()), quote(b.Host.Tool), quote(in), quote(out),
+		b.launcher(), quote(b.Host.Tool), quote(in), quote(out),
 		b.Host.lanes(), strconv.FormatFloat(b.Host.rateDelay(), 'f', -1, 64),
 		int(b.Host.pageTimeout().Seconds()), quote(prompt), quote(logFile))
 
