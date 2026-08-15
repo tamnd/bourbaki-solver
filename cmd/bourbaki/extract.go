@@ -249,7 +249,8 @@ func extractRun(args []string) error {
 		meta := corpus.PageFrontMatter{
 			Book:        b.ID,
 			PDFPage:     p.PDFPage,
-			PageLabel:   pageLabel(pm, p),
+			PageLabel:   pageLabel(pm, b, p),
+			Folio:       p.Foot,
 			RunningHead: p.Title,
 			Continues:   p.Continues,
 			Method:      corpus.MethodNative,
@@ -325,17 +326,35 @@ func extractRun(args []string) error {
 // because it was fitted over the whole volume and knows what a page carries even
 // when the page does not say, and the running head is the fallback for a run
 // made before the volume was mapped.
-func pageLabel(pm *pagemap.Map, p *extract.Page) string {
-	if pm != nil {
+// pageLabel is the label of a page, "A VIII.13", built from the page map rather
+// than from the head, because a page that opens a § carries no head at all.
+//
+// book is the Book of the Éléments and not the volume, since the letter belongs
+// to the Book: chapters I to VIII of Algebra are printed in three volumes and
+// all three label their pages "A". A Book the Éléments do not abbreviate has no
+// label to build, and the page keeps whatever its own head said.
+func pageLabel(pm *pagemap.Map, b *corpus.Book, p *extract.Page) string {
+	letter := corpus.BookLetter(b.Book)
+	// A page label counts pages inside a chapter, which is what "A VIII.13"
+	// says and what corpus.ParsePageLabel reads back. The volumes that number
+	// their pages straight through the book print no such label anywhere, and
+	// gluing the chapter of a page to its running number would make one up:
+	// "E IV.289" would read as page 289 of chapter IV, and chapter IV of Theory
+	// of Sets is 60 pages long. Those volumes carry the bare number instead,
+	// in Folio, and no label.
+	if b.Pagination != "" && b.Pagination != string(pagemap.PerChapter) {
+		return p.Label
+	}
+	if pm != nil && letter != "" {
 		if e, ok := pm.Lookup(p.PDFPage); ok {
 			if e.Page > 0 {
-				return fmt.Sprintf("A %s.%d", e.Chapter, e.Page)
+				return fmt.Sprintf("%s %s.%d", letter, e.Chapter, e.Page)
 			}
 			// A page that opens a § prints its number at the foot and carries
 			// no head, so the number is all there is and the chapter comes from
 			// the map.
 			if p.Label == "" && p.Foot > 0 && e.Chapter != "" {
-				return fmt.Sprintf("A %s.%d", e.Chapter, p.Foot)
+				return fmt.Sprintf("%s %s.%d", letter, e.Chapter, p.Foot)
 			}
 		}
 	}

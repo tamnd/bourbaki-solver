@@ -102,6 +102,46 @@ func TestBookTitleFallsBackToTheSlug(t *testing.T) {
 	}
 }
 
+// The letters are the table the Éléments print on page vii of every recent
+// volume, so this test is against the book and not against the map. The last
+// two cases are the ones that cost something: a Book with no letter must give
+// back nothing rather than a guess, and no two Books may share a letter, since
+// a page label is the letter and the number and nothing else.
+func TestBookLetterIsWhatTheElementsPrint(t *testing.T) {
+	for book, want := range map[string]string{
+		"ens":  "E",
+		"alg":  "A",
+		"top":  "TG",
+		"lie":  "LIE",
+		"ts":   "TS",
+		"ta":   "TA",
+		"hist": "",
+		"":     "",
+	} {
+		if got := BookLetter(book); got != want {
+			t.Errorf("BookLetter(%q) = %q, want %q", book, got, want)
+		}
+	}
+	seen := map[string]string{}
+	for book, letter := range bookLetters {
+		if other, ok := seen[letter]; ok {
+			t.Errorf("%s and %s are both cited %q, so their page labels collide", book, other, letter)
+		}
+		seen[letter] = book
+	}
+	// Every Book with a letter is a Book the corpus knows the name of, and
+	// every abbreviated Book is shelved, so a new volume cannot arrive with a
+	// letter and no place to stand.
+	for book := range bookLetters {
+		if _, ok := bookTitles[book]; !ok {
+			t.Errorf("%s is cited by a letter and has no title", book)
+		}
+		if _, ok := bookOrder[book]; !ok {
+			t.Errorf("%s is cited by a letter and is not shelved", book)
+		}
+	}
+}
+
 func TestUpsertReplaces(t *testing.T) {
 	m := &BooksManifest{}
 	m.Upsert(Book{ID: "alg-viii", Pages: 1})
