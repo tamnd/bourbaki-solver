@@ -121,6 +121,61 @@ func TestATitleIsOfferedOnce(t *testing.T) {
 	}
 }
 
+// A word a title sets off on its own is a term, and the fragment rule does not
+// get to take it away.
+//
+// The counts cannot settle this case. A title is counted once for the file it
+// heads and the phrases inside it are counted zero, so a word that reaches a
+// count of one by folding a plural onto it lands exactly level with the title
+// that contains it, and equal counts is what the fragment rule reads as proof.
+// Theory of Sets lost axiom, empty set, ordered pair, well-ordered set, inverse
+// limit and quantified theories this way, every one of them a heading of the
+// volume.
+func TestAWordATitleSetsOffOnItsOwnSurvives(t *testing.T) {
+	got := mine(t, []Doc{{Path: "a.md", Body: "nothing at all here\n",
+		Titles: []string{"The gribble of extent", "Gribbles"}}}, Options{MinCount: 99, MaxWords: 4})
+	if _, ok := find(got, "gribble"); !ok {
+		t.Errorf("the word heads a title of its own and was dropped as a fragment: %v", ens(got))
+	}
+}
+
+// The exemption above is the whole run and not any phrase a title contains.
+//
+// Without that limit the fragments come back with it: a long title yields three
+// and four word cuts out of its middle, "connected commutative real lie" and
+// the like, which are not terms and which a curator has to read and reject one
+// by one. 91 of them over the real corpus.
+func TestAPhraseCutOutOfTheMiddleOfATitleIsStillAFragment(t *testing.T) {
+	body := strings.Repeat("Connected flabby wobbly quivers are rare.\n", 6)
+	got := mine(t, []Doc{{Path: "a.md", Body: body,
+		Titles: []string{"Connected flabby wobbly quivers"}}}, Options{MinCount: 3, MaxWords: 4})
+	if _, ok := find(got, "flabby wobbly"); ok {
+		t.Errorf("two words out of the middle of a title were offered as a term")
+	}
+	if _, ok := find(got, "connected flabby wobbly quivers"); !ok {
+		t.Errorf("the run itself was not offered: %v", ens(got))
+	}
+}
+
+// set is a noun. It was in the stop list because it is also a verb, and the
+// English corpus says "the set" 855 times against "we set" 17, so the list was
+// breaking phrases at the commonest noun in mathematics to catch one use in
+// fifty. Theory of Sets cannot be translated at all without the row.
+func TestSetIsATermAndNotAStopWord(t *testing.T) {
+	body := strings.Repeat("The ordered set of quivers is flat and the set is small.\n", 6)
+	got := mine(t, []Doc{{Path: "a.md", Body: body}}, Options{MinCount: 3, MaxWords: 4})
+	c, ok := find(got, "set")
+	if !ok {
+		t.Fatalf("set was not offered: %v", ens(got))
+	}
+	if c.Count != 12 {
+		t.Errorf("set is counted %d times, want 12: six sentences saying it twice", c.Count)
+	}
+	if _, ok := find(got, "ordered set"); !ok {
+		t.Errorf("the phrase the word is half of was not offered either: %v", ens(got))
+	}
+}
+
 // The sentence form of a definition, which is thin on chapter VIII but always
 // right when it hits.
 func TestADefinedTermIsFound(t *testing.T) {

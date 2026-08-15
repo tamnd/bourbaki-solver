@@ -20,7 +20,7 @@ func smallCorpus(t *testing.T) string {
 
 	books := &corpus.BooksManifest{}
 	books.Upsert(corpus.Book{
-		ID: "alg-viii", Book: "alg", Title: "Algebra, Chapter 8", Edition: "2023, Springer Nature",
+		ID: "alg-viii", Book: "alg", Lang: "en", Title: "Algebra, Chapter 8", Edition: "2023, Springer Nature",
 		Chapters: []string{"VIII"}, Pages: 4, Nature: "digital", Extraction: "native",
 	})
 	if err := books.Save(root); err != nil {

@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"unicode"
@@ -108,6 +109,11 @@ type miner struct {
 	// display is the term as it was first written, so that "Artinian" keeps its
 	// capital and "module" does not gain one.
 	display map[string]string
+	// whole is the phrases a title set off by itself: the title entire, and each
+	// stretch of it that the stop words leave standing. "Segments of a
+	// well-ordered set" puts in three, the title, "segments" and "well-ordered
+	// set", and not "well-ordered" or "ordered set". See dropSubsumed.
+	whole map[string]bool
 }
 
 func newMiner() *miner {
@@ -116,6 +122,7 @@ func newMiner() *miner {
 		sources: map[string]map[string]bool{},
 		where:   map[string]string{},
 		display: map[string]string{},
+		whole:   map[string]bool{},
 	}
 }
 
@@ -169,7 +176,9 @@ func (m *miner) mineTitles(d Doc) {
 			continue
 		}
 		m.add(t, SourceTitle, d.Path, 1)
+		m.whole[Key(t)] = true
 		for _, run := range runs(strip(t)) {
+			m.whole[Key(strings.Join(run, " "))] = true
 			for _, ng := range ngrams(run, 4) {
 				m.add(ng, SourceTitle, d.Path, 0)
 			}
@@ -303,7 +312,7 @@ func (m *miner) candidates(opt Options) []Candidate {
 			Where:   m.where[key],
 		})
 	}
-	out = dropSubsumed(out)
+	out = dropSubsumed(out, m.whole)
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Count != out[j].Count {
 			return out[i].Count > out[j].Count
@@ -314,6 +323,10 @@ func (m *miner) candidates(opt Options) []Candidate {
 		out = out[:opt.Limit]
 	}
 	return out
+}
+
+func hasSource(c Candidate, want string) bool {
+	return slices.Contains(c.Sources, want)
 }
 
 func sourceList(set map[string]bool) []string {
@@ -333,13 +346,39 @@ func sourceList(set map[string]bool) []string {
 // corpus uses, it is a fragment of one. The test is equal counts: a phrase that
 // does occur alone somewhere has a count strictly greater than any phrase
 // containing it.
-func dropSubsumed(in []Candidate) []Candidate {
+//
+// The test is a test on the prose, and a phrase the book itself set off is
+// exempt from it. Three things set a phrase off: a title that is the phrase, a
+// stretch of a title that the stop words leave standing on its own, and the
+// definition and statement kind sources, both of which capture a whole noun
+// phrase and never a fragment. Everything else is judged on the count.
+//
+// The counts of the curated sources cannot decide this on their own, which is
+// why the exemption is needed. A title is counted once for the file it heads
+// and the phrases inside it are counted zero, so "axiom" and "The axiom of
+// extent" come out equal and the word loses to the sentence it sits in. Theory
+// of Sets is where that shows worst, because its terms are being read off its
+// table of contents while its pages are still being scanned, and axiom, empty
+// set, ordered pair, well-ordered set, inverse limit and quantified theories
+// were all going out this way. It is not only the unread volumes: segment
+// heads a no. of chapter III, the corpus says the word once in prose, and that
+// one sentence was enough to drop it against the phrase it occurred in.
+//
+// The exemption is the whole run and not any phrase a title contains, which is
+// the difference between keeping "Morita equivalence" and keeping "connected
+// commutative real lie". The first is a run of its title entire and the second
+// is four words cut out of the middle of a longer one.
+func dropSubsumed(in []Candidate, whole map[string]bool) []Candidate {
 	count := map[string]int{}
 	for _, c := range in {
 		count[Key(c.EN)] = c.Count
 	}
 	var out []Candidate
 	for _, c := range in {
+		if whole[Key(c.EN)] || hasSource(c, SourceDefined) || hasSource(c, SourceKind) {
+			out = append(out, c)
+			continue
+		}
 		key := Key(c.EN)
 		subsumed := false
 		for longer, n := range count {
@@ -501,6 +540,15 @@ func trimStops(fields []string) []string {
 // "such", "therefore". The fifth is the machinery of a Bourbaki cross
 // reference, "p", "no", "cf", "loc", "cit", which occur thousands of times and
 // would otherwise sit at the head of the frequency list.
+//
+// "set" was in the fourth group and came out of it. It is a verb in "we set x =
+// 0" and that is what put it there, but the English corpus says "the set" 855
+// times and "we set" 17, so the list was breaking phrases at the commonest noun
+// in mathematics to catch one use in fifty. It cost ordered set, finite set,
+// quotient set, empty set, inductive set, directed set and set theory, none of
+// which could be mined while the word in the middle of them was a wall, and it
+// cost the row for set itself, which Theory of Sets needs before anything of it
+// can be translated.
 var stop = set(`
 a an the this that these those there here it its it's their his her our your my
 and or but nor so yet if then else when while whenever whereas because since
@@ -512,7 +560,7 @@ we us you they them he she who whom whose which what where why how
 one two three four five six seven eight nine ten first second third
 all any both each either every few many more most much neither none other same several some such
 as than too very own less least more
-let put set take taken takes taking give given gives giving call called calls
+let put take taken takes taking give given gives giving call called calls
 say says said see seen show shown shows suppose supposed assume assumed
 thus hence therefore moreover furthermore however conversely indeed namely
 follows following follow followed denote denoted denotes write written writes
