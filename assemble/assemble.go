@@ -294,6 +294,9 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 // own, or it does not, and the block was gathered.
 func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr printing) ([]span, error) {
 	out := slices.Clone(body)
+	// heads is the gathered heading of a page, kept aside until the runs are in
+	// printed order, because which run it belongs to is not known until then.
+	heads := map[int]int{}
 	for _, b := range body {
 		s := pieces[b.piece].Section
 		if s.Exercises == nil {
@@ -309,23 +312,19 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 			return nil, fmt.Errorf("%s: pdf page %d carries neither the heading %q nor a mark %s: %w",
 				name(s), page, pr.exercises, mark, err)
 		}
-		// The chapter's own note on its exercises stands above the first mark,
-		// under the gathered heading: chapter VII of Lie 7 to 9 says there that
-		// its Lie algebras are finite dimensional and that k has characteristic
-		// zero from § 3 on. It is printed where it is printed, immediately
-		// before the exercises of § 1, and it is kept there rather than moved or
-		// copied to each §, so that the file reads as the page does.
-		// The case of the heading is the press's and not the printing's, the
-		// same way the case of an appendix mark is. Lie 7 to 9 sets it in
-		// capitals and the three recent French volumes set it "Exercices", and
-		// both are the one heading over a chapter's worth of exercises.
-		head := off
+		// The case of the gathered heading is the press's and not the
+		// printing's, the same way the case of an appendix mark is. Lie 7 to 9
+		// sets it in capitals and the three recent French volumes set it
+		// "Exercices", and both are the one heading over a chapter's worth of
+		// exercises.
 		if at, err := findLine(pages, page, func(l string) bool {
 			return strings.EqualFold(l, pr.gathered)
 		}); err == nil && at < off {
-			head = at
+			if have, ok := heads[page]; !ok || at < have {
+				heads[page] = at
+			}
 		}
-		out = append(out, span{page: page, off: head, piece: b.piece,
+		out = append(out, span{page: page, off: off, piece: b.piece,
 			head: pr.exercises, mark: headingText(pages[page].Body, off)})
 	}
 	slices.SortFunc(out, func(a, b span) int {
@@ -334,6 +333,27 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 		}
 		return a.off - b.off
 	})
+	// The chapter's own note on its exercises stands above the first mark, under
+	// the gathered heading: chapter VII of Lie 7 to 9 says there that its Lie
+	// algebras are finite dimensional and that k has characteristic zero from
+	// § 3 on. It is printed where it is printed, immediately before the
+	// exercises of § 1, and it is kept there rather than moved or copied to each
+	// §, so that the file reads as the page does.
+	//
+	// It belongs to the run that opens under it, which is the first one on the
+	// page and not every one of them. Chapter I of Theory of Sets marks § 1 and
+	// § 2 on the one page, its exercises for § 1 being five, and pulling both up
+	// to the heading opened two runs on the same line.
+	for i, s := range out {
+		at, ok := heads[s.page]
+		if !ok || at >= s.off {
+			continue
+		}
+		if i > 0 && out[i-1].page == s.page {
+			continue
+		}
+		out[i].off = at
+	}
 	for i := 1; i < len(out); i++ {
 		if a, b := out[i-1], out[i]; a.page == b.page && a.off == b.off {
 			return nil, fmt.Errorf("%s and %s both open at the same place on pdf page %d",
@@ -368,6 +388,14 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 // are asked for.
 func runMark(s corpus.Section) *regexp.Regexp {
 	if s.Appendix {
+		// A chapter with one appendix does not number it, and the page prints
+		// the word by itself. Chapter I of Theory of Sets does, and the table of
+		// contents gives it no numeral either, so a mark that insists on one
+		// finds nothing on the page that carries it and the whole volume stops
+		// assembling on a page that is perfectly well read.
+		if s.Number == 0 {
+			return regexp.MustCompile(`(?i)^#{1,4} +appendi[xc]e?\.?$`)
+		}
 		return regexp.MustCompile(fmt.Sprintf(`(?i)^#{1,4} +appendi[xc]e? +(?:%d|%s)\.?$`,
 			s.Number, roman(s.Number)))
 	}
@@ -599,13 +627,17 @@ func slice(pages map[int]corpus.PageFile, from, to span) ([]part, error) {
 			return nil, fmt.Errorf("pdf page %d has not been read", p)
 		}
 		body, cont := f.Body, f.Meta.Continues
+		lo, hi := 0, len(body)
 		if p == to.page {
-			body = body[:to.off]
+			hi = to.off
 		}
 		if p == from.page && from.off > 0 {
 			// The piece opens partway down the page, so it opens on its own
 			// heading and carries on nothing.
-			body, cont = body[from.off:], false
+			lo, cont = from.off, false
+		}
+		if lo > 0 || hi < len(body) {
+			body = cutPage(body, lo, hi)
 		}
 		if strings.TrimSpace(body) == "" {
 			continue
@@ -620,6 +652,73 @@ func slice(pages map[int]corpus.PageFile, from, to span) ([]part, error) {
 		out[0].body = openRun(out[0].body, from.head, from.mark)
 	}
 	return out, nil
+}
+
+// cutPage is the part of a page between two offsets, with the footnote
+// definitions of the whole page put on the side of the cut that marks them.
+//
+// A footnote is printed at the foot of the page, below everything, and a piece
+// boundary falls in the middle of the page. So the definition of a note marked
+// in the text above the boundary sits physically below it, and a plain cut hands
+// it to the piece that follows. Page 67 of Theory of Sets is exactly that: the
+// last exercise of § 4 ends "(Take R to be the relation x = x ...) (*)", the
+// APPENDIX heading opens two lines later, and the note the asterisk points at is
+// at the foot of the page under both of them. Cut plainly, § 4 has a mark with
+// nothing behind it and the appendix has a note nothing points at, which is what
+// Chapter reports.
+//
+// So the definitions are read off the whole page and given to the side that
+// carries the mark, whichever side of the cut they were printed on. The mark
+// counts either as the reference extraction was asked for or as the mark the
+// book printed, because at this point in the run the reference has not been put
+// back yet: see markNotes.
+func cutPage(page string, lo, hi int) string {
+	cut := page[lo:hi]
+	_, defs := cutNotes(page)
+	// The mark is looked for in the text of the cut and not in the definitions
+	// standing at the foot of it, since every definition opens on the mark it
+	// defines and would otherwise be found marking itself.
+	text, _ := cutNotes(cut)
+	var keep []string
+	for _, d := range defs {
+		if noteRE.FindStringSubmatch(d) == nil {
+			continue // a note that runs to a second line, which stays with its first
+		}
+		here, mine := strings.Contains(cut, d), marksNote(text, d)
+		switch {
+		case here && !mine:
+			cut = strings.Replace(cut, d+"\n", "", 1)
+			cut = strings.Replace(cut, d, "", 1)
+		case !here && mine:
+			keep = append(keep, d)
+		}
+	}
+	cut = strings.TrimRight(cut, "\n ")
+	if len(keep) > 0 {
+		cut += "\n\n" + strings.Join(keep, "\n")
+	}
+	return cut
+}
+
+// marksNote says a text carries the mark of a footnote definition.
+func marksNote(text, def string) bool {
+	n := noteRE.FindStringSubmatch(def)
+	if n == nil {
+		return false
+	}
+	if strings.Contains(text, "[^"+n[1]+"]") {
+		return true
+	}
+	mark := headMarkRE.FindString(strings.TrimPrefix(def, n[0]))
+	if mark == "" {
+		return false
+	}
+	for _, m := range printedMarkRE.FindAllString(text, -1) {
+		if markKey(m) == markKey(mark) {
+			return true
+		}
+	}
+	return false
 }
 
 // block is one paragraph, heading or display of the assembled text, with the
@@ -672,6 +771,7 @@ func join(parts []part, pr printing) ([]block, []note) {
 	var notes []note
 	for _, p := range parts {
 		body, defs := cutNotes(p.body)
+		body = markNotes(body, defs)
 		body, defs = renumber(body, defs, len(notes)+1)
 		for _, d := range defs {
 			notes = append(notes, note{def: d, page: p.page})
@@ -930,6 +1030,74 @@ func cutNotes(body string) (string, []string) {
 		keep = append(keep, b)
 	}
 	return strings.Join(keep, "\n\n"), defs
+}
+
+// printedMarkRE is the mark the book itself prints at a footnote. Bourbaki does
+// not number its notes, it marks them with an asterisk, then two asterisks, then
+// a dagger, then a double dagger, starting again on each page. The mark stands
+// in the text and again at the head of the definition, and extraction writes it
+// in both places as the page set it, sometimes as mathematics and sometimes not.
+var printedMarkRE = regexp.MustCompile(`\$?\(\s*(?:(?:\\?\*)+|\\?†|\\?‡)\s*\)\$?`)
+
+// headMarkRE is the same mark where a definition opens on it.
+var headMarkRE = regexp.MustCompile(`^` + printedMarkRE.String())
+
+// markNotes puts back the reference to a footnote that a page printed the mark
+// for and never wrote the reference for.
+//
+// Extraction is asked for two things at a footnote: the mark in the text
+// becomes "(*)[^1]", the printed mark kept as a transcription and the reference
+// added so that the definition has something pointing at it. Pages that were
+// read by a model do the first half more reliably than the second. Theory of
+// Sets prints 51 notes and 30 of them came back with the mark alone, "an axiom
+// of $\mathscr{T}$ (\*)." against a definition reading "[^1]: (\*) This scheme
+// may be expressed", so the definition had nothing pointing at it and the
+// chapter would not assemble.
+//
+// Nothing is guessed. The definition carries the printed mark at its head, that
+// is the mark the page set, and the reference goes after the one place in the
+// body where the same mark stands. A mark that stands nowhere, or in more than
+// one place, is left exactly as it was for the error in Chapter to report,
+// because a note put at the wrong mark is worse than a note with no mark.
+//
+// The printed mark stays where it is rather than being replaced, because that is
+// what the pages that were read properly look like: page 22 gives "the following
+// signs of a mathematical theory $\mathscr{T}$ (*)[^1] are", with both. The mark
+// is the book's and the reference is this corpus's, and neither says the other.
+func markNotes(body string, defs []string) string {
+	for _, def := range defs {
+		n := noteRE.FindStringSubmatch(def)
+		if n == nil || strings.Contains(body, "[^"+n[1]+"]") {
+			continue
+		}
+		mark := headMarkRE.FindString(strings.TrimPrefix(def, n[0]))
+		if mark == "" {
+			continue
+		}
+		at := -1
+		for _, loc := range printedMarkRE.FindAllStringIndex(body, -1) {
+			if markKey(body[loc[0]:loc[1]]) != markKey(mark) {
+				continue
+			}
+			if at >= 0 {
+				at = -1 // the page sets this mark twice, so no one place is the one
+				break
+			}
+			at = loc[1]
+		}
+		if at < 0 {
+			continue
+		}
+		body = body[:at] + "[^" + n[1] + "]" + body[at:]
+	}
+	return body
+}
+
+// markKey is a printed mark with the decoration the page happened to set it in
+// taken off, so that the "(\*)" of a definition is the same mark as the "(*)"
+// of the text it belongs to. Page 22 of Theory of Sets writes it both ways.
+func markKey(s string) string {
+	return strings.NewReplacer(`\`, "", "$", "", " ", "").Replace(s)
 }
 
 // renumber gives the footnotes of one page the numbers they will carry in the

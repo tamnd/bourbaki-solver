@@ -499,8 +499,24 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // The closing dollar hangs off the pilcrow rather than standing on its own,
 // because on its own it would read "$$ 5) $$", the opening of a display, as a
 // marker.
+//
+// A full stop closes the number as well as a parenthesis does, because Theory of
+// Sets closes it that way and every other volume closes it the other way. It
+// prints "1. Let $\mathscr{T}$ be a theory with no specific signs." and "¶ 4.
+// Let $A$ be a term", where Algebra VIII prints "1)" and "$\P 4)$", and it
+// letters the parts of an exercise "(a)" rather than "a)", so the two shapes do
+// not meet. This is a difference between two printings of one language, like the
+// numeral over an appendix, so the marker is read both ways rather than one way
+// being chosen by the volume. Read one way only, § 1 of chapter I reported a
+// preamble and no exercises at all, and so did every other § of the book.
+//
+// The cost of reading the full stop was measured before it was allowed rather
+// than argued about: no paragraph of the assembled corpus, in either language,
+// opens on a number and a full stop. What keeps it honest at all is the rule
+// that already keeps the parenthesis honest, that a marker counts only when it
+// carries the number the run is up to.
 var exNumRE = regexp.MustCompile(
-	`^(?:\*\*)?(?:\$\s*(\*)?\s*)?(?:(\\P|¶)\s*\$?\s*)?(?:\*\*)?(\d+)\)(?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
+	`^(?:\*\*)?(?:\$\s*(\*)?\s*)?(?:(\\P|¶)\s*\$?\s*)?(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // markerLen is how much of a block the marker takes, which is not always the
 // whole of what matched: a lettered part is matched to prove the number opens
