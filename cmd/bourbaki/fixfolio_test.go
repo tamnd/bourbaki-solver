@@ -134,6 +134,79 @@ func TestFixFolioSkipsTheVolumesThatPrintTheNumberInTheHead(t *testing.T) {
 	}
 }
 
+// The page prints a number, the map has it off that same foot, and the reading
+// dropped it. Page 32 of Theory of Sets is this: 25 at the foot of the image, no
+// folio in the file. -fill writes it and says on the page where it came from.
+func TestFixFolioFillsANumberTheReadingDropped(t *testing.T) {
+	root := folioCorpus(t, ens, map[int]string{
+		1: "Let $E$ be a set.\n",
+	}, []pagemap.Entry{{PDFPage: 1, Chapter: "I", Page: 25, Confidence: "foot"}})
+	if err := fixFolio([]string{"-fill"}); err != nil {
+		t.Fatal(err)
+	}
+	f := readPage(t, root, ens.ID, 1)
+	if f.Meta.Folio != 25 {
+		t.Errorf("folio = %d, want 25 from the page map", f.Meta.Folio)
+	}
+	if f.Body != "Let $E$ be a set.\n" {
+		t.Errorf("the body was touched, and there was nothing in it to take: %q", f.Body)
+	}
+	if len(f.Meta.Flags) != 1 || !strings.Contains(f.Meta.Flags[0], "page map") {
+		t.Errorf("flags = %q, and a number from somewhere other than the page says so", f.Meta.Flags)
+	}
+}
+
+// Without the flag nothing is filled, so no other volume changes under a run of
+// fix folio that was meant to move numbers out of bodies.
+func TestFixFolioFillsNothingUnasked(t *testing.T) {
+	root := folioCorpus(t, ens, map[int]string{
+		1: "Let $E$ be a set.\n",
+	}, []pagemap.Entry{{PDFPage: 1, Chapter: "I", Page: 25, Confidence: "foot"}})
+	if err := fixFolio(nil); err != nil {
+		t.Fatal(err)
+	}
+	if f := readPage(t, root, ens.ID, 1); f.Meta.Folio != 0 || len(f.Meta.Flags) != 0 {
+		t.Errorf("folio = %d, flags = %q, and neither was asked for", f.Meta.Folio, f.Meta.Flags)
+	}
+}
+
+// An interpolated number is not printed on the page. Filling it would put a
+// number in the corpus that a reader holding the book cannot find at the foot,
+// so -fill leaves the page as it stands.
+func TestFixFolioFillsNoNumberThePageDoesNotPrint(t *testing.T) {
+	root := folioCorpus(t, ens, map[int]string{
+		1: "## § 1. DEFINITIONS\n",
+	}, []pagemap.Entry{{PDFPage: 1, Chapter: "I", Page: 22, Confidence: "interpolated"}})
+	if err := fixFolio([]string{"-fill"}); err != nil {
+		t.Fatal(err)
+	}
+	if f := readPage(t, root, ens.ID, 1); f.Meta.Folio != 0 {
+		t.Errorf("folio = %d, and the page prints none", f.Meta.Folio)
+	}
+}
+
+// A page repaired by an earlier run has no number left in its body and a folio
+// in its front matter. Running again must not read that as a page that prints
+// none and must not flag it as filled from the map.
+func TestFixFolioLeavesAPageItAlreadyRepaired(t *testing.T) {
+	root := folioCorpus(t, ens, map[int]string{
+		1: "Let $E$ be a set.\n\n21\n",
+	}, []pagemap.Entry{{PDFPage: 1, Chapter: "I", Page: 21, Confidence: "foot"}})
+	if err := fixFolio([]string{"-fill"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixFolio([]string{"-fill"}); err != nil {
+		t.Fatal(err)
+	}
+	f := readPage(t, root, ens.ID, 1)
+	if f.Meta.Folio != 21 {
+		t.Errorf("folio = %d, want the 21 the first run took off the foot", f.Meta.Folio)
+	}
+	if len(f.Meta.Flags) != 0 {
+		t.Errorf("flags = %q, and the number was read off the page by the first run", f.Meta.Flags)
+	}
+}
+
 // -check is the same reading with nothing written, which is what makes it safe
 // to run over the whole corpus before running it for real.
 func TestFixFolioCheckWritesNothing(t *testing.T) {
