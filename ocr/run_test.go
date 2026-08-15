@@ -25,6 +25,10 @@ type fleet struct {
 	// answer returns what the model said for a page image. An empty string is a
 	// page that never came back.
 	answer func(image string) string
+	// refuse returns why the reader would not return a page at all, or the empty
+	// string for a page it was willing to read. A reader that refuses leaves a
+	// sidecar next to the answers rather than an answer. See refused.go.
+	refuse func(image string) string
 	// batches records every batch directory the fleet was asked to write into,
 	// which is how a test sees that a retry did not reuse a directory.
 	batches []string
@@ -94,13 +98,21 @@ func (f *fleet) Pull(ctx context.Context, host, remote, local string) error {
 	f.mu.Lock()
 	images := f.pending[batchOf(remote)]
 	f.batches = append(f.batches, filepath.Base(local))
-	answer := f.answer
+	answer, refuse := f.answer, f.refuse
 	f.mu.Unlock()
 
 	if err := os.MkdirAll(local, 0o755); err != nil {
 		return err
 	}
 	for _, image := range images {
+		if refuse != nil {
+			if said := refuse(image); said != "" {
+				if err := WriteRefusal(local, image, said); err != nil {
+					return err
+				}
+				continue
+			}
+		}
 		body := answer(image)
 		if body == "" {
 			continue
@@ -985,6 +997,97 @@ func TestAPauseCostsThePagesNoAttempts(t *testing.T) {
 	for _, job := range mustList(t, w.queue, queue.Pending) {
 		if job.Attempts != 0 {
 			t.Errorf("%s came back with %d attempts spent, want 0", job.Target, job.Attempts)
+		}
+	}
+}
+
+// The Historical Note of Theory of Sets is prose, and a reader whose provider
+// will not return a long verbatim stretch of a published book returns nothing
+// for those pages. That is not the page being wrong, and it must not be paid
+// for out of the page's four attempts: those pages read on the fleet without
+// complaint, and a page killed here is a page missing from the corpus for good.
+func TestARefusedPageKeepsItsAttempts(t *testing.T) {
+	w := newWorld(t, 4)
+	machine := newFleet(func(string) string { return page("A IV.1") })
+	machine.refuse = func(image string) string {
+		if strings.HasSuffix(image, "0003.png") {
+			return "API Error: 400 Output blocked by content filtering policy"
+		}
+		return ""
+	}
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Accepted != 3 {
+		t.Errorf("accepted %d, want the 3 pages the reader was willing to read", report.Accepted)
+	}
+	if report.Rejected != 0 || report.Dead != 0 {
+		t.Errorf("a refusal rejected %d pages and killed %d, want neither", report.Rejected, report.Dead)
+	}
+	if report.Refused != 1 {
+		t.Errorf("refused %d, want the one page the reader would not return", report.Refused)
+	}
+	if len(report.Refusals) != 1 || report.Refusals[0] != 3 {
+		t.Errorf("the refused pages are %v, want page 3 named", report.Refusals)
+	}
+	// A refused page is not evidence about how well the model reads, so it is
+	// out of the rate rather than counted against it.
+	if report.Rate() != 100 {
+		t.Errorf("the rate is %.1f %%, want 100 with the refusal left out of it", report.Rate())
+	}
+	pending := mustList(t, w.queue, queue.Pending)
+	if len(pending) != 1 || pending[0].Target != Target("alg-iv-vii", 3) {
+		t.Fatalf("pending is %v, want page 3 still waiting for a host that will read it", pending)
+	}
+	if pending[0].Attempts != 0 {
+		t.Errorf("the refused page came back with %d attempts spent, want 0", pending[0].Attempts)
+	}
+}
+
+// The release puts the page back in pending, where the next lease finds it, and
+// the answer is the same every time. Without the host remembering its own
+// refusals a run reads the last twenty five pages of the volume for ever.
+func TestARefusedPageIsNotOfferedToThatHostAgain(t *testing.T) {
+	w := newWorld(t, 3)
+	machine := newFleet(func(string) string { return page("A IV.1") })
+	machine.refuse = func(string) string { return "API Error: 400 Output blocked by content filtering policy" }
+	runner := w.runner(t, machine)
+	runner.Batch = 3
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Refused != 3 {
+		t.Errorf("refused %d of 3 pages", report.Refused)
+	}
+	if machine.started != 1 {
+		t.Errorf("the run started %d batches, want 1: the refused pages must not come round again", machine.started)
+	}
+}
+
+func TestAPageListReadsAsAPersonWouldWriteIt(t *testing.T) {
+	for _, c := range []struct {
+		pages []int
+		want  string
+	}{
+		{nil, ""},
+		{[]int{89}, "89"},
+		{[]int{89, 90}, "89, 90"},
+		{[]int{301, 302, 303}, "301 to 303"},
+		{[]int{306, 301, 302, 303, 89, 147}, "89, 147, 301 to 303, 306"},
+	} {
+		if got := pageList(c.pages); got != c.want {
+			t.Errorf("pageList(%v) = %q, want %q", c.pages, got, c.want)
 		}
 	}
 }

@@ -119,6 +119,65 @@ func TestTheBatchStopsWhenTheModelIsOutOfTurns(t *testing.T) {
 	}
 }
 
+// A refusal is neither a failure nor a pause. The provider will not return the
+// prose pages of a book at all, and the answer is the same every time, so the
+// page is marked refused for the run above to hand back untouched. The batch
+// carries on, because the next page is very likely mathematics and comes back.
+func TestARefusedPageIsMarkedAndTheBatchCarriesOn(t *testing.T) {
+	in := images(t, 301, 302)
+	out := t.TempDir()
+	reader := localReader{
+		Binary: fakeCLI(t, `case "$ask" in *0301.png*) echo "API Error: 400 Output blocked by content filtering policy" >&2; exit 1 ;; *) echo "SIGNS AND ASSEMBLIES" ;; esac`),
+		Model:  "opus", Prompt: "transcribe the page", Timeout: 30 * time.Second,
+	}
+	if err := reader.all(context.Background(), []string{
+		filepath.Join(in, "0301.png"), filepath.Join(in, "0302.png"),
+	}, out, 1, 0, false); err != nil {
+		t.Fatalf("a refusal failed the whole batch: %v", err)
+	}
+	said, ok := ocr.Refusal(out, "0301.png")
+	if !ok {
+		t.Fatal("the refused page left no mark, so the run above would read it as a page that merely went missing")
+	}
+	if !strings.Contains(said, "content filtering") {
+		t.Errorf("the mark says %q, want what the provider said", said)
+	}
+	if _, err := os.Stat(filepath.Join(out, "0301.md")); err == nil {
+		t.Error("a refusal was written to the corpus as a page")
+	}
+	if _, err := os.Stat(filepath.Join(out, "0302.md")); err != nil {
+		t.Errorf("the page after the refusal was not read: %v", err)
+	}
+}
+
+// The mark must not be counted as an answer. The run above polls a batch by
+// counting the Markdown files in the output directory, so a refusal named
+// 0301.md would say a page had been read.
+func TestTheRefusalMarkIsNotCountedAsAPage(t *testing.T) {
+	if strings.HasSuffix(ocr.RefusedName("0301.png"), ".md") {
+		t.Errorf("the mark is %q, which the poll counts as a page", ocr.RefusedName("0301.png"))
+	}
+}
+
+func TestARefusalIsToldApartFromALimit(t *testing.T) {
+	refusals := []string{
+		"API Error: 400 Output blocked by content filtering policy",
+		"api error: 400 blocked by content filtering",
+	}
+	for _, said := range refusals {
+		if !isRefusal(said) {
+			t.Errorf("%q was not read as a refusal", said)
+		}
+		if isLimit(said) {
+			t.Errorf("%q was read as the account being out of turns", said)
+		}
+	}
+	limit := "You've hit your session limit · resets 6:40pm"
+	if isRefusal(limit) {
+		t.Errorf("%q was read as a refusal, and the pages after it would be given up on rather than waited for", limit)
+	}
+}
+
 // One page failing is one page to read again. It must not take the rest of the
 // batch with it.
 func TestOnePageFailingLeavesTheRestOfTheBatchAlone(t *testing.T) {

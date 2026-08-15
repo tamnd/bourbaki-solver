@@ -52,6 +52,11 @@ A page that comes back empty, or that the CLI refuses, is not written. The run
 above counts the answers that are there, puts the missing pages back in the
 queue and reads them again later, which is the same thing it does for a page a
 rented box did not manage.
+
+A page the provider will not return at all, which is what happens to a page of
+continuous prose from a published book, leaves 0301.refused beside the answers
+instead. The run hands that page back with its attempts intact and stops
+offering it to this host, because reading it again here gets the same answer.
 `
 
 // defaultLocalModel is what a page is read with here.
@@ -71,6 +76,19 @@ const defaultLocalModel = "opus"
 // after it fails in a second and burns an attempt each. So the batch stops on
 // this and lets the queue keep the pages.
 var limitPhrases = []string{"session limit", "usage limit", "rate limit", "limit reached"}
+
+// refusalPhrases are how the API says it will not return this page at all,
+// rather than that it cannot right now.
+//
+// Twenty five pages of Theory of Sets are the Historical Note, which is
+// continuous English prose with no mathematics in it, and a transcription of
+// one is a long verbatim stretch of a published book. The API answers 400 and
+// names a content filtering policy. Every tier does it, so this is not a model
+// to be swapped: opus and sonnet are stopped by the filter and haiku declines
+// in its own words. The page is fine and the fleet reads it, so what this must
+// not do is spend the page's attempts finding that out four times. See
+// ocr/refused.go for what the run does with it.
+var refusalPhrases = []string{"content filtering policy", "output blocked", "blocked by content"}
 
 func runOCRBatch(args []string) error {
 	if len(args) < 2 || strings.HasPrefix(args[0], "-") {
@@ -164,9 +182,10 @@ func (r localReader) all(ctx context.Context, images []string, out string, jobs 
 
 	var (
 		mu     sync.Mutex
-		limit  string // what the CLI said when it refused, empty until it does
+		limit  string // what the CLI said when it ran out of turns, empty until it does
 		wrote  int
 		failed int
+		turned int // pages the reader would not return at all
 	)
 	work := make(chan string)
 	var wg sync.WaitGroup
@@ -186,6 +205,17 @@ func (r localReader) all(ctx context.Context, images []string, out string, jobs 
 				started := time.Now()
 				text, err := r.one(ctx, image)
 				switch {
+				case err != nil && isRefusal(err.Error()):
+					// Not a failure and not a limit. The batch carries on with
+					// the other pages, because the next page is very likely
+					// mathematics and comes back without a murmur.
+					if writeErr := ocr.WriteRefusal(out, name, err.Error()); writeErr != nil {
+						fmt.Printf("%s: could not record the refusal: %v\n", name, writeErr)
+					}
+					mu.Lock()
+					turned++
+					mu.Unlock()
+					fmt.Printf("%s: %s: %s\n", name, ocr.RefusedMark, condenseLine(err.Error()))
 				case err != nil && isLimit(err.Error()):
 					mu.Lock()
 					if limit == "" {
@@ -233,7 +263,8 @@ func (r localReader) all(ctx context.Context, images []string, out string, jobs 
 	close(work)
 	wg.Wait()
 
-	fmt.Printf("%d pages written, %d failed, %d not attempted\n", wrote, failed, len(images)-wrote-failed)
+	fmt.Printf("%d pages written, %d failed, %d refused, %d not attempted\n",
+		wrote, failed, turned, len(images)-wrote-failed-turned)
 	if limit != "" {
 		return fmt.Errorf("ocr-batch: %s", condenseLine(limit))
 	}
@@ -325,9 +356,13 @@ func writeAnswer(path, text string) error {
 	return os.Rename(tmp, path)
 }
 
-func isLimit(said string) bool {
+func isLimit(said string) bool { return says(said, limitPhrases) }
+
+func isRefusal(said string) bool { return says(said, refusalPhrases) }
+
+func says(said string, phrases []string) bool {
 	lower := strings.ToLower(said)
-	for _, phrase := range limitPhrases {
+	for _, phrase := range phrases {
 		if strings.Contains(lower, phrase) {
 			return true
 		}
