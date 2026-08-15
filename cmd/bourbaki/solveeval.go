@@ -141,7 +141,7 @@ func runSolveEval(args []string) error {
 	logf := func(format string, args ...any) {
 		fmt.Fprintf(os.Stderr, "["+time.Since(start).Round(time.Second).String()+"] "+format+"\n", args...)
 	}
-	hosts, err := ocrHostsNow(ctx, f.routes, f.hosts, f.wait, logf)
+	hosts, err := askHostsNow(ctx, f.routes, f.hosts, f.wait, logf)
 	if err != nil {
 		return err
 	}

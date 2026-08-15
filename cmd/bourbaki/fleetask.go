@@ -71,7 +71,7 @@ func runFleetAsk(args []string) error {
 		question = padTo(question, *fill)
 	}
 
-	hosts, err := ocrHosts(*routes, *host)
+	hosts, err := askHosts(*routes, *host)
 	if err != nil {
 		return err
 	}
@@ -84,15 +84,31 @@ func runFleetAsk(args []string) error {
 	if !*quiet {
 		fmt.Fprintf(os.Stderr, "asking %s, %d characters\n", hosts[0].Name, len(question))
 	}
-	answer, err := (ocr.Ask{
-		Host:     hosts[0],
-		Shell:    fleet.SSH{Timeout: 2 * time.Minute},
-		Copy:     ocr.Rsync{Timeout: 5 * time.Minute},
-		Prompt:   question,
-		ID:       "ask-" + time.Now().UTC().Format("20060102-150405"),
-		Deadline: *timeout,
-		Keep:     *keep,
-	}).Do(ctx)
+	id := "ask-" + time.Now().UTC().Format("20060102-150405")
+	// The branch is written out here rather than left to NewAsk because of
+	// -timeout. A box is polled by this process and takes its deadline as an
+	// argument; a gateway holds one HTTP call and takes its deadline from the
+	// route, which is where a gateway's timeout belongs. Passing the flag to
+	// something that cannot honour it would be worse than saying so.
+	var call ocr.Asker
+	if hosts[0].Client != nil {
+		if *timeout > 0 {
+			fmt.Fprintf(os.Stderr, "-timeout does not reach %s, a gateway waits as long as its route says\n", hosts[0].Name)
+		}
+		call = ocr.Gateway{Name: hosts[0].Name, Client: hosts[0].Client, Model: hosts[0].Model,
+			Prompt: question, ID: id}
+	} else {
+		call = ocr.Ask{
+			Host:     hosts[0],
+			Shell:    fleet.SSH{Timeout: 2 * time.Minute},
+			Copy:     ocr.Rsync{Timeout: 5 * time.Minute},
+			Prompt:   question,
+			ID:       id,
+			Deadline: *timeout,
+			Keep:     *keep,
+		}
+	}
+	answer, err := call.Do(ctx)
 	if err != nil {
 		return err
 	}

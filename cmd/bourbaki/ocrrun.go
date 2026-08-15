@@ -440,9 +440,22 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 		return nil, err
 	}
 
+	asked := strings.TrimSpace(names) != ""
+
 	var out []ocr.Host
 	var refused []string
 	for _, value := range registry.Enabled() {
+		if value.Gateway {
+			// A gateway answers HTTP and has no box to run chatgpt-tool on, so
+			// it was never a candidate to read a page. Saying so on every run
+			// of every volume would be a line of stderr forever about a route
+			// behaving exactly as it is meant to. It is said when it was asked
+			// for by name, because then somebody is waiting to hear why.
+			if asked {
+				refused = append(refused, value.Name+": a gateway reads no page images, it has no box to run chatgpt-tool on")
+			}
+			continue
+		}
 		if strings.TrimSpace(value.Host) == "" {
 			refused = append(refused, value.Name+": no ssh host in "+path)
 			continue
@@ -467,6 +480,73 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 	}
 	return out, nil
 }
+
+// askHosts is ocrHosts for the commands that ask a question rather than read a
+// page: translate, solve, glossary translate and fleet ask.
+//
+// The difference is the gateway. A gateway cannot read a page image and is
+// rightly missing from ocrHosts, and it can answer every one of these, which
+// are text going out and text coming back. It is also the cheap way to answer
+// them: a question put to the fleet spends an upload on an account that runs
+// out of them for hours, and one put here spends nothing.
+//
+// A box still needs its chatgpt-tool and its lanes, so those checks are the
+// same ones and are not repeated here: ocrHosts does them and this adds the
+// gateways to what it found. When the fleet is spent, or when a run names the
+// gateway on the command line, that leaves a list with only gateways in it,
+// which is the point.
+func askHosts(routeFile, names string) ([]ocr.Host, error) {
+	registry, _, err := route.LoadOrDefault(routeFile)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(names) != "" {
+		if registry, err = registry.Select(strings.Split(names, ",")); err != nil {
+			return nil, err
+		}
+	}
+
+	var out []ocr.Host
+	var boxes bool
+	for _, value := range registry.Enabled() {
+		if !value.Gateway {
+			boxes = true
+			continue
+		}
+		client, err := value.Client(0, gatewayRetries)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "skipping %s: %v\n", value.Name, err)
+			continue
+		}
+		lanes := value.Concurrency
+		if lanes <= 0 {
+			lanes = 1
+		}
+		out = append(out, ocr.Host{Name: value.Name, Lanes: lanes, Client: client, Model: value.Model})
+	}
+	if !boxes {
+		if len(out) == 0 {
+			return nil, fmt.Errorf("no route can answer a question, run bourbaki doctor")
+		}
+		return out, nil
+	}
+	// A fleet that cannot be reached is not fatal here when a gateway can be:
+	// the question gets answered, which is what the caller asked for, and the
+	// reason the fleet was skipped has already been printed.
+	hosts, err := ocrHosts(routeFile, names)
+	if err != nil {
+		if len(out) == 0 {
+			return nil, err
+		}
+		return out, nil
+	}
+	return append(hosts, out...), nil
+}
+
+// gatewayRetries is retries inside one call. A free endpoint answers 429 when
+// its window is full, which passes on its own, and failing the whole question
+// over it would put the work back on the fleet and spend an upload on it.
+const gatewayRetries = 4
 
 // refreshFleet re-measures the boxes named in the route file before a run.
 //
@@ -527,6 +607,22 @@ func ocrHostsNow(ctx context.Context, routeFile, names string, wait time.Duratio
 			logf("could not re-measure the fleet, going on what the state file says: %v", err)
 		}
 		return ocrHosts(routeFile, names)
+	})
+}
+
+// askHostsNow is ocrHostsNow for the commands that ask a question, and it waits
+// the same way for the same reason.
+//
+// The wait is shorter in practice than it looks, because a gateway is up or it
+// is not and no amount of sitting frees a core on it. What the loop is really
+// for is the fleet: when both boxes are busy the run goes out on the gateway
+// alone, and the next call round finds the boxes back.
+func askHostsNow(ctx context.Context, routeFile, names string, wait time.Duration, logf func(string, ...any)) ([]ocr.Host, error) {
+	return hostsWithin(ctx, wait, logf, sleepFor, func() ([]ocr.Host, error) {
+		if err := refreshFleet(ctx, routeFile, names); err != nil {
+			logf("could not re-measure the fleet, going on what the state file says: %v", err)
+		}
+		return askHosts(routeFile, names)
 	})
 }
 

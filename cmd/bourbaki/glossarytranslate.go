@@ -128,7 +128,7 @@ func glossaryTranslate(args []string) error {
 		return nil
 	}
 
-	hosts, err := ocrHosts(*routeFile, *hostList)
+	hosts, err := askHosts(*routeFile, *hostList)
 	if err != nil {
 		return err
 	}
@@ -248,10 +248,8 @@ func askEveryBatch(ctx context.Context, root string, hosts []ocr.Host, batches [
 
 func askOneBatch(ctx context.Context, root string, host ocr.Host, batch glossary.Batch, index int, keep bool) (*glossary.Reply, error) {
 	question := batch.Prompt()
-	call := ocr.Ask{
-		Host: host, Shell: fleet.SSH{Timeout: 2 * time.Minute}, Copy: ocr.Rsync{Timeout: 5 * time.Minute},
-		Prompt: question, ID: batchID(batch.Lang, index, question), Keep: keep,
-	}
+	call := ocr.NewAsk(host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
+		question, batchID(batch.Lang, index, question), keep)
 	answer, err := call.Do(ctx)
 	if err != nil {
 		return nil, err

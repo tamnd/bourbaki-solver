@@ -59,6 +59,53 @@ func TestProbeLive(t *testing.T) {
 	}
 }
 
+// A gateway has no /health and no pool of sessions, so its catalogue is the
+// whole probe. Asking for the health it does not serve returns 404 and the
+// route reads as broken while it is answering perfectly well.
+func TestProbeAGatewayByItsCatalogueAlone(t *testing.T) {
+	var asked []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		asked = append(asked, r.URL.Path)
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = w.Write([]byte(`{"object":"list","data":[{"id":"nemotron-3-ultra-free"},{"id":"hy3-free"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	got := Prober{}.Probe(context.Background(), Route{
+		Name: "zen", Wire: WireChat, Gateway: true,
+		BaseURL: server.URL, Model: "nemotron-3-ultra-free"})
+	if got.State != StateLive {
+		t.Fatalf("State = %s: %s", got.State, got.Detail)
+	}
+	if strings.Join(asked, ",") != "/v1/models" {
+		t.Errorf("the probe asked for %v, and a gateway serves only its catalogue", asked)
+	}
+	if got.Transport != "gateway" || got.Detail != "gateway, 2 models" {
+		t.Errorf("transport = %q, detail = %q", got.Transport, got.Detail)
+	}
+}
+
+// The catalogue is the only thing a gateway is asked, so a catalogue that will
+// not answer is the state of the route. There is nothing left to fall through
+// to, and reporting live off a 500 would send it a chapter.
+func TestAGatewayThatWillNotListItsModelsIsNotLive(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`upstream is down`))
+	}))
+	t.Cleanup(server.Close)
+
+	got := Prober{}.Probe(context.Background(), Route{
+		Name: "zen", Wire: WireChat, Gateway: true,
+		BaseURL: server.URL, Model: "nemotron-3-ultra-free"})
+	if got.State == StateLive {
+		t.Fatalf("State = %s: %s", got.State, got.Detail)
+	}
+}
+
 // A host with no verified sessions is up and has nothing to answer with.
 // Sending it work produces refusals on every page that read like model
 // failures, so it is out until somebody heals the sessions.
