@@ -384,6 +384,37 @@ func TestTidyTakesOutAPhraseThatRunsThroughAnOperator(t *testing.T) {
 	}
 }
 
+// The nine rows the old miner spelled with a hyphen where the book prints an
+// apostrophe. Six are real terms and all nine are unfindable: a term is located
+// in a section by literal search, and "schur-s lemma" is not in the corpus. They
+// come out here and go back in correctly spelled on the next mining pass.
+func TestTidyTakesOutAMangledPossessive(t *testing.T) {
+	g := &Glossary{Terms: []Term{
+		{EN: "schur-s lemma", VI: "bổ đề Schur"},
+		{EN: "hilbert-s", VI: "Hilbert"},
+		{EN: "schur’s lemma", VI: "bổ đề Schur"},
+	}}
+	dropped := g.Tidy()
+	if len(g.Terms) != 1 || g.Terms[0].EN != "schur’s lemma" {
+		t.Fatalf("wanted the apostrophe spelling left standing, got %v", g.Terms)
+	}
+	if len(dropped) != 2 {
+		t.Fatalf("wanted two removals, got %v", dropped)
+	}
+}
+
+// A word that simply ends in -s is not a mangled possessive. The rule looks for
+// a hyphen before the s, so plurals and hyphenated terms are untouched.
+func TestTidyLeavesAnOrdinaryHyphenatedTermAlone(t *testing.T) {
+	g := &Glossary{Terms: []Term{
+		{EN: "left-exact functors", VI: "hàm tử khớp trái"},
+		{EN: "$G$-sets", VI: "$G$-tập"},
+	}}
+	if dropped := g.Tidy(); len(dropped) != 0 || len(g.Terms) != 2 {
+		t.Fatalf("an ordinary term was removed: %v", dropped)
+	}
+}
+
 // The title of a § is a term worth pinning and it is written in ordinary
 // English, so the word rule is asked about the operators and not about the stop
 // list. Five section titles of chapter VIII are in the glossary and a stop word
