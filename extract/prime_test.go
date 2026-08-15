@@ -3,6 +3,8 @@ package extract
 import (
 	"strings"
 	"testing"
+
+	"github.com/tamnd/bourbaki-solver/pdfsrc"
 )
 
 // French page 287, the diagram of § 16 that carries the Brauer group of a
@@ -122,5 +124,91 @@ func TestAPrimeIsNeverReadAsAnIndex(t *testing.T) {
 	}
 	if !strings.Contains(got, `E'`) {
 		t.Errorf("Render:\n got %s\nwant a line ending in E'", got)
+	}
+}
+
+// The pages below are given as boxes rather than as a document, in the style of
+// bar_test.go, and they use the layouts declared there. The glyph at 0x30 of a
+// symbol font is the prime and not the digit, so a page hands a prime back as a
+// zero here too.
+
+// A prime and the index of the base it marks start at the same place, so the
+// layer hands the index back first and the prime lands inside it. This is page
+// 114 of Lie 7 to 9, which prints the bracket of X prime alpha against X prime
+// minus alpha. The second of those came back as a base carrying two subscripts,
+// which is not TeX at all, and the first set the prime on the far side of the
+// index from where the volume prints it.
+func TestAPrimeDrawnOverAnIndexGoesInFrontOfIt(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 114, Width: 612, Height: 792,
+		Spans: []pdfsrc.Span{
+			{Top: 292, Left: 172, Width: 4, Height: 13, Font: 3, Text: "["},
+			{Top: 292, Left: 177, Width: 12, Height: 13, Font: 4, Text: "X"},
+			{Top: 299, Left: 189, Width: 8, Height: 9, Font: 6, Text: "α"},
+			{Top: 286, Left: 190, Width: 3, Height: 14, Font: 7, Text: "0"},
+			{Top: 292, Left: 198, Width: 19, Height: 13, Font: 4, Text: ", X"},
+			{Top: 296, Left: 217, Width: 9, Height: 14, Font: 7, Text: "−"},
+			{Top: 286, Left: 218, Width: 3, Height: 14, Font: 7, Text: "0"},
+			{Top: 299, Left: 226, Width: 8, Height: 9, Font: 6, Text: "α"},
+			{Top: 292, Left: 234, Width: 28, Height: 13, Font: 3, Text: "] = ["},
+		},
+	}
+	want := `$[X'_{\alpha}, X'_{-\alpha}] = [$`
+	if got := sole(t, enlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// A prime the author wrote inside an index is set after the box of the letter
+// it marks and stands clear of that letter, so it is left where it is. This is
+// page 246 of Algebra VIII, where the L of A_(L') carries the prime and the
+// bracket of the index closes after the prime rather than before it.
+func TestAPrimeClearOfAnIndexStaysInside(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 246, Width: 612, Height: 792,
+		Spans: []pdfsrc.Span{
+			{Top: 777, Left: 80, Width: 163, Height: 13, Text: "extension of L. As an A"},
+			{Top: 784, Left: 243, Width: 12, Height: 9, Font: 2, Text: "(L"},
+			{Top: 783, Left: 255, Width: 3, Height: 7, Font: 10, Text: "0"},
+			{Top: 784, Left: 259, Width: 5, Height: 9, Font: 2, Text: ")"},
+		},
+	}
+	want := `extension of L. As an $A_{(L')}$`
+	if got := sole(t, enlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// The prime of an inverse image is drawn between the two halves of the -1 that
+// is written over the symbol, so the layer hands back the minus, the symbol,
+// the one and the prime in that order. Reading the prime before the halves are
+// put back together takes the inverse image apart, which is why the prime is
+// read after it and not before. This is page 37 of Topologie algébrique 1 to 4.
+func TestAPrimeInsideAnInverseImageLeavesItStanding(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 37, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 726, Left: 81, Width: 29, Height: 21, Text: "(20)"},
+			{Top: 730, Left: 247, Width: 8, Height: 15, Font: 1, Text: "p"},
+			{Top: 725, Left: 255, Width: 3, Height: 11, Font: 13, Text: "0"},
+			{Top: 726, Left: 259, Width: 6, Height: 21, Text: "("},
+			{Top: 726, Left: 266, Width: 6, Height: 21, Text: "("},
+			{Top: 716, Left: 271, Width: 10, Height: 11, Font: 13, Text: "−"},
+			{Top: 730, Left: 272, Width: 8, Height: 15, Font: 1, Text: "f"},
+			{Top: 716, Left: 281, Width: 6, Height: 11, Font: 3, Text: "1"},
+			{Top: 725, Left: 282, Width: 3, Height: 11, Font: 13, Text: "0"},
+			{Top: 726, Left: 286, Width: 55, Height: 21, Text: ")(A)) ="},
+			{Top: 718, Left: 346, Width: 10, Height: 11, Font: 13, Text: "−"},
+			{Top: 730, Left: 349, Width: 8, Height: 15, Font: 1, Text: "f"},
+			{Top: 718, Left: 356, Width: 6, Height: 11, Font: 3, Text: "1"},
+			{Top: 726, Left: 362, Width: 6, Height: 21, Text: "("},
+			{Top: 730, Left: 368, Width: 8, Height: 15, Font: 1, Text: "p"},
+			{Top: 726, Left: 376, Width: 31, Height: 21, Text: "(A))"},
+			{Top: 730, Left: 408, Width: 5, Height: 15, Font: 1, Text: "."},
+		},
+	}
+	want := `(20) $p'((\overset{-1}{f}')(A)) =\overset{-1}{f}(p(A))$.`
+	if got := sole(t, frlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }

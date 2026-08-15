@@ -48,6 +48,7 @@ func Render(l Line) string {
 	toks = barred(toks, l.Rules)
 	toks = overset(toks)
 	toks = restack(toks)
+	toks = marked(toks)
 	toks = extend(toks)
 	return statementHead(emit(toks), capsOpen(toks))
 }
