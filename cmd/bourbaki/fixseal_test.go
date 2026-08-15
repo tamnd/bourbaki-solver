@@ -166,3 +166,106 @@ func TestSealNamesTheTranslationItStales(t *testing.T) {
 		t.Errorf("the translation records %s, want it left at the old English hash %s", got, old)
 	}
 }
+
+// The manifest records the same hash a second time. assemble -check compares
+// the manifest it would write against the committed one, so a section sealed
+// without its row is a corpus that cannot pass its own check, and the volumes
+// this command is for are exactly the ones assemble refuses to run on.
+func TestSealWritesTheManifestRowToo(t *testing.T) {
+	body := "Le centre d’un anneau simple est un corps.\n"
+	name := "content/fr/alg/VIII/01_s1_anneaux_simples.md"
+	old := corpus.ContentSHA256("le corps d’avant")
+	root := sealCorpus(t, map[string]string{name: sealFile(body, old)})
+	m := &corpus.SectionsManifest{Books: []corpus.BookSections{{
+		ID: "alg-viii-fr",
+		Chapters: []corpus.ChapterSections{{
+			Chapter: "VIII",
+			Sections: []corpus.SectionRecord{
+				{Kind: corpus.KindSection, Section: 1, Path: name, ContentSHA256: old},
+			},
+		}},
+	}}}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixSeal(nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := corpus.LoadSections(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := got.Books[0].Chapters[0].Sections[0].ContentSHA256; row != corpus.ContentSHA256(body) {
+		t.Errorf("the manifest row is %s, want %s", row, corpus.ContentSHA256(body))
+	}
+}
+
+// A corpus in order comes out of a run with the manifest it went in with, down
+// to the byte. The manifest is a thousand lines of generated YAML and a run
+// that rewrites it for nothing is a diff nobody can read.
+func TestSealLeavesTheManifestAloneWhenNothingMoved(t *testing.T) {
+	body := "Every field is a simple ring.\n"
+	name := "content/en/alg/VIII/01_s1_simple_rings.md"
+	root := sealCorpus(t, map[string]string{name: sealFile(body, corpus.ContentSHA256(body))})
+	m := &corpus.SectionsManifest{Books: []corpus.BookSections{{
+		ID: "alg-viii",
+		Chapters: []corpus.ChapterSections{{
+			Chapter: "VIII",
+			Sections: []corpus.SectionRecord{
+				{Kind: corpus.KindSection, Section: 1, Path: name,
+					ContentSHA256: corpus.ContentSHA256(body)},
+			},
+		}},
+	}}}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(corpus.SectionsPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := fixSeal(nil); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(corpus.SectionsPath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("the manifest was rewritten:\n%s", after)
+	}
+}
+
+// A row can be stale on its own. Seal a section today and the row goes with it,
+// but a section that was corrected and sealed before this command existed left
+// a row behind that nothing has been through since, and the file it describes
+// is in order. So the walk offers every section to the manifest and not only
+// the ones it wrote.
+func TestSealFixesARowUnderAFileThatIsAlreadySealed(t *testing.T) {
+	body := "The centre of a simple ring is a field.\n"
+	name := "content/en/alg/VIII/01_s1_simple_rings.md"
+	root := sealCorpus(t, map[string]string{name: sealFile(body, corpus.ContentSHA256(body))})
+	m := &corpus.SectionsManifest{Books: []corpus.BookSections{{
+		ID: "alg-viii",
+		Chapters: []corpus.ChapterSections{{
+			Chapter: "VIII",
+			Sections: []corpus.SectionRecord{
+				{Kind: corpus.KindSection, Section: 1, Path: name,
+					ContentSHA256: corpus.ContentSHA256("the body before the correction")},
+			},
+		}},
+	}}}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixSeal(nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := corpus.LoadSections(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row := got.Books[0].Chapters[0].Sections[0].ContentSHA256; row != corpus.ContentSHA256(body) {
+		t.Errorf("the manifest row is %s, want %s", row, corpus.ContentSHA256(body))
+	}
+}

@@ -166,6 +166,11 @@ It is not a repair of the text and it does not look at the text. It reads what
 the file says its body hashes to, hashes the body, and where the two differ it
 writes the second. A file already sealed is not rewritten.
 
+manifests/sections.yaml records the same hash a second time and is written with
+it, since assemble -check compares the manifest it would write against the
+committed one and a section sealed without its row fails that check with no way
+to pass it. Only a row the manifest already has is touched.
+
 Sealing an English section restales its translations, which is the point: the
 English moved, so the Vietnamese was made from a body that is no longer there.
 The translations that recorded the old hash are named, because a hand correction
@@ -532,10 +537,17 @@ func fixSeal(args []string) error {
 	// The hash each resealed file used to carry, against the file it was in, so
 	// that a translation recording it can be named by what it was made from.
 	broke := map[string]string{}
+	// The new hash against the corpus-relative path, for the manifest.
+	now := map[string]string{}
 	var read, sealed int
 	err = eachSection(root, *lang, func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
 		read++
 		want := corpus.ContentSHA256(f.Body)
+		// Every file, and not only the ones sealed here. The manifest row can be
+		// stale on its own: seal a section today and the row is written with it,
+		// but a section sealed before this command existed left a row behind that
+		// nothing has been through since.
+		now[filepath.ToSlash(rel(root, path))] = want
 		if f.Meta.ContentSHA256 == want {
 			return nil
 		}
@@ -551,6 +563,17 @@ func fixSeal(args []string) error {
 		// Write recomputes the hash from the body, so the field is not set here.
 		return f.Write(path)
 	})
+	if err != nil {
+		return err
+	}
+
+	// manifests/sections.yaml records the same hash a second time, and the two
+	// have to move together: assemble -check compares the manifest it would
+	// write against the committed one, and a section sealed here without the
+	// manifest is a corpus that fails that check with no way to pass it. The
+	// volumes this command is for are the ones assemble will not run on, so
+	// rewriting the manifest from a fresh assembly is not open to us.
+	rows, err := sealManifest(root, now, *check)
 	if err != nil {
 		return err
 	}
@@ -576,9 +599,43 @@ func fixSeal(args []string) error {
 	if *check {
 		verb = "would seal"
 	}
-	fmt.Printf("fix seal: %d sections read, %s %d of them, %d translations left stale\n",
-		read, verb, sealed, stale)
+	fmt.Printf("fix seal: %d sections read, %s %d of them and %d manifest rows, %d translations left stale\n",
+		read, verb, sealed, rows, stale)
 	return nil
+}
+
+// sealManifest writes the new hashes into manifests/sections.yaml and returns
+// how many rows moved. A row whose hash already agrees is left as it is, and a
+// path the manifest does not know is not added: the manifest is assembly's
+// account of what it wrote, and a file assembly never wrote does not belong in
+// it. Nothing is written when no row moved, so a corpus that is in order comes
+// out of this with an unmodified manifest.
+func sealManifest(root string, now map[string]string, check bool) (int, error) {
+	if len(now) == 0 {
+		return 0, nil
+	}
+	m, err := corpus.LoadSections(root)
+	if err != nil {
+		return 0, err
+	}
+	var rows int
+	for i := range m.Books {
+		for j := range m.Books[i].Chapters {
+			for k := range m.Books[i].Chapters[j].Sections {
+				r := &m.Books[i].Chapters[j].Sections[k]
+				want, ok := now[filepath.ToSlash(r.Path)]
+				if !ok || r.ContentSHA256 == want {
+					continue
+				}
+				rows++
+				r.ContentSHA256 = want
+			}
+		}
+	}
+	if rows == 0 || check {
+		return rows, nil
+	}
+	return rows, m.Save(root)
 }
 
 // short is the head of a hash, which is all the report needs and all S08 prints.
