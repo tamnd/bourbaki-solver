@@ -98,3 +98,41 @@ func TestAFrenchVolumeIsNotMinedIntoTheEnglishCandidates(t *testing.T) {
 		t.Errorf("got %d documents, want the one English chapter", len(docs))
 	}
 }
+
+// The candidates are ordered by how often the prose says a phrase, and a volume
+// whose pages are not read yet has no prose at all. Every row Theory of Sets
+// puts in is a title with a count of one or two, so it sits at the bottom of a
+// file of two and a half thousand, and -add reaching it means asking about
+// everything above it first. -only is the way to the good source directly.
+func TestOnlyTakesTheCandidatesOfOneSource(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "simple", VI: "đơn"}}}
+	if err := g.Write(glossary.Path(root)); err != nil {
+		t.Fatal(err)
+	}
+	if err := glossary.WriteCandidates(glossary.CandidatesPath(root), glossary.Candidates{
+		Version: 1, From: "content/en", Terms: []glossary.Candidate{
+			{EN: "flat quiver", Count: 90, Sources: []string{glossary.SourceProse}},
+			{EN: "wobbly quiver", Count: 40, Sources: []string{glossary.SourceProse}},
+			{EN: "Ordered gribbles", Count: 1, Sources: []string{glossary.SourceTitle}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := needing(root, loaded(t, root), "vi", 10, 0, glossary.SourceTitle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "Ordered gribbles" {
+		t.Fatalf("asked about %q, want the one title", got)
+	}
+	// And without it the commonest come first, which is what -add has always
+	// done and what the rest of the corpus is filled by.
+	got, err = needing(root, loaded(t, root), "vi", 2, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0] != "flat quiver" || got[1] != "wobbly quiver" {
+		t.Errorf("asked about %q, want the two commonest", got)
+	}
+}
