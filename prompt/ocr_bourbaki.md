@@ -17,8 +17,8 @@ This page is from Bourbaki, Elements of Mathematics, Algebra. The following hold
 - The margin sign for a dangerous bend is printed as a road sign in the outer margin. Transcribe it as ☡ on its own line at the point where it appears.
 - Cross-references are transcribed verbatim, including the punctuation and the spacing of the reference: (I, p. 23, Proposition 4), (Set Theory, III, § 3, no. 6, Proposition 13), (A, I, p. 100).
 - The subdivision marks § and no. are printed as they are. Keep § and keep no. in that form, do not expand them to Section or number.
-- Exercises are numbered 1., 2., and so on, under a heading EXERCISES. Keep that heading on its own line and keep the numbering as printed, including exercise numbers that carry a star or a dagger.
-- Footnotes are printed below a short rule at the foot of the page. Transcribe the rule as a line of three hyphens and keep the footnote marks as they are printed.
+- Exercises are numbered 1., 2., and so on, under a heading EXERCISES. Keep that heading on its own line and keep the numbering as printed, including exercise numbers that carry a star or a dagger. The number of an exercise is not a heading. It is set in the text at the head of its paragraph, the way the number of a list item is, so no hash goes in front of it.
+- Footnotes are printed below a short rule at the foot of the page, and they are written as Markdown footnotes and not as the page sets them. Put the mark in the body at the place the page marks it, as [^1], [^2] and so on, numbered from one on this page whatever sign the page prints for it, and set the note itself at the foot of the page as [^1]: followed by its text, one note to a line. Leave the rule out, because the form of the note already says where the notes begin.
 - Tables and matrices are transcribed as LaTeX. A commutative diagram that is set in type is transcribed as a LaTeX array rather than described in words.
 - Ligatures, accents and old spellings are kept as printed. Do not modernise them.
 - If part of the page is illegible, emit ⟪illegible⟫ at that point rather than inventing content. Do not guess a digit, a subscript or an index that you cannot read.
