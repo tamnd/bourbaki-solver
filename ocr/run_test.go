@@ -1027,6 +1027,23 @@ func TestAPauseIsRecognisedInEveryReadersWords(t *testing.T) {
 	}
 }
 
+// The tool wraps its log to the width of the terminal it thinks it has, so the
+// break falls inside the sentence and the phrase is not there to be found. This
+// is server3's log as it came off the host, and it cost ten pages on the first
+// run after the pause was supposedly understood.
+func TestAPauseIsRecognisedThroughTheToolsLineWrapping(t *testing.T) {
+	wrapped := []string{
+		"  fail  0384.png  0.0s  not attempted: every account on this host is out of \nuploads until 20:14:17",
+		"because no account here can upload: all 11 verified slot(s) are banned, the \nearliest lifts at 20:14:17, which is 25 minutes away",
+		"  fail  0381.png  0.0s  upload cap: all 11 verified slot(s) are banned, the \nearliest lifts at 20:14:17, which is 25 minutes ",
+	}
+	for _, log := range wrapped {
+		if !OutOfTurns(log) {
+			t.Errorf("a line break inside the phrase hid the pause:\n%s", log)
+		}
+	}
+}
+
 // The whole batch failing in a tenth of a second each is what a spent account
 // looks like, and every one of those pages has to come back with its attempts
 // where they were.
