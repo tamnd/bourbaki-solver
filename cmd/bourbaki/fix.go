@@ -79,9 +79,22 @@ chapter that runs to sixty pages. The bare number is what those volumes print
 and it is all that is recorded. A foot-number volume paginated per chapter would
 get a label, and there is none in the corpus today.
 
+A reading that dropped the number is the other case, and -fill is for it. Page
+32 of Theory of Sets prints 25 at the foot and the reading came back without it,
+so there is nothing to move and the page has no folio at all. The page map has
+one, read off that same foot when the map was built, so -fill writes it and
+flags the page with where the number came from. It fills only a number the map
+read off the page, never one the map worked out from the pages around it, since
+that number is printed nowhere and a reader holding the book will not find it.
+It is off by default because a number in the front matter of a page that does
+not show one in its body is worth saying out loud rather than doing quietly to a
+whole corpus.
+
 flags:
   -book ID   only this volume, default every volume that prints its folio at the foot
   -check     say what would change and change nothing
+  -fill      give a page whose reading dropped the number the one the page map
+             holds, flagged as coming from there
 `
 
 const fixParensUsage = `usage: bourbaki fix parens [flags]
@@ -378,6 +391,7 @@ func fixFolio(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFolioUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
+	fill := fs.Bool("fill", false, "take the number from the page map when the body has none")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -386,7 +400,7 @@ func fixFolio(args []string) error {
 		return err
 	}
 
-	var pages, changed, labelled, disagreed, missing int
+	var pages, changed, labelled, disagreed, missing, filled int
 	for _, b := range books.Books {
 		if *book != "" && b.ID != *book {
 			continue
@@ -410,11 +424,31 @@ func fixFolio(args []string) error {
 			pages++
 			body, folio := corpus.CutFolio(f.Body)
 			if folio == 0 {
-				// Most of these are a page the volume prints no number on: the
-				// opener of a chapter, a plate, the blank facing one. They are
-				// not worth a line each, only a count.
+				if f.Meta.Folio != 0 {
+					// Already repaired by an earlier run, which is why the
+					// body has no number left to take.
+					return nil
+				}
+				// Most of the rest are a page the volume prints no number on:
+				// the opener of a chapter, a plate, the blank facing one. They
+				// are not worth a line each, only a count.
 				missing++
-				return nil
+				e, ok := pm.Lookup(f.Meta.PDFPage)
+				if !*fill || !ok || e.Page == 0 || !e.Confidence.Printed() {
+					return nil
+				}
+				filled++
+				label := folioLabel(f.Meta.PageLabel, letter, e.Chapter, e.Page)
+				if label != f.Meta.PageLabel {
+					labelled++
+				}
+				if *check {
+					fmt.Printf("%s  %d  %s  from the page map\n", rel(root, path), e.Page, label)
+					return nil
+				}
+				f.Meta.Folio, f.Meta.PageLabel = e.Page, label
+				f.Meta.Flags = withFlag(f.Meta.Flags, folioFromMap)
+				return f.Write(path)
 			}
 			e, ok := pm.Lookup(f.Meta.PDFPage)
 			if !ok || e.Page != folio {
@@ -427,10 +461,7 @@ func fixFolio(args []string) error {
 					rel(root, path), folio, want)
 				return nil
 			}
-			label := f.Meta.PageLabel
-			if label == "" && letter != "" && e.Chapter != "" {
-				label = fmt.Sprintf("%s %s.%d", letter, e.Chapter, folio)
-			}
+			label := folioLabel(f.Meta.PageLabel, letter, e.Chapter, folio)
 			changed++
 			if label != f.Meta.PageLabel {
 				labelled++
@@ -454,14 +485,42 @@ func fixFolio(args []string) error {
 	}
 	fmt.Printf("fix folio: %d pages read, %s the number off %d of them, %d print none, %d left alone\n",
 		pages, verb, changed, missing, disagreed)
+	if filled > 0 {
+		verb := "took"
+		if *check {
+			verb = "would take"
+		}
+		fmt.Printf("fix folio: of those %d, %s the number of %d from the page map\n", missing, verb, filled)
+	}
 	if labelled > 0 {
 		fmt.Printf("fix folio: %d pages got a page label\n", labelled)
 	}
-	if changed > 0 && !*check {
+	if changed+filled > 0 && !*check {
 		fmt.Println("fix folio: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
+
+// folioLabel keeps the label a page already carries, and builds one for a
+// volume that numbers inside the chapter and has none.
+func folioLabel(has, letter, chapter string, folio int) string {
+	if has != "" || letter == "" || chapter == "" {
+		return has
+	}
+	return fmt.Sprintf("%s %s.%d", letter, chapter, folio)
+}
+
+// folioFromMap is what a filled page is flagged with, because a number that
+// came from somewhere other than the page in front of the reader is worth
+// saying so on the page.
+//
+// Only a number the page map read off the page is filled in, never one it
+// worked out from the pages around it. The two look the same in the map and are
+// not the same claim at all: the first says the volume prints this number and
+// the reading dropped it, which is a repair, and the second says nothing on the
+// page carries a number, which makes writing one an invention. A reader holding
+// the printed book would go looking for it at the foot and find blank paper.
+const folioFromMap = "folio from the page map, printed on the page and dropped by this reading"
 
 func fixMath(args []string) error {
 	fs := flag.NewFlagSet("fix math", flag.ExitOnError)
