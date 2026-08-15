@@ -71,6 +71,17 @@ Four sources, and every candidate says which of them found it.
   kind      the words for the statement kinds, which are put in whether the
             mining found them or not
 
+A Book with nothing assembled yet is mined from its table of contents, which
+holds the same § and no. titles the section files would give. The glossary has
+to be settled before the first translation and the first translation runs the
+day the first chapter assembles, so a Book that waits for its own content waits
+too long. Theory of Sets is the case: the glossary was mined from Algebra and
+Lie and has no row for set, assembly, ordered set, well-ordered set, ordinal,
+equipotent or species of structure, and its table of contents names all of them.
+A Book that is assembled is not mined this way, because its titles are already
+read off its section files and counting them twice would inflate the number a
+curator judges a term by.
+
 Spec 06 asks for the terms Bourbaki italicises at first use, which is the
 convention the printed page uses and would be the best source of all. It is not
 available: the whole English corpus carries seven runs of emphasis and none of
@@ -107,6 +118,11 @@ func glossaryExtract(args []string) error {
 	if err != nil {
 		return err
 	}
+	unread, err := unassembledTOCDocs(root, docs)
+	if err != nil {
+		return err
+	}
+	docs = append(docs, unread...)
 	if len(docs) == 0 {
 		return fmt.Errorf("%s has no English content to mine", root)
 	}
@@ -142,6 +158,64 @@ func glossaryExtract(args []string) error {
 // The exercises are read as well as the sections. They are a third of the
 // corpus, they are where the unusual vocabulary is, and a glossary built from
 // the statements alone would miss every word that only an exercise uses.
+// unassembledTOCDocs is one document per chapter of every English Book that has
+// nothing in content/en yet, carrying that chapter's titles and no body.
+//
+// The titles are the § and no. headings the volume prints, taken off
+// manifests/toc.yaml, which is where the printed table of contents was read to.
+// They are the same strings the section files would give once the volume is
+// assembled, and they are the source the miner rates highest, so a Book can have
+// its terminology settled while its pages are still being read.
+//
+// The bar is the Book and not the volume, because Algebra is three volumes and
+// one Book and one directory under content/en. Assembling any of the three is
+// enough to have the Book's titles read off its section files, and mining the
+// other two volumes' tables of contents on top of that would count the same
+// title twice.
+//
+// French volumes are left out. Their titles are French, and a French word in a
+// list of English candidates is a rendering asked for in the wrong direction.
+func unassembledTOCDocs(root string, have []glossary.Doc) ([]glossary.Doc, error) {
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		return nil, err
+	}
+	toc, err := corpus.LoadTOC(root)
+	if err != nil {
+		return nil, err
+	}
+	assembled := map[string]bool{}
+	for _, d := range have {
+		if parts := strings.Split(d.Path, "/"); len(parts) > 2 {
+			assembled[parts[2]] = true
+		}
+	}
+	var out []glossary.Doc
+	for _, b := range books.Books {
+		if b.Lang != "en" || assembled[b.Book] {
+			continue
+		}
+		bt, ok := toc.Get(b.ID)
+		if !ok {
+			continue
+		}
+		for _, ch := range bt.Chapters {
+			d := glossary.Doc{
+				Path:   "manifests/toc.yaml",
+				Titles: []string{ch.Title},
+			}
+			for _, s := range ch.Sections {
+				d.Titles = append(d.Titles, s.Title)
+				for _, sub := range s.Subsections {
+					d.Titles = append(d.Titles, sub.Title)
+				}
+			}
+			out = append(out, d)
+		}
+	}
+	return out, nil
+}
+
 func englishDocs(root string) ([]glossary.Doc, error) {
 	var out []glossary.Doc
 	dir := filepath.Join(root, "content", "en")
