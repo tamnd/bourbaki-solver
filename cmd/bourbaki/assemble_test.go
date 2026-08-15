@@ -542,6 +542,30 @@ func TestPageRange(t *testing.T) {
 	}
 }
 
+// A volume that labels its pages writes the label, and one paginated straight
+// through writes the folio bare. Theory of Sets is the second kind: its pages
+// carry a number at the foot and nothing else, so a § of it used to come out
+// with an empty book_pages, no printed page in the reference index, and every
+// one of the 223 references Algebra VIII makes to it by page went unresolved.
+func TestBookPagesWritesTheFolioWhereThereIsNoPageLabel(t *testing.T) {
+	cases := []struct {
+		runs []assemble.Run
+		want string
+	}{
+		{[]assemble.Run{{FirstLabel: "A VIII.1", LastLabel: "A VIII.23"}}, "A VIII.1-A VIII.23"},
+		{[]assemble.Run{{FirstFolio: 15, LastFolio: 23}}, "15-23"},
+		{[]assemble.Run{{FirstFolio: 15, LastFolio: 23}, {FirstFolio: 56, LastFolio: 56}}, "15-23, 56"},
+		// A page with neither is a page nothing is known about, and a guess here
+		// would put the § on a page it is not printed on.
+		{[]assemble.Run{{First: 18, Last: 20}}, ""},
+	}
+	for _, c := range cases {
+		if got := bookPages(c.runs); got != c.want {
+			t.Errorf("bookPages(%+v) = %q, want %q", c.runs, got, c.want)
+		}
+	}
+}
+
 func TestKindOfAndLabelOf(t *testing.T) {
 	cases := []struct {
 		piece assemble.Piece

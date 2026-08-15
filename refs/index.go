@@ -54,6 +54,41 @@ type Section struct {
 // Run is a stretch of printed pages, both ends included.
 type Run struct{ First, Last int }
 
+// pageRuns reads the printed pages a § occupies out of its front matter.
+//
+// The front matter writes one range to a run and separates the runs with a
+// comma: "A VIII.69-A VIII.84, A VIII.218-A VIII.226" for a volume that labels
+// its pages, "15-23, 56" for one that numbers them straight through. A run of a
+// single page is written once and not twice, "56" and not "56-56", and it is a
+// real run: the exercises of a § of Theory of Sets are often one page, and
+// dropping them would put a reference to that page in no § at all.
+//
+// The two shapes are read one at a time and per run rather than by one pattern
+// over the whole string. A label carries a number inside it, so a pattern that
+// also took bare numbers would read "A VIII.69" as pages 8 and 69 and put every
+// § of the chapter on page 8.
+func pageRuns(pages string) []Run {
+	var out []Run
+	for _, run := range strings.Split(pages, ",") {
+		m := pageRangeRE.FindAllStringSubmatch(run, -1)
+		col := 2
+		if len(m) == 0 {
+			m, col = folioRangeRE.FindAllStringSubmatch(run, -1), 1
+		}
+		switch len(m) {
+		case 0:
+		case 1:
+			n, _ := strconv.Atoi(m[0][col])
+			out = append(out, Run{First: n, Last: n})
+		default:
+			first, _ := strconv.Atoi(m[0][col])
+			last, _ := strconv.Atoi(m[len(m)-1][col])
+			out = append(out, Run{First: first, Last: last})
+		}
+	}
+	return out
+}
+
 // Holds reports whether the page falls in any run of the section.
 func (s *Section) Holds(page int) bool {
 	for _, r := range s.Runs {
@@ -122,7 +157,11 @@ type stmtKey struct {
 
 var (
 	pageRangeRE = regexp.MustCompile(`\bA\s+([IVX]+)\.(\d+)`)
-	statementRE = regexp.MustCompile(`\{#([a-z0-9-]+) \.statement(?: tag=([0-9A-Z]{4}))?\}`)
+	// folioRangeRE is the same thing for a volume that numbers its pages
+	// straight through and prints the number bare at the foot, where the front
+	// matter reads "15-56, 190-201" and there is no label to anchor on.
+	folioRangeRE = regexp.MustCompile(`\b(\d+)\b`)
+	statementRE  = regexp.MustCompile(`\{#([a-z0-9-]+) \.statement(?: tag=([0-9A-Z]{4}))?\}`)
 )
 
 // Load builds the index for one language of the corpus.
@@ -281,14 +320,7 @@ func section(root, lang string, rec corpus.SectionRecord, swap bool) (*Section, 
 	}
 	s := &Section{Label: rec.Label, Book: f.Meta.Book, Chapter: f.Meta.Chapter,
 		Number: f.Meta.Section, Appendix: f.Meta.Appendix}
-	// The pages come in pairs, one pair per run, because that is how the front
-	// matter writes them: "A VIII.69-A VIII.84, A VIII.218-A VIII.226".
-	m := pageRangeRE.FindAllStringSubmatch(rec.BookPages, -1)
-	for i := 0; i+1 < len(m); i += 2 {
-		first, _ := strconv.Atoi(m[i][2])
-		last, _ := strconv.Atoi(m[i+1][2])
-		s.Runs = append(s.Runs, Run{First: first, Last: last})
-	}
+	s.Runs = pageRuns(rec.BookPages)
 	for _, sub := range f.Meta.Subsections {
 		s.Subsecs = append(s.Subsecs, Subsec{No: sub.Number, Page: sub.Page})
 	}

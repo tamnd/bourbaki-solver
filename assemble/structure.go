@@ -39,8 +39,13 @@ func subsections(parts []part) []corpus.Subsection {
 			}
 			n, _ := strconv.Atoi(m[1])
 			s := corpus.Subsection{Number: n, Title: m[2], PDFPage: p.page}
+			// The page the book prints, from whichever of the two the volume
+			// has. A labelled volume carries "A VIII.7" and a volume paginated
+			// straight through carries a bare 7 at the foot.
 			if l, ok := corpus.ParsePageLabel(p.label); ok {
 				s.Page = l.Page
+			} else {
+				s.Page = p.folio
 			}
 			out = append(out, s)
 		}

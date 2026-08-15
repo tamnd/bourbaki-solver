@@ -53,9 +53,19 @@ type Piece struct {
 
 // Run is one stretch of pages a piece is made of, by PDF page and by the page
 // the book prints on it.
+//
+// The printed page arrives one of two ways and a volume uses one of them. A
+// volume that prints a page label has it in FirstLabel and LastLabel, "A
+// VIII.69". A volume that numbers its pages straight through the book and sets
+// the number bare at the foot has nothing to put there and has the number in
+// FirstFolio and LastFolio instead. Theory of Sets is the second kind, and
+// until this was written its assembled sections said nothing at all about what
+// pages of the book they were, so a reference to Set Theory III page 190 had
+// nothing to land on.
 type Run struct {
 	First, Last           int
 	FirstLabel, LastLabel string
+	FirstFolio, LastFolio int
 }
 
 // First and Last are the PDF pages the piece opens and ends on. Between them
@@ -156,6 +166,7 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 			p.Runs = append(p.Runs, Run{
 				First: r[0].page, Last: r[len(r)-1].page,
 				FirstLabel: r[0].label, LastLabel: r[len(r)-1].label,
+				FirstFolio: r[0].folio, LastFolio: r[len(r)-1].folio,
 			})
 		}
 		for _, q := range parts {
@@ -606,6 +617,7 @@ func chapterEnd(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) i
 type part struct {
 	page      int
 	label     string
+	folio     int
 	method    corpus.PageMethod
 	body      string
 	continues bool
@@ -642,7 +654,7 @@ func slice(pages map[int]corpus.PageFile, from, to span) ([]part, error) {
 		if strings.TrimSpace(body) == "" {
 			continue
 		}
-		out = append(out, part{page: p, label: f.Meta.PageLabel,
+		out = append(out, part{page: p, label: f.Meta.PageLabel, folio: f.Meta.Folio,
 			method: f.Meta.Method, body: body, continues: cont})
 	}
 	if len(out) == 0 {

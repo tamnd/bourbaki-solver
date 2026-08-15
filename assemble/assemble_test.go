@@ -64,6 +64,39 @@ func smallChapter() (corpus.Chapter, map[int]corpus.PageFile) {
 	return ch, pages
 }
 
+// The same chapter as a volume paginated straight through prints it: no page
+// label anywhere, a folio at the foot of each page, and the grammar of the
+// volume saying so. Theory of Sets is this kind, and until the folio was carried
+// through assembly a § of it had no printed pages at all: the runs came out with
+// empty labels, book_pages was written empty, and the reference index put the
+// volume on no page of the book.
+func folioChapter() (corpus.Chapter, map[int]corpus.PageFile) {
+	ch, pages := smallChapter()
+	for n, p := range pages {
+		p.Meta.PageLabel = ""
+		p.Meta.Folio = n - 3
+		pages[n] = p
+	}
+	return ch, pages
+}
+
+func TestAVolumeWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
+	ch, pages := folioChapter()
+	got, err := Chapter("alg", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := got[1]
+	if want := []Run{{First: 18, Last: 20, FirstFolio: 15, LastFolio: 17}}; !slices.Equal(sec.Runs, want) {
+		t.Errorf("§ 1 runs %+v, want %+v", sec.Runs, want)
+	}
+	// The no. is placed by the folio too, or a reference to no. 2 by page would
+	// land in whichever no. was placed last.
+	if len(sec.Subsections) != 2 || sec.Subsections[1].Page != 16 {
+		t.Errorf("the no. of § 1 are %+v, want the second of them on page 16", sec.Subsections)
+	}
+}
+
 func TestChapter(t *testing.T) {
 	ch, pages := smallChapter()
 	got, err := Chapter("alg", "en", ch, pages)
@@ -77,10 +110,10 @@ func TestChapter(t *testing.T) {
 	if !front.Front || front.Name() != "front matter" {
 		t.Errorf("the first piece is %+v", front)
 	}
-	if want := []Run{{18, 18, "A VIII.1", "A VIII.1"}}; !slices.Equal(front.Runs, want) {
+	if want := []Run{{First: 18, Last: 18, FirstLabel: "A VIII.1", LastLabel: "A VIII.1"}}; !slices.Equal(front.Runs, want) {
 		t.Errorf("the front matter runs %+v, want %+v", front.Runs, want)
 	}
-	if want := []Run{{18, 20, "A VIII.1", "A VIII.3"}}; !slices.Equal(sec.Runs, want) {
+	if want := []Run{{First: 18, Last: 20, FirstLabel: "A VIII.1", LastLabel: "A VIII.3"}}; !slices.Equal(sec.Runs, want) {
 		t.Errorf("§ 1 runs %+v, want %+v", sec.Runs, want)
 	}
 	if got, want := len(sec.Subsections), 2; got != want {
