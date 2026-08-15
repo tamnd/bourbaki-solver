@@ -169,7 +169,11 @@ func assembleAll(root string) (map[string][]byte, []string, string) {
 		if err != nil || len(names) == 0 {
 			continue
 		}
-		f, s, _, err := assembleBook(root, b.ID, "en", false)
+		// Partial, because a volume in the middle of being read is the one
+		// case where the alternative is no coverage at all: without it the
+		// assembler stops on the first unread page and S09 skips the book
+		// whole, chapters that are finished and committed included.
+		f, s, _, err := assembleBook(root, b.ID, "en", true, false)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "audit: S09 does not cover %s, the assembler stopped on it: %v\n", b.ID, err)
 			continue

@@ -23,15 +23,26 @@ import (
 // place. It is what CI runs: the whole stage is meant to be a pure function of
 // its inputs, and the only way to know that it stays one is to run it against
 // what is committed and diff.
+//
+// -partial assembles the chapters that are read through and skips the ones that
+// are not. A volume is normally assembled once its pages are all in, and running
+// it short is then a mistake worth stopping for, which is why this is a flag and
+// not the behaviour. Theory of Sets is the case it exists for: 417 pages read a
+// few dozen a day is a week of reading, and without this nothing downstream can
+// touch chapter I until chapter IV is in, so no tag is minted, no reference is
+// resolved and no translation starts for a week. With it, chapter I assembles
+// the day it finishes and the rest of the pipeline runs on it while the reading
+// goes on.
 
 func runAssemble(args []string) error {
 	fs := flag.NewFlagSet("assemble", flag.ExitOnError)
 	book := fs.String("book", "", "book id, as in manifests/books.yaml")
 	lang := fs.String("lang", "en", "language of the pages being assembled")
 	check := fs.Bool("check", false, "assemble but write nothing, and report what differs from what is committed")
+	partial := fs.Bool("partial", false, "assemble the chapters that are read through and skip the ones that are not")
 	quiet := fs.Bool("q", false, "print only the totals")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki assemble -book <id> [-lang en] [-check]\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki assemble -book <id> [-lang en] [-check] [-partial]\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -45,7 +56,7 @@ func runAssemble(args []string) error {
 	if err != nil {
 		return err
 	}
-	files, stale, sum, err := assembleBook(root, *book, *lang, !*quiet)
+	files, stale, sum, err := assembleBook(root, *book, *lang, *partial, !*quiet)
 	if err != nil {
 		return err
 	}
@@ -83,7 +94,7 @@ type assembleTotals struct{ statements, exercises int }
 // It is here rather than in package assemble because it is the driver and not
 // the algorithm: it reads the manifests, walks the chapters and lays out the
 // paths, and moving it would take the command's tests with it for no gain.
-func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []string, assembleTotals, error) {
+func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]byte, []string, assembleTotals, error) {
 	var sum assembleTotals
 	books, err := corpus.LoadBooks(root)
 	if err != nil {
@@ -132,7 +143,17 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 	rec := corpus.BookSections{ID: book}
 	exrec := corpus.BookExercises{ID: book}
 	files := map[string][]byte{}
-	for _, ch := range bt.Chapters {
+	done := make([]corpus.Chapter, 0, len(bt.Chapters))
+	for i, ch := range bt.Chapters {
+		if partial {
+			from, to := chapterSpan(*b, bt.Chapters, i)
+			if gap := unread(pages, from, to); len(gap) > 0 {
+				fmt.Fprintf(os.Stderr, "chapter %s runs pdf %d to %d and %d of those pages are not read yet, skipping it\n",
+					ch.Numeral, from, to, len(gap))
+				continue
+			}
+		}
+		done = append(done, ch)
 		pieces, err := assemble.Chapter(b.Book, lang, ch, pages)
 		if err != nil {
 			return nil, nil, sum, err
@@ -180,7 +201,11 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 		rec.Chapters = append(rec.Chapters, cr)
 		exrec.Chapters = append(exrec.Chapters, cx)
 	}
-	if err := errataApplied(root, errata, lang, b.Book, bt.Chapters, used); err != nil {
+	if len(done) == 0 {
+		return nil, nil, sum, fmt.Errorf("no chapter of %s is read through: %d pages of %d are in %s",
+			book, len(pages), b.Pages, corpus.PagesDir(root, book))
+	}
+	if err := errataApplied(root, errata, lang, b.Book, done, used); err != nil {
 		return nil, nil, sum, err
 	}
 
@@ -206,7 +231,10 @@ func assembleBook(root, book, lang string, verbose bool) (map[string][]byte, []s
 	}
 	files[corpus.ExercisesPath(root)] = exmanifest
 
-	stale, err := staleFiles(root, lang, b.Book, bt.Chapters, files)
+	// The chapters that ran, not all of them: a chapter this run skipped wrote
+	// nothing, and sweeping it would take out whatever a previous run of the
+	// same volume put there.
+	stale, err := staleFiles(root, lang, b.Book, done, files)
 	if err != nil {
 		return nil, nil, sum, err
 	}
@@ -422,6 +450,41 @@ func pdfPages(runs []assemble.Run) string {
 }
 
 // readPages reads every page of a volume.
+// chapterSpan is the run of pdf pages a chapter occupies.
+//
+// It ends where the next chapter begins, and the last chapter of the volume ends
+// at the last page of the file. That last one takes in the bibliography and the
+// index along with the chapter, which is more than the chapter, and it is meant
+// to be: the only use of this is deciding whether the pages are all in, and
+// there is no page after the back matter to be wrong about. It costs the last
+// chapter of a volume the right to be assembled a day early, which is a day
+// nobody was going to use, because by then the volume is read.
+func chapterSpan(b corpus.Book, chapters []corpus.Chapter, i int) (from, to int) {
+	from = chapters[i].PDFPage
+	if i+1 < len(chapters) {
+		return from, chapters[i+1].PDFPage - 1
+	}
+	return from, b.Pages
+}
+
+// unread are the pages of a run that are not in pages.
+//
+// A blank leaf never gets rendered and so is unread in exactly the same way as a
+// page the fleet has not got to yet, which would leave a chapter with a blank
+// inside it waiting for ever. Theory of Sets has one blank, the leaf at pdf page
+// 2, and chapter I opens at 22, so no span of that volume holds one. If a volume
+// turns up that prints a blank mid chapter, the answer is a page file that says
+// the leaf is blank rather than a rule here that guesses which gaps are real.
+func unread(pages map[int]corpus.PageFile, from, to int) []int {
+	var out []int
+	for p := from; p <= to; p++ {
+		if _, ok := pages[p]; !ok {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func readPages(root, book string) (map[int]corpus.PageFile, error) {
 	dir := corpus.PagesDir(root, book)
 	names, err := filepath.Glob(filepath.Join(dir, "*.md"))
