@@ -550,3 +550,58 @@ func TestAfterMarker(t *testing.T) {
 		})
 	}
 }
+
+// Theory of Sets closes the number of an exercise with a full stop where every
+// other volume closes it with a parenthesis, and it letters the parts "(a)"
+// rather than "a)", so the two shapes never meet on one page. Read the other
+// way only, every § of the volume came back with a preamble and no exercises.
+func TestExercisesReadsTheFullStopTheoryOfSetsPrints(t *testing.T) {
+	in := blocks(
+		"### Exercises",
+		`1. Let $\mathscr{T}$ be a theory with no specific signs.`,
+		"(a) Show that the relation is false. (b) Deduce that the theory is contradictory.",
+		`$\P 2.$ Let $A$ be a term.`,
+		`$*3.$ Let $R$ be a relation.`,
+	)
+	got, err := exercises(in, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d exercises, want 3", len(got))
+	}
+	if !strings.Contains(got[0].Body, "(a) Show that") {
+		t.Errorf("the lettered parts left exercise 1: %q", got[0].Body)
+	}
+	if !got[1].Meta.Starred || got[1].Meta.Supplementary {
+		t.Errorf("exercise 2 carries the pilcrow alone, got starred=%v supplementary=%v",
+			got[1].Meta.Starred, got[1].Meta.Supplementary)
+	}
+	if !got[2].Meta.Supplementary || got[2].Meta.Starred {
+		t.Errorf("exercise 3 carries the asterisk alone, got starred=%v supplementary=%v",
+			got[2].Meta.Supplementary, got[2].Meta.Starred)
+	}
+}
+
+// The full stop is only a marker where the number is the one the run is up to,
+// which is what keeps a sentence opening on a numeral out of the run. No
+// paragraph of the assembled corpus opens on a number and a full stop, and the
+// count was taken before the shape was allowed.
+func TestAParagraphOpeningOnANumberIsNotAnExercise(t *testing.T) {
+	in := blocks(
+		"### Exercises",
+		"1. Let $A$ be a set.",
+		"3. is the number of elements, and 2. of them are here.",
+		"2. Let $B$ be a set.",
+	)
+	got, err := exercises(in, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("got %d exercises, want 2", len(got))
+	}
+	if !strings.Contains(got[0].Body, "3. is the number of elements") {
+		t.Errorf("the paragraph opening on 3. was taken for an exercise: %q", got[0].Body)
+	}
+}

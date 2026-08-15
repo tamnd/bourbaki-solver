@@ -480,3 +480,98 @@ func TestCutNotes(t *testing.T) {
 	}
 	same(t, defs, []string{"[^1]: the note"})
 }
+
+// A chapter with one appendix does not number it. Chapter I of Theory of Sets
+// prints the word alone, its table of contents gives it no numeral, and a mark
+// that insisted on one stopped the whole volume assembling on a page that had
+// been read perfectly well.
+func TestTheMarkOfAnUnnumberedAppendix(t *testing.T) {
+	mark := runMark(corpus.Section{Appendix: true})
+	for _, line := range []string{"## APPENDIX", "### Appendix", "#### appendix.", "## APPENDICE"} {
+		if !mark.MatchString(line) {
+			t.Errorf("%q is not read as the appendix mark", line)
+		}
+	}
+	// And it is still a mark and not a word in a sentence.
+	for _, line := range []string{"APPENDIX", "## Appendix I", "## Appendix to chapter I"} {
+		if mark.MatchString(line) {
+			t.Errorf("%q is read as the mark of an unnumbered appendix", line)
+		}
+	}
+	// A numbered one is unchanged, in either numeral and at any level.
+	numbered := runMark(corpus.Section{Appendix: true, Number: 2})
+	for _, line := range []string{"## Appendix 2", "### APPENDIX II"} {
+		if !numbered.MatchString(line) {
+			t.Errorf("%q is not read as the mark of appendix 2", line)
+		}
+	}
+	if numbered.MatchString("## Appendix") {
+		t.Error("a chapter with two appendices reads a bare mark as the second one")
+	}
+}
+
+// Bourbaki does not number its notes, it marks them with an asterisk, then two
+// asterisks, then a dagger. The mark stands in the text and again at the head
+// of the definition, and a reading that gave the mark and no reference used to
+// stop the volume. Theory of Sets prints 51 notes and 30 came back that way.
+func TestMarkNotesPutsTheReferenceBackWhereThePagePrintsTheMark(t *testing.T) {
+	body := "The theory is contradictory (*) and nothing else follows."
+	got := markNotes(body, []string{"[^1]: (*) This is the note."})
+	if want := "The theory is contradictory (*)[^1] and nothing else follows."; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// The mark is written as the page set it, sometimes as mathematics and
+// sometimes not, and the two are the same mark.
+func TestMarkNotesReadsTheMarkAsMathematics(t *testing.T) {
+	body := `A term of the theory $(\*)$ is an assembly.`
+	got := markNotes(body, []string{`[^2]: (*) The note.`})
+	if !strings.Contains(got, `$(\*)$[^2]`) {
+		t.Errorf("the mathematical mark was not matched: %q", got)
+	}
+}
+
+// Two things are left alone. A page that already marks the note is a page
+// nothing has to be done to, and a page that sets the same mark twice gives no
+// one place the reference belongs, so it goes to the check rather than to a
+// guess.
+func TestMarkNotesLeavesWhatItCannotPlace(t *testing.T) {
+	marked := "already marked[^1] here (*) and there."
+	if got := markNotes(marked, []string{"[^1]: (*) The note."}); got != marked {
+		t.Errorf("a body that marks its note was changed: %q", got)
+	}
+	twice := "one (*) and two (*)."
+	if got := markNotes(twice, []string{"[^1]: (*) The note."}); got != twice {
+		t.Errorf("a mark the page sets twice was placed anyway: %q", got)
+	}
+}
+
+// A piece can open partway down a page, and the note of the half above it is
+// printed at the foot under both halves. Page 67 of Theory of Sets is the case:
+// the last exercise of § 4 ends on the mark, APPENDIX opens two lines later,
+// and the definition stands at the foot of the whole page.
+func TestCutPageLeavesANoteWithTheHalfThatMarksIt(t *testing.T) {
+	page := "The relation holds (*)\n\n## APPENDIX\n\nA characterization of terms.\n\n[^1]: (*) Take R to be the relation."
+	top := cutPage(page, 0, strings.Index(page, "## APPENDIX"))
+	if !strings.Contains(top, "[^1]: (*) Take R") {
+		t.Errorf("the top of the page lost the note it marks:\n%s", top)
+	}
+	bottom := cutPage(page, strings.Index(page, "## APPENDIX"), len(page))
+	if strings.Contains(bottom, "[^1]:") {
+		t.Errorf("the bottom of the page kept a note nothing in it marks:\n%s", bottom)
+	}
+	if !strings.Contains(bottom, "A characterization of terms.") {
+		t.Errorf("the bottom of the page lost its text:\n%s", bottom)
+	}
+}
+
+// The definition opens on the mark it defines, so a note looked for in the
+// whole cut finds itself and every half of every page keeps every note.
+func TestCutPageDoesNotLetANoteMarkItself(t *testing.T) {
+	page := "Nothing here refers to it.\n\n## APPENDIX\n\nThe text (*) of the appendix.\n\n[^1]: (*) The note."
+	top := cutPage(page, 0, strings.Index(page, "## APPENDIX"))
+	if strings.Contains(top, "[^1]:") {
+		t.Errorf("the note followed the definition rather than the mark:\n%s", top)
+	}
+}
