@@ -98,6 +98,35 @@ type Runner struct {
 	Logf        func(string, ...any)
 	Sleep       func(ctx context.Context, d time.Duration) error
 	Now         func() time.Time
+
+	// mu guards refused, which the host goroutines both read and write.
+	mu sync.Mutex
+	// refused is the pages one host would not return, by host name, so that this
+	// run stops offering them to it. Per host rather than per run, because a
+	// refusal is a fact about the reader and not about the page: a page the
+	// local reader will not return is a page the fleet reads without complaint,
+	// and a run holding both hosts should still send it to the other one.
+	refused map[string]map[string]bool
+}
+
+// refuseHere records that a host will not read a page.
+func (r *Runner) refuseHere(host, target string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.refused == nil {
+		r.refused = map[string]map[string]bool{}
+	}
+	if r.refused[host] == nil {
+		r.refused[host] = map[string]bool{}
+	}
+	r.refused[host][target] = true
+}
+
+// takes says whether a host is still willing to be offered a page.
+func (r *Runner) takes(host, target string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return !r.refused[host][target]
 }
 
 // inRange says whether a target is a page this run was asked for.
@@ -256,6 +285,13 @@ type Report struct {
 	// them, since a run that released fifty pages did nothing wrong to any of
 	// them and a run that rejected fifty has fifty bad readings to explain.
 	Released int `json:"released,omitempty"`
+	// Refused is pages a reader would not return at all, and Refusals is which
+	// ones. They are neither accepted nor rejected and are left out of the rate
+	// on purpose: the rate is how often the model reads a page correctly, and a
+	// page it never read is no evidence either way. They are still pending when
+	// the run ends, which is the truth about them.
+	Refused  int   `json:"refused,omitempty"`
+	Refusals []int `json:"refusals,omitempty"`
 	// Faces is every letter that changed typeface against the native reading a
 	// repaired page replaced. It is a list to read and not a count to watch: the
 	// model is wrong about a face more often than the extractor is and neither
@@ -286,6 +322,10 @@ func (r Report) Summary() string {
 	}
 	if r.Released > 0 {
 		fmt.Fprintf(&out, "  %d pages went back to the queue untouched, their batch never reached a host\n", r.Released)
+	}
+	if r.Refused > 0 {
+		fmt.Fprintf(&out, "  %d pages the reader would not return at all, still pending, read them on another host: %s\n",
+			r.Refused, pageList(r.Refusals))
 	}
 	hosts := make([]string, 0, len(r.PerHost))
 	for host := range r.PerHost {
@@ -321,6 +361,34 @@ func (r Report) Summary() string {
 		}
 	}
 	return out.String()
+}
+
+// pageList writes a run of page numbers the way a person would, 301 to 306 and
+// not 301, 302, 303, 304, 305, 306. The pages a reader refuses come in blocks,
+// because what it refuses is a stretch of prose rather than a page.
+func pageList(pages []int) string {
+	if len(pages) == 0 {
+		return ""
+	}
+	sorted := append([]int(nil), pages...)
+	sort.Ints(sorted)
+	var parts []string
+	for i := 0; i < len(sorted); {
+		j := i
+		for j+1 < len(sorted) && sorted[j+1] == sorted[j]+1 {
+			j++
+		}
+		switch j {
+		case i:
+			parts = append(parts, fmt.Sprintf("%d", sorted[i]))
+		case i + 1:
+			parts = append(parts, fmt.Sprintf("%d, %d", sorted[i], sorted[j]))
+		default:
+			parts = append(parts, fmt.Sprintf("%d to %d", sorted[i], sorted[j]))
+		}
+		i = j + 1
+	}
+	return strings.Join(parts, ", ")
 }
 
 // FacesShown is how many typeface changes the printed summary lists before it
@@ -423,9 +491,11 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				report.PerHost[host.Name] += outcome.accepted
 				report.HostTimes[host.Name] += result.Elapsed
 				report.Released += outcome.released
+				report.Refused += outcome.refused
+				report.Refusals = append(report.Refusals, outcome.refusals...)
 				// The pages went back, so they are not read and the next host
 				// may still get them.
-				read -= outcome.released
+				read -= outcome.released + outcome.refused
 				lock.Unlock()
 				r.logf("%s", result.Summary())
 
@@ -443,6 +513,7 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 	group.Wait()
 
 	report.Finished = r.now()
+	sort.Ints(report.Refusals)
 	sort.Slice(report.Failures, func(i, j int) bool { return report.Failures[i].Page < report.Failures[j].Page })
 	sort.Slice(report.Batches, func(i, j int) bool { return report.Batches[i].ID < report.Batches[j].ID })
 	return report, ctx.Err()
@@ -505,8 +576,13 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 			}
 		}
 	}()
+	// A page this host has already refused is not offered to it again. Without
+	// this the release below puts the page straight back in pending, the next
+	// batch leases it, and the run spends a minute a page refusing the same
+	// twenty five pages until the queue is otherwise empty.
+	wanted := func(target string) bool { return r.inRange(target) && r.takes(host.Name, target) }
 	for len(out) < n {
-		job, err := r.Queue.LeasePart(queue.StageOCR, host.Name, r.Book, r.inRange, expected)
+		job, err := r.Queue.LeasePart(queue.StageOCR, host.Name, r.Book, wanted, expected)
 		if errors.Is(err, queue.ErrEmpty) {
 			break
 		}
@@ -556,6 +632,14 @@ type outcome struct {
 	// They are not rejections and must not be counted as any, but the run does
 	// have to notice: a host that hands everything back is a host to stop using.
 	released int
+	// refused is pages the reader would not return at all. They are handed back
+	// like released pages, with their attempts intact, and counted apart from
+	// them because the cause is different and so is the cure: a released page
+	// wants the same host again in a minute, a refused page wants another host.
+	refused int
+	// refusals is which pages those were, so the run can name them rather than
+	// print a number nobody can act on.
+	refusals []int
 	// repaired is how many of the accepted pages needed a follow up first. They
 	// are counted apart because a run where a third of the pages had to be
 	// repaired is not a healthy run, and the accepted count alone hides that.
@@ -744,6 +828,12 @@ func StripToolHeader(text string) string {
 
 // file decides what happened to one page and tells the queue.
 func (r *Runner) file(ctx context.Context, host Host, dest string, value task, out *outcome) {
+	// Before the answer, because a refused page has none and the reason it has
+	// none is not that anything went wrong with it. See refused.go.
+	if said, ok := Refusal(dest, value.image); ok {
+		r.refuse(host, value, out, said)
+		return
+	}
 	raw, err := os.ReadFile(filepath.Join(dest, OutputName(filepath.Base(value.image))))
 	if err != nil {
 		r.reject(value, out, nil, "no answer came back for this page")
@@ -824,6 +914,18 @@ func (r *Runner) mend(ctx context.Context, thread Thread, page int, text string,
 	}
 	r.logf("page %d: repaired in its own thread, %s", page, Reasons(problems))
 	return fixed, true
+}
+
+// refuse hands a page back that this host will not read, and remembers not to
+// offer it again.
+func (r *Runner) refuse(host Host, value task, out *outcome, reason string) {
+	if err := r.Queue.Release(value.job, reason); err != nil {
+		r.logf("page %d: could not hand the refused page back: %v", value.page, err)
+	}
+	r.refuseHere(host.Name, value.job.Target)
+	out.refused++
+	out.refusals = append(out.refusals, value.page)
+	r.logf("page %d: %s on %s, handed back unread with its attempts intact", value.page, RefusedMark, host.Name)
 }
 
 func (r *Runner) reject(value task, out *outcome, rules []Rule, reason string) {

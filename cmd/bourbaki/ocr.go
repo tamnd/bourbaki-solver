@@ -32,7 +32,10 @@ flags for fill and run:
   -hosts LIST    comma separated route names, default every route that does OCR.
                  -hosts local reads the pages on this machine with the Claude
                  Code CLI instead of the fleet, which needs no browser account
-                 and reads a page in about fifteen seconds
+                 and reads a page in about fifteen seconds. It is not the path
+                 for a volume: it spends a metered Claude session quota that
+                 costs real money, and it will not return a page of continuous
+                 prose at all. The fleet is what reads a book.
   -routes PATH   route file, default ~/.config/bourbaki/routes.json
   -queue PATH    queue directory
   -keep          leave the page images on the hosts, for debugging
