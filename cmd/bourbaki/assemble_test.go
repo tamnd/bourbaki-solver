@@ -157,6 +157,111 @@ func TestRunAssemble(t *testing.T) {
 	}
 }
 
+// A volume being read a few dozen pages a day is assembled chapter by chapter as
+// the chapters finish, and the ones still being read are skipped rather than
+// stopping the run. Without that, Theory of Sets would hold chapter I back for a
+// week waiting on chapter IV, and nothing downstream, no tag, no reference, no
+// translation, could touch a chapter that was finished on the first day.
+//
+// The second chapter here is in the table of contents and has not one page read,
+// which is what a volume looks like part way through.
+func TestAssemblePartialSkipsTheChapterStillBeingRead(t *testing.T) {
+	root := smallCorpus(t)
+	addUnreadChapter(t, root)
+	t.Setenv("BOURBAKI_CORPUS", root)
+
+	// Without the flag the run stops, because a volume whose pages are all in
+	// and which still will not assemble is a fault and not a state to carry on
+	// from.
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err == nil {
+		t.Fatal("the run passed over an unread chapter without being asked to")
+	}
+
+	if err := runAssemble([]string{"-book", "alg-viii", "-partial", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+	names, err := filepath.Glob(filepath.Join(root, "content", "en", "alg", "VIII", "*.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(names) != 2 {
+		t.Fatalf("chapter VIII came out as %v, want the front matter and § 1", names)
+	}
+	if _, err := os.Stat(filepath.Join(root, "content", "en", "alg", "IX")); !os.IsNotExist(err) {
+		t.Errorf("chapter IX was written from pages nobody has read: %v", err)
+	}
+	m, err := corpus.LoadSections(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Books) != 1 || len(m.Books[0].Chapters) != 1 || m.Books[0].Chapters[0].Chapter != "VIII" {
+		t.Fatalf("the manifest records %+v", m.Books)
+	}
+
+	// -check is what CI runs, and it has to agree with what -partial wrote,
+	// or every push on a volume in the middle of a read reports the corpus as
+	// out of date.
+	if err := runAssemble([]string{"-book", "alg-viii", "-partial", "-check", "-q"}); err != nil {
+		t.Fatalf("checking what -partial wrote differs from it: %v", err)
+	}
+}
+
+// A page missing out of the middle of a chapter holds that chapter back exactly
+// as an unread chapter is held back. The page here is the last of § 1, so the
+// chapter would otherwise assemble short by a page and nothing would say so.
+func TestAssemblePartialHoldsAChapterWithAHoleInIt(t *testing.T) {
+	root := smallCorpus(t)
+	addUnreadChapter(t, root)
+	if err := os.Remove(corpus.PagePath(root, "alg-viii", 20)); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BOURBAKI_CORPUS", root)
+	err := runAssemble([]string{"-book", "alg-viii", "-partial", "-q"})
+	if err == nil {
+		t.Fatal("a volume with no chapter read through assembled anyway")
+	}
+	if !strings.Contains(err.Error(), "no chapter") {
+		t.Errorf("the run stopped on %v", err)
+	}
+}
+
+// addUnreadChapter puts a second chapter in the table of contents and leaves its
+// pages unwritten, so that the first chapter is read through and the volume is
+// not.
+func addUnreadChapter(t *testing.T, root string) {
+	t.Helper()
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := books.Get("alg-viii")
+	nb := *b
+	nb.Chapters = []string{"VIII", "IX"}
+	nb.Pages = 25
+	books.Upsert(nb)
+	if err := books.Save(root); err != nil {
+		t.Fatal(err)
+	}
+
+	toc, err := corpus.LoadTOC(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bt, _ := toc.Get("alg-viii")
+	nt := *bt
+	nt.Chapters = append(append([]corpus.Chapter{}, bt.Chapters...), corpus.Chapter{
+		Book: "alg-viii", Numeral: "IX", Title: "Sesquilinear and Quadratic Forms", Page: 5, PDFPage: 22,
+		Sections: []corpus.Section{{
+			Number: 1, Title: "Sesquilinear Forms", Page: 5, PDFPage: 22,
+			Subsections: []corpus.Subsection{{Number: 1, Title: "Sesquilinear Forms", Page: 5, PDFPage: 22}},
+		}},
+	})
+	toc.Upsert(nt)
+	if err := toc.Save(root); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // An erratum is written into a manifest and stamped into the assembled file, and
 // it has to survive the assembler being run again. Written into content/ by hand
 // it would not: content/ is a pure function of the pages and the next run wipes
