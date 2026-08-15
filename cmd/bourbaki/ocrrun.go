@@ -143,7 +143,14 @@ func expectFor(entry *corpus.Book, pmap *pagemap.Map, manifest render.Manifest, 
 
 // sources is the pages of a volume that a run may read, bounded by the range
 // asked for.
-func (s setup) sources(first, last int) []ocr.Source {
+//
+// unread drops every page that already has a reading committed, whatever it was
+// read with. Without it a page comes back into the work list when the prompt
+// moves, which is right when the prompt moved because the model was misreading
+// something, and wrong when the pages have since been read against their images
+// by hand: the corrections are overwritten by a fresh answer, and the uploads
+// that paid for it were the ones the unread pages were waiting for.
+func (s setup) sources(first, last int, unread bool) []ocr.Source {
 	var out []ocr.Source
 	for _, page := range s.manifest.Pages {
 		if s.only != nil && !s.only[page.Page] {
@@ -153,6 +160,9 @@ func (s setup) sources(first, last int) []ocr.Source {
 			continue
 		}
 		if last > 0 && page.Page > last {
+			continue
+		}
+		if unread && committed(s.root, s.entry.ID, page.Page) {
 			continue
 		}
 		out = append(out, ocr.Source{Page: page.Page, SHA256: page.SHA256, Blank: page.Blank})
@@ -179,6 +189,7 @@ func ocrFill(args []string) error {
 	fs := flag.NewFlagSet("ocr fill", flag.ExitOnError)
 	book, _, _, queueRoot, first, last, _, _, _, _ := ocrFlags(fs)
 	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
+	unread := fs.Bool("unread", false, "only the pages with no reading committed")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -191,7 +202,7 @@ func ocrFill(args []string) error {
 		return err
 	}
 	runner := &ocr.Runner{Book: state.entry.ID, Root: state.root, Queue: state.queue, Prompt: state.ask}
-	sources := state.sources(*first, *last)
+	sources := state.sources(*first, *last, *unread)
 	added, err := runner.Fill(sources)
 	if err != nil {
 		return err
@@ -230,6 +241,10 @@ func ocrRun(args []string) error {
 	// purpose: rendering the pages of a born-digital volume is cheap and local,
 	// reading them costs rationed uploads.
 	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
+	// A run against a starved pool spends its uploads on the pages nothing has
+	// read yet, and a re-read is then something asked for rather than something
+	// a prompt edit causes.
+	unread := fs.Bool("unread", false, "only the pages with no reading committed")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -282,7 +297,7 @@ func ocrRun(args []string) error {
 		runner.Repair = mender(state.root, hosts, state.expect, logf)
 	}
 
-	added, err := runner.Fill(state.sources(*first, *last))
+	added, err := runner.Fill(state.sources(*first, *last, *unread))
 	if err != nil {
 		return err
 	}
@@ -579,4 +594,12 @@ func writeOCRReport(root string, report ocr.Report) error {
 		}
 	}
 	return nil
+}
+
+// committed says whether a page of this volume already has a reading in the
+// corpus. It asks the file system and not the queue: what a re-read would
+// overwrite is the file, and the file is the thing worth not overwriting.
+func committed(root, book string, page int) bool {
+	_, err := os.Stat(corpus.PagePath(root, book, page))
+	return err == nil
 }

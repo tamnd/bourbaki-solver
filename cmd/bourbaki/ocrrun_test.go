@@ -396,14 +396,14 @@ func TestFlaggedIsTheOnlyWayIntoABornDigitalVolume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ocrSetup with -flagged: %v", err)
 	}
-	sources := s.sources(0, 0)
+	sources := s.sources(0, 0, false)
 	if len(sources) != 2 || sources[0].Page != 76 || sources[1].Page != 77 {
 		t.Fatalf("sources = %v, want only the flagged pages 76 and 77", sources)
 	}
 
 	// The range still applies on top of the flag list, because a repair pass of
 	// forty five pages is still something you want to try ten of first.
-	if got := s.sources(77, 0); len(got) != 1 || got[0].Page != 77 {
+	if got := s.sources(77, 0, false); len(got) != 1 || got[0].Page != 77 {
 		t.Errorf("sources(77, 0) = %v, want page 77 alone", got)
 	}
 }
@@ -421,7 +421,37 @@ func TestWithoutFlaggedAScannedVolumeReadsEveryRenderedPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ocrSetup: %v", err)
 	}
-	if got := s.sources(0, 0); len(got) != 2 {
+	if got := s.sources(0, 0, false); len(got) != 2 {
 		t.Errorf("sources = %v, want both rendered pages", got)
+	}
+}
+
+// A page already read is not read again under -unread, and one never read is.
+//
+// The prompt of Theory of Sets was edited after fifty five of its pages were in
+// and the fifty five came straight back into the work list, which is the rule
+// working as written: the prompt moved, so the readings were made under rules
+// that no longer hold. It was still the wrong thing to do that afternoon. Those
+// pages had been read against their images by hand, a re-read would have
+// overwritten the corrections with a fresh answer, and the pool had two uploads
+// left in it and three hundred and sixty three pages nobody had read at all.
+func TestUnreadLeavesThePagesAlreadyReadAlone(t *testing.T) {
+	book := corpus.Book{ID: "ens-i-iv", Nature: "scan", Extraction: "ocr"}
+	manifest := render.Manifest{Book: "ens-i-iv", Pages: []render.Page{
+		{Page: 22, SHA256: "a"}, {Page: 23, SHA256: "b"}, {Page: 24, SHA256: "c"},
+	}}
+	root := setupCorpus(t, book, manifest, nil)
+	writePage(t, root, "ens-i-iv", 23, "Let $E$ be a set.\n")
+
+	s, err := ocrSetup("ens-i-iv", filepath.Join(t.TempDir(), "queue"), false)
+	if err != nil {
+		t.Fatalf("ocrSetup: %v", err)
+	}
+	got := s.sources(0, 0, true)
+	if len(got) != 2 || got[0].Page != 22 || got[1].Page != 24 {
+		t.Errorf("sources = %v, want 22 and 24 and not the page that is read", got)
+	}
+	if all := s.sources(0, 0, false); len(all) != 3 {
+		t.Errorf("without -unread sources = %v, want all three", all)
 	}
 }

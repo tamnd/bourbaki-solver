@@ -38,6 +38,8 @@ flags for fill and run:
   -wait DUR      wait this long for a box with a spare core rather than fail
   -flagged       only the pages a native extraction could not read, which is the
                  one way a born-digital volume is read through a model
+  -unread        only the pages with no reading committed, so that editing the
+                 prompt does not send the pages already read back to the fleet
   -dry           say what would be read and stop
 
 flags for check:
