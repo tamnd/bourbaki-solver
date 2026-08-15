@@ -3,6 +3,7 @@ package assemble
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -208,7 +209,9 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 	next := 0             // the number the next member of that run would carry
 	occ := map[corpus.Ref]int{}
 	opened := map[corpus.Ref]bool{} // the runs a bare lead has already opened, by no.
-	for _, b := range blocks {
+	queue := slices.Clone(blocks)
+	for i := 0; i < len(queue); i++ {
+		b := queue[i]
 		if m := subsecRE.FindStringSubmatch(b.text); m != nil {
 			no, _ = strconv.Atoi(m[1])
 			next = 0
@@ -257,6 +260,19 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 					return err
 				}
 				continue
+			}
+		}
+		// The printing sets each member of a run as a paragraph of its own, and a
+		// page read without the blank line between two of them arrives as one
+		// block. Page 16 of Theory of Sets is read that way, with (2) on the line
+		// under (1), and the second member would go into the body of the first.
+		// Cut it off and put it back in the queue as the block it is printed as.
+		if next > 0 {
+			if head, rest, ok := cutRunMember(b.text, next); ok {
+				b.text = head
+				t := b
+				t.text, t.label = rest, ""
+				queue = slices.Insert(queue, i+1, t)
 			}
 		}
 		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, taken, pr)
@@ -579,6 +595,23 @@ var runNumRE = regexp.MustCompile(`^(?:\\?\*\s*)?\((\d+)\)\s+`)
 // runItem reads the marker on a member of a run, either way a volume writes it,
 // and says what the number is, how much of the block the marker takes, and what
 // is left after it.
+// cutRunMember cuts a block that opens on member now of an open run at the line
+// where member now+1 begins, so that each member is the block the printing sets
+// it as. It cuts on nothing else: a bracketed number that is not the one the run
+// is up to is a reference to a formula or a case, not a member.
+func cutRunMember(text string, now int) (head, rest string, ok bool) {
+	if num, _, _, ok := runItem(text); !ok || num != strconv.Itoa(now) {
+		return "", "", false
+	}
+	lines := strings.Split(text, "\n")
+	for i := 1; i < len(lines); i++ {
+		if num, _, _, ok := runItem(lines[i]); ok && num == strconv.Itoa(now+1) {
+			return strings.Join(lines[:i], "\n"), strings.Join(lines[i:], "\n"), true
+		}
+	}
+	return "", "", false
+}
+
 func runItem(text string) (num, marker, rest string, ok bool) {
 	if i := exNumRE.FindStringSubmatch(text); i != nil {
 		return i[3], i[0], text[markerLen(i):], true

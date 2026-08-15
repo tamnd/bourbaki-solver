@@ -690,6 +690,33 @@ func TestARunOpensOnItsKindAloneOnALine(t *testing.T) {
 	}
 }
 
+// Page 16 of Theory of Sets is read with (2) on the line under (1), so the two
+// members arrive as one block and the second would go into the body of the
+// first.
+func TestARunSplitsTwoMembersThePageRanTogether(t *testing.T) {
+	in := blocks(
+		"### 1. Terms and Relations",
+		"*Examples*",
+		"(1) The assembly $\\vee 1$ is represented by $\\Rightarrow$.\n(2) The following symbols represent assemblies :",
+		"(3) The sign $\\square$ is not a letter.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "I", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-i-s1-n1-exa-1",
+		"ens-i-s1-n1-exa-2",
+		"ens-i-s1-n1-exa-3",
+	})
+	if strings.Contains(got[0].Body, "The following symbols") {
+		t.Errorf("the second member went into the body of the first: %q", got[0].Body)
+	}
+	if !strings.HasPrefix(got[1].Body, "The following symbols") {
+		t.Errorf("the second member was not read: %q", got[1].Body)
+	}
+}
+
 // The second run of a kind in one no. is left as prose. Numbering it on from
 // the first would put a number on a statement that the book does not give it,
 // and its own numbers are already spoken for. See walk.
