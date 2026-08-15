@@ -885,6 +885,15 @@ func readHead(line string, blankAfter bool) (Head, bool) {
 	if line == "" {
 		return Head{}, false
 	}
+	// A heading is body. The prompt asks for the headings to be marked with
+	// hashes, and the page that opens a chapter of Theory of Sets marks its
+	// first line "## CHAPTER I Description of Formal Mathematics", which stands
+	// alone above the title the way a running head stands above the text block
+	// and was read as one. The chapter then had no heading on it at all and the
+	// assembler could not find where it began.
+	if strings.HasPrefix(line, "#") {
+		return Head{}, false
+	}
 	var head Head
 	rest := line
 	if label, ok := corpus.ParsePageLabel(line); ok {

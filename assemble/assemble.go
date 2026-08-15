@@ -235,7 +235,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 	}
 	open(Piece{Front: true}, ch.PDFPage, off)
 	for _, s := range ch.Sections {
-		want := []string{fmt.Sprintf("## § %d.", s.Number)}
+		want := sectionHeads(s.Number)
 		if s.Appendix {
 			want = pr.appendixHeads(s.Number)
 		}
@@ -400,6 +400,22 @@ func openRun(body, head, mark string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
+}
+
+// sectionHeads is the heading over § n, both ways a volume prints it.
+//
+// Five of the six volumes print the sign: "§ 1. PRIMARY DECOMPOSITION OF LINEAR
+// REPRESENTATIONS". Theory of Sets prints the number alone, "2. THEOREMS",
+// centred and set at the size the others set a § heading at, and its table of
+// contents lists the same section as "§ 2. Theorems". The sign is the press's
+// business and not the structure's, so both forms are offered and the page says
+// which it is, the same way the numeral over an appendix is asked of the page.
+//
+// The bare form cannot be read as a no. by mistake. A no. is set smaller and
+// reaches here at "### 3.", one level down, so the two are told apart by the
+// level before the number is ever looked at.
+func sectionHeads(n int) []string {
+	return []string{fmt.Sprintf("## § %d.", n), fmt.Sprintf("## %d.", n)}
 }
 
 func name(s corpus.Section) string {

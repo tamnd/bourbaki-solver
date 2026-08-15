@@ -542,6 +542,20 @@ func TestSplitHeadKeepsAPageThatPrintsNoHead(t *testing.T) {
 			title: "MONOIDS, GROUPS",
 			body:  "Let $G$ be a monoid.",
 		},
+		{
+			// The page that opens a chapter of Theory of Sets. The heading
+			// stands alone above the title of the chapter exactly as a running
+			// head stands above the text block, and reading it as one leaves
+			// the chapter with nothing on it for the assembler to find.
+			name: "a marked heading is body",
+			text: "## CHAPTER I Description of Formal Mathematics\n\n## 1. TERMS AND RELATIONS",
+			body: "## CHAPTER I Description of Formal Mathematics\n\n## 1. TERMS AND RELATIONS",
+		},
+		{
+			name: "a marked heading of capitals is body too",
+			text: "## APPENDIX\n\n## CHARACTERIZATION OF TERMS AND RELATIONS",
+			body: "## APPENDIX\n\n## CHARACTERIZATION OF TERMS AND RELATIONS",
+		},
 	}
 	for _, test := range cases {
 		head, body := SplitHead(test.text)
