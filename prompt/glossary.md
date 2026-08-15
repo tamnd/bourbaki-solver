@@ -1,6 +1,8 @@
 You are giving the {{LANGUAGE}} terminology for a translation of Bourbaki's
-Algebra. Below is a numbered list of English mathematical terms, spelled as the
-book spells them.
+Elements of Mathematics. Below is a numbered list of English mathematical
+terms, spelled as the book spells them. They come from the whole of the series
+and not from one Book of it, so a term may belong to algebra, to Lie theory or
+to the theory of sets, and the reading you want is the one the series uses.
 
 For each one, give the established {{LANGUAGE}} rendering: the words a
 mathematician writing a textbook in {{LANGUAGE}} would use for that notion.

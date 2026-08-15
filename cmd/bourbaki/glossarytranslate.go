@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -45,6 +46,14 @@ audits each line, and merges what survives into manifests/glossary.yaml.
                  in the glossary yet, from manifests/glossary-candidates.yaml.
                  This is how the file gets its first rows.
   -min N         when adding, only candidates the corpus uses at least N times
+  -only SOURCE   when adding, only candidates this source found: title,
+                 defined, prose or kind. The candidates are ordered by how
+                 often the prose says them, so a volume whose pages are not
+                 read yet sits at the bottom of the file however good its
+                 terms are: Theory of Sets is mined from its table of
+                 contents and every row of it is a title with a count of one
+                 or two. -only title is how those are reached without
+                 sending the four hundred prose phrases above them.
   -batch N       terms per question, default 40
   -limit N       stop after this many questions
   -hosts LIST    comma separated route names
@@ -74,6 +83,7 @@ func glossaryTranslate(args []string) error {
 	lang := fs.String("lang", "", "vi, zh or ja")
 	add := fs.Int("add", 0, "also ask about this many mined candidates")
 	min := fs.Int("min", 0, "when adding, only candidates used at least this often")
+	only := fs.String("only", "", "when adding, only candidates from this source")
 	size := fs.Int("batch", glossary.DefaultBatch, "terms per question")
 	limit := fs.Int("limit", 0, "stop after this many questions")
 	hostList := fs.String("hosts", "", "comma separated route names")
@@ -95,7 +105,7 @@ func glossaryTranslate(args []string) error {
 	if err != nil {
 		return err
 	}
-	terms, err := needing(root, g, *lang, *add, *min)
+	terms, err := needing(root, g, *lang, *add, *min, *only)
 	if err != nil {
 		return err
 	}
@@ -287,7 +297,15 @@ func archiveAsk(root, lang string, index int, question, answer, conversation str
 //
 // The glossary first, because a term somebody has already decided is worth
 // having is worth finishing before a term a miner noticed.
-func needing(root string, g *glossary.Glossary, lang string, add, min int) ([]string, error) {
+//
+// only narrows the candidates to one source. The list is ordered by how often
+// the prose says a phrase, which is the right order while the corpus is the
+// volumes that are read, and no order at all for a volume that is not: Theory
+// of Sets is mined from its table of contents and every candidate it puts in is
+// a title with a count of one or two, sitting under two thousand phrases from
+// Algebra and Lie. Asking for the titles is how the terminology of a Book gets
+// settled before the Book is read.
+func needing(root string, g *glossary.Glossary, lang string, add, min int, only string) ([]string, error) {
 	var out []string
 	have := map[string]bool{}
 	for _, t := range g.Terms {
@@ -316,6 +334,9 @@ func needing(root string, g *glossary.Glossary, lang string, add, min int) ([]st
 			break
 		}
 		if have[glossary.Key(c.EN)] || (min > 0 && c.Count < min) {
+			continue
+		}
+		if only != "" && !slices.Contains(c.Sources, only) {
 			continue
 		}
 		have[glossary.Key(c.EN)] = true
