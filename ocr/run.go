@@ -90,9 +90,30 @@ type Runner struct {
 	// Limit stops the run after this many pages have been read, for a pilot. Zero
 	// is the whole volume.
 	Limit int
+	// First and Last bound the pages this run will lease. Zero and zero is the
+	// whole volume. Fill has always taken a range and leasing never did, so
+	// asking for pages 22 to 71 queued those pages and then read whatever the
+	// queue held, which on a volume already filled once meant reading page 1.
+	First, Last int
 	Logf  func(string, ...any)
 	Sleep func(ctx context.Context, d time.Duration) error
 	Now   func() time.Time
+}
+
+// inRange says whether a target is a page this run was asked for.
+//
+// A target whose page will not parse is taken rather than passed over, because
+// the leasing loop already has a place to put one of those, and it fails the job
+// with the reason on it. Silently leaving it pending would hide it for ever.
+func (r *Runner) inRange(target string) bool {
+	if r.First == 0 && r.Last == 0 {
+		return true
+	}
+	page, err := pageOf(target)
+	if err != nil {
+		return true
+	}
+	return (r.First == 0 || page >= r.First) && (r.Last == 0 || page <= r.Last)
 }
 
 func (r *Runner) logf(format string, args ...any) {
@@ -481,7 +502,7 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 		}
 	}()
 	for len(out) < n {
-		job, err := r.Queue.Lease(queue.StageOCR, host.Name, r.Book, expected)
+		job, err := r.Queue.LeasePart(queue.StageOCR, host.Name, r.Book, r.inRange, expected)
 		if errors.Is(err, queue.ErrEmpty) {
 			break
 		}
