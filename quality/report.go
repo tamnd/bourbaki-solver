@@ -79,13 +79,25 @@ func Report(r *Result) string {
 				break
 			}
 			if at := f.At(); at != "" {
-				fmt.Fprintf(&b, "- `%s` %s\n", at, f.Msg)
+				fmt.Fprintf(&b, "- `%s` %s\n", at, oneline(f.Msg))
 			} else {
-				fmt.Fprintf(&b, "- %s\n", f.Msg)
+				fmt.Fprintf(&b, "- %s\n", oneline(f.Msg))
 			}
 		}
 	}
 	return b.String()
+}
+
+// oneline folds a finding onto the one line of the list item it is written as.
+//
+// A finding that quotes what it found quotes it as the file holds it, and a
+// formula that the line gathering ran together spans a line break there, so the
+// quote arrives with a newline in it. Written straight out that breaks the item
+// in two and leaves the first half ending in the space in front of the break,
+// which the hygiene rules refuse. The corpus keeps the whole quote and reads it
+// on one line.
+func oneline(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // scope is the one line that says what was audited. Without it a report of forty
