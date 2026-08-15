@@ -148,3 +148,75 @@ func TestTheManifestIsWrittenSorted(t *testing.T) {
 		t.Error("Bytes sorted the manifest it was called on")
 	}
 }
+
+// A volume's table of contents is a claim the volume makes about itself, and a
+// volume can be wrong about itself. Theory of Sets lists no. 5 of § 7 of
+// chapter III on page 201 and prints its heading on 202. That correction is not
+// against a labelled piece of anything, so it is kept apart from the rest.
+func TestTheContentsOfAVolumeHasItsOwnErrata(t *testing.T) {
+	root := writeErrata(t, `errata:
+    - label: alg-viii-s1-ex-3
+      lang: en
+      errata:
+        - {says: a, read: b, why: c}
+contents:
+    - book: ens-i-iv
+      errata:
+        - says: '5. Direct limits 201'
+          read: '5. Direct limits 202'
+          why: the volume prints the heading on 202
+`)
+	m, err := LoadErrata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := m.ContentsErrata("ens-i-iv")
+	if len(got) != 1 || got[0].Read != "5. Direct limits 202" {
+		t.Fatalf("the contents errata of ens-i-iv are %+v", got)
+	}
+	if len(m.ContentsErrata("alg-viii")) != 0 {
+		t.Error("a volume with no contents errata got some")
+	}
+	if len(m.Lookup("en")) != 1 {
+		t.Error("the contents errata disturbed the labelled ones")
+	}
+}
+
+// The same failure mode as above, in the same place: written down, never
+// applied.
+func TestAContentsErratumThatWouldGoUnreadIsRefused(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"no book", `contents:
+    - errata:
+        - {says: a, read: b, why: c}
+`, "no book"},
+		{"nothing to correct", `contents:
+    - book: ens-i-iv
+      errata: []
+`, "lists no errata"},
+		{"no reason", `contents:
+    - book: ens-i-iv
+      errata:
+        - {says: a, read: b}
+`, "no reason"},
+		{"entered twice", `contents:
+    - book: ens-i-iv
+      errata:
+        - {says: a, read: b, why: c}
+    - book: ens-i-iv
+      errata:
+        - {says: d, read: e, why: f}
+`, "twice"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := LoadErrata(writeErrata(t, c.body))
+			if err == nil {
+				t.Fatal("no error")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("the error does not say %q: %v", c.want, err)
+			}
+		})
+	}
+}

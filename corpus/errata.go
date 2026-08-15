@@ -25,6 +25,30 @@ import (
 // want a correction before anything has assigned it a tag.
 type ErrataManifest struct {
 	Entries []LabelErrata `yaml:"errata"`
+
+	// Contents is the same thing for a volume's own table of contents, which is
+	// not a labelled piece of anything and so cannot be listed above. See
+	// BookErrata.
+	Contents []BookErrata `yaml:"contents"`
+}
+
+// BookErrata is what is wrong with the table of contents of one volume.
+//
+// The contents is a claim the book makes about itself, and a book can be wrong
+// about itself. Theory of Sets lists no. 5 of § 7 of chapter III on page 201 and
+// prints its heading on page 202, with no. 4 running to the foot of 201. The
+// assembler checks the pages against the contents on purpose, because a
+// disagreement is usually a page misread or a page missing, so the one case
+// where the printing is at fault has to be written down rather than tolerated.
+//
+// It is written as the line the contents prints and the line it should have
+// printed, and bourbaki toc build applies it to the contents page before reading
+// it. That keeps the correction in the same words as the rest of this file, and
+// it fails loudly rather than quietly: a says that is not on the page, or is on
+// it twice, stops the build.
+type BookErrata struct {
+	Book   string    `yaml:"book"`
+	Errata []Erratum `yaml:"errata"`
 }
 
 // LabelErrata is what is wrong with one labelled piece of one printing.
@@ -90,6 +114,37 @@ func (m *ErrataManifest) check(path string) error {
 			}
 		}
 	}
+	books := map[string]bool{}
+	for _, e := range m.Contents {
+		switch {
+		case e.Book == "":
+			return fmt.Errorf("%s: a contents entry has no book", path)
+		case len(e.Errata) == 0:
+			return fmt.Errorf("%s: the contents of %s lists no errata", path, e.Book)
+		case books[e.Book]:
+			return fmt.Errorf("%s: the contents of %s is entered twice", path, e.Book)
+		}
+		books[e.Book] = true
+		for i, x := range e.Errata {
+			if x.Says == "" || x.Read == "" {
+				return fmt.Errorf("%s: contents of %s, erratum %d has to say what the page says and what to read instead",
+					path, e.Book, i+1)
+			}
+			if x.Why == "" {
+				return fmt.Errorf("%s: contents of %s, erratum %d has no reason on it", path, e.Book, i+1)
+			}
+		}
+	}
+	return nil
+}
+
+// ContentsErrata is the corrections to one volume's table of contents.
+func (m *ErrataManifest) ContentsErrata(book string) []Erratum {
+	for _, e := range m.Contents {
+		if e.Book == book {
+			return e.Errata
+		}
+	}
 	return nil
 }
 
@@ -116,7 +171,10 @@ func (m *ErrataManifest) Bytes() ([]byte, error) {
 		}
 		return sorted[i].Lang < sorted[j].Lang
 	})
-	enc, err := yaml.Marshal(&ErrataManifest{Entries: sorted})
+	contents := make([]BookErrata, len(m.Contents))
+	copy(contents, m.Contents)
+	sort.Slice(contents, func(i, j int) bool { return contents[i].Book < contents[j].Book })
+	enc, err := yaml.Marshal(&ErrataManifest{Entries: sorted, Contents: contents})
 	if err != nil {
 		return nil, err
 	}

@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
@@ -51,6 +52,10 @@ func tocBuild(args []string) error {
 	if err != nil {
 		return err
 	}
+	errata, err := corpus.LoadErrata(root)
+	if err != nil {
+		return err
+	}
 	list := books.Books
 	if *book != "" {
 		b, ok := books.Get(*book)
@@ -82,6 +87,9 @@ func tocBuild(args []string) error {
 		pages, err := volumeText(ctx, root, &b)
 		if err != nil {
 			return err
+		}
+		if pages, err = correctContents(pages, errata.ContentsErrata(b.ID)); err != nil {
+			return fmt.Errorf("%s: %w", b.ID, err)
 		}
 		res, err := toc.Parse(pages, pm, toc.Options{
 			Book: b.ID, Chapters: b.Chapters})
@@ -120,6 +128,34 @@ func tocBuild(args []string) error {
 		return fmt.Errorf("%d volumes have contents problems and were not written", failed)
 	}
 	return nil
+}
+
+// correctContents puts the errata of a volume's own table of contents into the
+// pages before the contents is read off them.
+//
+// The correction is applied here rather than to the manifest because the
+// manifest is generated and says so at the top of itself. A line that is not
+// found, or is found more than once, is an error and not a warning: an erratum
+// nobody applied is a person having written down a correction in the belief that
+// it was in force, and the whole point of the check it is exempting is that a
+// contents which disagrees with the pages usually means something worse.
+func correctContents(pages []string, errata []corpus.Erratum) ([]string, error) {
+	for _, e := range errata {
+		n := 0
+		for _, p := range pages {
+			n += strings.Count(p, e.Says)
+		}
+		if n != 1 {
+			return nil, fmt.Errorf("the contents erratum %q is on %d pages of the volume, want exactly one", e.Says, n)
+		}
+		for i, p := range pages {
+			pages[i] = strings.Replace(p, e.Says, e.Read, 1)
+			if pages[i] != p {
+				break
+			}
+		}
+	}
+	return pages, nil
 }
 
 func printTOC(r *toc.Result) {
