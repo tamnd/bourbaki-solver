@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	iofs "io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -37,12 +38,14 @@ commands:
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
   folio     move the printed page number off the foot and into the front matter
+  seal      write content_sha256 over a section body that was edited by hand
 
 Run the first three in that order. Everything after an unclosed delimiter reads
 as mathematics, so stray comes first and the other two will not touch a span
 whose end they cannot see, and parens comes before math so that math reads the
 spans as they will be rather than as they are. folio touches no mathematics and
-can be run at any point before assemble.
+can be run at any point before assemble. seal works on content/ and not on
+pages/, and is the last thing run after a hand correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
 `
@@ -149,6 +152,35 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixSealUsage = `usage: bourbaki fix seal [flags]
+
+Writes content_sha256 over a section file whose body no longer hashes to it.
+
+The hash is what tells a stale translation from a current one, so nothing may
+write it without meaning to, and no command did: assemble writes a section from
+its pages and seals it on the way out, and a correction made in content/ by hand
+leaves the body one thing and the hash another. S08 then refuses the corpus and
+says so, correctly, and there was nothing to run. This is that thing.
+
+It is not a repair of the text and it does not look at the text. It reads what
+the file says its body hashes to, hashes the body, and where the two differ it
+writes the second. A file already sealed is not rewritten.
+
+Sealing an English section restales its translations, which is the point: the
+English moved, so the Vietnamese was made from a body that is no longer there.
+The translations that recorded the old hash are named, because a hand correction
+is usually a comma and a stale translation over a comma is worth knowing about
+before the next run spends an hour redoing the section.
+
+Prefer the correction in pages/ where the page is what was misread, since
+assemble overwrites the section from the page and the hand correction with it.
+Use this where the fault is in the assembly and not in the page.
+
+flags:
+  -lang L    only this language, default every language
+  -check     say what would change and change nothing
+`
+
 func runFix(args []string) error {
 	if len(args) == 0 {
 		fmt.Fprint(os.Stderr, fixUsage)
@@ -163,6 +195,8 @@ func runFix(args []string) error {
 		return fixParens(args[1:])
 	case "folio":
 		return fixFolio(args[1:])
+	case "seal":
+		return fixSeal(args[1:])
 	}
 	fmt.Fprint(os.Stderr, fixUsage)
 	os.Exit(2)
@@ -473,6 +507,142 @@ func fixMath(args []string) error {
 		pages, verb, chars, changed, len(refused))
 	if changed > 0 && !*check {
 		fmt.Println("fix math: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+// fixSeal writes content_sha256 over the body it no longer describes.
+//
+// The two passes are one walk each and not one walk with a lookup, because the
+// translations that go stale are named against the hash the English had before
+// this run, and that is not known until the first walk is over.
+func fixSeal(args []string) error {
+	fs := flag.NewFlagSet("fix seal", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSealUsage) }
+	lang := fs.String("lang", "", "only this language")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+
+	// The hash each resealed file used to carry, against the file it was in, so
+	// that a translation recording it can be named by what it was made from.
+	broke := map[string]string{}
+	var read, sealed int
+	err = eachSection(root, *lang, func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
+		read++
+		want := corpus.ContentSHA256(f.Body)
+		if f.Meta.ContentSHA256 == want {
+			return nil
+		}
+		sealed++
+		fmt.Printf("%s  %s is now %s\n", rel(root, path),
+			short(f.Meta.ContentSHA256), short(want))
+		if f.Meta.ContentSHA256 != "" {
+			broke[f.Meta.ContentSHA256] = rel(root, path)
+		}
+		if *check {
+			return nil
+		}
+		// Write recomputes the hash from the body, so the field is not set here.
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	var stale int
+	if len(broke) > 0 {
+		err = eachSection(root, "", func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
+			from, ok := broke[f.Meta.SourceSHA256]
+			if !ok {
+				return nil
+			}
+			stale++
+			fmt.Printf("%s  was made from %s as it stood and is now stale\n",
+				rel(root, path), from)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	verb := "sealed"
+	if *check {
+		verb = "would seal"
+	}
+	fmt.Printf("fix seal: %d sections read, %s %d of them, %d translations left stale\n",
+		read, verb, sealed, stale)
+	return nil
+}
+
+// short is the head of a hash, which is all the report needs and all S08 prints.
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	if sha == "" {
+		return "(nothing)"
+	}
+	return sha
+}
+
+// eachSection walks the section files of the corpus in path order.
+//
+// The exercises and the solutions are left out. They are files of another
+// schema, they carry no content_sha256, and reading them here would only be a
+// way of failing on front matter this command has no business parsing.
+func eachSection(root, lang string, fn func(path string, f *corpus.File[corpus.SectionFrontMatter]) error) error {
+	dir := filepath.Join(root, "content")
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, e iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if e.IsDir() {
+			// content/solutions is a tree of its own schema, and every
+			// exercises directory holds the exercises of one §.
+			if e.Name() == "solutions" || e.Name() == "exercises" {
+				return iofs.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+		rest, err := filepath.Rel(dir, path)
+		if err != nil {
+			return err
+		}
+		if lang != "" {
+			l, _, _ := strings.Cut(filepath.ToSlash(rest), "/")
+			if l != lang {
+				return nil
+			}
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		f, err := corpus.ReadFile[corpus.SectionFrontMatter](path)
+		if err != nil {
+			return err
+		}
+		if err := fn(path, &f); err != nil {
+			return err
+		}
 	}
 	return nil
 }
