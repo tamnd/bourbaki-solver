@@ -95,9 +95,9 @@ type Runner struct {
 	// asking for pages 22 to 71 queued those pages and then read whatever the
 	// queue held, which on a volume already filled once meant reading page 1.
 	First, Last int
-	Logf  func(string, ...any)
-	Sleep func(ctx context.Context, d time.Duration) error
-	Now   func() time.Time
+	Logf        func(string, ...any)
+	Sleep       func(ctx context.Context, d time.Duration) error
+	Now         func() time.Time
 }
 
 // inRange says whether a target is a page this run was asked for.
