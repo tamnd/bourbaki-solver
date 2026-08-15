@@ -42,10 +42,10 @@ type PageLocator struct {
 
 // PageFrontMatter is the head of pages/<book>/NNNN.md.
 type PageFrontMatter struct {
-	Book        string       `yaml:"book"`
-	PDFPage     int          `yaml:"pdf_page"`
-	PageLabel   string       `yaml:"page_label,omitempty"`
-	RunningHead string       `yaml:"running_head,omitempty"`
+	Book        string `yaml:"book"`
+	PDFPage     int    `yaml:"pdf_page"`
+	PageLabel   string `yaml:"page_label,omitempty"`
+	RunningHead string `yaml:"running_head,omitempty"`
 
 	// Folio is the page number as the volume prints it, and it is here because
 	// half the corpus does not print a page label. Theory of Sets and Algebra I
@@ -61,7 +61,7 @@ type PageFrontMatter struct {
 	// page within the chapter here.
 	Folio int `yaml:"folio,omitempty"`
 
-	Locator     *PageLocator `yaml:"locator,omitempty"`
+	Locator *PageLocator `yaml:"locator,omitempty"`
 
 	// Continues says the first line of this page carries on the last paragraph
 	// of the page before it. It is written here because only the reader of the
