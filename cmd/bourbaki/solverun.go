@@ -132,7 +132,7 @@ func runSolveRun(args []string) error {
 		return solveDryRun(c, o, f.ask, work)
 	}
 
-	hosts, err := ocrHostsNow(ctx, f.routes, f.hosts, f.wait, logf)
+	hosts, err := askHostsNow(ctx, f.routes, f.hosts, f.wait, logf)
 	if err != nil {
 		return err
 	}
@@ -328,14 +328,8 @@ type fleetAsker struct {
 }
 
 func (a fleetAsker) Ask(ctx context.Context, id, question string) (solve.Answer, error) {
-	answer, err := (ocr.Ask{
-		Host:   a.host,
-		Shell:  fleet.SSH{Timeout: 2 * time.Minute},
-		Copy:   ocr.Rsync{Timeout: 5 * time.Minute},
-		Prompt: question,
-		ID:     "solve-" + strings.ReplaceAll(id, "/", "_"),
-		Keep:   a.keep,
-	}).Do(ctx)
+	answer, err := ocr.NewAsk(a.host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
+		question, "solve-"+strings.ReplaceAll(id, "/", "_"), a.keep).Do(ctx)
 	if err != nil {
 		return solve.Answer{}, err
 	}

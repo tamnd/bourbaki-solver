@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/tamnd/bourbaki-solver/api"
 )
 
 // OCR does not go over HTTP. The proxy on each box speaks chat completions and
@@ -75,6 +77,19 @@ type Host struct {
 	// as an IP level block and bans four accounts for eight hours. That is not
 	// a hypothetical, it is what the first live batch did.
 	Display string
+
+	// Client and Model are set when this is not a box at all but a gateway
+	// reached over HTTP, and they are what NewAsk switches on.
+	//
+	// A gateway reads no page images, so it never reaches the batch machinery
+	// that the rest of these fields describe: every free model on the one in
+	// the route table answers a request carrying an image with "404 No
+	// endpoints found that support image input". It is here rather than in a
+	// type of its own because the commands that ask questions run over a list
+	// of hosts, take whichever will answer, and have no business knowing which
+	// kind each one is.
+	Client api.Completer
+	Model  string
 }
 
 // DefaultDisplay is where Xvfb is on these hosts. run-serve.sh starts it on :99

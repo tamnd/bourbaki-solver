@@ -198,7 +198,7 @@ func runTranslate(args []string) error {
 		fmt.Printf("\n%s: chunk 1 of %d\n\n%s\n", jobs[0].source, len(jobs[0].chunks), question)
 		return nil
 	}
-	hosts, err := ocrHosts(*routeFile, *hostList)
+	hosts, err := askHosts(*routeFile, *hostList)
 	if err != nil {
 		return err
 	}
@@ -566,10 +566,8 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 				return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 			}
 		}
-		answer, err := (ocr.Ask{
-			Host: host, Shell: fleet.SSH{Timeout: 2 * time.Minute}, Copy: ocr.Rsync{Timeout: 5 * time.Minute},
-			Prompt: ask, ID: chunkID(lang, j.source, c, attempt), Keep: keep,
-		}).Do(ctx)
+		answer, err := ocr.NewAsk(host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
+			ask, chunkID(lang, j.source, c, attempt), keep).Do(ctx)
 		if err != nil {
 			logf("%s chunk %d on %s: %v", j.source, c.Index, host.Name, err)
 			last = []translate.Problem{{Rule: "transport", Msg: err.Error()}}
