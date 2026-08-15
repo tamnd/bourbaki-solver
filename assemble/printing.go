@@ -93,7 +93,15 @@ func (p printing) unswallow(text string) string {
 // APPENDIX II. It is not a difference in language, so it is not one printing
 // against another, and it is not worth a field per volume for a choice of
 // numeral. The page is asked which it uses.
+// A chapter that closes with one appendix does not always number it. Chapter I
+// of Theory of Sets heads its own APPENDIX and sets CHARACTERIZATION OF TERMS
+// AND RELATIONS under it, and chapters II and III of Algebra I to III do the
+// same, so the contents gives all three the number 0 and the heading is the word
+// alone.
 func (p printing) appendixHeads(n int) []string {
+	if n == 0 {
+		return []string{p.appendix}
+	}
 	return []string{fmt.Sprintf("%s %d", p.appendix, n), fmt.Sprintf("%s %s", p.appendix, roman(n))}
 }
 

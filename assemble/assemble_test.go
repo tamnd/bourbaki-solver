@@ -239,6 +239,79 @@ func TestChapterRefusesAHeadingTheContentsDisagreesWith(t *testing.T) {
 	}
 }
 
+// Chapter I of Theory of Sets, cut down to four pages. It heads its § by the
+// number alone, "2. THEOREMS", where the other volumes print the sign, and it
+// closes on an appendix that carries no number, the word on one line and the
+// title under it. Both are the press's way of setting the same structure.
+func setsChapter() (corpus.Chapter, map[int]corpus.PageFile) {
+	ch := corpus.Chapter{
+		Book: "ens-i-iv", Numeral: "I", Title: "DESCRIPTION OF FORMAL MATHEMATICS",
+		Page: 15, PDFPage: 22,
+		Sections: []corpus.Section{{
+			Number: 2, Title: "Theorems", Page: 24, PDFPage: 22,
+			Subsections: []corpus.Subsection{
+				{Number: 1, Title: "THE AXIOMS", Page: 24, PDFPage: 22},
+			},
+		}, {
+			Number: 0, Title: "Characterization of terms and relations", Page: 50, PDFPage: 23,
+			Appendix: true,
+			Subsections: []corpus.Subsection{
+				{Number: 1, Title: "SIGNS AND WORDS", Page: 50, PDFPage: 23},
+			},
+		}},
+	}
+	pages := map[int]corpus.PageFile{
+		22: page(22, "", false, strings.Join([]string{
+			"## CHAPTER I Description of Formal Mathematics",
+			"## 2. THEOREMS",
+			"### 1. THE AXIOMS",
+			"A theory is not the same thing as a proof.",
+		}, "\n\n")),
+		23: page(23, "", false, strings.Join([]string{
+			"## APPENDIX",
+			"## CHARACTERIZATION OF TERMS AND RELATIONS",
+			"### 1. SIGNS AND WORDS",
+			"Let the signs be given in some order.",
+		}, "\n\n")),
+		24: page(24, "", false, "# HISTORICAL NOTE"),
+	}
+	return ch, pages
+}
+
+func TestChapterReadsASectionHeadedByItsNumberAlone(t *testing.T) {
+	ch, pages := setsChapter()
+	got, err := Chapter("ens", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d pieces, want the front matter, § 2 and the appendix", len(got))
+	}
+	if name := got[1].Name(); name != "§ 2" {
+		t.Errorf("the second piece is %q, want § 2", name)
+	}
+	if !strings.Contains(got[1].Body, "A theory is not the same thing as a proof.") {
+		t.Errorf("§ 2 does not carry its text: %q", got[1].Body)
+	}
+	if name := got[2].Name(); name != "Appendix 0" {
+		t.Errorf("the third piece is %q, want the appendix", name)
+	}
+	if !strings.Contains(got[2].Body, "Let the signs be given in some order.") {
+		t.Errorf("the appendix does not carry its text: %q", got[2].Body)
+	}
+}
+
+// The bare form is still checked against the contents. A number that lands on
+// the wrong title is the fault it was always there to catch, and taking the
+// sign out of the heading does not take that check away.
+func TestChapterRefusesABareSectionHeadingTheContentsDisagreesWith(t *testing.T) {
+	ch, pages := setsChapter()
+	ch.Sections[0].Title = "Proofs"
+	if _, err := Chapter("ens", "en", ch, pages); err == nil {
+		t.Fatal("a bare heading the contents disagrees with should be an error")
+	}
+}
+
 // Assembly reads the pages and never the PDF, so a page it has not been given
 // is an error rather than a gap to write out.
 func TestChapterRefusesAMissingPage(t *testing.T) {
