@@ -330,9 +330,36 @@ func (q *Queue) ids(stage Stage, state State) ([]string, error) {
 // I, which can then be assembled, tagged and translated while the rest of the
 // volume is still being read.
 func (q *Queue) Lease(stage Stage, host, group string, expected time.Duration) (Job, error) {
+	return q.LeasePart(stage, host, group, nil, expected)
+}
+
+// LeasePart is Lease over part of a group.
+//
+// want is asked about each target in turn and only the ones it takes are leased.
+// A group is the unit of ownership and this is not: the jobs it passes over stay
+// pending for the next run, which is the whole point. Theory of Sets is read a
+// chapter at a time because a chapter is what assembly works in, and the volume
+// prints twenty one pages of half title, table of contents and preface before
+// chapter I. Read in page order those come first, they belong to no chapter, and
+// they are also the pages the short rule rejects, so the first half day of a
+// week long read went on pages nothing was waiting for and then threw them away.
+// With a range, chapter I is finished first and everything downstream starts on
+// it while the rest of the volume is still being read.
+//
+// A nil want takes everything, which is Lease.
+func (q *Queue) LeasePart(stage Stage, host, group string, want func(target string) bool, expected time.Duration) (Job, error) {
 	jobs, err := q.pending(stage, group)
 	if err != nil {
 		return Job{}, err
+	}
+	if want != nil {
+		kept := jobs[:0]
+		for _, job := range jobs {
+			if want(job.Target) {
+				kept = append(kept, job)
+			}
+		}
+		jobs = kept
 	}
 	for _, job := range jobs {
 		id := job.ID

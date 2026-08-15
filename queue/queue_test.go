@@ -164,6 +164,42 @@ func TestLeaseOrdersInsideTheGroupOnly(t *testing.T) {
 	}
 }
 
+// A run asked for part of a volume takes that part and leaves the rest pending.
+// The pages outside the range are still work and the next run gets them; they
+// are just not this run's work, and a queue filled once already holds them all.
+func TestLeasePartTakesTheRangeAndLeavesTheRest(t *testing.T) {
+	q := open(t)
+	for _, page := range []string{"0001", "0021", "0022", "0044", "0071", "0072"} {
+		add(t, q, "ens-i-iv/"+page)
+	}
+	chapterOne := func(target string) bool {
+		return target >= "ens-i-iv/0022" && target <= "ens-i-iv/0071"
+	}
+	var got []string
+	for {
+		job, err := q.LeasePart(StageOCR, "server3", "ens-i-iv", chapterOne, time.Minute)
+		if errors.Is(err, ErrEmpty) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("LeasePart: %v", err)
+		}
+		got = append(got, job.Target)
+	}
+	want := []string{"ens-i-iv/0022", "ens-i-iv/0044", "ens-i-iv/0071"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("leased\n %v\nwant\n %v", got, want)
+	}
+	// The three outside the range are untouched rather than failed or dropped.
+	stats, err := q.Stats(StageOCR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Counts[Pending] != 3 {
+		t.Errorf("%d jobs are still pending, want the 3 outside the range", stats.Counts[Pending])
+	}
+}
+
 func TestLeaseThenFinish(t *testing.T) {
 	q := open(t)
 	add(t, q, "alg-i-iii/0045")

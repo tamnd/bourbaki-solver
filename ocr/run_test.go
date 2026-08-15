@@ -447,6 +447,43 @@ func TestALimitStopsTheRunEarly(t *testing.T) {
 	}
 }
 
+// A volume is read a chapter at a time, because a chapter is what assembly
+// works in, and a run asked for pages 5 to 8 has to read those and not the four
+// pages that happen to be at the head of the queue. Fill has always taken the
+// range and leasing did not, so on a queue filled once already the range chose
+// nothing and the run read the front matter instead.
+func TestARunReadsOnlyThePagesItWasAskedFor(t *testing.T) {
+	w := newWorld(t, 20)
+	machine := newFleet(func(string) string { return page("A IV.9") })
+	runner := w.runner(t, machine)
+	runner.First, runner.Last = 5, 8
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := report.Accepted + report.Rejected; got != 4 {
+		t.Fatalf("read %d pages, want the 4 of the range", got)
+	}
+	stats, err := w.queue.Stats(queue.StageOCR)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Counts[queue.Pending] != 16 {
+		t.Errorf("%d pages left pending, want the 16 outside the range", stats.Counts[queue.Pending])
+	}
+	for p := 5; p <= 8; p++ {
+		if _, err := os.Stat(corpus.PagePath(w.root, "alg-iv-vii", p)); err != nil {
+			t.Errorf("page %d of the range was not read: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(corpus.PagePath(w.root, "alg-iv-vii", 1)); !os.IsNotExist(err) {
+		t.Errorf("page 1 was read and nothing asked for it: %v", err)
+	}
+}
+
 func TestAHostWithNoLanesIsNotAskedToReadAnything(t *testing.T) {
 	w := newWorld(t, 2)
 	machine := newFleet(func(string) string { return page("A IV.1") })

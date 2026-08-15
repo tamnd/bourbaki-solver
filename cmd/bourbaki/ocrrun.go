@@ -269,6 +269,7 @@ func ocrRun(args []string) error {
 		Prompt: state.ask, Model: route.DefaultModel,
 		Hosts: hosts, Shell: fleet.SSH{Timeout: 2 * time.Minute}, Copy: ocr.Rsync{Timeout: 30 * time.Minute},
 		Batch: *batch, Limit: *limit, Keep: *keep,
+		First: *first, Last: *last,
 		Expect: state.expect, RetryDPI: render.RetryDPI,
 		Rerender: rerender(state),
 		Logf:     logf,
