@@ -117,6 +117,53 @@ func TestLeaseStaysInsideItsGroup(t *testing.T) {
 	}
 }
 
+// A volume is read front to back. The job ids are content hashes and the
+// directory lists them in that order, so the pages come out shuffled unless
+// something sorts them, and a shuffled read finishes no chapter. The pages here
+// are added in an order no sort would produce by accident, including one that
+// hashes before the others and one that would come first under a plain
+// alphabetical sort of unpadded numbers.
+func TestLeaseTakesThePagesInOrder(t *testing.T) {
+	q := open(t)
+	for _, page := range []string{"0301", "0022", "0107", "0009", "0071"} {
+		add(t, q, "ens-i-iv/"+page)
+	}
+	var got []string
+	for {
+		job, err := q.Lease(StageOCR, "server3", "ens-i-iv", time.Minute)
+		if errors.Is(err, ErrEmpty) {
+			break
+		}
+		if err != nil {
+			t.Fatalf("Lease: %v", err)
+		}
+		got = append(got, job.Target)
+	}
+	want := []string{"ens-i-iv/0009", "ens-i-iv/0022", "ens-i-iv/0071", "ens-i-iv/0107", "ens-i-iv/0301"}
+	if strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("leased\n %v\nwant\n %v", got, want)
+	}
+}
+
+// The order is per group. A run of one book must not be handed another book's
+// page just because its number is lower.
+func TestLeaseOrdersInsideTheGroupOnly(t *testing.T) {
+	q := open(t)
+	add(t, q, "alg-viii/0001")
+	add(t, q, "ens-i-iv/0400")
+	add(t, q, "ens-i-iv/0100")
+
+	for _, want := range []string{"ens-i-iv/0100", "ens-i-iv/0400"} {
+		job, err := q.Lease(StageOCR, "server3", "ens-i-iv", time.Minute)
+		if err != nil {
+			t.Fatalf("Lease: %v", err)
+		}
+		if job.Target != want {
+			t.Errorf("leased %s, want %s", job.Target, want)
+		}
+	}
+}
+
 func TestLeaseThenFinish(t *testing.T) {
 	q := open(t)
 	add(t, q, "alg-i-iii/0045")

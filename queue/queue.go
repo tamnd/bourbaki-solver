@@ -318,22 +318,24 @@ func (q *Queue) ids(stage Stage, state State) ([]string, error) {
 // with, so a job from another book reads the wrong file and writes a real page
 // of one volume over a real page of another. An empty group takes anything, and
 // only a caller that owns the whole stage should pass it.
+//
+// The order is the order of the targets, which for OCR is the order of the
+// pages. The file names are content hashes, so taking them as the directory
+// lists them reads a volume in no order at all, and that is not a neutral
+// choice when a volume takes days to read. Theory of Sets has 417 pages and the
+// accounts give a few uploads each a day; read in hash order, the first fifty
+// pages that came back were scattered from page 13 to page 415, no chapter was
+// finished, and nothing downstream could run on any of it, because assembly
+// needs a chapter whole. Read in page order the same fifty pages finish chapter
+// I, which can then be assembled, tagged and translated while the rest of the
+// volume is still being read.
 func (q *Queue) Lease(stage Stage, host, group string, expected time.Duration) (Job, error) {
-	ids, err := q.ids(stage, Pending)
+	jobs, err := q.pending(stage, group)
 	if err != nil {
 		return Job{}, err
 	}
-	for _, id := range ids {
-		job, err := q.read(Pending, stage, id)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue // somebody else took it between the listing and here
-			}
-			return Job{}, err
-		}
-		if group != "" && GroupOf(job.Target) != group {
-			continue
-		}
+	for _, job := range jobs {
+		id := job.ID
 		from, to := q.path(stage, Pending, id), q.path(stage, Leased, id)
 		if err := os.Rename(from, to); err != nil {
 			if os.IsNotExist(err) {
@@ -359,6 +361,41 @@ func GroupOf(target string) string {
 		return target
 	}
 	return group
+}
+
+// pending reads the pending jobs of one group, in target order.
+//
+// Sorting needs every job read rather than only the ones looked at before a
+// match, which is the cost of the order. It is a few hundred small files on
+// local disk against a page that takes minutes on a rented box, so the cost is
+// not worth avoiding. A job that goes missing between the listing and the read
+// is skipped: another worker took it, which is exactly what the rename in
+// Lease is there to settle.
+//
+// OCR targets are book/0022, zero padded, so ordering the strings orders the
+// pages. The other stages name a file or a section rather than a page, and for
+// them this is alphabetical, which is at least an order somebody can predict.
+func (q *Queue) pending(stage Stage, group string) ([]Job, error) {
+	ids, err := q.ids(stage, Pending)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Job, 0, len(ids))
+	for _, id := range ids {
+		job, err := q.read(Pending, stage, id)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		if group != "" && GroupOf(job.Target) != group {
+			continue
+		}
+		out = append(out, job)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Target < out[j].Target })
+	return out, nil
 }
 
 // Finish records the result of a leased job.
