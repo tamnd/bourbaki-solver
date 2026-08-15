@@ -21,6 +21,7 @@ func TestOCRPromptSaysWhatBourbakiNeeds(t *testing.T) {
 		"⟪illegible⟫", // the honest failure, rather than an invention
 		"no. ",        // the subdivision mark, kept as printed
 		"EXERCISES",   // the heading the solver keys off
+		"[^1]:",       // the footnote definition assembly reads a note out of
 		"do not translate",
 	} {
 		if !strings.Contains(text, want) {
