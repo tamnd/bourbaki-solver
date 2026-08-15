@@ -36,6 +36,7 @@ commands:
   publish          build the static site out of the committed Markdown
   repo             the checkout itself: point git at the hooks the corpus keeps
   ocr              read the pages of a scanned volume through a model, and check them
+  ocr-batch        read a directory of page images on this machine, the local half of ocr run
   label            parse a statement label, or a running head, and print what it means
   fleet            probe the hosts, and run the ssh tunnels that reach them
   queue            the durable work list: stats, reap, retry, drain, list
@@ -95,6 +96,8 @@ func main() {
 		err = runRepo(args[1:])
 	case "ocr":
 		err = runOCR(args[1:])
+	case "ocr-batch":
+		err = runOCRBatch(args[1:])
 	case "label":
 		err = runLabel(args[1:])
 	case "fleet":

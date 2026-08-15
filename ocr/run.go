@@ -429,6 +429,10 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				lock.Unlock()
 				r.logf("%s", result.Summary())
 
+				if reason := outcome.stop; reason != "" {
+					r.logf("%s: %s, so %s is out of this run", host.Name, reason, host.Name)
+					return
+				}
 				if outcome.released == len(tasks) {
 					r.logf("%s: the batch never left this laptop, so %s is out of this run", host.Name, host.Name)
 					return
@@ -561,6 +565,9 @@ type outcome struct {
 	// faces is every letter that changed typeface against the reading this run
 	// replaced. See faces.go.
 	faces []FaceChange
+	// stop is why this host should be sent nothing more in this run, or empty
+	// for a batch that says nothing about the next one.
+	stop string
 }
 
 // one runs a single batch and files everything it produced.
@@ -622,11 +629,49 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 		return result, out
 	}
 
+	// The model being out of turns is not the pages being bad.
+	//
+	// A batch that stops on a limit has read what it read and refused the rest
+	// in a second each, and those refusals would otherwise be filed as attempts:
+	// four of them and the queue gives up on a page for good, over an account
+	// that will be back in an hour. So the unread pages go back with their
+	// attempts intact, the ones that came back are still filed, and the host is
+	// done for this run.
+	if err != nil && OutOfTurns(result.Log) {
+		missing := map[string]bool{}
+		for _, name := range result.Missing {
+			missing[name] = true
+		}
+		out.stop = "the model is out of turns for now"
+		for _, value := range tasks {
+			if !missing[filepath.Base(value.image)] {
+				r.file(ctx, host, work.Dest, value, &out)
+				continue
+			}
+			out.released++
+			if relErr := r.Queue.Release(value.job, out.stop); relErr != nil {
+				r.logf("could not hand page %d back: %v", value.page, relErr)
+			}
+		}
+		return result, out
+	}
+
 	for _, value := range tasks {
 		r.file(ctx, host, work.Dest, value, &out)
 	}
 	return result, out
 }
+
+// OutOfTurnsMark is what a reader says when the account behind it has no turns
+// left for now, rather than the page having gone wrong.
+//
+// It is one string in one place because two programs read it: the reader here
+// prints it into the batch log, and the run above matches it there to tell a
+// pause apart from a failure. See cmd/bourbaki ocr-batch.
+const OutOfTurnsMark = "the model is out of turns"
+
+// OutOfTurns says whether a batch log carries that mark.
+func OutOfTurns(log string) bool { return strings.Contains(log, OutOfTurnsMark) }
 
 // named fills in what a batch that died before it started cannot report.
 //
@@ -745,6 +790,12 @@ func (r *Runner) record(host Host, page int, raw string) Thread {
 		Model: fields["model"], Read: r.now().Format(time.RFC3339),
 	}
 	if thread.Conversation == "" {
+		// A page read here has no conversation to go back to and needs none: a
+		// re-read on this machine is fifteen seconds, which is cheaper than the
+		// question a repair would ask, and the queue does it already.
+		if host.Local() {
+			return thread
+		}
 		// An older chatgpt-tool does not report it. Worth saying once per page
 		// rather than silently producing a corpus no page of which can be
 		// repaired without being read again.
