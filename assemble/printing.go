@@ -130,6 +130,7 @@ var printings = map[string]printing{
 				smallType + `(` + enKinds + `)(?: (\d+))?\.)\s*—\s*` +
 				`|(` + enCapKinds + `)(?: (\d+))?(?: \([^)]*\))?\.\s*` +
 				`|(` + enPlainKinds + `)(?: (\d+))?\.\s+` +
+				`|\*\*(` + enKinds + `)(?: (\d+))?(?:\.\*\*|\*\* \([^)]*\)\.)\s+` +
 				`|\*\*(` + enCapKinds + `)(?: (\d+))?\.\*\*\s*` +
 				`|\*(` + enPlainKinds + `)(?: (\d+))?\.\*\s+` +
 				`|` + smallTypeSup + `(` + enPlainKinds + `)(?: (\d+))?\.?\s+)`),
@@ -181,6 +182,35 @@ var smallTypeOpen = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup +
 // head that has none would be found in the statement under it.
 var headName = regexp.MustCompile(`\(([^)]*)\)`)
 
+// enKinds are the kinds an English printing states its results in, written the
+// way a reading of the page writes them rather than the way the page sets them.
+//
+// Two printings reach the grammar in this shape and they reach it for different
+// reasons. Algebra VIII sets its heads in bold and follows them with an em dash,
+// and that is what is on the page. Theory of Sets sets its heads in small
+// capitals and follows them with nothing: page 46 prints "THEOREM 1. x = x."
+// and page 104 prints "PROPOSITION 4. Let (X_i) be a family of sets", both of
+// them small capitals, no dash anywhere on either page. A model reading those
+// pages writes the small capitals as bold and lowers the word to ordinary
+// capitals, so what arrives is "**Proposition 4.** *Let*". Not one head of the
+// 357 pages read of that volume arrives in full capitals, which is why the
+// capitals branch below never fires for it.
+//
+// The dash is the part worth being careful about. 152 of the volume's 257 bold
+// heads arrive with an em dash after them and the page under them has no dash on
+// it: both models write one, so it is not a habit of one reader, and the two
+// images above settle what the page does. The assembler drops the dash with the
+// rest of the head, so the invented ones cost nothing downstream, but a branch
+// that leans on the dash would read 152 heads of this volume and lose the other
+// 105. This branch leans on the bold instead: the period is inside it, and no
+// sentence of any volume opens on a bold word with a period in it. Measured over
+// every page of the corpus, the shape appears 101 times in Theory of Sets, three
+// times in Algebra I to III, where all three are heads too, and nowhere else.
+//
+// The second half of the branch is the same head with the name of the result
+// outside the bold, which is how four of them are written: "**Theorem 1**
+// (Zermelo). *Every set* E *can be well-ordered.*". The name is picked out of the
+// matched head by headName, exactly as it is for the dashed printings.
 const enKinds = `Definitions?|Propositions?|Theorems?|Lemmas?|Corollary|Corollaries|Remarks?|Examples?|Scholium`
 
 // enCapKinds and enPlainKinds are the two ways the other English printing sets a

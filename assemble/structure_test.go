@@ -1,6 +1,7 @@
 package assemble
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -603,5 +604,60 @@ func TestAParagraphOpeningOnANumberIsNotAnExercise(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Body, "3. is the number of elements") {
 		t.Errorf("the paragraph opening on 3. was taken for an exercise: %q", got[0].Body)
+	}
+}
+
+// Theory of Sets sets its heads in small capitals and follows them with nothing:
+// page 46 prints "THEOREM 1.  x = x." and page 104 prints "PROPOSITION 4.  Let
+// (X_i) be a family of sets", and there is no dash on either page. A reading
+// writes the small capitals as bold and the word in ordinary capitals, so what
+// arrives is the shape below. Read as prose it cost the volume 101 of its 257
+// heads, and § 5 of chapter I came out with none of its three theorems.
+func TestStatementsReadsAHeadWithNoDashAfterIt(t *testing.T) {
+	in := blocks(
+		"### 1. The Axioms",
+		"**Theorem 1.** $x = x$.",
+		"**Theorem 2** (Zermelo). *Every set* E *can be well-ordered.*",
+		"**Proposition 4.** *Let* $(X_\\iota)$ *be a family of sets.*",
+		"**Remark.** There exists no set of which every object is an element.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "I", Section: 5}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-i-s5-thm-1",
+		"ens-i-s5-thm-2",
+		"ens-i-s5-prop-4",
+		"ens-i-s5-n1-rem-1",
+	})
+	if !strings.Contains(strings.Join(texts(out), "\n"), "Theorem 2 (Zermelo)") {
+		t.Errorf("the name outside the bold was dropped: %v", texts(out))
+	}
+	if !strings.HasPrefix(got[0].Body, "$x = x$") {
+		t.Errorf("the head was not taken off the body: %q", got[0].Body)
+	}
+}
+
+// The dash is what the other bold printing leans on, and this volume has none,
+// so the bold is what the branch leans on instead. A sentence of the corpus
+// opens on a bold word often enough to matter, and none of them closes it with a
+// period inside the bold.
+func TestASentenceOpeningOnABoldWordIsNotAHead(t *testing.T) {
+	in := blocks(
+		"### 1. The Axioms",
+		"**Theorem 1.** $x = x$.",
+		"**Proposition** 5 of § 2 is proved the same way.",
+		"**Remarks** are gathered at the end of the no.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "I", Section: 5}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"ens-i-s5-thm-1"})
+	for _, want := range []string{"**Proposition** 5 of § 2 is proved the same way.", "**Remarks** are gathered at the end of the no."} {
+		if !slices.Contains(texts(out), want) {
+			t.Errorf("the sentence was read as a head and taken apart: %q", want)
+		}
 	}
 }
