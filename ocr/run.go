@@ -754,8 +754,33 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 // pause apart from a failure. See cmd/bourbaki ocr-batch.
 const OutOfTurnsMark = "the model is out of turns"
 
-// OutOfTurns says whether a batch log carries that mark.
-func OutOfTurns(log string) bool { return strings.Contains(log, OutOfTurnsMark) }
+// outOfTurnsMarks are the ways a reader says the account behind it is spent.
+//
+// The first is the one the local reader prints, which this package chose. The
+// rest are chatgpt-tool's own words, and they were being ignored. server3 ran
+// out of uploads two thirds of the way through Theory of Sets and answered ten
+// pages in a tenth of a second each with "not attempted: every account on this
+// host is out of uploads until 20:14:17". The run read ten instant refusals as
+// ten pages it had failed to read, spent an attempt on each, and killed all ten
+// inside two minutes over an account that would be back the same evening. The
+// tool had said exactly what was wrong in its log the whole time.
+var outOfTurnsMarks = []string{
+	OutOfTurnsMark,
+	"out of uploads until",
+	"no uploads left",
+	"has no uploads",
+}
+
+// OutOfTurns says whether a batch log carries one of those marks.
+func OutOfTurns(log string) bool {
+	lower := strings.ToLower(log)
+	for _, mark := range outOfTurnsMarks {
+		if strings.Contains(lower, mark) {
+			return true
+		}
+	}
+	return false
+}
 
 // named fills in what a batch that died before it started cannot report.
 //

@@ -1001,6 +1001,65 @@ func TestAPauseCostsThePagesNoAttempts(t *testing.T) {
 	}
 }
 
+// The pause is a fleet thing before it is a local thing, and the fleet says it
+// in its own words. Ten pages of Theory of Sets were killed in two minutes
+// because these lines were in the log and nothing read them.
+func TestAPauseIsRecognisedInEveryReadersWords(t *testing.T) {
+	paused := []string{
+		"0002.png: " + OutOfTurnsMark + " for now: You've hit your session limit",
+		"fail  0394.png  0.0s  not attempted: every account on this host is out of uploads until 20:14:17",
+		"no-response  0385.png  retry in 30s (attempt 1/4): chatgpt-profile-12 has no uploads left, the composer says 'wait 9 hours to upload again'",
+	}
+	for _, log := range paused {
+		if !OutOfTurns(log) {
+			t.Errorf("this reads as ten bad pages rather than a pause:\n%s", log)
+		}
+	}
+	working := []string{
+		"", "OCR done=10 fail=0",
+		"fail  0042.png  151.2s  the model returned nothing",
+		"[ban] Profile slot chatgpt-profile-12 rate-limited until 01:36:01 — will rotate to a fresh slot.",
+	}
+	for _, log := range working {
+		if OutOfTurns(log) {
+			t.Errorf("this reads as a pause, so the host is taken out of the run over one bad page:\n%s", log)
+		}
+	}
+}
+
+// The whole batch failing in a tenth of a second each is what a spent account
+// looks like, and every one of those pages has to come back with its attempts
+// where they were.
+func TestAFleetOutOfUploadsCostsThePagesNoAttempts(t *testing.T) {
+	w := newWorld(t, 4)
+	machine := newFleet(func(string) string { return "" })
+	machine.stopped, machine.wrote = true, 0
+	machine.log = "fail  0001.png  0.0s  not attempted: every account on this host is out of uploads until 20:14:17"
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Rejected != 0 || report.Dead != 0 {
+		t.Errorf("a spent account rejected %d pages and killed %d, want neither", report.Rejected, report.Dead)
+	}
+	if report.Released != 4 {
+		t.Errorf("released %d, want all 4 pages back", report.Released)
+	}
+	if machine.started != 1 {
+		t.Errorf("the run started %d batches against a host with nothing left, want 1", machine.started)
+	}
+	for _, job := range mustList(t, w.queue, queue.Pending) {
+		if job.Attempts != 0 {
+			t.Errorf("%s came back with %d attempts spent, want 0", job.Target, job.Attempts)
+		}
+	}
+}
+
 // The Historical Note of Theory of Sets is prose, and a reader whose provider
 // will not return a long verbatim stretch of a published book returns nothing
 // for those pages. That is not the page being wrong, and it must not be paid
