@@ -103,9 +103,24 @@ type ExerciseFrontMatter struct {
 	Refs          []string  `yaml:"refs,omitempty"`
 	Errata        []Erratum `yaml:"errata,omitempty"`
 
+	// Set only on a translation, and the same five facts a translated section
+	// records. An exercise is a shorter file than a §, and it is held to the
+	// same terminology and the same instructions, so staleness has to be
+	// decided the same way: the English it was made from, the glossary rows it
+	// was shown, and the prompt it was asked under.
+	//
+	// SourceSHA256 is taken over the English body here rather than copied out
+	// of the English file's front matter, which is what a section does. An
+	// exercise records no content_sha256 of its own, and adding one would mean
+	// rewriting all 239 English files of this book to record a number that can
+	// be computed from the body sitting under it.
 	TranslatedFrom   string `yaml:"translated_from,omitempty"`
 	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
+	TranslationRun   string `yaml:"translation_run,omitempty"`
+	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
+	GlossaryTerms    string `yaml:"glossary_terms_sha256,omitempty"`
+	PromptSHA256     string `yaml:"prompt_sha256,omitempty"`
 }
 
 // Erratum is a place where the printed page is wrong and the corpus keeps the

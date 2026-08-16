@@ -238,7 +238,7 @@ func Translate(lang, glossary, note, body string) (string, error) {
 	// A chunk with no glossary terms in it gets a sentence saying so rather than
 	// a heading over an empty list. Short chunks do happen, and a heading with
 	// nothing under it reads to a model as a list it failed to receive.
-	terms := "There is no glossary entry for anything in this section."
+	terms := "There is no glossary entry for anything in this passage."
 	if g := strings.TrimSpace(glossary); g != "" {
 		terms = "The glossary. Left is the English as the book spells it, right is" +
 			" what to write.\n\n" + g
