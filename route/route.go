@@ -354,6 +354,18 @@ func Default() Registry {
 			Rank: 70, Concurrency: 2, Timeout: Duration(5 * time.Minute),
 			Note: "a fourth allowance on a cut down model, which L08 will say so about",
 		},
+		{
+			Name: "zen-mimo", Wire: WireChat, Gateway: true,
+			BaseURL: ZenBaseURL, Model: ZenMimo, APIKeyEnv: ZenKeyEnv,
+			Rank: 80, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "a fifth allowance",
+		},
+		{
+			Name: "zen-lightning", Wire: WireChat, Gateway: true,
+			BaseURL: ZenBaseURL, Model: ZenLightning, APIKeyEnv: ZenKeyEnv,
+			Rank: 90, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "the sixth and last, and the quickest, so it is ranked behind the rest",
+		},
 	}}
 	registry.sort()
 	return registry
@@ -386,17 +398,22 @@ const (
 	// The other free slugs. The allowance is per model and not per account,
 	// which was measured rather than assumed: with nemotron answering 429
 	// FreeUsageLimitError to every call, deepseek, hy3 and laguna all answered
-	// 200 in the same minute. So a run that has exhausted one of them has three
+	// 200 in the same minute. So a run that has exhausted one of them has five
 	// more to go at, and a translation of a volume that would have sat on its
-	// backoff for the rest of the day carries on. They are separate routes
+	// backoff for the rest of the day carries on. All six are here because they
+	// do not come back together: probed twice an hour apart, the first time only
+	// hy3 answered and the second time hy3 and laguna did, and the four routes
+	// this had before left two allowances on the table both times. They are separate routes
 	// rather than a list on one, because the pool ranks and counts routes and a
 	// route that is out of turns has to be the thing that is out.
 	//
 	// ZenDeepseek is a cut down model by its name, so quality.SmallModel says
 	// so, L08 reports any section it writes, and it is ranked last of the four.
-	ZenHy3      = "hy3-free"
-	ZenLaguna   = "laguna-s-2.1-free"
-	ZenDeepseek = "deepseek-v4-flash-free"
+	ZenHy3       = "hy3-free"
+	ZenLaguna    = "laguna-s-2.1-free"
+	ZenDeepseek  = "deepseek-v4-flash-free"
+	ZenMimo      = "mimo-v2.5-free"
+	ZenLightning = "nemotron-3.5-lightning-free"
 	// ZenKeyEnv is the variable opencode itself writes, so a machine that has
 	// the CLI set up has the route working already.
 	ZenKeyEnv = "OPENCODE_API_KEY"
