@@ -278,7 +278,8 @@ func adherence(g *glossary.Glossary, p quality.Pair) (mentions, followed int) {
 	lang := p.Translation.Lang
 	en := strings.ToLower(quality.Prose(p.English.Body))
 	tr := strings.ToLower(quality.Prose(p.Translation.Body))
-	for _, t := range g.Mentioned(lang, en) {
+	// This file's own volume's rows, as L06 does it. See glossary.Glossary.For.
+	for _, t := range g.For(quality.BookOf(p.Translation)).Mentioned(lang, en) {
 		mentions++
 		if glossary.Follows(lang, tr, t.In(lang)) {
 			followed++
@@ -330,7 +331,7 @@ func Terms(c *quality.Corpus, g *glossary.Glossary, lang string, opt TermOptions
 		}
 		en := strings.ToLower(quality.Prose(p.English.Body))
 		tr := strings.ToLower(quality.Prose(p.Translation.Body))
-		for _, t := range g.Mentioned(lang, en) {
+		for _, t := range g.For(quality.BookOf(p.Translation)).Mentioned(lang, en) {
 			row := byTerm[t.EN]
 			if row == nil {
 				row = &TermRow{EN: t.EN, Rendering: t.In(lang)}
