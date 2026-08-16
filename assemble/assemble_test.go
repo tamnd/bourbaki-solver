@@ -97,6 +97,26 @@ func TestAVolumeWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
 	}
 }
 
+// The page a § opens on prints no number, which is what a page that opens
+// something does in a volume that carries the number in the running head. Taken
+// as it stands the run has no number at one end, so it is written as no range
+// at all, and § 1 of every chapter of Lie 7 to 9 came out printed on no page of
+// the book.
+func TestASectionOpeningOnAnUnnumberedPageStillHasItsPages(t *testing.T) {
+	ch, pages := folioChapter()
+	first := pages[18]
+	first.Meta.Folio = 0
+	pages[18] = first
+	got, err := Chapter("alg", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sec := got[1]
+	if want := []Run{{First: 18, Last: 20, FirstFolio: 15, LastFolio: 17}}; !slices.Equal(sec.Runs, want) {
+		t.Errorf("§ 1 runs %+v, want %+v", sec.Runs, want)
+	}
+}
+
 func TestChapter(t *testing.T) {
 	ch, pages := smallChapter()
 	got, err := Chapter("alg", "en", ch, pages)

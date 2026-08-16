@@ -292,6 +292,37 @@ func (p *Page) readHead() {
 		p.Subsec, _ = strconv.Atoi(m[1])
 	}
 	p.Title = strings.Join(strings.Fields(rest), " ")
+	if p.Label == "" {
+		p.Foot = headFolio(p.Title)
+	}
+}
+
+// headFolio is the page number a running head carries at its outer edge, for
+// the volumes that print it there rather than at the foot.
+//
+// Lie 7 to 9 is one: the head of a left-hand page reads "100 SPLIT SEMI-SIMPLE
+// LIE ALGEBRAS Ch. VIII" and of a right-hand one ". ALGEBRA DEFINED BY A ROOT
+// SYSTEM 97". The volume is paginated straight through, so it prints no page
+// label anywhere and there is nothing else on the page that says which printed
+// page it is. Without this the 413 pages of it that carry a head say nothing
+// about their number, and a § of it assembles with an empty book_pages, which
+// is how every reference made to the volume by page goes unresolved.
+//
+// Only at an edge, and only in arabic, because a number inside a title is part
+// of the title: the head of chapter IX names the group SL 2 in the middle of a
+// line. The front matter is numbered in roman and is left alone, which is what
+// the corpus already does with it.
+func headFolio(title string) int {
+	f := strings.Fields(title)
+	if len(f) < 2 {
+		return 0
+	}
+	for _, s := range []string{f[0], f[len(f)-1]} {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 && n < 1000 {
+			return n
+		}
+	}
+	return 0
 }
 
 // footBand is how far down the page the folio has to be to be the folio. The
@@ -316,7 +347,7 @@ func (p *Page) readFoot(lines []Line, height int) []Line {
 	if n == "" || strings.TrimLeft(n, "0123456789") != "" {
 		return lines
 	}
-	if p.Label == "" {
+	if p.Label == "" && p.Foot == 0 {
 		p.Foot, _ = strconv.Atoi(n)
 	}
 	return lines[:len(lines)-1]
@@ -405,6 +436,21 @@ func blocks(lines []Line, v Volume) string {
 	return strings.Join(out, "\n\n")
 }
 
+// carryHead puts the rest of a title back on the line it was broken off.
+//
+// A break falls between two words and the two are joined by the space that
+// stood between them, except where the title breaks at a hyphen. TeX breaks a
+// line at a hyphen the printing sets, and the hyphen stays in print, so the
+// name carries on with no space: Lie 7 to 9 heads three no. that way and the
+// corpus shipped "POINCARE-BIRKHOFF- WITT", "SEMI- SIMPLE" and "INFINITELY-
+// DIFFERENTIABLE".
+func carryHead(head, rest string) string {
+	if strings.HasSuffix(head, "-") {
+		return head + rest
+	}
+	return head + " " + rest
+}
+
 // join puts the lines of one block back into paragraphs.
 //
 // A line is joined to the one before it unless it starts a paragraph, and it
@@ -452,7 +498,7 @@ func join(lines []Line, v Volume) string {
 			if head == i-1 && len(out) > 0 && !opensHead(h) &&
 				!chapterLine(lines[i-1]) &&
 				l.Top-lines[i-1].Top <= headLead(lines[i-1]) {
-				out[len(out)-1] += " " + strings.TrimLeft(h, "# ")
+				out[len(out)-1] = carryHead(out[len(out)-1], strings.TrimLeft(h, "# "))
 				head = i
 				continue
 			}
@@ -464,7 +510,7 @@ func join(lines []Line, v Volume) string {
 		// The rest of a title broken after a word, where what carries on is not
 		// itself the shape of a heading. See headTail.
 		if head == i-1 && len(out) > 0 && headTail(l) && l.Top-lines[i-1].Top <= headLead(lines[i-1]) {
-			out[len(out)-1] += " " + headingText(l)
+			out[len(out)-1] = carryHead(out[len(out)-1], headingText(l))
 			head = i
 			continue
 		}

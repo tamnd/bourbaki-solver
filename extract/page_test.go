@@ -71,3 +71,34 @@ func TestWordInMath(t *testing.T) {
 		}
 	}
 }
+
+// The head of § 3 of Chapter IX, which is too long for the measure and is set
+// on two lines. TeX broke it at the hyphen the printing sets, so the hyphen
+// stands at the end of the first line and the name carries on with no space
+// after it. The corpus shipped "SEMI- SIMPLE" here, and read the same way in
+// the table of contents, which is built off the heading.
+const brokenHeadXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="303" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="1" size="18" family="LKSJDA+CMSY10" color="#000000"/>
+<fontspec id="4" size="18" family="LKSJDB+CMBX10" color="#000000"/>
+<fontspec id="6" size="15" family="LKSJDC+CMBX10" color="#000000"/>
+<text top="75" left="83" width="8" height="23" font="1">§</text>
+<text top="79" left="91" width="434" height="16" font="4"><b>3. COMPACT FORMS OF COMPLEX SEMI-</b></text>
+<text top="103" left="83" width="241" height="16" font="4"><b>SIMPLE LIE ALGEBRAS</b></text>
+<text top="147" left="83" width="137" height="13" font="6"><b>1. REAL FORMS</b></text>
+</page>
+</pdf2xml>
+`
+
+func TestATitleBrokenAtAHyphenCarriesOnWithNoSpace(t *testing.T) {
+	lay, err := pdfsrc.ParseXML(strings.NewReader(brokenHeadXML))
+	if err != nil {
+		t.Fatalf("ParseXML: %v", err)
+	}
+	p := ReadPage(lay, lay.Pages[0])
+	const want = "## § 3. COMPACT FORMS OF COMPLEX SEMI-SIMPLE LIE ALGEBRAS"
+	if !strings.Contains(p.Body, want) {
+		t.Errorf("body:\n%s\nwant a line reading\n%s", p.Body, want)
+	}
+}

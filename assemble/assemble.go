@@ -68,6 +68,33 @@ type Run struct {
 	FirstFolio, LastFolio int
 }
 
+// folioRange is the printed numbers a run of pages lies between.
+//
+// A page that opens a chapter or a block of exercises prints no number at all.
+// Lie 7 to 9 carries the number in the running head, and a page that opens
+// something carries no head, so nothing on it says which page of the book it
+// is. Taking the ends as they stand loses the whole run, because a run with no
+// number at one end is written as no range at all, and § 1 of all three
+// chapters of that volume came out saying it is printed on no page of the book.
+//
+// The number of such a page is not in doubt. A run is consecutive in the
+// printing as much as in the file, so a page with no number of its own is the
+// numbered page nearest it in the run counted back to it. Nothing is written on
+// to the page by this: what is being said is which pages of the book a § is
+// printed on, and not what any one page prints.
+func folioRange(r []part) (first, last int) {
+	for i, p := range r {
+		if p.folio == 0 {
+			continue
+		}
+		if first == 0 {
+			first = p.folio - i
+		}
+		last = p.folio + len(r) - 1 - i
+	}
+	return first, last
+}
+
 // First and Last are the PDF pages the piece opens and ends on. Between them
 // can lie pages of another piece, which is why they are not the piece.
 func (p Piece) First() int {
@@ -163,10 +190,11 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 		parts := slices.Concat(runs[i]...)
 		p := out[i]
 		for _, r := range runs[i] {
+			first, last := folioRange(r)
 			p.Runs = append(p.Runs, Run{
 				First: r[0].page, Last: r[len(r)-1].page,
 				FirstLabel: r[0].label, LastLabel: r[len(r)-1].label,
-				FirstFolio: r[0].folio, LastFolio: r[len(r)-1].folio,
+				FirstFolio: first, LastFolio: last,
 			})
 		}
 		for _, q := range parts {
