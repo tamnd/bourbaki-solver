@@ -71,6 +71,7 @@ type accepted struct {
 	Chunk  int    `json:"chunk"`
 	Of     int    `json:"of"`
 	Input  string `json:"input_sha256"`
+	Prompt string `json:"prompt_sha256"`
 	Model  string `json:"model"`
 	Text   string `json:"text"`
 }
@@ -118,7 +119,16 @@ func writeAccepted(root, lang string, a accepted) error {
 // The input hash is compared rather than trusted. work/ is not in the repository
 // and nothing stops a person from re-extracting the English underneath it, and
 // an answer to a question nobody would ask today is not an answer.
-func readAccepted(root, lang, source string, index int, input string) (accepted, bool) {
+//
+// The prompt hash is compared for the same reason, and it is the half that was
+// missing. The queue keys a job on the instructions as well as the text, so a
+// rewritten prompt puts every chunk back on the list, but the answer beside it
+// was read back anyway and the run wrote a file that claimed the new
+// instructions and held the old translation. That is how the rule about words
+// inside a formula would have shipped without a single line of the book
+// actually being asked again. An answer with no prompt recorded is from before
+// this field and cannot say what it was asked, so it is asked again.
+func readAccepted(root, lang, source string, index int, input, promptHash string) (accepted, bool) {
 	raw, err := os.ReadFile(acceptedPath(root, lang, source, index))
 	if err != nil {
 		return accepted{}, false
@@ -127,7 +137,7 @@ func readAccepted(root, lang, source string, index int, input string) (accepted,
 	if err := json.Unmarshal(raw, &a); err != nil {
 		return accepted{}, false
 	}
-	if a.Input != input || strings.TrimSpace(a.Text) == "" {
+	if a.Input != input || a.Prompt != promptHash || strings.TrimSpace(a.Text) == "" {
 		return accepted{}, false
 	}
 	return a, true
@@ -182,7 +192,7 @@ func plan(q *queue.Queue, root, lang, promptHash string, j job, force bool) (hav
 		id := queue.NewID(queue.StageTranslate, target, input, promptHash)
 
 		if !force {
-			if a, ok := readAccepted(root, lang, j.source, c.Index, input); ok {
+			if a, ok := readAccepted(root, lang, j.source, c.Index, input, promptHash); ok {
 				have[c.Index] = a
 				continue
 			}

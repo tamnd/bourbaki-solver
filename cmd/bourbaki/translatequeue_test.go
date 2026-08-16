@@ -62,7 +62,7 @@ func TestAnAnsweredChunkIsNotAskedFor(t *testing.T) {
 	// The first chunk comes back and is written down, the way a worker writes it.
 	first := j.chunks[0]
 	answer := accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
-		Input: chunkInput(first.Body, j.terms), Model: "gpt-5-6", Text: "Đoạn thứ nhất."}
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: "Đoạn thứ nhất."}
 	if err := writeAccepted(root, "vi", answer); err != nil {
 		t.Fatal(err)
 	}
@@ -92,13 +92,52 @@ func TestAChangeOfTerminologyIsANewChunk(t *testing.T) {
 	j := section()
 	first := j.chunks[0]
 	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
-		Input: chunkInput(first.Body, j.terms), Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
 		t.Fatal(err)
 	}
 	moved := j
 	moved.terms = "terms-v2"
 
 	have, queued, _, err := plan(q, root, "vi", "prompt-v1", moved, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) != 0 || queued != 3 {
+		t.Fatalf("have %d and queued %d, want the answer refused and all three asked for", len(have), queued)
+	}
+}
+
+// The instructions are part of the question too. The rule about words set
+// inside a formula is a change to the prompt and nothing else, and an answer
+// written before it was there is an answer to the old instructions.
+func TestAChangeOfInstructionsIsANewChunk(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	first := j.chunks[0]
+	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
+		t.Fatal(err)
+	}
+	have, queued, _, err := plan(q, root, "vi", "prompt-v2", j, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) != 0 || queued != 3 {
+		t.Fatalf("have %d and queued %d, want the answer refused and all three asked for", len(have), queued)
+	}
+}
+
+// An answer written before the prompt was recorded cannot say what it was asked
+// for, so it is asked again rather than trusted.
+func TestAnAnswerWithNoInstructionsRecordedIsAskedAgain(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	first := j.chunks[0]
+	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
+		Input: chunkInput(first.Body, j.terms), Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
+		t.Fatal(err)
+	}
+	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +237,7 @@ func TestForceAsksAgainForAnAnswerThatIsOnDisk(t *testing.T) {
 	j := section()
 	for _, c := range j.chunks {
 		if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: c.Index, Of: c.Of,
-			Input: chunkInput(c.Body, j.terms), Model: "gpt-5-6-mini", Text: "một đoạn"}); err != nil {
+			Input: chunkInput(c.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6-mini", Text: "một đoạn"}); err != nil {
 			t.Fatal(err)
 		}
 	}
