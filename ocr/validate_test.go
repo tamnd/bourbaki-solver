@@ -330,3 +330,76 @@ func has(problems []Problem, rule Rule) bool {
 	}
 	return false
 }
+
+// ens returns what the page map knows about a page of Theory of Sets, which
+// prints its number at the foot and carries a chapter name up top.
+func ens(page int) Expect {
+	return Expect{
+		Book: "ens-i-iv", PDFPage: page + 5, Grammar: pagemap.FootNumber,
+		Chapter: "IV", Page: page, Confidence: pagemap.FromFoot, HasHead: false,
+	}
+}
+
+// Page 289 of Theory of Sets prints EXERCISES, then § 1, then its first
+// exercise as an ordinary paragraph, and the reading came back with that
+// paragraph as a heading. Nothing of a § comes after its exercises, so the
+// heading is the reading and not the page. See checkAfterExercises.
+func TestRule8AnExerciseSetAsAHeading(t *testing.T) {
+	page := `# EXERCISES
+
+## § 1
+
+### 1. Let $S$ be the set of signs $P$, $X$, $x_1, \ldots, x_n$, the letters
+$x_i$ being of weight 0, $P$ of weight 1, and $X$ of weight 2. Such a word will
+be called an *echelon type* on $x_1, \ldots, x_n$.
+
+Let $E_1, \ldots, E_n$ be $n$ terms in a theory stronger than the theory of
+sets. For each echelon type $T$ define a term $T(E_1, \ldots, E_n)$ as follows.`
+	problems := Validate(page, ens(289), Options{})
+	if !has(problems, RuleExercise) {
+		t.Fatalf("an exercise set as a heading was accepted: %s", Reasons(problems))
+	}
+	for _, problem := range problems {
+		if problem.Rule == RuleExercise && problem.Line != 5 {
+			t.Errorf("the heading is on line 5, the rule says line %d", problem.Line)
+		}
+	}
+}
+
+// The same page read as the volume prints it, which is what page 290 came back
+// as. The exercise is prose and the § head above it is a head, because a chapter
+// gathers the exercises of all its sections under one EXERCISES and divides them
+// by §.
+func TestRule8ASectionHeadBelowTheExercisesHeadIsThePrinting(t *testing.T) {
+	page := `# EXERCISES
+
+## § 1
+
+1. Let $S$ be the set of signs $P$, $X$, $x_1, \ldots, x_n$, the letters $x_i$
+being of weight 0, $P$ of weight 1, and $X$ of weight 2. Such a word will be
+called an *echelon type* on $x_1, \ldots, x_n$.
+
+2. Let $E_1, \ldots, E_n$ be $n$ terms in a theory stronger than the theory of
+sets. For each echelon type $T$ define a term $T(E_1, \ldots, E_n)$ as follows.`
+	if problems := Validate(page, ens(289), Options{}); has(problems, RuleExercise) {
+		t.Fatalf("the printing was rejected: %s", Reasons(problems))
+	}
+}
+
+// A no. heading is how the body of a § is written, and above the exercises head
+// there is nothing wrong with it.
+func TestRule8ANoHeadingAboveTheExercisesHeadStands(t *testing.T) {
+	page := `### 4. Echelon types
+
+Let $S$ be the set of signs $P$, $X$, $x_1, \ldots, x_n$, the letters $x_i$
+being of weight 0, $P$ of weight 1, and $X$ of weight 2. Such a word will be
+called an *echelon type* on $x_1, \ldots, x_n$.
+
+# EXERCISES
+
+1. Show that the relation given above holds for every echelon type on the
+letters $x_1, \ldots, x_n$, and that no other relation holds for all of them.`
+	if problems := Validate(page, ens(289), Options{}); has(problems, RuleExercise) {
+		t.Fatalf("a no. heading above the exercises head was rejected: %s", Reasons(problems))
+	}
+}

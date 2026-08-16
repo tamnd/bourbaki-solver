@@ -49,7 +49,8 @@ flags for fill and run:
   -dry           say what would be read and stop
 
 flags for check:
-  -rule NAME     only report this rule: short, math, leak, head, illegible, label, latex
+  -rule NAME     only report this rule: short, math, leak, head, illegible, label,
+                 latex, exercise
   -v             print every problem, not just the counts
   -json          print one JSON object per rejected page
 
