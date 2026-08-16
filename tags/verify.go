@@ -191,17 +191,29 @@ func at(it Item) string {
 // invariant T05.
 //
 // The diff is asked for with no context, so every line that starts with a minus
-// and is not the file header is a line the change removes. A removal is allowed
-// only when an alias explains it: the same tag on the same line with the label
-// the alias says it became. That is what migrate does and it is the one edit to
-// tags that is not an append.
+// and is not the file header is a line the change removes. Two things explain a
+// removal and nothing else does.
+//
+// The first is an alias: the same tag on the same line with the label the alias
+// says it became. That is what migrate does.
+//
+// The second is a retirement: the tag stands in inactive under the label it is
+// leaving. That is what retire does, and it is what happens when a statement
+// leaves the corpus for good, as the twelfth exercise of § 2 of chapter VIII of
+// Lie did when the volume turned out to print eleven. The rule was written
+// before anything had ever been retired and named only migrate, so the first
+// retirement the corpus made was reported as a tag going missing.
 //
 // The comment block at the top is prose and not record. Rewording it is not
 // taking a tag away from anything, so it is not what this rule is about.
-func AppendOnly(diff string, aliases []Alias) []Failure {
+func AppendOnly(diff string, aliases []Alias, retired []Retired) []Failure {
 	renamed := map[string]string{}
 	for _, a := range aliases {
 		renamed[a.Old] = a.New
+	}
+	burned := map[string]string{}
+	for _, r := range retired {
+		burned[string(r.Tag)] = r.Label
 	}
 	added := map[string]bool{}
 	var removed []string
@@ -221,6 +233,9 @@ func AppendOnly(diff string, aliases []Alias) []Failure {
 		tag, label, ok := strings.Cut(line, ",")
 		if ok {
 			if to, isRename := renamed[label]; isRename && added[tag+","+to] {
+				continue
+			}
+			if burned[tag] == label {
 				continue
 			}
 		}

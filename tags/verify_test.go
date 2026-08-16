@@ -167,26 +167,44 @@ func TestOrder(t *testing.T) {
 // rewrite migrate does, and only when an alias says so.
 func TestAppendOnly(t *testing.T) {
 	add := "--- a/tags/tags\n+++ b/tags/tags\n+0003,alg-viii-s2-prop-1\n"
-	if bad := AppendOnly(add, nil); len(bad) != 0 {
+	if bad := AppendOnly(add, nil, nil); len(bad) != 0 {
 		t.Errorf("an append was reported: %v", bad)
 	}
 	del := add + "-0001,alg-viii-s1-def-1\n"
-	if bad := AppendOnly(del, nil); len(bad) != 1 || bad[0].Rule != T05 {
+	if bad := AppendOnly(del, nil, nil); len(bad) != 1 || bad[0].Rule != T05 {
 		t.Errorf("a removal was not reported: %v", bad)
 	}
 	rename := "--- a/tags/tags\n+++ b/tags/tags\n-0001,alg-viii-s1-rem-1\n+0001,alg-viii-s1-n1-rem-1\n"
 	aliases := []Alias{{Old: "alg-viii-s1-rem-1", New: "alg-viii-s1-n1-rem-1"}}
-	if bad := AppendOnly(rename, aliases); len(bad) != 0 {
+	if bad := AppendOnly(rename, aliases, nil); len(bad) != 0 {
 		t.Errorf("a migration an alias justifies was reported: %v", bad)
 	}
-	if bad := AppendOnly(rename, nil); len(bad) != 1 {
+	if bad := AppendOnly(rename, nil, nil); len(bad) != 1 {
 		t.Errorf("a label rewrite with no alias behind it was allowed: %v", bad)
 	}
 	// The tag has to be the same one. Moving a label to another tag is two
 	// statements swapping identity, which is the thing all of this prevents.
 	swap := "--- a/tags/tags\n+++ b/tags/tags\n-0001,alg-viii-s1-rem-1\n+0002,alg-viii-s1-n1-rem-1\n"
-	if bad := AppendOnly(swap, aliases); len(bad) != 1 {
+	if bad := AppendOnly(swap, aliases, nil); len(bad) != 1 {
 		t.Errorf("a label that moved to another tag was allowed: %v", bad)
+	}
+}
+
+// A retirement takes the line out of tags and puts the tag in inactive, which
+// is what happens when a statement leaves the corpus. The rule named only
+// migrate until the corpus retired its first tag.
+func TestAppendOnlyAllowsARetirement(t *testing.T) {
+	diff := "--- a/tags/tags\n+++ b/tags/tags\n-00ZN,lie-viii-s2-ex-12\n"
+	gone := []Retired{{Tag: "00ZN", Label: "lie-viii-s2-ex-12",
+		Reason: "the section prints eleven exercises", Date: "2026-08-16"}}
+	if bad := AppendOnly(diff, nil, gone); len(bad) != 0 {
+		t.Errorf("a retirement was reported: %v", bad)
+	}
+	// The tag has to be burned under the label it is leaving. A tag retired
+	// somewhere else does not explain this line going.
+	other := []Retired{{Tag: "00ZN", Label: "lie-viii-s3-ex-1", Reason: "x", Date: "2026-08-16"}}
+	if bad := AppendOnly(diff, nil, other); len(bad) != 1 || bad[0].Rule != T05 {
+		t.Errorf("a removal no retirement explains was allowed: %v", bad)
 	}
 }
 
@@ -194,7 +212,7 @@ func TestAppendOnly(t *testing.T) {
 // it takes no tag away from anything.
 func TestAppendOnlyIgnoresTheHeader(t *testing.T) {
 	diff := "--- a/tags/tags\n+++ b/tags/tags\n-# the old wording\n+# the new wording\n"
-	if bad := AppendOnly(diff, nil); len(bad) != 0 {
+	if bad := AppendOnly(diff, nil, nil); len(bad) != 0 {
 		t.Errorf("a reworded header was reported: %v", bad)
 	}
 }

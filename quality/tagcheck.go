@@ -84,7 +84,7 @@ func needHistory(c *Corpus) string {
 // what migrate does and is the one edit to tags that is not an append.
 func t05(c *Corpus) ([]Finding, error) {
 	var out []Finding
-	for _, f := range tags.AppendOnly(c.TagsDiff, c.Tags.Aliases) {
+	for _, f := range tags.AppendOnly(c.TagsDiff, c.Tags.Aliases, c.Tags.Inactive) {
 		out = append(out, Finding{File: "tags/" + tags.TagsFile, Msg: f.Msg})
 	}
 	return out, nil

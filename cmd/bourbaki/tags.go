@@ -370,7 +370,7 @@ func runTagsVerify(args []string) error {
 	case gitErr != nil:
 		fmt.Printf("tags verify: T05 not checked, %v\n", gitErr)
 	default:
-		bad = append(bad, tags.AppendOnly(diff, set.Aliases)...)
+		bad = append(bad, tags.AppendOnly(diff, set.Aliases, set.Inactive)...)
 	}
 	if len(bad) > 0 {
 		var lines []string
