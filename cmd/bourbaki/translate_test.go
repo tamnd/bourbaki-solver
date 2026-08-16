@@ -424,5 +424,5 @@ func writeVietnameseBy(t *testing.T, root string, g *glossary.Glossary, n int, e
 		t.Fatal(err)
 	}
 	f.Meta.TranslationModel = model
-	writeSection(t, path, corpus.SectionFile{Meta: f.Meta, Body: f.Body})
+	writeSection(t, path, corpus.SectionFile(f))
 }
