@@ -815,3 +815,120 @@ func TestOutstandingIsEveryTargetStillToRun(t *testing.T) {
 		}
 	}
 }
+
+// A job is keyed on its content, so editing the instructions makes a new job for
+// the same target and leaves the old one pending beside it. Nothing had to care
+// until a run leased by group: two pending jobs, the same target, different ids,
+// and two lanes take one each and ask the same question twice.
+//
+// Measured on the corpus after one rewrite of prompt/translate.md, 1380 pending
+// jobs stood for 837 distinct chunks, and the log has the frontmatter of chapter
+// I accepted at 12 seconds on one host and again at 1 minute 6 on another.
+func TestASupersededJobDoesNotGetAskedBesideTheOneThatReplacedIt(t *testing.T) {
+	q := open(t)
+	old := New(StageTranslate, "vi-a9dd72/001", "input-1", "prompt-v1")
+	fresh := New(StageTranslate, "vi-a9dd72/001", "input-1", "prompt-v2")
+	other := New(StageTranslate, "vi-a9dd72/002", "input-2", "prompt-v2")
+	for _, job := range []Job{old, fresh, other} {
+		if _, err := q.Add(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	dropped, err := q.Supersede(StageTranslate, map[string]string{
+		"vi-a9dd72/001": fresh.ID, "vi-a9dd72/002": other.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped != 1 {
+		t.Fatalf("dropped %d, want the one job the rewrite replaced", dropped)
+	}
+
+	// And what is left is one job per chunk, so two lanes cannot both be asking
+	// for chunk 1.
+	var got []string
+	for {
+		job, err := q.Lease(StageTranslate, "host", "vi-a9dd72", time.Minute)
+		if errors.Is(err, ErrEmpty) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, job.Target)
+	}
+	if len(got) != 2 || got[0] != "vi-a9dd72/001" || got[1] != "vi-a9dd72/002" {
+		t.Fatalf("leased %v, want each chunk once", got)
+	}
+}
+
+// Supersede is about what is pending. A job a worker is holding is that worker's
+// until it finishes or its lease runs out, and done, failed and dead are the
+// record of what happened rather than a work list.
+func TestSupersedeLeavesEveryOtherStateAlone(t *testing.T) {
+	q := open(t)
+	held := New(StageTranslate, "vi-a9dd72/001", "input-1", "prompt-v1")
+	finished := New(StageTranslate, "vi-a9dd72/002", "input-2", "prompt-v1")
+	for _, job := range []Job{held, finished} {
+		if _, err := q.Add(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	leased, err := q.Lease(StageTranslate, "host", "vi-a9dd72", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leased.Target != "vi-a9dd72/001" {
+		t.Fatalf("leased %s first", leased.Target)
+	}
+	second, err := q.Lease(StageTranslate, "host", "vi-a9dd72", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Finish(second, true, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Nothing pending answers to either target, and both are superseded by a
+	// version that is not there.
+	dropped, err := q.Supersede(StageTranslate, map[string]string{
+		"vi-a9dd72/001": "some-other-id", "vi-a9dd72/002": "some-other-id",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped != 0 {
+		t.Fatalf("dropped %d jobs that were not pending", dropped)
+	}
+	if _, state, err := q.Find(StageTranslate, held.ID); err != nil || state != Leased {
+		t.Errorf("the leased job is %s: %v", state, err)
+	}
+	if _, state, err := q.Find(StageTranslate, finished.ID); err != nil || state != Done {
+		t.Errorf("the finished job is %s: %v", state, err)
+	}
+}
+
+// A target nobody named is not this run's to judge. A translate run plans one
+// section at a time, so every other section's chunks are pending and unmentioned,
+// and dropping them would be one run quietly clearing the work list of the next.
+func TestSupersedeIgnoresATargetItWasNotAskedAbout(t *testing.T) {
+	q := open(t)
+	mine := New(StageTranslate, "vi-a9dd72/001", "input-1", "prompt-v1")
+	theirs := New(StageTranslate, "vi-563ecb/044", "input-2", "prompt-v1")
+	for _, job := range []Job{mine, theirs} {
+		if _, err := q.Add(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dropped, err := q.Supersede(StageTranslate, map[string]string{"vi-a9dd72/001": mine.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped != 0 {
+		t.Fatalf("dropped %d, want none", dropped)
+	}
+	if _, state, err := q.Find(StageTranslate, theirs.ID); err != nil || state != Pending {
+		t.Errorf("another section's chunk is %s: %v", state, err)
+	}
+}
