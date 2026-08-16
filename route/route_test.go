@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/tamnd/bourbaki-solver/api"
 )
 
 // The file below is the one spec 04 §3 describes, byte for byte in shape. It is
@@ -250,5 +252,27 @@ func TestTheGatewayIsFourFreeModels(t *testing.T) {
 	}
 	if len(seen) != 4 {
 		t.Fatalf("the gateway carries %d models, want the four free ones", len(seen))
+	}
+}
+
+// The wait a provider asks for is honoured only as far as it is worth waiting.
+// A spent free allowance comes back as 429 with retry-after: 53931, which is
+// fifteen hours, and a lane that sits that out is a lane that is gone.
+func TestEveryRouteRefusesToSitOutAProviderSuspension(t *testing.T) {
+	for _, value := range Default().Routes {
+		client, err := value.Client(0, 2)
+		if err != nil {
+			t.Fatalf("%s: %v", value.Name, err)
+		}
+		chat, ok := client.(*api.Client)
+		if !ok {
+			t.Fatalf("%s: the client is %T", value.Name, client)
+		}
+		if chat.MaxRetryDelay <= 0 {
+			t.Errorf("%s names no longest wait, so a provider names it instead", value.Name)
+		}
+		if chat.MaxRetryDelay > 5*time.Minute {
+			t.Errorf("%s will sit out %s, which is longer than moving to the next route", value.Name, chat.MaxRetryDelay)
+		}
 	}
 }

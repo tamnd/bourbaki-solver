@@ -441,10 +441,27 @@ func (r Route) Client(timeout time.Duration, maxRetries int) (api.Completer, err
 		timeout = 20 * time.Minute
 	}
 	return &api.Client{
-		URL:        r.Endpoint("/chat/completions"),
-		APIKey:     r.Key(),
-		HTTPClient: &http.Client{Timeout: timeout},
-		MaxRetries: maxRetries,
-		UserAgent:  UserAgent,
+		URL:           r.Endpoint("/chat/completions"),
+		APIKey:        r.Key(),
+		HTTPClient:    &http.Client{Timeout: timeout},
+		MaxRetries:    maxRetries,
+		MaxRetryDelay: MaxRetryDelay,
+		UserAgent:     UserAgent,
 	}, nil
 }
+
+// MaxRetryDelay is the longest wait this fleet will sit out because a provider
+// asked it to.
+//
+// The client has always honoured Retry-After and has always had the guard for a
+// wait too long to be worth taking, and nothing set the guard. The free gateway
+// answers a spent allowance with 429 and "retry-after: 53931", which is fifteen
+// hours, so both lanes of a translation run went to sleep inside one call and
+// stayed there. Ninety four minutes in, the log's last line was still the
+// chunk that had come back before it, and nothing said why.
+//
+// A minute. A provider that names longer than that is telling us it is done for
+// now, and the answer to that is the next route rather than a wait: the chunk
+// fails this attempt, goes back on the queue, and the run picks it up on a
+// route that is still answering. That is what the four free models are for.
+const MaxRetryDelay = time.Minute
