@@ -54,15 +54,21 @@ import (
 
 const translateUsage = `usage: bourbaki translate -lang CODE [flags]
 
-Translates English section files into Vietnamese, Chinese or Japanese, and
-refuses any answer that is not the same section.
+Translates the English of the corpus into Vietnamese, Chinese or Japanese, and
+refuses any answer that is not the same text.
+
+Both kinds of file go over. A § is what a reader reads first and an exercise is
+what a reader does next, and a volume that has its §§ in Vietnamese and its
+exercises in English is not a volume anybody can work through. Theory of Sets is
+28 §§ and 211 exercises, so the exercises are seven eighths of the files and
+about a fifth of the words.
 
   -lang CODE     vi, zh or ja, required
   -corpus DIR    the checkout, default $BOURBAKI_CORPUS
   -book ID       only this book, as books.yaml names it
   -chapter ID    only this chapter, as VIII
   -file PATH     only this English file, relative to the corpus root
-  -limit N       stop after this many sections
+  -limit N       stop after this many files
   -force         translate again even where a translation is already there and
                  not stale
   -hosts LIST    comma separated route names
@@ -75,11 +81,13 @@ refuses any answer that is not the same section.
   -keep          leave the questions on the boxes, for debugging
   -queue PATH    the work list, default $BOURBAKI_WORK/queue
 
-A section is skipped when its translation is there, its source_content_sha256
-is the English file's content_sha256, its glossary_terms_sha256 is the digest of
-the glossary rows its English mentions today, and its prompt_sha256 is this
+A file is skipped when its translation is there, its source_content_sha256 is
+the English it was made from, its glossary_terms_sha256 is the digest of the
+glossary rows that English mentions today, and its prompt_sha256 is this
 binary's. Any of those four out of date is what stale means, and a stale file is
-translated again.
+translated again. An exercise records no content_sha256 of its own, so the
+second of the four hashes the English body rather than reading a number out of
+its head.
 
 The terminology test is per file rather than on glossary_version, which moves
 for any edit anywhere. Pinning "common zero", a phrase that occurs in one
@@ -179,16 +187,16 @@ func runTranslate(args []string) error {
 		return reportStale(jobs, skipped, *lang)
 	}
 	if len(jobs) == 0 {
-		fmt.Printf("translate: nothing to do, %d sections are already translated and current\n", skipped)
+		fmt.Printf("translate: nothing to do, %d files are already translated and current\n", skipped)
 		return nil
 	}
 	if *limit > 0 && len(jobs) > *limit {
 		// Said out loud, because a run that quietly stopped at the limit reads
 		// exactly like a run that covered everything.
-		fmt.Printf("translate: %d sections need %s, doing the first %d\n", len(jobs), *lang, *limit)
+		fmt.Printf("translate: %d files need %s, doing the first %d\n", len(jobs), *lang, *limit)
 		jobs = jobs[:*limit]
 	} else {
-		fmt.Printf("translate: %d sections need %s, %d are current\n", len(jobs), *lang, skipped)
+		fmt.Printf("translate: %d files need %s, %d are current\n", len(jobs), *lang, skipped)
 	}
 	if *dry {
 		question, err := translateQuestion(g, *lang, jobs[0].chunks[0].Body)
@@ -227,7 +235,7 @@ func runTranslate(args []string) error {
 	run := runID(*lang, promptHash, jobs)
 	var written, refused int
 	for _, job := range jobs {
-		body, model, problems := translateSection(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *keep, logf)
+		body, model, problems := translateFile(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *keep, logf)
 		if len(problems) > 0 {
 			refused++
 			logf("%s: refused, nothing written", job.source)
@@ -236,21 +244,8 @@ func runTranslate(args []string) error {
 			}
 			continue
 		}
-		out := job.meta
-		out.Lang = *lang
-		out.TranslatedFrom = job.source
-		out.SourceSHA256 = job.meta.ContentSHA256
-		out.ContentSHA256 = corpus.ContentSHA256(body)
-		out.TranslationModel = model
-		out.TranslationRun = run
-		out.GlossaryVersion = g.Version
-		out.GlossaryTerms = job.terms
-		out.PromptSHA256 = promptHash
-		path := corpus.SectionPath(root, *lang, out)
-		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return err
-		}
-		if err := (corpus.SectionFile{Meta: out, Body: body}).Write(path); err != nil {
+		path, err := writeTranslation(root, *lang, run, promptHash, g.Version, job, body, model)
+		if err != nil {
 			return err
 		}
 		written++
@@ -259,8 +254,54 @@ func runTranslate(args []string) error {
 			break
 		}
 	}
-	fmt.Printf("translate: %d sections written, %d refused, %d were already current\n", written, refused, skipped)
+	fmt.Printf("translate: %d files written, %d refused, %d were already current\n", written, refused, skipped)
 	return ctx.Err()
+}
+
+// writeTranslation puts the finished file where the language wants it, as a
+// section or as an exercise.
+//
+// The two carry the same five facts about how they were made, and they have to,
+// because staleness is decided by reading them back. What differs is only where
+// the file goes and which schema its head is written in, and an exercise takes
+// the hash of the English body rather than a hash copied out of the English
+// head, since an exercise records none.
+func writeTranslation(root, lang, run, promptHash string, version int, j job, body, model string) (string, error) {
+	var path string
+	var file interface{ Write(string) error }
+	if j.ex != nil {
+		out := *j.ex
+		out.Lang = lang
+		out.TranslatedFrom = j.source
+		out.SourceSHA256 = corpus.ContentSHA256(j.body)
+		out.TranslationModel = model
+		out.TranslationRun = run
+		out.GlossaryVersion = version
+		out.GlossaryTerms = j.terms
+		out.PromptSHA256 = promptHash
+		path = corpus.ExercisePath(root, lang, out)
+		file = corpus.ExerciseFile{Meta: out, Body: body}
+	} else {
+		out := j.meta
+		out.Lang = lang
+		out.TranslatedFrom = j.source
+		out.SourceSHA256 = j.meta.ContentSHA256
+		out.ContentSHA256 = corpus.ContentSHA256(body)
+		out.TranslationModel = model
+		out.TranslationRun = run
+		out.GlossaryVersion = version
+		out.GlossaryTerms = j.terms
+		out.PromptSHA256 = promptHash
+		path = corpus.SectionPath(root, lang, out)
+		file = corpus.SectionFile{Meta: out, Body: body}
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := file.Write(path); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // reportStale prints what a run would do, and asks nothing.
@@ -305,17 +346,24 @@ func reportStale(jobs []job, skipped int, lang string) error {
 	for _, j := range jobs {
 		fmt.Printf("%-64s %s\n", j.source, j.why)
 	}
-	fmt.Printf("translate: %d sections need %s, %d are current\n", len(jobs), lang, skipped)
+	fmt.Printf("translate: %d files need %s, %d are current\n", len(jobs), lang, skipped)
 	return nil
 }
 
-// A job is one English section and the chunks it was cut into.
+// A job is one English file and the chunks it was cut into.
+//
+// Two schemas sit in the corpus under content/en and both of them are prose a
+// reader reads, so both are translated. ex is set on an exercise and meta on a
+// section, and nothing else in the run cares which it is: the chunking, the
+// queue, the questions and the audit are the same work either way. The one
+// place it matters is where the answer is written, which is writeTranslation.
 type job struct {
 	source string // relative to the corpus root
 	meta   corpus.SectionFrontMatter
+	ex     *corpus.ExerciseFrontMatter // set when this file is an exercise
 	body   string
 	chunks []translate.Chunk
-	terms  string // digest of the glossary rows this section's English mentions
+	terms  string // digest of the glossary rows this file's English mentions
 	why    string // why the translation on disk is not the one this run would make
 }
 
@@ -345,40 +393,72 @@ func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only,
 	var jobs []job
 	skipped := 0
 	for _, path := range paths {
-		f, err := corpus.ReadFile[corpus.SectionFrontMatter](path)
+		j, ok, err := readJob(root, path)
 		if err != nil {
-			// An exercise file or anything else that is not a section. The
-			// exercises are a batch of their own and are not this command's.
+			return nil, 0, err
+		}
+		if !ok {
 			continue
 		}
-		if f.Meta.Lang != "en" || f.Meta.Book == "" {
-			continue
-		}
-		source := rel(root, path)
 		switch {
-		case only != "" && source != only:
+		case only != "" && j.source != only:
 			continue
-		case book != "" && f.Meta.Book != book:
+		case book != "" && j.meta.Book != book:
 			continue
-		case chapter != "" && !strings.EqualFold(f.Meta.Chapter, chapter):
+		case chapter != "" && !strings.EqualFold(j.meta.Chapter, chapter):
 			continue
 		}
-		// The glossary a section is held to is the one its own volume is
+		// The glossary a file is held to is the one its own volume is
 		// translated against, since a row can be scoped to a book. See
 		// glossary.Glossary.For.
-		terms := translate.GlossaryDigest(g.For(f.Meta.Book), lang, f.Body)
-		ok, why := current(root, lang, source, f.Meta, g.Version, promptHash, terms)
-		if !force && ok {
+		j.terms = translate.GlossaryDigest(g.For(j.meta.Book), lang, j.body)
+		var fresh bool
+		if j.ex != nil {
+			fresh, j.why = currentExercise(root, lang, j.source, *j.ex, j.body, g.Version, promptHash, j.terms)
+		} else {
+			fresh, j.why = current(root, lang, j.source, j.meta, g.Version, promptHash, j.terms)
+		}
+		if !force && fresh {
 			skipped++
 			continue
 		}
-		chunks := translate.Chunks(f.Body)
-		if len(chunks) == 0 {
+		j.chunks = translate.Chunks(j.body)
+		if len(j.chunks) == 0 {
 			continue
 		}
-		jobs = append(jobs, job{source: source, meta: f.Meta, body: f.Body, chunks: chunks, terms: terms, why: why})
+		jobs = append(jobs, j)
 	}
 	return jobs, skipped, nil
+}
+
+// readJob reads one file under content/en as the kind of thing it is, and says
+// no to anything that is neither.
+//
+// Which schema to try is decided by the path and not by trying both, because
+// the two heads share enough field names that a wrong guess would parse rather
+// than fail, and a section read as an exercise has section 0 and exercise 0 and
+// would be written over the exercise before it. The path is how the corpus
+// already names the difference, in ExercisePath and in the audit's loader, so
+// this is the third place that reads it and not a new rule.
+//
+// Book and Chapter are copied onto meta for an exercise as well, since the
+// -book and -chapter flags and the per volume glossary are asked for by those
+// two fields and both heads carry them.
+func readJob(root, path string) (job, bool, error) {
+	source := rel(root, path)
+	if strings.Contains(filepath.ToSlash(source), "/exercises/") {
+		f, err := corpus.ReadFile[corpus.ExerciseFrontMatter](path)
+		if err != nil || f.Meta.Lang != "en" || f.Meta.Book == "" {
+			return job{}, false, nil
+		}
+		meta := corpus.SectionFrontMatter{Book: f.Meta.Book, Chapter: f.Meta.Chapter}
+		return job{source: source, meta: meta, ex: &f.Meta, body: f.Body}, true, nil
+	}
+	f, err := corpus.ReadFile[corpus.SectionFrontMatter](path)
+	if err != nil || f.Meta.Lang != "en" || f.Meta.Book == "" {
+		return job{}, false, nil
+	}
+	return job{source: source, meta: f.Meta, body: f.Body}, true, nil
 }
 
 // current asks whether the translation on disk is the one this run would make,
@@ -420,7 +500,38 @@ func current(root, lang, source string, en corpus.SectionFrontMatter, version in
 	return true, ""
 }
 
-// translateSection asks for every chunk and puts the answers together.
+// currentExercise is the same four questions asked of a translated exercise.
+//
+// The only difference is the second one. A section compares the hash the
+// English file records with the hash the translation recorded when it was made;
+// an exercise records no hash of its own, so the English body is hashed here and
+// compared with what the translation kept. Both sides go through
+// corpus.ContentSHA256, which normalises first, so an editor's trailing space
+// does not restale an exercise.
+func currentExercise(root, lang, source string, en corpus.ExerciseFrontMatter, body string, version int, promptHash, terms string) (bool, string) {
+	meta := en
+	meta.Lang = lang
+	f, err := corpus.ReadFile[corpus.ExerciseFrontMatter](corpus.ExercisePath(root, lang, meta))
+	switch {
+	case err != nil:
+		return false, "there is no translation"
+	case f.Meta.TranslatedFrom != source:
+		return false, "it was made from " + f.Meta.TranslatedFrom
+	case f.Meta.SourceSHA256 != corpus.ContentSHA256(body):
+		return false, "the English has changed since"
+	case f.Meta.PromptSHA256 != promptHash:
+		return false, "the instructions have changed since"
+	case f.Meta.GlossaryTerms == "":
+		if f.Meta.GlossaryVersion != version {
+			return false, fmt.Sprintf("it records no terminology and was made with glossary %d, which is now %d", f.Meta.GlossaryVersion, version)
+		}
+	case f.Meta.GlossaryTerms != terms:
+		return false, "the terminology it was shown has changed"
+	}
+	return true, ""
+}
+
+// translateFile asks for every chunk and puts the answers together.
 //
 // A chunk that fails after its second ask fails the section. There is no
 // partial write: half a translated § is worse than none, because the audit
@@ -431,7 +542,7 @@ func current(root, lang, source string, en corpus.SectionFrontMatter, version in
 // every accepted answer as it arrives. A run that is killed at chunk twelve
 // costs chunk twelve, and the next run asks for that one and joins it to the
 // eleven already on disk.
-func translateSection(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
+func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
 	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "queue", Msg: err.Error()}}

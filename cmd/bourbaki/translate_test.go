@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -245,5 +246,127 @@ func TestTheFileNamesEveryModelThatAnsweredIt(t *testing.T) {
 		if got := modelsUsed(c.models); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+// The exercises are seven eighths of the files in Theory of Sets, and until this
+// they were translated by nothing at all: translateJobs read every file under
+// content/en as a section, an exercise head would not parse as one, and the walk
+// went quietly on to the next. A volume with its §§ in Vietnamese and its
+// exercises in English is not a volume anybody can work through, and the count
+// at the end of a run said 26 files and meant 26 of 239.
+func TestAnExerciseIsWorkForThisCommandToo(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "ring", VI: "vành"}}}
+	english := "Show that every finite ring with no divisor of zero is a field."
+	writeEnglishExercise(t, root, 3, english)
+
+	jobs := stale(t, root, g)
+	if len(jobs) != 1 {
+		t.Fatalf("got %d jobs, want the exercise: %v", len(jobs), jobs)
+	}
+	j := jobs[0]
+	if j.ex == nil {
+		t.Fatal("the exercise was read as a section")
+	}
+	if j.ex.Exercise != 3 || j.ex.Label != "alg-viii-s1-ex-3" {
+		t.Errorf("the head was lost: %+v", j.ex)
+	}
+	if j.meta.Book != "alg" || j.meta.Chapter != "VIII" {
+		t.Errorf("-book and -chapter cannot reach it: book %q chapter %q", j.meta.Book, j.meta.Chapter)
+	}
+	if j.why != "there is no translation" {
+		t.Errorf("the reason given is %q", j.why)
+	}
+	// The glossary reaches an exercise the same way it reaches a §, or the two
+	// halves of a volume are held to different terminology.
+	if j.terms != translate.GlossaryDigest(g, "vi", english) {
+		t.Error("the exercise was not held to the rows its English mentions")
+	}
+}
+
+// A translated exercise records the same five facts a translated section does,
+// and is then current. Anything less and every run would ask for every exercise
+// again, which on this book is 211 files a night.
+func TestATranslatedExerciseIsCurrent(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "ring", VI: "vành"}}}
+	english := "Show that every finite ring with no divisor of zero is a field."
+	writeEnglishExercise(t, root, 3, english)
+	j := stale(t, root, g)[0]
+
+	path, err := writeTranslation(root, "vi", "run-1", "prompt-hash", g.Version, j, "Chứng minh rằng mọi vành hữu hạn không có ước của không là một trường.", "gpt-5-6")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := corpus.ExercisePath(root, "vi", *j.ex); path != want {
+		t.Errorf("written to %s, want %s", path, want)
+	}
+	f, err := corpus.ReadFile[corpus.ExerciseFrontMatter](path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Meta.Lang != "vi" || f.Meta.Tag != "00QM" || f.Meta.Exercise != 3 {
+		t.Errorf("the head did not carry over: %+v", f.Meta)
+	}
+	if f.Meta.SourceSHA256 != corpus.ContentSHA256(english) {
+		t.Error("the English it was made from was not recorded")
+	}
+	if jobs := stale(t, root, g); len(jobs) != 0 {
+		t.Fatalf("a translation just written was called stale: %v", jobs)
+	}
+
+	// The English moving puts it back on the list, with the reason said out
+	// loud, and so does a glossary row that reaches it.
+	writeEnglishExercise(t, root, 3, english+" Deduce that it is commutative.")
+	if jobs := stale(t, root, g); len(jobs) != 1 || jobs[0].why != "the English has changed since" {
+		t.Errorf("the English changed and got %v", jobs)
+	}
+	writeEnglishExercise(t, root, 3, english)
+
+	g.Version, g.Terms[0].VI = 2, "vòng"
+	if jobs := stale(t, root, g); len(jobs) != 1 || jobs[0].why != "the terminology it was shown has changed" {
+		t.Errorf("the terminology changed and got %v", jobs)
+	}
+}
+
+// The instructions are the fourth test, and it is the one with teeth: a rewrite
+// of prompt/translate.md has to reach the exercises as well as the §§, or half
+// the book stays on rules that no longer hold.
+func TestAChangeOfInstructionsReachesAnExercise(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "ring", VI: "vành"}}}
+	english := "Show that every finite ring with no divisor of zero is a field."
+	writeEnglishExercise(t, root, 3, english)
+	j := stale(t, root, g)[0]
+	if _, err := writeTranslation(root, "vi", "run-1", "prompt-hash", g.Version, j, "Chứng minh.", "gpt-5-6"); err != nil {
+		t.Fatal(err)
+	}
+
+	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash-2", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || jobs[0].why != "the instructions have changed since" {
+		t.Fatalf("got %v, want the exercise back on the list", jobs)
+	}
+}
+
+func exerciseMeta(n int) corpus.ExerciseFrontMatter {
+	return corpus.ExerciseFrontMatter{
+		Book: "alg", Chapter: "VIII", Section: 1, Exercise: n,
+		Label: fmt.Sprintf("alg-viii-s1-ex-%d", n), Tag: "00QM", Lang: "en",
+	}
+}
+
+func writeEnglishExercise(t *testing.T, root string, n int, body string) {
+	t.Helper()
+	m := exerciseMeta(n)
+	path := corpus.ExercisePath(root, "en", m)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (corpus.ExerciseFile{Meta: m, Body: body}).Write(path); err != nil {
+		t.Fatal(err)
 	}
 }
