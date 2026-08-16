@@ -45,6 +45,11 @@ type printing struct {
 	// for a printing that does not set one. See walk.
 	runHead *regexp.Regexp
 
+	// resume is a paragraph that hands the reader back to the proof of a
+	// statement printed further up, which puts that statement in force again.
+	// See resumed.
+	resume *regexp.Regexp
+
 	// swallowed is a head whose number was drawn into the maths that follows it,
 	// which is a thing that happens to a printing that sets the number hard
 	// against the first word. Empty for a printing it does not happen to. See
@@ -139,7 +144,10 @@ var printings = map[string]printing{
 				`|\*\*(` + enCapKinds + `)(?: (\d+))?\.\*\*\s*` +
 				`|\*(` + enPlainKinds + `)(?: (\d+))?\.\*\s+` +
 				`|` + smallTypeSup + `(` + enPlainKinds + `)(?: (\d+))?\.?\s+)`),
-		runHead:   regexp.MustCompile(`^\*(` + enRunKinds + `)\*\s*$`),
+		runHead: regexp.MustCompile(`^\*(` + enRunKinds + `)(?: [a-z][^*]*)?\*\s*$`),
+		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:takes? up|comes? now|concludes?|` +
+			`finish(?:es)?|completes?|resumes?|returns? to)\b[^.]{0,40}?\bproof of (?:the )?(` +
+			enResumeKinds + `) (\d+)\b`),
 		swallowed: regexp.MustCompile(`^(` + enCapKinds + `|` + enPlainKinds + `) \$(\d+)(?:(\^\d+)\$)?\.`),
 	},
 	"fr": {
@@ -152,6 +160,9 @@ var printings = map[string]printing{
 		head: regexp.MustCompile(
 			`^(?:\*\*(` + frKinds + `)(?: (\d+))?\.\*\*|(` + frKinds + `)(?: (\d+))? \([^)]*\)\.|` +
 				smallType + `(` + frKinds + `)(?: (\d+))?\.|(` + frPlainKinds + `)(?: (\d+))?\.)\s*—\s*`),
+		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:terminons|terminer|achevons|achever|` +
+			`reprenons|reprendre|concluons|conclure)\b[^.]{0,40}?\b(?:d[ée]monstration|preuve) ` +
+			`(?:du|de la|de l['’])\s*(` + frResumeKinds + `) (\d+)\b`),
 	},
 }
 
@@ -280,7 +291,21 @@ const enPlainKinds = `Lemmas?|Remarks?|Examples?|Scholium`
 // gives no statement of its own, because the book gives it none: it is a lead,
 // the way "Remarks. —" is a lead in Algebra VIII, except that this printing
 // puts nothing after it on the line.
+//
+// The head may say what the run is of. Page 89 sets "*Examples of functions*"
+// over the (1) and (2) that follow it, and § 3 of chapter II cites the first of
+// them as "§ 3, no. 4, Example 1". One line of the volume is written that way
+// and the other 34 are the bare word. What follows the kind is held to a
+// lower-case word so that a title in italic, which opens on a capital, is not
+// read as a run of examples with a name.
 const enRunKinds = `Examples|Remarks|Lemmas|Scholia`
+
+// enResumeKinds and frResumeKinds are the kinds a paragraph can hand the reader
+// back to, which are the kinds a Corollary can be numbered under. A run of
+// Remarks is not something a proof is taken up again for.
+const enResumeKinds = `Definition|Proposition|Theorem|Lemma|Scholium`
+
+const frResumeKinds = `d[ée]finition|proposition|th[ée]or[èe]me|lemme|scholie`
 
 // frKinds are the words the French printing states its results in. The accents
 // are the volume's own and the plurals are too: it sets "Remarques. —" over a
