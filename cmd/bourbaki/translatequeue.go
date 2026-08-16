@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tamnd/bourbaki-solver/quality"
 	"github.com/tamnd/bourbaki-solver/queue"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
@@ -199,7 +200,7 @@ func chunkOf(j job, item queue.Job) (int, translate.Chunk, bool) {
 // means and a person is meant to read it. And -force must reach a chunk that is
 // done, which is the whole of what -force is for: the answer is there and it was
 // written on a cut down model.
-func plan(q *queue.Queue, root, lang, promptHash string, j job, force bool) (have map[int]accepted, queued int, stuck map[int][]translate.Problem, err error) {
+func plan(q *queue.Queue, root, lang, promptHash string, j job, force, redoSmall bool) (have map[int]accepted, queued int, stuck map[int][]translate.Problem, err error) {
 	have, stuck = map[int]accepted{}, map[int][]translate.Problem{}
 
 	// What this section's chunks are asked under today, so that the versions of
@@ -222,7 +223,13 @@ func plan(q *queue.Queue, root, lang, promptHash string, j job, force bool) (hav
 		id := queue.NewID(queue.StageTranslate, target, input, promptHash)
 
 		if !force {
-			if a, ok := readAccepted(root, lang, j.source, c.Index, input, promptHash); ok {
+			// An answer a cut down model gave is passed over under -redo-small,
+			// and only that answer. -force would ask for all forty two chunks
+			// of chapter I, § 1 again to replace the four of them that came
+			// back on gpt-5-6-mini, which is thirty eight questions nobody
+			// needs to put and, on the free gateway, most of a day.
+			if a, ok := readAccepted(root, lang, j.source, c.Index, input, promptHash); ok &&
+				!(redoSmall && quality.SmallModel(a.Model)) {
 				have[c.Index] = a
 				continue
 			}
