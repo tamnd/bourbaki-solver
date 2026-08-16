@@ -14,6 +14,7 @@ const shareUsage = `usage: bourbaki share <command> [arguments]
 
 commands:
   import    read public ChatGPT share links into imports/
+  audit     hold an import against the printed volume
 
 Set BOURBAKI_CORPUS to the checkout of tamnd/bourbaki.
 `
@@ -26,6 +27,8 @@ func runShare(args []string) error {
 	switch args[0] {
 	case "import":
 		return shareImport(args[1:])
+	case "audit":
+		return shareAudit(args[1:])
 	case "help", "-h", "--help":
 		fmt.Fprint(os.Stderr, shareUsage)
 		return nil
