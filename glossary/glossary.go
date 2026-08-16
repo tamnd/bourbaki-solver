@@ -44,6 +44,34 @@ type Term struct {
 	// convention: a ring is associative with a unit unless it says otherwise,
 	// and a translator who does not know that will reach for the wrong word.
 	Note string `yaml:"note,omitempty"`
+
+	// Books names the volumes this row is for, by the short book id, and empty
+	// means every volume. It is here for the term that means two things and is
+	// told apart by which volume it is in rather than by anything in the phrase.
+	//
+	// "order" is the one that forced it. In Algebra and in Lie groups it is the
+	// order of a group or of an element, cấp in Vietnamese and 阶 in Chinese,
+	// and it is used that way 178 times in the two of them. In Theory of Sets it
+	// is an ordering, thứ tự and 序, in every one of its 122 occurrences. A
+	// single row has to be wrong for one of them, and it was wrong for the
+	// volume with the chapter called Ordered sets.
+	//
+	// A row with no books is the default and a row with books overrides it for
+	// those books, which keeps the common case one line long.
+	Books []string `yaml:"books,omitempty"`
+}
+
+// Covers says whether this row applies to a volume, by the short book id.
+func (t Term) Covers(book string) bool {
+	if len(t.Books) == 0 {
+		return true
+	}
+	for _, b := range t.Books {
+		if b == book {
+			return true
+		}
+	}
+	return false
 }
 
 // In is the term's rendering in one language, empty when it has none.
@@ -123,19 +151,60 @@ func Parse(b []byte, name string) (*Glossary, error) {
 // Validate catches the two ways a hand-edited glossary is wrong in a way that
 // would be silent: a duplicated English term, where the second row is dead and
 // nobody can see which one is being used, and an empty one.
+// A term scoped to a volume is the one exception. "order" is two rows, the
+// default and the one for Theory of Sets, and that is not a duplicate. What is
+// still an error is two rows that both answer for the same volume, since then
+// the second is dead the same way.
 func (g Glossary) Validate() error {
-	seen := map[string]bool{}
+	unscoped := map[string]bool{}
+	scoped := map[string]bool{}
 	for i, t := range g.Terms {
 		key := Key(t.EN)
 		if key == "" {
 			return fmt.Errorf("term %d has no en", i+1)
 		}
-		if seen[key] {
-			return fmt.Errorf("term %q appears twice", t.EN)
+		if len(t.Books) == 0 {
+			if unscoped[key] {
+				return fmt.Errorf("term %q appears twice", t.EN)
+			}
+			unscoped[key] = true
+			continue
 		}
-		seen[key] = true
+		for _, b := range t.Books {
+			if scoped[key+"\x00"+b] {
+				return fmt.Errorf("term %q appears twice for book %q", t.EN, b)
+			}
+			scoped[key+"\x00"+b] = true
+		}
 	}
 	return nil
+}
+
+// For is the glossary one volume is translated against: the row scoped to that
+// book where there is one, and the default row otherwise.
+//
+// Every term keeps the place its first row had, so the block a prompt carries
+// does not shuffle when a scoped row is added somewhere else in the file.
+func (g Glossary) For(book string) *Glossary {
+	at := map[string]int{}
+	out := &Glossary{Version: g.Version}
+	for _, t := range g.Terms {
+		if !t.Covers(book) {
+			continue
+		}
+		key := Key(t.EN)
+		i, seen := at[key]
+		if !seen {
+			at[key] = len(out.Terms)
+			out.Terms = append(out.Terms, t)
+			continue
+		}
+		// A scoped row beats the default, whichever order they are written in.
+		if len(t.Books) > 0 {
+			out.Terms[i] = t
+		}
+	}
+	return out
 }
 
 // Key is the form a term is compared in: lower case, single spaced. Bourbaki
@@ -228,19 +297,26 @@ func SameTerms(a, b []Term) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	was := make(map[string]Term, len(a))
+	was := make(map[string]string, len(a))
 	for _, t := range a {
-		t.Note = ""
-		was[Key(t.EN)] = t
+		was[scopedKey(t)] = t.renderings()
 	}
 	for _, t := range b {
-		t.Note = ""
-		if other, ok := was[Key(t.EN)]; !ok || other != t {
+		if other, ok := was[scopedKey(t)]; !ok || other != t.renderings() {
 			return false
 		}
 	}
 	return true
 }
+
+// scopedKey identifies a row. The English on its own is not enough once a term
+// can be scoped to a volume, since "order" is then two rows and a map keyed on
+// the English would keep one of them.
+func scopedKey(t Term) string { return Key(t.EN) + "\x00" + strings.Join(t.Books, ",") }
+
+// renderings is the part of a row a prompt carries, which is what SameTerms
+// compares. The note is left out because it is written for a person.
+func (t Term) renderings() string { return t.VI + "\x00" + t.ZH + "\x00" + t.JA }
 
 // Write renders the glossary to a path, creating the directory.
 //

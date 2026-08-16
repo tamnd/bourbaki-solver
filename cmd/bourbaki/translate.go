@@ -363,7 +363,10 @@ func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only,
 		case chapter != "" && !strings.EqualFold(f.Meta.Chapter, chapter):
 			continue
 		}
-		terms := translate.GlossaryDigest(g, lang, f.Body)
+		// The glossary a section is held to is the one its own volume is
+		// translated against, since a row can be scoped to a book. See
+		// glossary.Glossary.For.
+		terms := translate.GlossaryDigest(g.For(f.Meta.Book), lang, f.Body)
 		ok, why := current(root, lang, source, f.Meta, g.Version, promptHash, terms)
 		if !force && ok {
 			skipped++
@@ -554,7 +557,8 @@ func translateSection(ctx context.Context, root string, q *queue.Queue, hosts []
 // askChunk asks once, and asks again with the complaint if the first answer did
 // not pass.
 func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, lang string, j job, c translate.Chunk, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
-	question, err := translateQuestion(g, lang, c.Body)
+	terms := g.For(j.meta.Book)
+	question, err := translateQuestion(terms, lang, c.Body)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 	}
@@ -562,7 +566,7 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 	for attempt := 1; attempt <= 2; attempt++ {
 		ask := question
 		if attempt == 2 {
-			if ask, err = translateQuestionWithNote(g, lang, c.Body, retryNote(last)); err != nil {
+			if ask, err = translateQuestionWithNote(terms, lang, c.Body, retryNote(last)); err != nil {
 				return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 			}
 		}

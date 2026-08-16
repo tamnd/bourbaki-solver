@@ -392,7 +392,10 @@ func l06(c *Corpus) ([]Finding, error) {
 		en := strings.ToLower(prose(p.en.Body))
 		tr := strings.ToLower(prose(p.tr.Body))
 		var missed []string
-		for _, t := range g.Mentioned(p.tr.Lang, en) {
+		// The rows this section was shown are its own volume's, since a row
+		// can be scoped to a book. See glossary.Glossary.For.
+		mentioned := g.For(BookOf(p.tr)).Mentioned(p.tr.Lang, en)
+		for _, t := range mentioned {
 			if glossary.Follows(p.tr.Lang, tr, t.In(p.tr.Lang)) {
 				continue
 			}
@@ -403,7 +406,7 @@ func l06(c *Corpus) ([]Finding, error) {
 		}
 		out = append(out, Finding{File: p.tr.Path, Line: 1,
 			Msg: fmt.Sprintf("the English mentions %d glossary terms and %d are not in this file as the glossary writes them: %s",
-				len(g.Mentioned(p.tr.Lang, en)), len(missed), strings.Join(missed, ", "))})
+				len(mentioned), len(missed), strings.Join(missed, ", "))})
 	}
 	return out, nil
 }
@@ -726,7 +729,9 @@ func l10(c *Corpus) ([]Finding, error) {
 	ps, out := c.pairs()
 	for _, p := range ps {
 		tr := strings.ToLower(prose(p.tr.Body))
-		for _, t := range g.Mentioned(p.tr.Lang, strings.ToLower(prose(p.en.Body))) {
+		// Its own volume's rows, as in L06: a term scoped to another book was
+		// never in this file's prompt and cannot be what it was told to write.
+		for _, t := range g.For(BookOf(p.tr)).Mentioned(p.tr.Lang, strings.ToLower(prose(p.en.Body))) {
 			if strings.EqualFold(t.EN, t.In(p.tr.Lang)) {
 				continue
 			}
@@ -807,4 +812,22 @@ func l09(c *Corpus) ([]Finding, error) {
 	return []Finding{{File: "manifests/glossary.yaml", Line: 1,
 		Msg: fmt.Sprintf("the terms changed since %s and the version is still %d, so every translated file will report current against a glossary it was not written against",
 			c.Opt.Base, now.Version)}}, nil
+}
+
+// BookOf is the volume a content file belongs to, by the short book id, which
+// is what a book scoped glossary row is matched against. A solution answers
+// "" and that is right: nothing translates a solution against the glossary yet,
+// and its front matter names the exercise rather than the volume.
+//
+// Exported for the same reason Prose is. The adherence report asks L06's
+// question a second time, and if it scoped the glossary differently the report
+// and the rule would disagree about the same file.
+func BookOf(d Doc) string {
+	switch {
+	case d.Section != nil:
+		return d.Section.Book
+	case d.Exercise != nil:
+		return d.Exercise.Book
+	}
+	return ""
 }
