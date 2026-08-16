@@ -336,6 +336,24 @@ func Default() Registry {
 			Rank: 40, Concurrency: 2, Timeout: Duration(5 * time.Minute),
 			Note: "free text models, no vision, ranked last so nothing moves to it by accident",
 		},
+		{
+			Name: "zen-hy3", Wire: WireChat, Gateway: true,
+			BaseURL: ZenBaseURL, Model: ZenHy3, APIKeyEnv: ZenKeyEnv,
+			Rank: 50, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "the same gateway on a second free model, so a second free allowance",
+		},
+		{
+			Name: "zen-laguna", Wire: WireChat, Gateway: true,
+			BaseURL: ZenBaseURL, Model: ZenLaguna, APIKeyEnv: ZenKeyEnv,
+			Rank: 60, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "and a third",
+		},
+		{
+			Name: "zen-deepseek", Wire: WireChat, Gateway: true,
+			BaseURL: ZenBaseURL, Model: ZenDeepseek, APIKeyEnv: ZenKeyEnv,
+			Rank: 70, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "a fourth allowance on a cut down model, which L08 will say so about",
+		},
 	}}
 	registry.sort()
 	return registry
@@ -365,6 +383,20 @@ const (
 	// models and six of them are free, and the others are metered, which this
 	// corpus does not spend.
 	ZenModel = "nemotron-3-ultra-free"
+	// The other free slugs. The allowance is per model and not per account,
+	// which was measured rather than assumed: with nemotron answering 429
+	// FreeUsageLimitError to every call, deepseek, hy3 and laguna all answered
+	// 200 in the same minute. So a run that has exhausted one of them has three
+	// more to go at, and a translation of a volume that would have sat on its
+	// backoff for the rest of the day carries on. They are separate routes
+	// rather than a list on one, because the pool ranks and counts routes and a
+	// route that is out of turns has to be the thing that is out.
+	//
+	// ZenDeepseek is a cut down model by its name, so quality.SmallModel says
+	// so, L08 reports any section it writes, and it is ranked last of the four.
+	ZenHy3      = "hy3-free"
+	ZenLaguna   = "laguna-s-2.1-free"
+	ZenDeepseek = "deepseek-v4-flash-free"
 	// ZenKeyEnv is the variable opencode itself writes, so a machine that has
 	// the CLI set up has the route working already.
 	ZenKeyEnv = "OPENCODE_API_KEY"
