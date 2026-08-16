@@ -91,6 +91,20 @@ func TestParse(t *testing.T) {
 			Chapter: "VIII", Appendix: true, Page: 429,
 			Kind: corpus.KindProposition, Number: 3}},
 	}, {
+		// The other printing names the no. where this one names the page, and it
+		// writes the appendix where the § would stand. See sectionOrAppendix.
+		name: "an appendix named by its no.",
+		in:   "a balanced word A in L(S) (Chapter I, Appendix, no. 3) which satisfies",
+		want: []Citation{{Raw: "Chapter I, Appendix, no. 3", Form: FormSection,
+			Chapter: "I", Appendix: true, Subsec: 3}},
+	}, {
+		name: "a corollary in an appendix named by its no.",
+		in:   "if A is of the form $f$ (Chapter I, Appendix, no. 3, Corollary 2 of Proposition 2), where",
+		want: []Citation{{Raw: "Chapter I, Appendix, no. 3, Corollary 2 of Proposition 2",
+			Form: FormAttached, Chapter: "I", Appendix: true, Subsec: 3,
+			Kind: corpus.KindCorollary, Number: 2,
+			ParentKind: corpus.KindProposition, ParentNumber: 2}},
+	}, {
 		// A heading is the statement, not a reference to it.
 		name: "a heading is not a citation",
 		in:   "#### Proposition 7 {#alg-viii-s1-prop-7 .statement tag=000X}",
