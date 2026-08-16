@@ -160,10 +160,11 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 	// The fleet first, in the order of verified profiles then free memory, and
 	// the gateway last. Last is the point of it: it costs nothing and it cannot
 	// read a page, so it is what the text stages fall through to and never what
-	// anything lands on by default. The gateway is four routes because the free
+	// anything lands on by default. The gateway is six routes because the free
 	// allowance is per model, so one slug out of turns is not the gateway out of
-	// turns.
-	if got := registry.Names(); strings.Join(got, ",") != "server3,server2,server1,zen,zen-hy3,zen-laguna,zen-deepseek" {
+	// turns, and the six do not come back together either: probed an hour apart,
+	// one probe had a single slug answering and the next had two.
+	if got := registry.Names(); strings.Join(got, ",") != "server3,server2,server1,zen,zen-hy3,zen-laguna,zen-deepseek,zen-mimo,zen-lightning" {
 		t.Errorf("Names = %v; the fleet ranks on verified profiles then free memory, and the gateway ranks last", got)
 	}
 	// Every route is enabled and every one carries the numbers it was ranked
@@ -173,7 +174,8 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 		name        string
 		concurrency int
 	}{{"server3", 4}, {"server2", 3}, {"server1", 1}, {"zen", 2},
-		{"zen-hy3", 2}, {"zen-laguna", 2}, {"zen-deepseek", 2}} {
+		{"zen-hy3", 2}, {"zen-laguna", 2}, {"zen-deepseek", 2},
+		{"zen-mimo", 2}, {"zen-lightning", 2}} {
 		value, ok := registry.Find(want.name)
 		if !ok {
 			t.Fatalf("%s is missing from the built-in fleet", want.name)
@@ -189,8 +191,8 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 			t.Errorf("%s has no note saying what it was ranked on", want.name)
 		}
 	}
-	if got := NewPool(registry).Lanes(); got != 16 {
-		t.Errorf("the fleet and the gateway carry %d calls at once, want 16", got)
+	if got := NewPool(registry).Lanes(); got != 20 {
+		t.Errorf("the fleet and the gateway carry %d calls at once, want 20", got)
 	}
 	// The gateway is the only route with no box behind it, and that is what
 	// keeps OCR off it.
@@ -232,7 +234,7 @@ func TestSelectOverridesDisabled(t *testing.T) {
 // The reason the gateway is four routes. The allowance is per model, so a run
 // that has exhausted one slug has three more, and each has to be a route of its
 // own for the pool to count it and to take it out when it is done.
-func TestTheGatewayIsFourFreeModels(t *testing.T) {
+func TestTheGatewayIsSixFreeModels(t *testing.T) {
 	registry := Default()
 	seen := map[string]string{}
 	for _, value := range registry.Routes {
@@ -250,8 +252,8 @@ func TestTheGatewayIsFourFreeModels(t *testing.T) {
 			t.Errorf("%s is on %s, which is not a free slug and this corpus does not spend", value.Name, value.Model)
 		}
 	}
-	if len(seen) != 4 {
-		t.Fatalf("the gateway carries %d models, want the four free ones", len(seen))
+	if len(seen) != 6 {
+		t.Fatalf("the gateway carries %d models, want the six free ones", len(seen))
 	}
 }
 
