@@ -53,7 +53,7 @@ func TestAnAnsweredChunkIsNotAskedFor(t *testing.T) {
 		t.Fatalf("the fixture came to %d chunks", len(j.chunks))
 	}
 
-	have, queued, stuck, err := plan(q, root, "vi", "prompt-v1", j, false)
+	have, queued, stuck, err := plan(q, root, "vi", "prompt-v1", j, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestAnAnsweredChunkIsNotAskedFor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	have, queued, stuck, err = plan(q, root, "vi", "prompt-v1", j, false)
+	have, queued, stuck, err = plan(q, root, "vi", "prompt-v1", j, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -100,7 +100,7 @@ func TestAChangeOfTerminologyIsANewChunk(t *testing.T) {
 	moved := j
 	moved.terms = "terms-v2"
 
-	have, queued, _, err := plan(q, root, "vi", "prompt-v1", moved, false)
+	have, queued, _, err := plan(q, root, "vi", "prompt-v1", moved, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +120,7 @@ func TestAChangeOfInstructionsIsANewChunk(t *testing.T) {
 		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
 		t.Fatal(err)
 	}
-	have, queued, _, err := plan(q, root, "vi", "prompt-v2", j, false)
+	have, queued, _, err := plan(q, root, "vi", "prompt-v2", j, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestAnAnswerWithNoInstructionsRecordedIsAskedAgain(t *testing.T) {
 		Input: chunkInput(first.Body, j.terms), Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
 		t.Fatal(err)
 	}
-	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false)
+	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,7 +153,7 @@ func TestAnAnswerWithNoInstructionsRecordedIsAskedAgain(t *testing.T) {
 func TestADoneChunkWithNoAnswerIsAskedForAgain(t *testing.T) {
 	q, root := openQueue(t)
 	j := section()
-	if _, _, _, err := plan(q, root, "vi", "prompt-v1", j, false); err != nil {
+	if _, _, _, err := plan(q, root, "vi", "prompt-v1", j, false, false); err != nil {
 		t.Fatal(err)
 	}
 	// Whichever one comes out. Jobs are handed out in id order, which is hash
@@ -179,7 +179,7 @@ func TestADoneChunkWithNoAnswerIsAskedForAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	have, queued, stuck, err := plan(q, root, "vi", "prompt-v1", j, false)
+	have, queued, stuck, err := plan(q, root, "vi", "prompt-v1", j, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -197,7 +197,7 @@ func TestADeadChunkStopsTheSectionAndSaysSo(t *testing.T) {
 	q, root := openQueue(t)
 	q.MaxAttempts = 1
 	j := section()
-	if _, _, _, err := plan(q, root, "vi", "prompt-v1", j, false); err != nil {
+	if _, _, _, err := plan(q, root, "vi", "prompt-v1", j, false, false); err != nil {
 		t.Fatal(err)
 	}
 	item, err := q.Lease(queue.StageTranslate, "server3", translateGroup("vi", j.source), chunkLease)
@@ -208,7 +208,7 @@ func TestADeadChunkStopsTheSectionAndSaysSo(t *testing.T) {
 		t.Fatalf("Fail = %s %v", state, err)
 	}
 
-	have, queued, stuck, err := plan(q, root, "vi", "prompt-v1", j, false)
+	have, queued, stuck, err := plan(q, root, "vi", "prompt-v1", j, false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestADeadChunkStopsTheSectionAndSaysSo(t *testing.T) {
 	}
 
 	// -force is the way past it, since a person typing it has read the reason.
-	if _, queued, stuck, err = plan(q, root, "vi", "prompt-v1", j, true); err != nil {
+	if _, queued, stuck, err = plan(q, root, "vi", "prompt-v1", j, true, false); err != nil {
 		t.Fatal(err)
 	}
 	if len(stuck) != 0 || queued != 3 {
@@ -243,7 +243,7 @@ func TestForceAsksAgainForAnAnswerThatIsOnDisk(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, true)
+	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -260,10 +260,10 @@ func TestASectionOnlyLeasesItsOwnChunks(t *testing.T) {
 	first := section()
 	second := section()
 	second.source = "content/en/alg/VIII/04_s4_semisimple_modules.md"
-	if _, _, _, err := plan(q, root, "vi", "prompt-v1", first, false); err != nil {
+	if _, _, _, err := plan(q, root, "vi", "prompt-v1", first, false, false); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, err := plan(q, root, "vi", "prompt-v1", second, false); err != nil {
+	if _, _, _, err := plan(q, root, "vi", "prompt-v1", second, false, false); err != nil {
 		t.Fatal(err)
 	}
 	group := translateGroup("vi", first.source)
@@ -329,12 +329,12 @@ func TestPlanningUnderNewInstructionsTakesTheOldChunksOffTheQueue(t *testing.T) 
 	q, root := openQueue(t)
 	j := section()
 
-	if _, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false); err != nil {
+	if _, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false, false); err != nil {
 		t.Fatal(err)
 	} else if queued != 3 {
 		t.Fatalf("queued %d under the first instructions, want 3", queued)
 	}
-	if _, queued, _, err := plan(q, root, "vi", "prompt-v2", j, false); err != nil {
+	if _, queued, _, err := plan(q, root, "vi", "prompt-v2", j, false, false); err != nil {
 		t.Fatal(err)
 	} else if queued != 3 {
 		t.Fatalf("queued %d under the second, want 3", queued)
@@ -383,7 +383,7 @@ func TestAProviderThatWillNotAnswerDoesNotKillTheChunks(t *testing.T) {
 	// the end of this loop.
 	for run := 1; run <= 4; run++ {
 		_, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, g,
-			"vi", "prompt-v1", j, false, false, func(string, ...any) {})
+			"vi", "prompt-v1", j, false, false, false, func(string, ...any) {})
 		if len(problems) == 0 {
 			t.Fatalf("run %d: the section was written by a host that answers nothing", run)
 		}
@@ -454,5 +454,59 @@ func TestALeaseOutlastsBothAttemptsAtAChunk(t *testing.T) {
 	// somebody having copied the wrong constant.
 	if chunkDeadline > 10*time.Minute {
 		t.Errorf("one ask of one chunk is allowed %s, which is a number for a photograph of a page", chunkDeadline)
+	}
+}
+
+// -redo-small asks again for the chunks a cut down model answered, and leaves
+// the rest of the section alone.
+//
+// Nobody chooses the model. An account gets moved down between two runs of the
+// same section and half of it comes back on gpt-5-6-mini, which L08 says so
+// about afterwards. The only answer to that was -force, which throws away the
+// whole section: chapter I, § 1 is forty two chunks and four of them were on
+// the small model, so -force is thirty eight questions nobody needs to put and,
+// on the free gateway, most of a day.
+func TestRedoSmallAsksAgainOnlyForWhatTheSmallModelAnswered(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	for i, model := range []string{"gpt-5-6", "gpt-5-6-mini", "nemotron-3-ultra-free"} {
+		c := j.chunks[i]
+		if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: c.Index, Of: c.Of,
+			Input: chunkInput(c.Body, j.terms), Prompt: "prompt-v1", Model: model,
+			Text: "Đoạn thứ " + model + "."}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Without the flag the section is finished, small model and all, which is
+	// what makes L08 soft: the text may well be fine.
+	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) != 3 || queued != 0 {
+		t.Fatalf("without the flag: have %d, queued %d, want all three in hand", len(have), queued)
+	}
+
+	have, queued, stuck, err := plan(q, root, "vi", "prompt-v1", j, false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queued != 1 {
+		t.Errorf("queued %d chunks, want the one gpt-5-6-mini answered", queued)
+	}
+	if len(stuck) != 0 {
+		t.Errorf("%d chunks are stuck, and none of them was asked for yet", len(stuck))
+	}
+	if len(have) != 2 {
+		t.Fatalf("have %d answers, want the two a full model gave", len(have))
+	}
+	if _, ok := have[j.chunks[1].Index]; ok {
+		t.Error("the answer gpt-5-6-mini gave was read back, so nothing was asked again")
+	}
+	for _, i := range []int{0, 2} {
+		if _, ok := have[j.chunks[i].Index]; !ok {
+			t.Errorf("chunk %d was asked again, and a full model had already answered it", j.chunks[i].Index)
+		}
 	}
 }

@@ -71,6 +71,8 @@ about a fifth of the words.
   -limit N       stop after this many files
   -force         translate again even where a translation is already there and
                  not stale
+  -redo-small    ask again for whatever a cut down model answered, and only for
+                 that
   -hosts LIST    comma separated route names
   -routes PATH   route file
   -dry           print the first question and stop, without asking anything
@@ -123,6 +125,14 @@ with the reason rather than in silence.
 translated again, and its chunks are asked again rather than read back off disk,
 which is what -force is for: the section is there and it was written while the
 account was being served a cut down model.
+
+-redo-small is the same intention with a smaller bill. It takes the files L08
+names, the ones whose translation_model holds a cut down model, and it asks
+again for the chunks that model answered and for no others. Chapter I, § 1 is
+forty two chunks and four of them came back on gpt-5-6-mini, so -force is
+thirty eight questions nobody needs to put. Across the volume it was 22 answers
+out of 769. Nothing else moves: a file that is stale is stale for its own
+reason, and a file nobody has translated is still untranslated.
 `
 
 func runTranslate(args []string) error {
@@ -135,6 +145,7 @@ func runTranslate(args []string) error {
 	file := fs.String("file", "", "only this English file")
 	limit := fs.Int("limit", 0, "stop after this many sections")
 	force := fs.Bool("force", false, "translate again even where it is not stale")
+	redoSmall := fs.Bool("redo-small", false, "ask again for whatever a cut down model answered")
 	hostList := fs.String("hosts", "", "comma separated route names")
 	routeFile := fs.String("routes", "", "route file")
 	dry := fs.Bool("dry", false, "print the first question and stop")
@@ -179,7 +190,7 @@ func runTranslate(args []string) error {
 	if err != nil {
 		return err
 	}
-	jobs, skipped, err := translateJobs(root, g, *lang, *book, *chapter, *file, promptHash, *force)
+	jobs, skipped, err := translateJobs(root, g, *lang, *book, *chapter, *file, promptHash, *force, *redoSmall)
 	if err != nil {
 		return err
 	}
@@ -235,7 +246,7 @@ func runTranslate(args []string) error {
 	run := runID(*lang, promptHash, jobs)
 	var written, refused int
 	for _, job := range jobs {
-		body, model, problems := translateFile(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *keep, logf)
+		body, model, problems := translateFile(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *redoSmall, *keep, logf)
 		if len(problems) > 0 {
 			refused++
 			logf("%s: refused, nothing written", job.source)
@@ -372,7 +383,7 @@ type job struct {
 // The walk is over content/en rather than over the sections manifest, because
 // the manifest records what the assembler produced and this has to translate
 // what is on disk. The two agree today and the file is the thing being read.
-func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only, promptHash string, force bool) ([]job, int, error) {
+func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only, promptHash string, force, redoSmall bool) ([]job, int, error) {
 	dir := filepath.Join(root, "content", "en")
 	var paths []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
@@ -417,6 +428,18 @@ func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only,
 			fresh, j.why = currentExercise(root, lang, j.source, *j.ex, j.body, g.Version, promptHash, j.terms)
 		} else {
 			fresh, j.why = current(root, lang, j.source, j.meta, g.Version, promptHash, j.terms)
+		}
+		if fresh && redoSmall {
+			// The file is the one this run would make, and it is still not the
+			// file this book wants: some of it came back on a model that was
+			// handed out because an account had been throttled. That is not
+			// staleness, since nothing about the question changed, so the four
+			// hashes are right to call it current and L08 is what notices. A
+			// person who has read L08 and wants those answered again says so
+			// here.
+			if model := translatedBy(root, lang, j); quality.SmallModel(model) {
+				fresh, j.why = false, "it was translated by "+model+", which is a cut down model"
+			}
 		}
 		if !force && fresh {
 			skipped++
@@ -500,6 +523,37 @@ func current(root, lang, source string, en corpus.SectionFrontMatter, version in
 	return true, ""
 }
 
+// translatedBy is what the translation on disk says answered it.
+//
+// One string for the whole file, and it is a list when the chunks did not all
+// come back from the same place, which is the usual case: "laguna-s-2.1-free,
+// hy3-free, gpt-5-6, gpt-5-6-mini" is one real section of chapter I. That is
+// why the caller hands the whole string to quality.SmallModel rather than
+// picking it apart. One cut down model anywhere in a file is a file worth
+// asking about again, and it is the same test L08 prints.
+//
+// A file that is not there answers with nothing, and nothing is not a cut down
+// model, so a missing translation stays a missing translation and is stale for
+// the ordinary reason.
+func translatedBy(root, lang string, j job) string {
+	if j.ex != nil {
+		meta := *j.ex
+		meta.Lang = lang
+		f, err := corpus.ReadFile[corpus.ExerciseFrontMatter](corpus.ExercisePath(root, lang, meta))
+		if err != nil {
+			return ""
+		}
+		return f.Meta.TranslationModel
+	}
+	meta := j.meta
+	meta.Lang = lang
+	f, err := corpus.ReadFile[corpus.SectionFrontMatter](corpus.SectionPath(root, lang, meta))
+	if err != nil {
+		return ""
+	}
+	return f.Meta.TranslationModel
+}
+
 // currentExercise is the same four questions asked of a translated exercise.
 //
 // The only difference is the second one. A section compares the hash the
@@ -542,8 +596,8 @@ func currentExercise(root, lang, source string, en corpus.ExerciseFrontMatter, b
 // every accepted answer as it arrives. A run that is killed at chunk twelve
 // costs chunk twelve, and the next run asks for that one and joins it to the
 // eleven already on disk.
-func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
-	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force)
+func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, redoSmall, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
+	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force, redoSmall)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "queue", Msg: err.Error()}}
 	}

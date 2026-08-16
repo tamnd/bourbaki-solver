@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -169,7 +170,7 @@ func TestTheDigestIsTheRowsAndNotTheGlossary(t *testing.T) {
 // stale is what a run would do, without asking anything.
 func stale(t *testing.T, root string, g *glossary.Glossary) []job {
 	t.Helper()
-	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash", false)
+	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,7 +344,7 @@ func TestAChangeOfInstructionsReachesAnExercise(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash-2", false)
+	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash-2", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,4 +370,59 @@ func writeEnglishExercise(t *testing.T, root string, n int, body string) {
 	if err := (corpus.ExerciseFile{Meta: m, Body: body}).Write(path); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// staleUnder is stale with -redo-small on.
+func staleUnder(t *testing.T, root string, g *glossary.Glossary, redoSmall bool) []job {
+	t.Helper()
+	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash", false, redoSmall)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return jobs
+}
+
+// A file a cut down model wrote is not stale, and -redo-small reaches it anyway.
+//
+// Nothing about the question changed, so the four hashes are right to call the
+// file current, and that is the whole difficulty: the run has no reason to look
+// at it again and the only record that anything is wrong is L08 in the audit. A
+// person who has read L08 says -redo-small and the file comes back on the list
+// with the model as the reason.
+func TestRedoSmallReachesAFileACutDownModelWrote(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "ring", VI: "vành"}}}
+	const english = "Let A be a ring."
+	writeEnglish(t, root, 1, english)
+	writeVietnameseBy(t, root, g, 1, english, "laguna-s-2.1-free, hy3-free, gpt-5-6, gpt-5-6-mini")
+	writeEnglish(t, root, 2, english)
+	writeVietnameseBy(t, root, g, 2, english, "gpt-5-6")
+
+	if got := staleUnder(t, root, g, false); len(got) != 0 {
+		t.Fatalf("%d files are stale, and the four hashes hold for both", len(got))
+	}
+	got := staleUnder(t, root, g, true)
+	if len(got) != 1 {
+		t.Fatalf("-redo-small put %d files on the list, want the one with a cut down model in it", len(got))
+	}
+	if got[0].meta.Section != 1 {
+		t.Errorf("it put § %d on the list, and § 1 is the one gpt-5-6-mini touched", got[0].meta.Section)
+	}
+	if !strings.Contains(got[0].why, "cut down model") {
+		t.Errorf("the reason reads %q, and it should say what is wrong with the file", got[0].why)
+	}
+}
+
+// writeVietnameseBy is writeVietnamese with the models named, which is the one
+// fact -redo-small reads.
+func writeVietnameseBy(t *testing.T, root string, g *glossary.Glossary, n int, english, model string) {
+	t.Helper()
+	writeVietnamese(t, root, g, n, english)
+	path := vietnamesePath(root, n)
+	f, err := corpus.ReadFile[corpus.SectionFrontMatter](path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Meta.TranslationModel = model
+	writeSection(t, path, corpus.SectionFile{Meta: f.Meta, Body: f.Body})
 }
