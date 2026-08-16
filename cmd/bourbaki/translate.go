@@ -593,6 +593,29 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 						}
 						return
 					}
+					if transportOnly(bad) {
+						// The provider never read the question. That is not the
+						// chunk failing, and it must not spend one of the
+						// chunk's three attempts: a gateway that is out of turns
+						// for the day otherwise kills the whole section in a
+						// minute and a half, which is what it did. Forty two
+						// chunks of chapter I, § 1 went from pending to dead in
+						// one minute fourteen seconds, and no model behind them
+						// had been asked anything at all.
+						//
+						// The lane goes with it. A route that has just answered
+						// 429 with fifteen hours on it will answer the next
+						// chunk the same way, and the queue is shared, so
+						// retiring this lane puts the work in front of one that
+						// is still answering. What is left at the end is the
+						// section refused with its chunks pending, which is the
+						// true state of it, and the next run asks again.
+						if err := q.Release(item, bad[0].Msg); err != nil {
+							logf("%s: %v", host.Name, err)
+						}
+						logf("%s: this lane is done for now, %s", host.Name, bad[0].Msg)
+						return
+					}
 					if len(bad) > 0 {
 						state, err := q.Fail(item, bad[0].String())
 						if err != nil {
@@ -721,6 +744,26 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		last = problems
 	}
 	return "", "", last
+}
+
+// transportOnly says the fleet never got an answer, as against getting one that
+// was wrong.
+//
+// askChunk labels the two apart already: a question that did not reach a model,
+// or reached one and came back as an error, is rule "transport", and everything
+// else in this list is package translate saying what was wrong with the text. So
+// the test is that every complaint is a transport one, and an empty list is not,
+// since an empty list is a chunk that passed.
+func transportOnly(bad []translate.Problem) bool {
+	if len(bad) == 0 {
+		return false
+	}
+	for _, p := range bad {
+		if p.Rule != "transport" {
+			return false
+		}
+	}
+	return true
 }
 
 // retryNote is what the second ask adds.
