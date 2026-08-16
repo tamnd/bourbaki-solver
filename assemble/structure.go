@@ -204,11 +204,16 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[int]bool,
 	f func(b block, r corpus.Ref, name, body string, ok bool) error) error {
 	no := 0
-	var parent corpus.Ref // the last statement a Corollary could be numbered under
-	var run corpus.Ref    // the run of remarks or examples now open, if any
-	next := 0             // the number the next member of that run would carry
+	var parent corpus.Ref           // the last statement a Corollary could be numbered under
+	var run corpus.Ref              // the run of remarks or examples now open, if any
+	next := 0                       // the number the next member of that run would carry
+	passed := map[corpus.Ref]bool{} // the numbered statements printed so far
 	occ := map[corpus.Ref]int{}
-	opened := map[corpus.Ref]bool{} // the runs a bare lead has already opened, by no.
+	runs, err := runCount(blocks, id, pr) // how many runs of each kind the no. prints
+	if err != nil {
+		return err
+	}
+	seen := map[corpus.Ref]int{} // how many of them have been passed
 	queue := slices.Clone(blocks)
 	for i := 0; i < len(queue); i++ {
 		b := queue[i]
@@ -232,16 +237,24 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 		// moves: the members number from 1 under it, and each of them becomes a
 		// statement of its own the same way a member of any other run does.
 		//
-		// A second run of the same kind in one no. is left alone. Three no. of
-		// Theory of Sets print one: no. 1 of § 1 of chapter III sets three
-		// examples on page 131 and four more on page 132, and the second lot
-		// starts again at (1). The volume cites both by their printed numbers,
-		// "no. 1, Example 3" on one page meaning the third of the second lot, so
-		// there are two Example 3 in that no. and a label can hold one. Numbering
-		// the second lot on from the first would put a number on a statement that
-		// the book does not give it, so the members stay as they are printed and
-		// the audit goes on saying the § has no Example 4. What is not done here
-		// is guessing.
+		// Where a no. prints two runs of one kind, the last one carries the
+		// numbering and the earlier ones are left as the prose they are printed
+		// as. Three no. of Theory of Sets print two: no. 1 of § 1 of chapter III
+		// sets three examples on page 131 and four more on page 132, and the
+		// second lot starts again at (1), so a label can hold one of the two
+		// Example 3 and the volume has to say which it means. It says so three
+		// times over. "no. 1, Example 3" is cited on pages 137, 142 and 145 and
+		// every one of them is the set of mappings of subsets of E into F ordered
+		// by extension, which is the third member of the second lot; the third of
+		// the first lot is the opposite of an order relation and is not what any
+		// of those sentences is about. "no. 1, Example 4", cited on page 137 and
+		// in exercise 18, is the partitions of a set ordered by fineness, and the
+		// first lot has no fourth member at all.
+		//
+		// So the numbering the volume cites by is the last run's, and that is the
+		// run that gets the numbers. This is counted before the walk rather than
+		// decided as each head is passed, because the first head cannot know
+		// whether another one follows it in the same no.
 		if pr.runHead != nil {
 			if k := pr.runHead.FindStringSubmatch(b.text); k != nil {
 				kind, ok := corpus.KindFromHeading(k[1])
@@ -250,10 +263,10 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 				}
 				key := corpus.Ref{Book: id.Book, Chapter: id.Chapter, Section: id.Section,
 					Kind: kind, Subsec: no}
-				if opened[key] {
-					next = 0 // the run is closed, so its members do not carry on into this one
+				seen[key]++
+				if seen[key] < runs[key] {
+					next = 0 // an earlier run of the kind, so its members are not numbered
 				} else {
-					opened[key] = true
 					run, next = key, 1
 				}
 				if err := f(b, corpus.Ref{}, "", "", false); err != nil {
@@ -282,9 +295,18 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 		if ok && r.Number > 0 {
 			switch r.Kind.Scope() {
 			case corpus.ScopeSection:
-				parent = r
+				parent, passed[r] = r, true
 			case corpus.ScopeSubsec:
 				run, next = r, r.Number+1
+			}
+		}
+		// A proof the printing broke off and takes up again hands the reader
+		// back to the statement it is a proof of, and the corollaries printed
+		// after it hang from that statement and not from the last lemma the
+		// proof needed. See resumed.
+		if !ok {
+			if back, is := resumed(b.text, id, pr, passed); is {
+				parent = back
 			}
 		}
 		if err := f(b, r, name, body, ok); err != nil {
@@ -292,6 +314,90 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 		}
 	}
 	return nil
+}
+
+// resumed is the statement a paragraph hands the reader back to, and false
+// where the paragraph hands them back to nothing.
+//
+// A long proof is broken off, the lemmas it needs are stated and proved, and
+// then the printing says it is taking the proof up again. What comes after that
+// belongs to the statement being proved, and a Corollary printed there is a
+// corollary of it. Read without this the corollary is numbered under the last
+// lemma, which is the statement the reader passed most recently and not the one
+// the page is about.
+//
+// No. 3 of § 6 of chapter III of Theory of Sets is the case that made this
+// worth writing. It prints Theorem 2, then Lemma 1 and Lemma 2 with their
+// proofs, then "¶ We come now to the proof of Theorem 2." on page 187, and then
+// four corollaries on page 188. The volume says whose they are on that same
+// page: Proposition 1 of no. 4 is proved by "The others follow from the
+// Corollaries to Theorem 2, no. 3", and § 3 cites "§ 6, no. 3, Theorem 3,
+// Corollary 4" for a fact that is Corollary 4 there. Read as the last lemma's
+// they were called ens-iii-s6-lem-2-cor-1 to 4, which no sentence of the volume
+// names.
+//
+// § 1 of chapter III of Théories spectrales does the same and says so in the
+// corollary itself. Page TS III.13 prints "Terminons la démonstration du
+// théorème 3.", the proof, and then "COROLLAIRE 1. — Conservons les hypothèses
+// du théorème 3", followed by Corollaire 2, which is Lomonosov's theorem, and
+// Corollaire 3. Those three were numbered under Lemme 1.
+//
+// Those two are the whole of it. Eight paragraphs of the corpus, four in each
+// language, say the proof of a numbered statement is being taken up or ended,
+// and in the other six what follows is a heading, an unnumbered Remark or an
+// unnumbered Example, none of which is numbered under anything. So nothing else
+// in either language moves.
+//
+// The statement has to have been printed already. A paragraph that promises a
+// proof still to come is not handing the reader back to anything, and a number
+// the § has not reached is a number this cannot name.
+func resumed(text string, id corpus.Ref, pr printing, passed map[corpus.Ref]bool) (corpus.Ref, bool) {
+	if pr.resume == nil {
+		return corpus.Ref{}, false
+	}
+	m := pr.resume.FindStringSubmatch(text)
+	if m == nil {
+		return corpus.Ref{}, false
+	}
+	kind, ok := corpus.KindFromHeading(m[1])
+	if !ok {
+		return corpus.Ref{}, false
+	}
+	r := id
+	r.Kind = kind
+	r.Number, _ = strconv.Atoi(m[2])
+	if !passed[r] {
+		return corpus.Ref{}, false
+	}
+	return r, true
+}
+
+// runCount is how many runs of each kind each no. of the piece prints, read off
+// the blocks before the walk that needs it. It is empty for every printing that
+// has no head of this sort, which is all of them but Theory of Sets.
+func runCount(blocks []block, id corpus.Ref, pr printing) (map[corpus.Ref]int, error) {
+	out := map[corpus.Ref]int{}
+	if pr.runHead == nil {
+		return out, nil
+	}
+	no := 0
+	for _, b := range blocks {
+		if m := subsecRE.FindStringSubmatch(b.text); m != nil {
+			no, _ = strconv.Atoi(m[1])
+			continue
+		}
+		k := pr.runHead.FindStringSubmatch(b.text)
+		if k == nil {
+			continue
+		}
+		kind, ok := corpus.KindFromHeading(k[1])
+		if !ok {
+			return nil, fmt.Errorf("nothing in the corpus is called a %q", k[1])
+		}
+		out[corpus.Ref{Book: id.Book, Chapter: id.Chapter, Section: id.Section,
+			Kind: kind, Subsec: no}]++
+	}
+	return out, nil
 }
 
 // numbers is every number the book gives a statement of the piece, by the kind

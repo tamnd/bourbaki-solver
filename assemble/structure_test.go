@@ -749,10 +749,10 @@ func TestARunSplitsTwoMembersThePageRanTogether(t *testing.T) {
 	}
 }
 
-// The second run of a kind in one no. is left as prose. Numbering it on from
-// the first would put a number on a statement that the book does not give it,
-// and its own numbers are already spoken for. See walk.
-func TestASecondRunOfOneKindInANoIsLeftAlone(t *testing.T) {
+// Where a no. prints two runs of one kind the numbers belong to the last, which
+// is the run the volume cites by, and the earlier one is left as the prose it is
+// printed as. See walk.
+func TestTheLastRunOfAKindInANoCarriesTheNumbering(t *testing.T) {
 	in := blocks(
 		"### 1. Definition of an Order Relation",
 		"*Examples*",
@@ -768,14 +768,59 @@ func TestASecondRunOfOneKindInANoIsLeftAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	same(t, labels(got), []string{"ens-iii-s1-n1-exa-1", "ens-iii-s1-n1-exa-2"})
+	same(t, labels(got), []string{"ens-iii-s1-n1-exa-1", "ens-iii-s1-n1-exa-2", "ens-iii-s1-n1-exa-3"})
+	if want := "(3) The relation g extends f."; slices.Contains(texts(out), want) {
+		t.Errorf("the last run was left as prose: %q", want)
+	}
 	for _, want := range []string{
-		"(1) The relations of equality and inclusion.",
-		"(2) The order relation induced on E.",
-		"(3) The relation g extends f.",
+		"(1) The relation $x = x$ is not collectivizing.",
+		"(2) An order relation on a set E.",
 	} {
 		if !slices.Contains(texts(out), want) {
-			t.Errorf("the second run was taken apart: %q", want)
+			t.Errorf("the earlier run was taken apart: %q", want)
 		}
 	}
+}
+
+// A proof taken up again puts the statement it proves back in force, so the
+// corollaries printed after it hang from that statement and not from the last
+// lemma the proof needed. See resumed.
+func TestAProofTakenUpAgainCarriesTheCorollaries(t *testing.T) {
+	in := blocks(
+		"### 3. Properties of Infinite Cardinals",
+		"**Theorem 2.** *Let* $\\mathfrak{a}$ *be an infinite cardinal.*",
+		"**Lemma 1.** *Every infinite set contains a countable subset.*",
+		"The proof is by Zorn's lemma.",
+		"**Lemma 2.** *There is a bijection of* D *onto* D $\\times$ D.",
+		"¶ We come now to the proof of Theorem 2. Let E be a set.",
+		"**Corollary 1.** $\\mathfrak{a}^n = \\mathfrak{a}$ *for every integer* $n \\geqslant 1$.",
+		"**Corollary 2.** *The product of a finite family of non-zero cardinals.*",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "III", Section: 6}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-iii-s6-thm-2",
+		"ens-iii-s6-lem-1",
+		"ens-iii-s6-lem-2",
+		"ens-iii-s6-thm-2-cor-1",
+		"ens-iii-s6-thm-2-cor-2",
+	})
+}
+
+// A paragraph naming a statement the § has not printed yet hands the reader back
+// to nothing, and the corollary under it stays where the printing put it.
+func TestAProofNotYetReachedLeavesTheParentAlone(t *testing.T) {
+	in := blocks(
+		"### 1. Compact Linear Mappings",
+		"**Lemma 1.** *Let* E *be a locally convex space.*",
+		"We shall complete the proof of Theorem 9 in the next no.",
+		"**Corollary 1.** *Keep the hypotheses of Lemma 1.*",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "ts", Chapter: "III", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"ts-iii-s1-lem-1", "ts-iii-s1-lem-1-cor-1"})
 }
