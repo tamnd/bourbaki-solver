@@ -538,3 +538,47 @@ func StackedMatrices(body string) int {
 func StackedRows(body string) []string {
 	return stackedRowRE.FindAllString(body, -1)
 }
+
+// Strip takes the mathematics out of a line and leaves the prose.
+//
+// What comes back is not TeX and is not meant to be read as any: the spans
+// become spaces, so words either side of a formula do not run together and the
+// line can be searched for an English word without a symbol inside a formula
+// answering for one. A backslash escape outside the mathematics keeps both of
+// its characters, since that is prose with a literal dollar in it.
+//
+// It lives here because the dollar scanning is this package's and two copies of
+// it would drift, which is exactly what happened: the audit had the only copy
+// and the run needs the same one, so a term left in English is caught in the
+// minute the chunk comes back rather than in a report nobody acts on.
+func Strip(s string) string {
+	var b strings.Builder
+	in := false
+	rs := []rune(s)
+	for i := 0; i < len(rs); i++ {
+		switch {
+		case rs[i] == '\\' && i+1 < len(rs):
+			if !in {
+				b.WriteRune(rs[i])
+				b.WriteRune(rs[i+1])
+			}
+			i++
+		case rs[i] == '$':
+			// A display opened and closed on one line is $$ at each end, and
+			// counting each dollar of it flips the switch twice and leaves the
+			// formula standing as prose. That is not a corner: most of the
+			// displays of chapter II of Theory of Sets are written this way,
+			// and read as prose they say the English words left, right and
+			// square, which is where ten of the twelve terminology findings
+			// against the Vietnamese came from.
+			if i+1 < len(rs) && rs[i+1] == '$' {
+				i++
+			}
+			in = !in
+			b.WriteRune(' ')
+		case !in:
+			b.WriteRune(rs[i])
+		}
+	}
+	return b.String()
+}

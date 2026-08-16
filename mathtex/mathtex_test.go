@@ -434,3 +434,26 @@ func TestNothingToDoChangesNothing(t *testing.T) {
 		t.Errorf("Unstraddle changed a body it had nothing to do to")
 	}
 }
+
+// Strip leaves the prose and takes the mathematics, and a display written on
+// one line is mathematics.
+//
+// $$ at each end is two dollars, and counting each of them flips the switch
+// twice and hands the whole formula back as prose. That is not a corner of the
+// syntax: most of the displays of chapter II of Theory of Sets are written this
+// way, and read as prose they say the English words left, right and square,
+// which is where ten of the twelve terminology findings against the Vietnamese
+// came from.
+func TestStripTakesADisplayWrittenOnOneLine(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"from the square of $x$.", "from the square of   ."},
+		{"$$\\overline{\\tau \\vee \\neg \\in \\square} A'$$", "  "},
+		{"before $$x \\left( y \\right)$$ after", "before    after"},
+		{"a $b$ c $d$ e", "a    c    e"},
+		{"costs \\$5 outright", "costs \\$5 outright"},
+	} {
+		if got := Strip(c.in); got != c.want {
+			t.Errorf("Strip(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

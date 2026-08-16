@@ -10,6 +10,8 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
+	"github.com/tamnd/bourbaki-solver/mathtex"
+	"github.com/tamnd/bourbaki-solver/translate"
 )
 
 // A translation of Bourbaki is a translation of the prose and a copy of the
@@ -657,28 +659,10 @@ func paragraphs(body string) []para {
 	return out
 }
 
-// stripMath takes the inline mathematics out of a line of prose.
-func stripMath(s string) string {
-	var b strings.Builder
-	in := false
-	rs := []rune(s)
-	for i := 0; i < len(rs); i++ {
-		switch {
-		case rs[i] == '\\' && i+1 < len(rs):
-			if !in {
-				b.WriteRune(rs[i])
-				b.WriteRune(rs[i+1])
-			}
-			i++
-		case rs[i] == '$':
-			in = !in
-			b.WriteRune(' ')
-		case !in:
-			b.WriteRune(rs[i])
-		}
-	}
-	return b.String()
-}
+// stripMath takes the inline mathematics out of a line of prose. It is
+// mathtex.Strip, which the run uses as well, so that the rule the audit reports
+// and the rule the run refuses on cannot come apart.
+func stripMath(s string) string { return mathtex.Strip(s) }
 
 // smallModel is the name of a model that is a cut down version of another one.
 //
@@ -777,22 +761,36 @@ func l10(c *Corpus) ([]Finding, error) {
 	}
 	ps, out := c.pairs()
 	for _, p := range ps {
-		tr := strings.ToLower(prose(p.tr.Body))
 		// Its own volume's rows, as in L06: a term scoped to another book was
 		// never in this file's prompt and cannot be what it was told to write.
-		for _, t := range g.For(BookOf(p.tr)).Mentioned(p.tr.Lang, strings.ToLower(prose(p.en.Body))) {
-			if strings.EqualFold(t.EN, t.In(p.tr.Lang)) {
-				continue
-			}
-			if !glossary.Mentions(tr, t.EN) {
-				continue
-			}
-			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(mentionLine(p.tr.Body, t.EN)),
-				Msg: fmt.Sprintf("%q is still in English, where the glossary writes %q",
-					t.EN, t.In(p.tr.Lang))})
+		//
+		// The test itself is translate.AuditTerms, which is the same test the
+		// run makes of every chunk as it comes back. Two implementations of one
+		// rule is how the run came to accept what the audit then refused, and
+		// how both of them came to read \square inside a one line display as
+		// the English word square.
+		for _, why := range translate.AuditTerms(p.tr.Lang, g.For(BookOf(p.tr)), p.en.Body, p.tr.Body) {
+			term := quoted(why.Msg)
+			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(mentionLine(p.tr.Body, term)),
+				Msg: why.Msg})
 		}
 	}
 	return out, nil
+}
+
+// quoted is the first quoted run of a complaint, which is the English term the
+// rule is about. The complaint is built next door in package translate and the
+// term is what a finding has to point a line number at.
+func quoted(msg string) string {
+	_, rest, ok := strings.Cut(msg, "\"")
+	if !ok {
+		return ""
+	}
+	term, _, ok := strings.Cut(rest, "\"")
+	if !ok {
+		return ""
+	}
+	return term
 }
 
 // mentionLine is the first line of a body whose prose holds this term, so that
