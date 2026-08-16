@@ -252,3 +252,40 @@ func TestALargeOperatorIsNotAnAccentWhateverCodeItArrivesUnder(t *testing.T) {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// The kern that centres an accent over a capital, which the layer hands back as
+// a space, beside the word gap in front of a lowercase one, which it also hands
+// back as a space. Both lines are off page 176 and page 34 of Lie 7 to 9, and
+// the boxes are what the volume draws: the letter is set back over the accent
+// in each, so what tells the two apart is the capital and not the geometry.
+const capitalAccentPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="176" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="4" size="15" family="MPGQKB+CMBX10" color="#000000"/>
+<fontspec id="7" size="15" family="MPGQKC+CMTI10" color="#000000"/>
+<text top="704" left="83" width="375" height="13" font="4"><b>3. INTEGRAL VARIANT OF THE POINCAR ´</b></text>
+<text top="704" left="448" width="116" height="13" font="4"><b>E-BIRKHOFF-</b></text>
+<text top="378" left="262" width="23" height="13" font="7"><i>is ´</i></text>
+<text top="378" left="278" width="48" height="13" font="7"><i>etale at</i></text>
+</page>
+</pdf2xml>
+`
+
+func TestAnAccentOverACapitalStandsInTheWidthOfTheLetter(t *testing.T) {
+	lines := parse(t, capitalAccentPage)
+	want := []string{
+		`is étale at`,
+		// The bold closes and opens again where the two runs meet, which is
+		// the emitter and not this rule, and which the page never shows since
+		// the line is a heading and a heading is stripped of its markers.
+		`**3. INTEGRAL VARIANT OF THE POINCARÉ****-BIRKHOFF-**`,
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("got %d lines, want %d", len(lines), len(want))
+	}
+	for i, w := range want {
+		if got := Render(lines[i]); got != w {
+			t.Errorf("Render line %d:\n got %s\nwant %s", i, got, w)
+		}
+	}
+}

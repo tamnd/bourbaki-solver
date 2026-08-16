@@ -259,6 +259,27 @@ func composed(runs []Run) []Run {
 				// the run it arrives in is a mathematics run of one character
 				// and the page said "Alg$è$bre".
 				own := owner[i+1]
+				// The kern that centres the accent, handed back as a space.
+				// TeX sets an accent by moving right half the difference of
+				// the two widths, drawing it, and moving back over it. Over a
+				// capital that move is wide enough for the layer to call it a
+				// gap between words; over a lowercase letter it is not, since
+				// the accent is about as wide as the letter it stands on and
+				// the move is nothing or backwards. Page 176 of Lie 7 to 9
+				// heads its no. 3 with the Poincare-Birkhoff-Witt theorem and
+				// the corpus shipped "POINCAR É-BIRKHOFF" in the heading, in
+				// the file and in the table of contents.
+				//
+				// A capital and no other, and only where the letter was drawn
+				// back over the accent, because a space in front of a
+				// lowercase accent is a word gap and nothing else: the volume
+				// writes "is ´etale" on twenty-five lines and the copyright
+				// page sets "de ´edition".
+				if n := len(out); n > 0 && out[n-1].r == ' ' && unicode.IsUpper(c) &&
+					owner[i] != owner[i+1] &&
+					runs[owner[i+1]].Left <= runs[owner[i]].Right() {
+					out = out[:n-1]
+				}
 				if len(out) > 0 && unicode.IsLetter(out[len(out)-1].r) {
 					own = out[len(out)-1].own
 					// The word takes the ground the accent and the letter
