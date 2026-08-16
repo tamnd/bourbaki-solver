@@ -720,14 +720,35 @@ func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 			e.Meta.Supplementary = star != ""
 			e.Meta.Starred = pilcrow != ""
 			e.Meta.PDFPage = b.page
-			if l, ok := corpus.ParsePageLabel(b.label); ok {
-				e.Meta.BookPage = l.String()
-			}
+			e.Meta.BookPage = bookPage(b)
 			out = append(out, e)
 			text = afterMarker(m[0], text[i+markerLen(m):])
 		}
 	}
 	return out, nil
+}
+
+// bookPage is the page of the printed book an exercise starts on.
+//
+// A volume that prints a page label on the page is cited by that label, and the
+// label is what goes here: "A VIII.229". Lie 7 to 9 prints no label. It is
+// paginated straight through and puts the number in the running head, so the
+// folio read off that head is the only thing that says which page of the book
+// an exercise is printed on, and without this the 351 exercises of that volume
+// say nothing about where they are, which is worse than the wrong label they
+// used to carry.
+//
+// Bare, and not dressed up as a label. A § of the same volume already writes
+// its range of pages bare for the same reason, and a label naming a chapter
+// would be inventing a citation form the volume does not use.
+func bookPage(b block) string {
+	if l, ok := corpus.ParsePageLabel(b.label); ok {
+		return l.String()
+	}
+	if b.folio > 0 {
+		return strconv.Itoa(b.folio)
+	}
+	return ""
 }
 
 // onPage records that an exercise runs on into another block, and so on to

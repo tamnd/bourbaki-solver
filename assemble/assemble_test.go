@@ -159,6 +159,39 @@ func TestChapter(t *testing.T) {
 	}
 }
 
+// An exercise is cited by the page it is printed on, and in a volume with no
+// page label that page is the folio. The 351 exercises of Lie 7 to 9 said
+// nothing at all about where they are printed once the wrong label they used to
+// carry was taken off them.
+func TestAnExerciseWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
+	ch, pages := smallChapter()
+	got, err := Chapter("alg", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p := got[1].Exercises[0].Meta.BookPage; p != "A VIII.3" {
+		t.Errorf("exercise 1 is printed on %q, want the label of the page", p)
+	}
+	ch, pages = folioChapter()
+	if got, err = Chapter("alg", "en", ch, pages); err != nil {
+		t.Fatal(err)
+	}
+	if p := got[1].Exercises[0].Meta.BookPage; p != "17" {
+		t.Errorf("exercise 1 is printed on %q, want the folio of the page", p)
+	}
+	// The page the exercises open on prints no head and so no number, which is
+	// how all three chapters of Lie 7 to 9 open theirs.
+	opening := pages[20]
+	opening.Meta.Folio = 0
+	pages[20] = opening
+	if got, err = Chapter("alg", "en", ch, pages); err != nil {
+		t.Fatal(err)
+	}
+	if p := got[1].Exercises[0].Meta.BookPage; p != "17" {
+		t.Errorf("exercise 1 opening on an unnumbered page is printed on %q, want 17", p)
+	}
+}
+
 // The exercises go out as one file each, so the section keeps the heading a
 // cross-reference points at and a line saying where they went, and none of the
 // text of them.

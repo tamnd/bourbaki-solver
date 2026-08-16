@@ -68,33 +68,6 @@ type Run struct {
 	FirstFolio, LastFolio int
 }
 
-// folioRange is the printed numbers a run of pages lies between.
-//
-// A page that opens a chapter or a block of exercises prints no number at all.
-// Lie 7 to 9 carries the number in the running head, and a page that opens
-// something carries no head, so nothing on it says which page of the book it
-// is. Taking the ends as they stand loses the whole run, because a run with no
-// number at one end is written as no range at all, and § 1 of all three
-// chapters of that volume came out saying it is printed on no page of the book.
-//
-// The number of such a page is not in doubt. A run is consecutive in the
-// printing as much as in the file, so a page with no number of its own is the
-// numbered page nearest it in the run counted back to it. Nothing is written on
-// to the page by this: what is being said is which pages of the book a § is
-// printed on, and not what any one page prints.
-func folioRange(r []part) (first, last int) {
-	for i, p := range r {
-		if p.folio == 0 {
-			continue
-		}
-		if first == 0 {
-			first = p.folio - i
-		}
-		last = p.folio + len(r) - 1 - i
-	}
-	return first, last
-}
-
 // First and Last are the PDF pages the piece opens and ends on. Between them
 // can lie pages of another piece, which is why they are not the piece.
 func (p Piece) First() int {
@@ -190,11 +163,10 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 		parts := slices.Concat(runs[i]...)
 		p := out[i]
 		for _, r := range runs[i] {
-			first, last := folioRange(r)
 			p.Runs = append(p.Runs, Run{
 				First: r[0].page, Last: r[len(r)-1].page,
 				FirstLabel: r[0].label, LastLabel: r[len(r)-1].label,
-				FirstFolio: first, LastFolio: last,
+				FirstFolio: r[0].folio, LastFolio: r[len(r)-1].folio,
 			})
 		}
 		for _, q := range parts {
@@ -698,10 +670,44 @@ func slice(pages map[int]corpus.PageFile, from, to span, pr printing) ([]part, e
 	if len(out) == 0 {
 		return nil, fmt.Errorf("pdf pages %d to %d are empty", from.page, to.page)
 	}
+	fillFolios(out)
 	if from.head != "" {
 		out[0].body = openRun(out[0].body, from.head, from.mark)
 	}
 	return out, nil
+}
+
+// fillFolios gives a page that prints no number the number it stands at.
+//
+// A page that opens a chapter or a block of exercises carries no running head,
+// and a volume that prints its page number in the head therefore says nothing
+// on such a page about which page of the book it is. Lie 7 to 9 opens the
+// exercises of three § that way. Taken as it stands, § 1 of each of its three
+// chapters came out printed on no page of the book at all, because a run with
+// no number at one end is written as no range, and the eleven exercises printed
+// on those three pages came out the same way.
+//
+// The number is not in doubt. The pages of a piece are consecutive in the
+// printing as much as in the file, so a page with no number of its own is a
+// numbered page of the same piece counted along to it. Nothing is written back
+// on to the page by this. What is being asked for is which page of the book a
+// piece of text is printed on, and not what any one page prints.
+func fillFolios(parts []part) {
+	k := -1
+	for i, p := range parts {
+		if p.folio > 0 {
+			k = i
+			break
+		}
+	}
+	if k < 0 {
+		return // a volume that prints a page label instead, or none at all
+	}
+	for i := range parts {
+		if parts[i].folio == 0 {
+			parts[i].folio = parts[k].folio + parts[i].page - parts[k].page
+		}
+	}
 }
 
 // dropRunningHead takes the gathered exercises heading off a page in the middle
@@ -809,6 +815,9 @@ type block struct {
 	// is what lets a note find the block that marks it.
 	last  int
 	label string
+	// folio is the number printed on the page this block starts on, for the
+	// volumes that print a number and no label. See bookPage.
+	folio int
 }
 
 func render(blocks []block) string {
@@ -858,7 +867,7 @@ func join(parts []part, pr printing) ([]block, []note) {
 			bs = bs[1:]
 		}
 		for _, b := range bs {
-			blocks = append(blocks, block{text: b, page: p.page, last: p.page, label: p.label})
+			blocks = append(blocks, block{text: b, page: p.page, last: p.page, label: p.label, folio: p.folio})
 		}
 	}
 	return blocks, notes
@@ -957,7 +966,7 @@ func cutExercises(blocks []block, section int, appendix bool, pr printing) []blo
 			// Exercise 1 begins partway down the block, so what is in front of
 			// it is the last of the preamble and the rest is an exercise.
 			if head := strings.TrimSpace(b.text[:at]); head != "" {
-				out = append(out, block{text: head, page: b.page, last: b.last, label: b.label})
+				out = append(out, block{text: head, page: b.page, last: b.last, label: b.label, folio: b.folio})
 			}
 			break
 		}
@@ -967,7 +976,7 @@ func cutExercises(blocks []block, section int, appendix bool, pr printing) []blo
 			name = fmt.Sprintf("Appendix %d", section)
 		}
 		return append(out, block{text: fmt.Sprintf("See the [exercises for %s](exercises/%s/).", name, dir),
-			page: b.page, label: b.label})
+			page: b.page, label: b.label, folio: b.folio})
 	}
 	return blocks
 }
