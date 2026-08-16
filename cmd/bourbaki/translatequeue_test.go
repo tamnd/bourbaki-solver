@@ -429,3 +429,30 @@ func TestOnlyATransportFailureIsGivenBack(t *testing.T) {
 		}
 	}
 }
+
+// The lease has to outlast the work it is a lease on.
+//
+// A worker takes the lease, then asks, then asks again with the complaint if
+// the first answer did not pass. If the lease runs out in the middle of that,
+// the queue is entitled to give the chunk to another lane, and then two lanes
+// hold the same chunk and the book is asked for twice. This is the same fault
+// Supersede fixed from the other end, and it was live: the lease was three
+// minutes and one ask of one chunk on a box was allowed forty five, so a box
+// that stopped answering expired three chunks out from under itself in the
+// first nine minutes of a run.
+func TestALeaseOutlastsBothAttemptsAtAChunk(t *testing.T) {
+	if chunkDeadline <= 0 {
+		t.Fatalf("a chunk names no deadline, so a box takes the page default of %s", 45*time.Minute)
+	}
+	if chunkLease < 2*chunkDeadline {
+		t.Errorf("the lease is %s and the two asks it covers are %s, so the chunk expires while a lane is still on it",
+			chunkLease, 2*chunkDeadline)
+	}
+	// And the deadline is a chunk's number rather than a page's. Six thousand
+	// characters has measured between forty and seventy seconds and the
+	// gateway routes allow five minutes, so anything near the page default is
+	// somebody having copied the wrong constant.
+	if chunkDeadline > 10*time.Minute {
+		t.Errorf("one ask of one chunk is allowed %s, which is a number for a photograph of a page", chunkDeadline)
+	}
+}

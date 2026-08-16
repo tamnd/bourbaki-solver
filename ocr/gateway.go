@@ -106,8 +106,25 @@ func (g Gateway) Do(ctx context.Context) (Answer, error) {
 // and the difference between a rented box and a public endpoint is not theirs
 // to carry.
 func NewAsk(host Host, shell Shell, copier Copier, prompt, id string, keep bool) Asker {
+	return NewAskWithin(host, shell, copier, prompt, id, keep, 0)
+}
+
+// NewAskWithin is NewAsk with a bound on how long the question may take.
+//
+// A box question with no bound gets the page default, which is fifteen minutes
+// times three because a § is minutes of generation. A chunk of six thousand
+// characters is not that, it has measured between forty and seventy seconds,
+// and the difference is not academic: the caller holds a queue lease while it
+// waits, and a box that has stopped answering held three lanes of server3 for
+// nine minutes on a three minute lease, so the chunks expired underneath the
+// lanes still working on them and were free to be handed out twice.
+//
+// A deadline of zero is no bound, which is what the page path wants. A gateway
+// takes its bound from the HTTP client its route built and this is not passed
+// down to it, since a route already names the longest it will wait.
+func NewAskWithin(host Host, shell Shell, copier Copier, prompt, id string, keep bool, deadline time.Duration) Asker {
 	if host.Client != nil {
 		return Gateway{Name: host.Name, Client: host.Client, Model: host.Model, Prompt: prompt, ID: id}
 	}
-	return Ask{Host: host, Shell: shell, Copy: copier, Prompt: prompt, ID: id, Keep: keep}
+	return Ask{Host: host, Shell: shell, Copy: copier, Prompt: prompt, ID: id, Keep: keep, Deadline: deadline}
 }

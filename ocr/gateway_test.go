@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamnd/bourbaki-solver/api"
 )
@@ -113,5 +114,41 @@ func TestNewAskPicksTheTransportFromTheHost(t *testing.T) {
 		nil, nil, "question", "q1", false)
 	if _, ok := box.(Ask); !ok {
 		t.Errorf("a host with no client got %T", box)
+	}
+}
+
+// A box question can be given a bound, and a page question can decline one.
+//
+// The bound is the whole point of the second constructor. NewAsk left every
+// caller on the page default of forty five minutes, which is right for a
+// photograph and wrong for six thousand characters of prose, and a caller that
+// holds a queue lease while it waits cannot say how long the lease should be if
+// it cannot say how long the ask may take.
+func TestABoxQuestionCanBeGivenABound(t *testing.T) {
+	machine := &counter{}
+	host := Host{Name: "server3", Tool: "/root/chatgpt-tool/.venv/bin/chatgpt-tool"}
+	asker := NewAskWithin(host, machine, machine, "translate this", "tr-vi-000001-001-1", false, 5*time.Minute)
+	box, ok := asker.(Ask)
+	if !ok {
+		t.Fatalf("a host with no client built %T, want the ssh transport", asker)
+	}
+	if box.Deadline != 5*time.Minute {
+		t.Errorf("Deadline = %s, want the five minutes the caller asked for", box.Deadline)
+	}
+	if got := box.deadline(); got != 5*time.Minute {
+		t.Errorf("deadline() = %s, want the bound rather than three times a page", got)
+	}
+
+	// Zero is no bound, which is what the page path passes and what NewAsk
+	// keeps passing on its behalf.
+	plain, ok := NewAsk(host, machine, machine, "read this page", "ens-i-iv-0029-cc0ac1", false).(Ask)
+	if !ok {
+		t.Fatalf("NewAsk did not build the ssh transport")
+	}
+	if plain.Deadline != 0 {
+		t.Errorf("Deadline = %s, want no bound", plain.Deadline)
+	}
+	if got := plain.deadline(); got != DefaultPageTimeout*3 {
+		t.Errorf("deadline() = %s, want the page default of %s", got, DefaultPageTimeout*3)
 	}
 }
