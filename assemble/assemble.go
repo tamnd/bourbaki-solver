@@ -153,7 +153,7 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 		if i+1 < len(spans) {
 			end = spans[i+1]
 		}
-		parts, err := slice(pages, s, end)
+		parts, err := slice(pages, s, end, pr)
 		if err != nil {
 			return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, out[s.piece].Name(), err)
 		}
@@ -351,19 +351,26 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 	// exercises of § 1, and it is kept there rather than moved or copied to each
 	// §, so that the file reads as the page does.
 	//
-	// It belongs to the run that opens under it, which is the first one on the
-	// page and not every one of them. Chapter I of Theory of Sets marks § 1 and
-	// § 2 on the one page, its exercises for § 1 being five, and pulling both up
-	// to the heading opened two runs on the same line.
+	// It belongs to the first run of the chapter's exercises and to no other.
+	// The heading is a heading once and a running head after that: Theory of
+	// Sets sets EXERCISES at the top of every verso page of the block, so pages
+	// 130, 132 and 134 of the volume each carry one. Read as a heading every
+	// time, a § marked at the top of such a page takes its run up over the tail
+	// of the § before it. Exercises 7 to 11 of § 3 of chapter II stand on page
+	// 132 above the mark for § 4, and they went into § 4's run, where 7 is not
+	// the number that run is up to, so the volume lost five exercises it prints.
+	//
+	// Taking it once also settles the other way it goes wrong. Chapter I of
+	// Theory of Sets marks § 1 and § 2 on the one page, its exercises for § 1
+	// being five, and pulling both up to the heading opened two runs on the same
+	// line.
 	for i, s := range out {
 		at, ok := heads[s.page]
 		if !ok || at >= s.off {
 			continue
 		}
-		if i > 0 && out[i-1].page == s.page {
-			continue
-		}
 		out[i].off = at
+		break
 	}
 	for i := 1; i < len(out); i++ {
 		if a, b := out[i-1], out[i]; a.page == b.page && a.off == b.off {
@@ -625,7 +632,7 @@ type part struct {
 
 // slice cuts the pages from the head of one run to the head of the next into the
 // parts of one piece.
-func slice(pages map[int]corpus.PageFile, from, to span) ([]part, error) {
+func slice(pages map[int]corpus.PageFile, from, to span, pr printing) ([]part, error) {
 	var out []part
 	for p := from.page; p <= to.page; p++ {
 		if p == to.page && to.off == 0 {
@@ -651,6 +658,9 @@ func slice(pages map[int]corpus.PageFile, from, to span) ([]part, error) {
 		if lo > 0 || hi < len(body) {
 			body = cutPage(body, lo, hi)
 		}
+		if from.head != "" && p != from.page {
+			body = dropRunningHead(body, pr.gathered)
+		}
 		if strings.TrimSpace(body) == "" {
 			continue
 		}
@@ -664,6 +674,28 @@ func slice(pages map[int]corpus.PageFile, from, to span) ([]part, error) {
 		out[0].body = openRun(out[0].body, from.head, from.mark)
 	}
 	return out, nil
+}
+
+// dropRunningHead takes the gathered exercises heading off a page in the middle
+// of a gathered run, where it is the running head of the page and not a heading
+// of anything.
+//
+// A volume that gathers its exercises prints the heading once over the block and
+// then prints it again at the top of every page of the block, or of every verso
+// page of it: Theory of Sets sets EXERCISES on pages 130, 132, 134 and on down
+// the chapter. The first is the heading the run opens on and the rest say only
+// what page the reader is on, so they are worth nothing to a file that is one §
+// from its head to its foot, and left in they end a run early.
+func dropRunningHead(body, head string) string {
+	lines := strings.Split(body, "\n")
+	out := lines[:0]
+	for _, l := range lines {
+		if strings.EqualFold(l, head) {
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
 }
 
 // cutPage is the part of a page between two offsets, with the footnote
