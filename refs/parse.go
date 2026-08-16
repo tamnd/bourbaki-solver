@@ -370,7 +370,24 @@ var locator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:` + chapWord + `)?\b([IVX]+)(?
 // further down the line.
 const stray = `\$[^$]{1,20}\$`
 
-var sectionLocator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:` + chapWord + `([IVX]+),\s*(?:` + stray + `\s*)?)?§\s*\$?\s*(\d+)` +
+// An Appendix stands where the § stands, and it is written in place of one:
+// "(Chapter I, Appendix, no. 3, Corollary 2 of Proposition 2)". The corpus files
+// an appendix as a § of the chapter with no number and a flag, which is exactly
+// what the page locator already reads out of "II, Appendix, p. 30", so the only
+// thing missing was the printing that names the no. instead of the page.
+//
+// It is one group with the § in it rather than two, so that a form which follows
+// the locator counts the same number of groups whichever of the two matched, and
+// locateSection is the one place that tells them apart. Left unread, the four
+// references Theory of Sets writes this way came apart into a no. of the § doing
+// the citing and a bare Proposition, and chapter IV was reported as missing a
+// Corollary 2 that belongs to the appendix of chapter I.
+//
+// The chapter in front of it is what makes it a reference, and locateSection
+// refuses one without it. See the note there.
+const sectionOrAppendix = `(§\s*\$?\s*\d+|Appendix\b)`
+
+var sectionLocator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:` + chapWord + `([IVX]+),\s*(?:` + stray + `\s*)?)?` + sectionOrAppendix +
 	`(?:,\s*[Nn]os?\.\s*(\d+))?`
 
 // The forms, in the order they are tried. Order is the whole of the
@@ -896,7 +913,9 @@ func citation(m []string, at Citation) (Citation, bool) {
 		c := Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary,
 			Number:     atoi(m[secParent]),
 			ParentKind: kind(m[secParent+1]), ParentNumber: atoi(m[secParent+2])}
-		locateSection(&c, m, secParent+3)
+		if !locateSection(&c, m, secParent+3) {
+			return Citation{}, false
+		}
 		return c, true
 	case m[attached+2] != "":
 		// "a corollary of Proposition 7" with no number on it is the prose saying
@@ -927,13 +946,17 @@ func citation(m []string, at Citation) (Citation, bool) {
 	case m[secNamed] != "":
 		c := Citation{Raw: m[0], Form: FormSection}
 		c.Kind, c.Number = kind(m[secNamed]), atoi(m[secNamed+1])
-		locateSection(&c, m, secNamed+2)
+		if !locateSection(&c, m, secNamed+2) {
+			return Citation{}, false
+		}
 		return c, true
 	case m[secAttached+5] != "":
 		c := Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary,
 			Number:     atoi(m[secAttached+4]),
 			ParentKind: kind(m[secAttached+5]), ParentNumber: atoi(m[secAttached+6])}
-		locateSection(&c, m, secAttached)
+		if !locateSection(&c, m, secAttached) {
+			return Citation{}, false
+		}
 		return c, true
 	case m[section+2] != "":
 		// A § named with nothing else around it is not a citation. The prose says
@@ -945,7 +968,9 @@ func citation(m []string, at Citation) (Citation, bool) {
 			return Citation{}, false
 		}
 		c := Citation{Raw: m[0], Form: FormSection}
-		locateSection(&c, m, section)
+		if !locateSection(&c, m, section) {
+			return Citation{}, false
+		}
 		// The statement is taken only when the reference is pointing at it, and
 		// not when it is pointing at the text either side of it.
 		if m[section+4] == "" && m[section+5] != "" {
@@ -1016,9 +1041,30 @@ func locate(c *Citation, m []string, at int) {
 // no., in the order the pattern writes them. The page is left at zero, and the
 // resolver reads that zero: a citation that carries a § and no page is one of
 // the other printing and is looked up by its numbering rather than by a page map.
-func locateSection(c *Citation, m []string, at int) {
+//
+// The third group holds the § with its sign on, or the word Appendix where the
+// chapter's appendix is what the reference names. An appendix has no number, so
+// the § comes out as zero and the flag beside it is what the index is asked for.
+//
+// It answers false for an appendix with no chapter in front of it, and the
+// citation is then dropped rather than read. A chapter is what the two printings
+// write when they mean an appendix this corpus holds: Theory of Sets writes
+// "(Chapter I, Appendix, no. 3)" and Lie writes "(Chap. V, Appendix, Prop. 2)".
+// Written bare the word means something else in all four places the corpus has
+// it, the Appendix II of Lie chapters VII and IX, which is a numbered appendix
+// nothing has read yet; the numeral is not part of the locator, so reading the
+// word alone would point "Prop. 3 of Appendix II" at an appendix 0 that no
+// chapter has. Left unread it is what it was before, which is not read at all.
+func locateSection(c *Citation, m []string, at int) bool {
+	if strings.HasPrefix(m[at+2], "Appendix") {
+		if m[at+1] == "" {
+			return false
+		}
+		c.Appendix = true
+	}
 	c.Book, c.Chapter = m[at], m[at+1]
-	c.Section, c.Subsec = atoi(m[at+2]), atoi(m[at+3])
+	c.Section, c.Subsec = atoi(strings.Trim(m[at+2], "§$ \t")), atoi(m[at+3])
+	return true
 }
 
 func kind(s string) corpus.Kind {

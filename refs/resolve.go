@@ -228,8 +228,11 @@ func (ix *Index) resolve(c Citation, at Site) (Target, error) {
 // fallback rather than the rule.
 func (ix *Index) attachedIn(c Citation, book, from string) (Target, error) {
 	// A locator with a § and no page is one of the other printing, which says
-	// which § the parent stands in rather than which page it is printed on.
-	if c.Page == 0 && c.Section != 0 {
+	// which § the parent stands in rather than which page it is printed on. An
+	// appendix is one of those and carries no number, so the § on its own does
+	// not say whether a place was named: "(Chapter I, Appendix, no. 3, Corollary
+	// 2 of Proposition 2)" went looking for a page 0 of chapter I.
+	if c.Page == 0 && (c.Section != 0 || c.Appendix) {
 		s, out, leaves := ix.sectionCited(c, book, from)
 		if leaves {
 			return out, nil

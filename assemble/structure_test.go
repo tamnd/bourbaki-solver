@@ -782,6 +782,48 @@ func TestTheLastRunOfAKindInANoCarriesTheNumbering(t *testing.T) {
 	}
 }
 
+// No. 4 of § 1 of chapter III announces its run in a sentence instead of setting
+// the word alone on a line, and chapter IV cites the third member of it. See
+// enRunKinds.
+func TestARunOpensOnAKindThatAnnouncesItself(t *testing.T) {
+	in := blocks(
+		"### 4. Ordered Subsets. Product of Ordered Sets",
+		"*Examples*. The relations induced by the inclusion relation $X \\subset Y$ on various sets of subsets are of considerable importance. Here are some examples :",
+		"(1) Let E, F be two sets, and let $\\Phi(E, F)$ be the set of all mappings.",
+		"(2) For each partition of a set E, let $\\tilde{\\varpi}$ be the graph.",
+		"(3) Let E be a set and let $\\Omega$ be the set of graphs of preorderings on E.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "III", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-iii-s1-n4-exa-1",
+		"ens-iii-s1-n4-exa-2",
+		"ens-iii-s1-n4-exa-3",
+	})
+	if !slices.Contains(texts(out), in[1].text) {
+		t.Errorf("the lead carries no statement, so it stays where it is: %v", texts(out))
+	}
+}
+
+// The colon is what tells the lead from a paragraph that opens on the word and
+// goes on to say something, which is not a head and states nothing.
+func TestAParagraphOpeningOnTheWordExamplesIsNotARun(t *testing.T) {
+	in := blocks(
+		"### 4. Ordered Subsets. Product of Ordered Sets",
+		"*Examples* of this are given in the exercises. The reader will supply them.",
+		"(1) Let E, F be two sets, and let $\\Phi(E, F)$ be the set of all mappings.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "III", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("a sentence was read as the head of a run: %v", labels(got))
+	}
+}
+
 // A proof taken up again puts the statement it proves back in force, so the
 // corollaries printed after it hang from that statement and not from the last
 // lemma the proof needed. See resumed.

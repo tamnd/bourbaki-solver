@@ -144,7 +144,7 @@ var printings = map[string]printing{
 				`|\*\*(` + enCapKinds + `)(?: (\d+))?\.\*\*\s*` +
 				`|\*(` + enPlainKinds + `)(?: (\d+))?\.\*\s+` +
 				`|` + smallTypeSup + `(` + enPlainKinds + `)(?: (\d+))?\.?\s+)`),
-		runHead: regexp.MustCompile(`^\*(` + enRunKinds + `)(?: [a-z][^*]*)?\*\s*$`),
+		runHead: regexp.MustCompile(`^\*(` + enRunKinds + `)(?: [a-z][^*]*)?\*(?:\..*:)?\s*$`),
 		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:takes? up|comes? now|concludes?|` +
 			`finish(?:es)?|completes?|resumes?|returns? to)\b[^.]{0,40}?\bproof of (?:the )?(` +
 			enResumeKinds + `) (\d+)\b`),
@@ -298,6 +298,22 @@ const enPlainKinds = `Lemmas?|Remarks?|Examples?|Scholium`
 // and the other 34 are the bare word. What follows the kind is held to a
 // lower-case word so that a title in italic, which opens on a capital, is not
 // read as a run of examples with a name.
+//
+// The head may also announce the run in a sentence, and page 143 is the one
+// place in the corpus that does: "*Examples*. The relations induced by the
+// inclusion relation X ⊂ Y on various sets of subsets are of considerable
+// importance. Here are some examples :", and then the (1), (2) and (3) of no. 4
+// of § 1 of chapter III. Chapter IV cites the third of them, "in accordance with
+// the definition given in Chapter III, § 1, no. 4, Example 3", which is the
+// preordering finer than another, and read as prose the § had no Example there
+// for that sentence to point at.
+//
+// The colon is what lets the sentence in without letting prose in with it. A
+// lead that announces a list ends in one, and a paragraph that merely opens on
+// the word Examples and goes on to say something does not, so the line still has
+// to be a head and not a statement. Where a printing announces a run without the
+// colon the run goes unread, and that fails loudly in R01 rather than quietly in
+// the numbering, which is the way round to be wrong.
 const enRunKinds = `Examples|Remarks|Lemmas|Scholia`
 
 // enResumeKinds and frResumeKinds are the kinds a paragraph can hand the reader
