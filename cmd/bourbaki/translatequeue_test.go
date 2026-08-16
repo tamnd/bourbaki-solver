@@ -363,3 +363,69 @@ func TestPlanningUnderNewInstructionsTakesTheOldChunksOffTheQueue(t *testing.T) 
 		}
 	}
 }
+
+// A provider that will not take the question is not the chunk getting it wrong.
+//
+// Three attempts are for three bad answers. Counting a 429 as one of them means
+// a gateway that has spent its allowance for the day kills every chunk of the
+// section it touches, and dead is a state somebody has to come and clear by
+// hand. It is not hypothetical: forty two chunks of chapter I, § 1 went from
+// pending to dead in one minute fourteen seconds, and not one model behind them
+// had been asked anything.
+func TestAProviderThatWillNotAnswerDoesNotKillTheChunks(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "element", VI: "phần tử"}}}
+	host := ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false", Lanes: 1}
+
+	// Four runs, which is one more than a chunk has attempts, so a run that
+	// spends an attempt on a transport failure would have killed all three by
+	// the end of this loop.
+	for run := 1; run <= 4; run++ {
+		_, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, g,
+			"vi", "prompt-v1", j, false, false, func(string, ...any) {})
+		if len(problems) == 0 {
+			t.Fatalf("run %d: the section was written by a host that answers nothing", run)
+		}
+	}
+
+	dead, err := q.List(queue.StageTranslate, queue.Dead)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dead) != 0 {
+		t.Errorf("%d chunks are dead and no model ever saw them", len(dead))
+	}
+	pending, err := q.List(queue.StageTranslate, queue.Pending)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != len(j.chunks) {
+		t.Fatalf("%d of %d chunks are still on the list", len(pending), len(j.chunks))
+	}
+	for _, item := range pending {
+		if item.Attempts != 0 {
+			t.Errorf("%s has spent %d attempts on a provider that never answered", item.Target, item.Attempts)
+		}
+	}
+}
+
+// And the two are told apart by what askChunk called them, so an answer that
+// came back and was wrong still costs the chunk an attempt.
+func TestOnlyATransportFailureIsGivenBack(t *testing.T) {
+	cases := []struct {
+		name string
+		bad  []translate.Problem
+		want bool
+	}{
+		{"nothing wrong", nil, false},
+		{"the gateway refused", []translate.Problem{{Rule: "transport", Msg: "429"}}, true},
+		{"the answer was wrong", []translate.Problem{{Rule: "math", Msg: "math span 6"}}, false},
+		{"both", []translate.Problem{{Rule: "transport", Msg: "429"}, {Rule: "math", Msg: "math span 6"}}, false},
+	}
+	for _, c := range cases {
+		if got := transportOnly(c.bad); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+	}
+}
