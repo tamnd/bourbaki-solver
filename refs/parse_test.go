@@ -61,6 +61,15 @@ func TestParse(t *testing.T) {
 		want: []Citation{{Raw: "corollary of Proposition 2", Form: FormAttached,
 			Kind: corpus.KindCorollary, ParentKind: corpus.KindProposition, ParentNumber: 2}},
 	}, {
+		// The indefinite article turns the sentence into a remark about the
+		// statement in hand, and Proposition 7 of Theory of Sets has no corollary
+		// printed under it to look for. The Proposition is a reference and comes
+		// back as one.
+		name: "a statement said to be a corollary of another",
+		in:   "This is a corollary of Proposition 7, since the two agree on the empty set.",
+		want: []Citation{{Raw: "a corollary of Proposition 7", Form: FormLocal,
+			Kind: corpus.KindProposition, Number: 7}},
+	}, {
 		name: "a numbered display",
 		in:   "where property d) results from formula (4).",
 		want: []Citation{{Raw: "formula (4)", Form: FormFormula,
