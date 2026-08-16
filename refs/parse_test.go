@@ -337,6 +337,17 @@ func TestParse(t *testing.T) {
 				Kind: corpus.KindProposition, Number: 36},
 		},
 	}, {
+		// Theory of Sets writes the word out where the other printings write it
+		// short. Read only in the short form the chapter went unread and the § was
+		// taken for a § of the chapter doing the citing, so § 1 of chapter III was
+		// reported as citing a no. 6 of a § that has five.
+		name: "a chapter written out in full",
+		in: "The condition for the existence of a common extension of a family of mappings " +
+			"belonging to $\\Phi(E, F)$ (Chapter II, § 4, no. 6, Proposition 7) shows that",
+		want: []Citation{{Raw: "Chapter II, § 4, no. 6, Proposition 7", Form: FormSection,
+			Chapter: "II", Section: 4, Subsec: 6,
+			Kind: corpus.KindProposition, Number: 7}},
+	}, {
 		// The § in brackets after the statement instead of after an "of", which
 		// the page form has read since it was written. Left to fall through it is
 		// a bare Prop. 3 hunted for in § 4, which prints four Propositions, and a

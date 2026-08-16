@@ -318,7 +318,15 @@ var kindAbbrev = map[string]string{
 // lost. The name in front of it goes too, since the Book is only read as part of
 // a locator, so "Exerc. 23 of Algèbre, Chap. X, p. 194" came out as an Exercise
 // 23 of the § of chapter IX the sentence stands in, which has twelve.
-var locator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:Chap\.\s*)?\b([IVX]+)(?:,\s*§\s*(\d+))?(,\s*Appendix)?` +
+// chapWord is how a printing writes the word in front of a chapter numeral.
+// Lie 7 to 9 and the French volumes write "Chap. VII" and Theory of Sets writes
+// it out, "Chapter II, § 4, no. 6, Proposition 7". Read one way only, 121
+// references of the corpus lost the chapter they name and were resolved against
+// the § doing the citing, which is how § 1 of chapter III came to cite a
+// Proposition 7 of a § that has three.
+const chapWord = `(?:Chap\.|Chapter)\s*`
+
+var locator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:` + chapWord + `)?\b([IVX]+)(?:,\s*§\s*(\d+))?(,\s*Appendix)?` +
 	`(?:,\s*(?:[Nn]o\.\s*|n\$\^o)(\d+)\$?)?,\s*p\.\s*\$?(\d+)`
 
 // sectionLocator is the locator of the other printing, which finds the § itself
@@ -362,7 +370,7 @@ var locator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:Chap\.\s*)?\b([IVX]+)(?:,\s*§
 // further down the line.
 const stray = `\$[^$]{1,20}\$`
 
-var sectionLocator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:Chap\.\s*([IVX]+),\s*(?:` + stray + `\s*)?)?§\s*\$?\s*(\d+)` +
+var sectionLocator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:` + chapWord + `([IVX]+),\s*(?:` + stray + `\s*)?)?§\s*\$?\s*(\d+)` +
 	`(?:,\s*[Nn]os?\.\s*(\d+))?`
 
 // The forms, in the order they are tried. Order is the whole of the
@@ -518,7 +526,7 @@ var (
 	// beside it; the clause earns its place by making sure that a chapter can
 	// never be dropped and the rest of the reference resolved quietly against the §
 	// doing the citing.
-	noRE = regexp.MustCompile(`(?:\*?(` + bookAlt + `)\*?,\s*)?(?:Chap\.\s*([IVX]+),\s*)?` +
+	noRE = regexp.MustCompile(`(?:\*?(` + bookAlt + `)\*?,\s*)?(?:` + chapWord + `([IVX]+),\s*)?` +
 		`\b[Nn]os?\.\s*(\d+),\s*(` + kindAlt + `)\s*(\d+)`)
 	// A statement of a work that is not one of the Éléments, standing where that
 	// work's own pages are given: "(B. KOSTANT, Lie group representations on
