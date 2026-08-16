@@ -627,6 +627,53 @@ func (q *Queue) Reset(stage Stage, id string) (bool, error) {
 	return false, nil
 }
 
+// Supersede drops the pending jobs that a newer version of the same work has
+// replaced.
+//
+// keep is target to the id that stands today. A pending job whose target is in
+// keep and whose id is not the one kept is work nobody wants any more, and it is
+// removed.
+//
+// This is the cost of keying a job on its content. The id is the target and the
+// input and the instructions together, which is what makes an unchanged chunk
+// the same job across runs, and it also means that editing the instructions
+// leaves the old job sitting in pending beside the new one. Nothing removed it,
+// and nothing had to, until the run leased its work by group: the two jobs have
+// different ids and the same target, both are pending in the group of that
+// section, and two lanes take one each and ask the same question twice. Measured
+// on this corpus after one prompt rewrite, 1380 pending jobs stood for 837
+// distinct chunks, so two runs in five were asking for something a lane beside
+// them was already asking for.
+//
+// Only pending is touched. A leased job belongs to a worker that is holding it
+// and will finish or lose it on its own, and done, failed and dead are the
+// record of what happened, which is not this function's to edit.
+func (q *Queue) Supersede(stage Stage, keep map[string]string) (int, error) {
+	ids, err := q.ids(stage, Pending)
+	if err != nil {
+		return 0, err
+	}
+	dropped := 0
+	for _, id := range ids {
+		job, err := q.read(Pending, stage, id)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return dropped, err
+		}
+		want, ok := keep[job.Target]
+		if !ok || want == id {
+			continue
+		}
+		if err := os.Remove(q.path(stage, Pending, id)); err != nil && !os.IsNotExist(err) {
+			return dropped, err
+		}
+		dropped++
+	}
+	return dropped, nil
+}
+
 // Drain removes pending jobs. Done, failed and dead stay: they are the record
 // of what happened, and a queue that forgets its dead jobs is a queue that
 // reports a clean run.

@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tamnd/bourbaki-solver/glossary"
 	"github.com/tamnd/bourbaki-solver/ocr"
@@ -311,5 +313,53 @@ func TestGroupsSeparateTheLanguages(t *testing.T) {
 	again := strings.Join([]string{"content", "en", "alg", "VIII", "03_s3_simple_modules.md"}, "/")
 	if translateGroup("vi", source) != translateGroup("vi", again) {
 		t.Error("the group is not a function of the section")
+	}
+}
+
+// The other half of a change of instructions. The new job goes on the queue, and
+// the old one has to come off it, or the section is pending twice over: two jobs
+// with different ids and the same target, in the same group, and a worker reads
+// the chunk number out of the target and cannot tell them apart.
+//
+// This is what the fleet was doing after the prompt was rewritten to name
+// Bourbaki rather than Algebra. The log has chapter I's front matter accepted at
+// 12 seconds on zen-laguna and again at 1 minute 6 on server3, and the second
+// answer overwrote the first, on a cut down model.
+func TestPlanningUnderNewInstructionsTakesTheOldChunksOffTheQueue(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+
+	if _, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false); err != nil {
+		t.Fatal(err)
+	} else if queued != 3 {
+		t.Fatalf("queued %d under the first instructions, want 3", queued)
+	}
+	if _, queued, _, err := plan(q, root, "vi", "prompt-v2", j, false); err != nil {
+		t.Fatal(err)
+	} else if queued != 3 {
+		t.Fatalf("queued %d under the second, want 3", queued)
+	}
+
+	// Three chunks, so three leases and then the group is empty. Six would be
+	// every chunk of this section asked for twice.
+	group := translateGroup("vi", j.source)
+	seen := map[string]int{}
+	for {
+		item, err := q.Lease(queue.StageTranslate, "host", group, time.Minute)
+		if errors.Is(err, queue.ErrEmpty) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen[item.Target]++
+	}
+	if len(seen) != 3 {
+		t.Fatalf("leased %d distinct chunks, want 3: %v", len(seen), seen)
+	}
+	for target, count := range seen {
+		if count != 1 {
+			t.Errorf("%s was handed out %d times", target, count)
+		}
 	}
 }

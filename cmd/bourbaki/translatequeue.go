@@ -186,6 +186,21 @@ func chunkOf(j job, item queue.Job) (int, translate.Chunk, bool) {
 // written on a cut down model.
 func plan(q *queue.Queue, root, lang, promptHash string, j job, force bool) (have map[int]accepted, queued int, stuck map[int][]translate.Problem, err error) {
 	have, stuck = map[int]accepted{}, map[int][]translate.Problem{}
+
+	// What this section's chunks are asked under today, so that the versions of
+	// them asked under yesterday's instructions can go. See Queue.Supersede: a
+	// worker leases by group and reads the chunk number out of the target, so a
+	// superseded job is indistinguishable from the job that replaced it once it
+	// is in a lane, and the section is asked for twice.
+	keep := map[string]string{}
+	for _, c := range j.chunks {
+		target := translateTarget(lang, j.source, c.Index)
+		keep[target] = queue.NewID(queue.StageTranslate, target, chunkInput(c.Body, j.terms), promptHash)
+	}
+	if _, err := q.Supersede(queue.StageTranslate, keep); err != nil {
+		return nil, 0, nil, err
+	}
+
 	for _, c := range j.chunks {
 		input := chunkInput(c.Body, j.terms)
 		target := translateTarget(lang, j.source, c.Index)
