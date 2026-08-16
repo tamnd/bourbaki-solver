@@ -349,8 +349,39 @@ func TestItemStartOnRunTogetherExercises(t *testing.T) {
 	// on the exercise. The book puts its marks in front of the number, and all
 	// nine asterisks of the chapter that mark something are set "$*19)$"; the
 	// six set "$15)*$" are the other thing.
-	if m[1] != "" {
+	if star, _ := marksOf(m[1]); star != "" {
 		t.Errorf("the asterisk after the number of exercise 15 of § 16 was read as a mark: %q", m[1])
+	}
+}
+
+// Theory of Sets sets the star that brackets a passage in small type outside
+// the mathematics, so it arrives as a bullet or as an escaped star, and it sets
+// the pilcrow before the star as well as after it.
+func TestItemStartReadsTheMarksTheoryOfSetsPrints(t *testing.T) {
+	for _, c := range []struct {
+		text          string
+		n             int
+		star, pilcrow bool
+		body          string
+	}{
+		{"* 4. Let E be an ordered set, and let $(E_\\iota)$ be the partition of E.", 4, true, false, "Let E be an"},
+		{"\\* 9. If E is a lattice, prove that", 9, true, false, "If E is a"},
+		{"¶ * 18.  Let A be a set with at least three elements.", 18, true, true, "Let A be a"},
+		{"¶ 17.  A lattice E which has a least element.", 17, false, true, "A lattice E"},
+		{"19. An ordered set E is said to be *without gaps*.", 19, false, false, "An ordered set"},
+	} {
+		i, m := itemStart(c.text, c.n)
+		if i < 0 {
+			t.Errorf("exercise %d was not found in %q", c.n, c.text)
+			continue
+		}
+		star, pilcrow := marksOf(m[1])
+		if (star != "") != c.star || (pilcrow != "") != c.pilcrow {
+			t.Errorf("%q: star %q pilcrow %q, want star %v pilcrow %v", c.text, star, pilcrow, c.star, c.pilcrow)
+		}
+		if got := strings.TrimSpace(c.text[i+markerLen(m):]); !strings.HasPrefix(got, c.body) {
+			t.Errorf("%q: the exercise begins %q", c.text, first(got, 40))
+		}
 	}
 }
 
@@ -374,7 +405,8 @@ func TestSentenceEnd(t *testing.T) {
 			t.Errorf("sentenceEnd(%q) = false", s)
 		}
 	}
-	for _, s := range []string{"By Exercise", "the ring A", "VIII, p. 210, Exercise"} {
+	for _, s := range []string{"By Exercise", "the ring A", "VIII, p. 210, Exercise",
+		"with the preorder relation (Chapter II, § 6, no.", "see VIII, p.", "cf.", "as in fig."} {
 		if sentenceEnd(s) {
 			t.Errorf("sentenceEnd(%q) = true", s)
 		}
