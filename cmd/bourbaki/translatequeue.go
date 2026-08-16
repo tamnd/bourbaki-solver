@@ -143,11 +143,26 @@ func readAccepted(root, lang, source string, index int, input, promptHash string
 	return a, true
 }
 
-// chunkLease is how long a worker says it will be. A chunk of six thousand
-// characters has measured between forty and seventy seconds, and a chunk that
-// does not pass is asked a second time inside the same lease, so this is three
-// minutes and the queue adds its own slack on top.
-const chunkLease = 3 * time.Minute
+// chunkDeadline is the longest one ask of one chunk may take.
+//
+// A chunk of six thousand characters has measured between forty and seventy
+// seconds, and five minutes is what the gateway routes already allow, so a box
+// is held to the same. Without it a box question takes the page default, which
+// is forty five minutes, and that is a number for a photograph of a page and
+// not for this. server3 sat on three of these for nine minutes with nothing
+// coming back, which is three of its four lanes doing nothing while the queue
+// counted them as busy.
+const chunkDeadline = 5 * time.Minute
+
+// chunkLease is how long a worker says it will be.
+//
+// It has to outlast the work, or the queue hands the chunk to somebody else
+// while the first lane is still legitimately on it and the book gets asked for
+// twice. A chunk that does not pass is asked a second time inside the same
+// lease, so the lease is two deadlines plus the ssh and rsync either side of
+// each, and the queue adds its own slack on top of that. It was three minutes,
+// which was under one deadline let alone two.
+const chunkLease = 2*chunkDeadline + 2*time.Minute
 
 // chunkOf finds the chunk a leased job is for.
 //

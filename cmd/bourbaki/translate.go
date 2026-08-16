@@ -704,8 +704,8 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 				return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 			}
 		}
-		answer, err := ocr.NewAsk(host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
-			ask, chunkID(lang, j.source, c, attempt), keep).Do(ctx)
+		answer, err := ocr.NewAskWithin(host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
+			ask, chunkID(lang, j.source, c, attempt), keep, chunkDeadline).Do(ctx)
 		if err != nil {
 			logf("%s chunk %d on %s: %v", j.source, c.Index, host.Name, err)
 			last = []translate.Problem{{Rule: "transport", Msg: err.Error()}}
