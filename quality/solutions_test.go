@@ -167,3 +167,48 @@ func TestX03SaysWhyItCannotRun(t *testing.T) {
 		t.Errorf("a corpus whose solution names a tag says %q", why)
 	}
 }
+
+// The real one: exercise 1 of § 2 of chapter III came back from a free model
+// with 181 characters of mathematics in it and not one dollar sign, and every
+// rule in the audit passed it.
+func TestX05FindsASolutionWrittenInSymbolsRatherThanTeX(t *testing.T) {
+	body := "Let Γ be an order on E. If Γ' ⊂ Γ and x ≤ y then ∀i, x ≤_{Γ_i} y."
+	d := solution(corpus.SolutionFrontMatter{Label: "alg-viii-s1-ex-1",
+		Status: corpus.StatusVerified, TruthJudge: "pass", AuditJudge: "pass"}, body)
+	got := run(t, x05, d)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, "written in symbols rather than in TeX") {
+		t.Errorf("the finding does not say what is wrong: %s", got[0].Msg)
+	}
+	if !strings.Contains(got[0].Msg, "Γ") || !strings.Contains(got[0].Msg, "⊂") {
+		t.Errorf("the finding does not name the characters it found: %s", got[0].Msg)
+	}
+}
+
+// The same mathematics, written the way the corpus writes it. Nothing outside a
+// span, so nothing to report, and the Greek inside one is not the rule's
+// business.
+func TestX05AcceptsTheSameMathematicsInTeX(t *testing.T) {
+	body := `Let $\Gamma$ be an order on $E$. If $\Gamma' \subset \Gamma$ and $x \le y$ then $\forall i$, $x \le_{\Gamma_i} y$. And Γ.`
+	d := solution(corpus.SolutionFrontMatter{Label: "alg-viii-s1-ex-1",
+		Status: corpus.StatusVerified, TruthJudge: "pass", AuditJudge: "pass"}, body)
+	got := run(t, x05, d)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want the one stray Greek letter: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, "1 characters") {
+		t.Errorf("counted more than the stray: %s", got[0].Msg)
+	}
+}
+
+// A solution with no mathematics outside its spans at all is the ordinary case,
+// and the rule has to be silent on it or every solution carries a finding.
+func TestX05IsSilentOnOrdinaryProse(t *testing.T) {
+	d := solution(corpus.SolutionFrontMatter{Label: "alg-viii-s1-ex-1",
+		Status: corpus.StatusVerified, TruthJudge: "pass", AuditJudge: "pass"}, proof)
+	if got := run(t, x05, d); len(got) != 0 {
+		t.Errorf("ordinary prose was reported: %v", got)
+	}
+}
