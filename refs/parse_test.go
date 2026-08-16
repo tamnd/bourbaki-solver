@@ -348,6 +348,35 @@ func TestParse(t *testing.T) {
 			Chapter: "II", Section: 4, Subsec: 6,
 			Kind: corpus.KindProposition, Number: 7}},
 	}, {
+		// The sign set as TeX, which is how page 178 of Theory of Sets writes it
+		// four times over. Nothing here was read at all before, not even as an
+		// unresolved reference, because the line carries no § for a locator to
+		// stop on.
+		name: "a § written as TeX with a thin space",
+		in: "and its cardinal is that of the set of subsets of E ($\\S\\,3$, no. 5, Proposition 12), " +
+			"so that we may write",
+		want: []Citation{{Raw: "§ 3, no. 5, Proposition 12", Form: FormSection,
+			Section: 3, Subsec: 5,
+			Kind: corpus.KindProposition, Number: 12}},
+	}, {
+		// The same sign with a space instead of a thin space, and the dollar
+		// closing between the § and what follows it. Read with the dollar left in,
+		// the reference comes apart into a § 2 nothing points at and a bare
+		// Exercise 13 hunted for in § 3, which prints six.
+		name: "a § written as TeX in front of an exercise",
+		in: "Let $(\\lambda_\\iota)_{\\iota \\in I}$ be a family of order-types ($\\S 2$, Exercise 13), " +
+			"indexed by an ordered set I.",
+		want: []Citation{{Raw: "§ 2, Exercise 13", Form: FormSection,
+			Section: 2, Kind: corpus.KindExercise, Number: 13}},
+	}, {
+		// \Sigma opens the way \S does and the corpus is full of it, so the rule
+		// has to tell them apart or every sum in the volume turns into a §.
+		name: "a sum sign is not a §",
+		in:   "where $\\Sigma$ is the sum, and by Prop. 3 (§2, no. 4) we have",
+		want: []Citation{{Raw: "Prop. 3 (§2, no. 4)", Form: FormSection,
+			Section: 2, Subsec: 4,
+			Kind: corpus.KindProposition, Number: 3}},
+	}, {
 		// The § in brackets after the statement instead of after an "of", which
 		// the page form has read since it was written. Left to fall through it is
 		// a bare Prop. 3 hunted for in § 4, which prints four Propositions, and a

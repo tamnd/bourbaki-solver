@@ -601,6 +601,7 @@ func Parse(body string, line0 int) []Citation {
 			continue
 		}
 		line = boldLead.ReplaceAllStringFunc(line, blank)
+		line = inMath.ReplaceAllStringFunc(line, plain)
 		// last is the Book and chapter the line has named so far, which is what a
 		// second page in the same bracket leaves out.
 		var last Citation
@@ -652,6 +653,37 @@ func Parse(body string, line0 int) []Citation {
 // blank keeps the length of what it replaces, so that nothing downstream has to
 // care that a span was taken out.
 func blank(s string) string { return strings.Repeat(" ", len(s)) }
+
+// inMath is a § written inside the mathematics, dollars and all.
+//
+// Extraction reads the sign off the page and writes it as the sign, except
+// where the sign stands in a formula and the whole of it comes back as TeX:
+// page 178 of Theory of Sets writes "($\S\,3$, no. 3, Proposition 5)" four
+// times and page 236 writes "($\S 2$, Exercise 13)". Five references, and not
+// one of them was read at all, so they did not even come out as unresolved.
+//
+// The dollars are part of the match because the closing one stands between the
+// § number and the no. after it, and a locator cannot read across it. The
+// letter after the backslash is checked because \Sigma opens the same way and
+// the corpus is full of it.
+var inMath = regexp.MustCompile(`\$\\S(?:[^A-Za-z][^$]*)?\$`)
+
+// plain is the § written the way the rest of a line writes it: the dollars off,
+// the sign for the TeX and a space for the thin space.
+//
+// What comes back is padded on the left to the length in bytes of what it
+// replaces, so that the offsets a citation is cut out on still hold and so that
+// the § stands hard against the no. that follows it. Right aligned rather than
+// left because the reference reads on to the right and nothing of it stands to
+// the left.
+func plain(s string) string {
+	in := strings.TrimSuffix(strings.TrimPrefix(s, "$"), "$")
+	in = "§" + strings.ReplaceAll(in[len(`\S`):], `\,`, " ")
+	if n := len(s) - len(in); n > 0 {
+		return strings.Repeat(" ", n) + in
+	}
+	return in
+}
 
 // groups is one match's submatches as strings, which is what citation reads.
 // They are taken from the indices rather than by matching a second time, so that
