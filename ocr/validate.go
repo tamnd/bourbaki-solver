@@ -10,6 +10,7 @@ package ocr
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -50,6 +51,7 @@ const (
 	RuleIllegible Rule = "illegible" // 5, too many unreadable spots
 	RuleLabel     Rule = "label"     // 6, the page label contradicts the page map
 	RuleLaTeX     Rule = "latex"     // 7, the LaTeX does not compile
+	RuleExercise  Rule = "exercise"  // 8, an exercise below the exercises head is set as a heading
 )
 
 // Problem is one reason a page was not accepted.
@@ -170,6 +172,11 @@ func Validate(text string, expect Expect, options Options) []Problem {
 		}
 	}
 	if problem, ok := checkLabel(head, expect); !ok {
+		problems = append(problems, problem)
+	}
+
+	// Rule 8.
+	if problem, ok := checkAfterExercises(body); !ok {
 		problems = append(problems, problem)
 	}
 
@@ -297,6 +304,59 @@ func unclosed(line int) Problem {
 		Detail: "an inline $ opened on this line is never closed before the paragraph ends",
 		Line:   line,
 	}
+}
+
+// exerciseHeadRE is the head a volume prints over the exercises of a chapter,
+// English and French, at whatever level the reading gave it.
+var exerciseHeadRE = regexp.MustCompile(`^#+\s*(EXERCISES|EXERCICES)\s*$`)
+
+// numberedHeadRE is a no. or a statement set as a heading, which is what the
+// body of a § is written with and what nothing below the exercises head can be.
+// The § head itself is left out of it: a chapter gathers the exercises of all
+// its sections under one head and divides them by §, so "## § 3" below the
+// exercises head is the printing and not a defect.
+var numberedHeadRE = regexp.MustCompile(`^#{3,}\s`)
+
+// checkAfterExercises is rule 8.
+//
+// Nothing of a § comes after its exercises, so a no. or a statement heading
+// below the exercises head is the reading of the page and not the page. Page
+// 289 of Theory of Sets prints EXERCISES, then § 1, then "1. Let S be the set
+// of signs P, X, ..." as an ordinary paragraph, and the reading came back with
+// that paragraph as "### 1. Let S be the set of signs". Every other exercise of
+// the volume, on 32 other pages, came back as the prose it is, including the
+// one on the very next page, which opens the same way word for word.
+//
+// The assembler is where this used to surface, as "the exercises are followed
+// by the heading", and by then the page has been accepted, committed and paid
+// for. Here it costs one re-read from an image that is still on disk.
+//
+// Measured over every page of every volume this project has read, 3301 of them
+// in English and French: 33 carry an exercises head, 9 English and 24 French,
+// one line below one of them is a § heading and one is a numbered heading, and
+// the numbered one is page 289 of Theory of Sets. So the rule rejects exactly
+// the page it was written for.
+//
+// It only sees the page it is given, and a volume prints EXERCISES once over a
+// block that runs for pages. An exercise set as a heading on the second page of
+// such a block goes past this rule, and the assembler is still the thing that
+// catches it.
+func checkAfterExercises(text string) (Problem, bool) {
+	after := false
+	for i, line := range strings.Split(text, "\n") {
+		if exerciseHeadRE.MatchString(strings.TrimSpace(line)) {
+			after = true
+			continue
+		}
+		if after && numberedHeadRE.MatchString(line) {
+			return Problem{
+				Rule:   RuleExercise,
+				Detail: fmt.Sprintf("an exercise below the exercises head is set as a heading: %q", clip(line)),
+				Line:   i + 1,
+			}, false
+		}
+	}
+	return Problem{}, true
 }
 
 // checkHead is rule 4.
