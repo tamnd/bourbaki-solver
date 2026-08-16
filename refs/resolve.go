@@ -196,15 +196,10 @@ func (ix *Index) resolve(c Citation, at Site) (Target, error) {
 	if !ix.holdsChapter(book, c.Chapter) {
 		return Target{How: OutOfCorpus, Book: codeFor(book)}, nil
 	}
-	on := ix.SectionAt(book, c.Chapter, c.Page)
-	switch len(on) {
-	case 0:
-		return Target{}, fmt.Errorf("no § of chapter %s is printed on page %d", c.Chapter, c.Page)
-	case 1:
-	default:
-		return Target{}, fmt.Errorf("page %d is in %d sections at once", c.Page, len(on))
+	s, err := ix.sectionOn(c, book)
+	if err != nil {
+		return Target{}, err
 	}
-	s := on[0]
 	if c.Kind == "" {
 		return Target{Label: s.Label, How: BySection}, nil
 	}
@@ -250,15 +245,43 @@ func (ix *Index) attachedIn(c Citation, book, from string) (Target, error) {
 	if !ix.holdsChapter(book, c.Chapter) {
 		return Target{How: OutOfCorpus, Book: codeFor(book)}, nil
 	}
+	s, err := ix.sectionOn(c, book)
+	if err != nil {
+		return Target{}, err
+	}
+	return ix.attached(c, s.Label)
+}
+
+// sectionOn is the § a citation that names a page points into.
+//
+// A page can belong to two §§ at once, because a § ends and the next begins on
+// it. Page 171 of chapter III of Algebra is one of those: § 4 runs from 166 to
+// it and § 5 starts on it. Nothing in the page number says which half is meant,
+// but the sentence that wrote it usually said, "III, § 4, no. 5, p. 171", and
+// where the § is written down it settles the page. Where it is not there is
+// nothing to choose with, and the page is reported as the ambiguity it is
+// rather than resolved to whichever § happens to be listed first.
+func (ix *Index) sectionOn(c Citation, book string) (*Section, error) {
 	on := ix.SectionAt(book, c.Chapter, c.Page)
+	if len(on) > 1 && c.Section != 0 {
+		var named []*Section
+		for _, s := range on {
+			if s.Number == c.Section && s.Appendix == c.Appendix {
+				named = append(named, s)
+			}
+		}
+		if len(named) == 1 {
+			on = named
+		}
+	}
 	switch len(on) {
 	case 0:
-		return Target{}, fmt.Errorf("no § of chapter %s is printed on page %d", c.Chapter, c.Page)
+		return nil, fmt.Errorf("no § of chapter %s is printed on page %d", c.Chapter, c.Page)
 	case 1:
+		return on[0], nil
 	default:
-		return Target{}, fmt.Errorf("page %d is in %d sections at once", c.Page, len(on))
+		return nil, fmt.Errorf("page %d is in %d sections at once", c.Page, len(on))
 	}
-	return ix.attached(c, on[0].Label)
 }
 
 // sectionCited is the § a citation of the other printing names, and says instead

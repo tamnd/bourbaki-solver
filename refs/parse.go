@@ -404,7 +404,16 @@ var (
 	// one of those came apart into a bare Cor. 1 and a bare Prop. 4, both hunted
 	// for in the § doing the citing. That is the reading that fails quietly: a §
 	// with a Corollary 1 of its own answers it, and the answer is wrong.
-	attachedRE = regexp.MustCompile(`\b(?:[Cc]orollary|Cor\.)\s*(\d*)` + run + part +
+	//
+	// The article in front is read, because it is what tells a reference from a
+	// remark about the statement in hand. "the corollary of Proposition 12" and
+	// "Cor. 1 of Prop. 4" point somewhere. "This is a corollary of Proposition
+	// 7", on page 107 of Theory of Sets, says what the sentence just proved, and
+	// there is no corollary printed under that Proposition to point at. What the
+	// sentence does point at is the Proposition, so that is what is read out of
+	// it. Only the unnumbered form is touched, since a book that numbered the
+	// corollary was naming one.
+	attachedRE = regexp.MustCompile(`(?:\b([Aa]n?)\s+)?\b(?:[Cc]orollary|Cor\.)\s*(\d*)` + run + part +
 		`\s+(?:of|to)\s+(` + kindAlt + `)\s+(\d+)(?:\s*(?:of\s+|,\s*|\()` + locator + `\)?)?`)
 	// The same reference with the locator written first, which is what the
 	// brackets do: "(II, §1, No. 9, p. 210, Corollary of Proposition 13)" and
@@ -619,7 +628,7 @@ func Parse(body string, line0 int) []Citation {
 				continue
 			}
 			c.Line = line0 + i
-			if prevEnd >= 0 {
+			if prevEnd >= 0 && !hangs(&c, prev, line[prevEnd:loc[0]]) {
 				carry(&c, prev, line[prevEnd:loc[0]])
 			}
 			if prevEnd < 0 || !runConnector.MatchString(line[prevEnd:loc[0]]) {
@@ -740,6 +749,57 @@ func carry(c *Citation, prev Citation, gap string) {
 	lift(c, prev)
 }
 
+// hangs reads a corollary written after the statement it belongs to rather than
+// before it, and says whether that is what it was.
+//
+// Theory of Sets writes its attached references the other way round from
+// Algebra and Lie. Algebra writes "Cor. 1 of Prop. 4" and Theory of Sets writes
+// "§ 3, no. 4, Proposition 6, Corollary 2", with the parent inside the locator
+// and the corollary hung on the end. Read a form at a time that is a reference
+// to Proposition 6 of that no. followed by a bare Corollary 2, and a bare
+// corollary is looked for in the § the sentence stands in. The volume does this
+// 28 times and 22 of them cite another § or another chapter, so 22 references
+// were being answered by whatever corollary of the citing § happened to carry
+// that number. That is the reading that fails quietly: nothing is reported,
+// because a wrong answer is still an answer.
+//
+// It is read here rather than as a form of its own because the parent may be
+// written in any of the ways a statement is written, bare or under a §, a no.,
+// a page or a chapter, and every one of those already has a form that reads it.
+// What this adds is the one thing the forms cannot see, which is that the
+// citation before this one is what this one hangs on.
+//
+// The comma is the whole of the evidence, so it has to be the whole of the gap.
+// "Prop. 1, Cor. 1 of Prop. 2, and Prop. 4" in Lie 7 to 9 is the shape this must
+// not take, and it does not: the corollary there names its own parent, so it is
+// read as attached before it gets here and a corollary that is already attached
+// is left alone.
+func hangs(c *Citation, prev Citation, gap string) bool {
+	if !comma.MatchString(gap) {
+		return false
+	}
+	if c.Form != FormLocal || c.Kind != corpus.KindCorollary || written(*c) {
+		return false
+	}
+	switch prev.Kind {
+	case corpus.KindProposition, corpus.KindTheorem, corpus.KindLemma:
+	default:
+		return false
+	}
+	if prev.Number == 0 || prev.Form == FormAttached {
+		return false
+	}
+	c.Form = FormAttached
+	c.ParentKind, c.ParentNumber = prev.Kind, prev.Number
+	c.Book, c.Chapter, c.Appendix = prev.Book, prev.Chapter, prev.Appendix
+	c.Section, c.Subsec, c.Page = prev.Section, prev.Subsec, prev.Page
+	return true
+}
+
+// comma is a gap that is nothing but a comma. A run written with "and" is a
+// list of statements and not a statement with a corollary hung on it.
+var comma = regexp.MustCompile(`^,\s*$`)
+
 // lift gives a statement that was written with no locator the locator of
 // another, and says whether there was one to give. It is the whole of what a
 // member of a list takes from the member it is written beside, in either
@@ -838,13 +898,26 @@ func citation(m []string, at Citation) (Citation, bool) {
 			ParentKind: kind(m[secParent+1]), ParentNumber: atoi(m[secParent+2])}
 		locateSection(&c, m, secParent+3)
 		return c, true
-	case m[attached+1] != "":
+	case m[attached+2] != "":
+		// "a corollary of Proposition 7" with no number on it is the prose saying
+		// what it has just proved. The reference in the sentence is the parent, so
+		// the parent is what comes back, named where the sentence named it and
+		// local where it did not.
+		if m[attached] != "" && m[attached+1] == "" {
+			c := Citation{Raw: m[0], Form: FormLocal,
+				Kind: kind(m[attached+2]), Number: atoi(m[attached+3])}
+			locate(&c, m, attached+4)
+			if c.Book != "" || c.Chapter != "" || c.Section != 0 || c.Page != 0 {
+				c.Form = FormNamed
+			}
+			return c, true
+		}
 		// Number stays 0 when the prose did not write one, because a corollary
 		// the book left unnumbered is not the same statement as its Corollary 1
 		// and is not looked up the same way.
-		c := Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary, Number: atoi(m[attached]),
-			ParentKind: kind(m[attached+1]), ParentNumber: atoi(m[attached+2])}
-		locate(&c, m, attached+3)
+		c := Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary, Number: atoi(m[attached+1]),
+			ParentKind: kind(m[attached+2]), ParentNumber: atoi(m[attached+3])}
+		locate(&c, m, attached+4)
 		return c, true
 	case m[lead+1] != "":
 		c := Citation{Raw: m[0], Form: FormAttached, Kind: corpus.KindCorollary, Number: atoi(m[lead+6]),

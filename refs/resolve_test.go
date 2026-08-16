@@ -18,7 +18,10 @@ import (
 func testIndex() *Index {
 	const s1file = "content/en/alg/VIII/01_s1.md"
 	s1 := Section{
-		Label: "alg-viii-s1", Book: "alg", Chapter: "VIII", Number: 1, Runs: []Run{{1, 23}}, Exercises: 12,
+		// § 1 runs to page 24 and § 2 starts on it, which is what the printing
+		// does whenever a § does not end at the foot of a page. Chapter III of
+		// Algebra has § 4 running to 171 and § 5 starting on it.
+		Label: "alg-viii-s1", Book: "alg", Chapter: "VIII", Number: 1, Runs: []Run{{1, 24}}, Exercises: 12,
 		Subsecs: []Subsec{{No: 1, Page: 1}, {No: 2, Page: 9}, {No: 3, Page: 15}},
 		Statements: []*Statement{
 			{Label: "alg-viii-s1-prop-1", Tag: "0001", Kind: corpus.KindProposition, Number: 1, Subsec: 1,
@@ -75,6 +78,20 @@ func TestResolve(t *testing.T) {
 		label: "alg-viii-s2-n2-exa-1", how: ByPageAndNo,
 	}, {
 		name: "the same kind on the other side of the §", in: "VIII, p. 25, Example 1",
+		label: "alg-viii-s2-n1-exa-1", how: ByPageAndNo,
+	}, {
+		// Page 24 is the last page of § 1 and the first of § 2, so the number on
+		// its own says both and settles nothing.
+		name: "a page two §§ share", in: "VIII, p. 24, Proposition 1",
+		err: "page 24 is in 2 sections at once",
+	}, {
+		// The same page with the § written down beside it, which is how the
+		// volume writes nearly all of them. The § chooses, and it chooses either
+		// way round.
+		name: "a shared page whose citation names the earlier §", in: "Proposition 1 of VIII, § 1, no. 1, p. 24",
+		label: "alg-viii-s1-prop-1", how: ByPage,
+	}, {
+		name: "a shared page whose citation names the later §", in: "Example 1 of VIII, § 2, no. 1, p. 24",
 		label: "alg-viii-s2-n1-exa-1", how: ByPageAndNo,
 	}, {
 		name: "an exercise", in: "VIII, p. 20, Exercise 9",
