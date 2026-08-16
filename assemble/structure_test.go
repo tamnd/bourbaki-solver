@@ -1,6 +1,7 @@
 package assemble
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -348,8 +349,39 @@ func TestItemStartOnRunTogetherExercises(t *testing.T) {
 	// on the exercise. The book puts its marks in front of the number, and all
 	// nine asterisks of the chapter that mark something are set "$*19)$"; the
 	// six set "$15)*$" are the other thing.
-	if m[1] != "" {
+	if star, _ := marksOf(m[1]); star != "" {
 		t.Errorf("the asterisk after the number of exercise 15 of § 16 was read as a mark: %q", m[1])
+	}
+}
+
+// Theory of Sets sets the star that brackets a passage in small type outside
+// the mathematics, so it arrives as a bullet or as an escaped star, and it sets
+// the pilcrow before the star as well as after it.
+func TestItemStartReadsTheMarksTheoryOfSetsPrints(t *testing.T) {
+	for _, c := range []struct {
+		text          string
+		n             int
+		star, pilcrow bool
+		body          string
+	}{
+		{"* 4. Let E be an ordered set, and let $(E_\\iota)$ be the partition of E.", 4, true, false, "Let E be an"},
+		{"\\* 9. If E is a lattice, prove that", 9, true, false, "If E is a"},
+		{"¶ * 18.  Let A be a set with at least three elements.", 18, true, true, "Let A be a"},
+		{"¶ 17.  A lattice E which has a least element.", 17, false, true, "A lattice E"},
+		{"19. An ordered set E is said to be *without gaps*.", 19, false, false, "An ordered set"},
+	} {
+		i, m := itemStart(c.text, c.n)
+		if i < 0 {
+			t.Errorf("exercise %d was not found in %q", c.n, c.text)
+			continue
+		}
+		star, pilcrow := marksOf(m[1])
+		if (star != "") != c.star || (pilcrow != "") != c.pilcrow {
+			t.Errorf("%q: star %q pilcrow %q, want star %v pilcrow %v", c.text, star, pilcrow, c.star, c.pilcrow)
+		}
+		if got := strings.TrimSpace(c.text[i+markerLen(m):]); !strings.HasPrefix(got, c.body) {
+			t.Errorf("%q: the exercise begins %q", c.text, first(got, 40))
+		}
 	}
 }
 
@@ -373,7 +405,8 @@ func TestSentenceEnd(t *testing.T) {
 			t.Errorf("sentenceEnd(%q) = false", s)
 		}
 	}
-	for _, s := range []string{"By Exercise", "the ring A", "VIII, p. 210, Exercise"} {
+	for _, s := range []string{"By Exercise", "the ring A", "VIII, p. 210, Exercise",
+		"with the preorder relation (Chapter II, § 6, no.", "see VIII, p.", "cf.", "as in fig."} {
 		if sentenceEnd(s) {
 			t.Errorf("sentenceEnd(%q) = true", s)
 		}
@@ -603,5 +636,146 @@ func TestAParagraphOpeningOnANumberIsNotAnExercise(t *testing.T) {
 	}
 	if !strings.Contains(got[0].Body, "3. is the number of elements") {
 		t.Errorf("the paragraph opening on 3. was taken for an exercise: %q", got[0].Body)
+	}
+}
+
+// Theory of Sets sets its heads in small capitals and follows them with nothing:
+// page 46 prints "THEOREM 1.  x = x." and page 104 prints "PROPOSITION 4.  Let
+// (X_i) be a family of sets", and there is no dash on either page. A reading
+// writes the small capitals as bold and the word in ordinary capitals, so what
+// arrives is the shape below. Read as prose it cost the volume 101 of its 257
+// heads, and § 5 of chapter I came out with none of its three theorems.
+func TestStatementsReadsAHeadWithNoDashAfterIt(t *testing.T) {
+	in := blocks(
+		"### 1. The Axioms",
+		"**Theorem 1.** $x = x$.",
+		"**Theorem 2** (Zermelo). *Every set* E *can be well-ordered.*",
+		"**Proposition 4.** *Let* $(X_\\iota)$ *be a family of sets.*",
+		"**Remark.** There exists no set of which every object is an element.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "I", Section: 5}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-i-s5-thm-1",
+		"ens-i-s5-thm-2",
+		"ens-i-s5-prop-4",
+		"ens-i-s5-n1-rem-1",
+	})
+	if !strings.Contains(strings.Join(texts(out), "\n"), "Theorem 2 (Zermelo)") {
+		t.Errorf("the name outside the bold was dropped: %v", texts(out))
+	}
+	if !strings.HasPrefix(got[0].Body, "$x = x$") {
+		t.Errorf("the head was not taken off the body: %q", got[0].Body)
+	}
+}
+
+// The dash is what the other bold printing leans on, and this volume has none,
+// so the bold is what the branch leans on instead. A sentence of the corpus
+// opens on a bold word often enough to matter, and none of them closes it with a
+// period inside the bold.
+func TestASentenceOpeningOnABoldWordIsNotAHead(t *testing.T) {
+	in := blocks(
+		"### 1. The Axioms",
+		"**Theorem 1.** $x = x$.",
+		"**Proposition** 5 of § 2 is proved the same way.",
+		"**Remarks** are gathered at the end of the no.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "I", Section: 5}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"ens-i-s5-thm-1"})
+	for _, want := range []string{"**Proposition** 5 of § 2 is proved the same way.", "**Remarks** are gathered at the end of the no."} {
+		if !slices.Contains(texts(out), want) {
+			t.Errorf("the sentence was read as a head and taken apart: %q", want)
+		}
+	}
+}
+
+// Theory of Sets sets the kind in the plural alone on a line and puts the
+// members under it, each opening on its own number in brackets.
+func TestARunOpensOnItsKindAloneOnALine(t *testing.T) {
+	in := blocks(
+		"### 3. Order Relations",
+		"*Examples*",
+		"(1) The relations of equality and inclusion are not order relations.",
+		"(2) Let E be a set such that $x \\in E$.",
+		"*Remarks*",
+		"(1) The empty set satisfies this condition.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "III", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-iii-s1-n3-exa-1",
+		"ens-iii-s1-n3-exa-2",
+		"ens-iii-s1-n3-rem-1",
+	})
+	if !strings.HasPrefix(got[0].Body, "The relations of equality") {
+		t.Errorf("the number was not taken off the body: %q", got[0].Body)
+	}
+	if !slices.Contains(texts(out), "*Examples*") {
+		t.Errorf("the lead carries no statement, so it stays where it is: %v", texts(out))
+	}
+}
+
+// Page 16 of Theory of Sets is read with (2) on the line under (1), so the two
+// members arrive as one block and the second would go into the body of the
+// first.
+func TestARunSplitsTwoMembersThePageRanTogether(t *testing.T) {
+	in := blocks(
+		"### 1. Terms and Relations",
+		"*Examples*",
+		"(1) The assembly $\\vee 1$ is represented by $\\Rightarrow$.\n(2) The following symbols represent assemblies :",
+		"(3) The sign $\\square$ is not a letter.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "I", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ens-i-s1-n1-exa-1",
+		"ens-i-s1-n1-exa-2",
+		"ens-i-s1-n1-exa-3",
+	})
+	if strings.Contains(got[0].Body, "The following symbols") {
+		t.Errorf("the second member went into the body of the first: %q", got[0].Body)
+	}
+	if !strings.HasPrefix(got[1].Body, "The following symbols") {
+		t.Errorf("the second member was not read: %q", got[1].Body)
+	}
+}
+
+// The second run of a kind in one no. is left as prose. Numbering it on from
+// the first would put a number on a statement that the book does not give it,
+// and its own numbers are already spoken for. See walk.
+func TestASecondRunOfOneKindInANoIsLeftAlone(t *testing.T) {
+	in := blocks(
+		"### 1. Definition of an Order Relation",
+		"*Examples*",
+		"(1) The relation $x = x$ is not collectivizing.",
+		"(2) An order relation on a set E.",
+		"An *ordering* on a set E is a correspondence.",
+		"*Examples*",
+		"(1) The relations of equality and inclusion.",
+		"(2) The order relation induced on E.",
+		"(3) The relation g extends f.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ens", Chapter: "III", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"ens-iii-s1-n1-exa-1", "ens-iii-s1-n1-exa-2"})
+	for _, want := range []string{
+		"(1) The relations of equality and inclusion.",
+		"(2) The order relation induced on E.",
+		"(3) The relation g extends f.",
+	} {
+		if !slices.Contains(texts(out), want) {
+			t.Errorf("the second run was taken apart: %q", want)
+		}
 	}
 }

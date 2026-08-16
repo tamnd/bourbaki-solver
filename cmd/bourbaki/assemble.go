@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/assemble"
@@ -411,8 +412,10 @@ func labelOf(book, chapter string, p assemble.Piece) string {
 	return corpus.Ref{Book: book, Chapter: chapter, Section: p.Number, Appendix: p.Appendix}.SectionLabel()
 }
 
-// pageRange is the span of printed pages a piece covers, "A VIII.1-A VIII.16".
-// A volume that prints no page label leaves this empty rather than guessing.
+// pageRange is the span of printed pages a piece covers, "A VIII.1-A VIII.16"
+// where the volume labels its pages and "15-56" where it numbers them straight
+// through the book. A piece whose pages carry neither leaves this empty rather
+// than guessing.
 func pageRange(first, last string) string {
 	if first == "" || last == "" {
 		return ""
@@ -434,7 +437,16 @@ func pageRange(first, last string) string {
 func bookPages(runs []assemble.Run) string {
 	out := make([]string, 0, len(runs))
 	for _, r := range runs {
-		if s := pageRange(r.FirstLabel, r.LastLabel); s != "" {
+		first, last := r.FirstLabel, r.LastLabel
+		if first == "" && r.FirstFolio > 0 {
+			// A volume paginated straight through prints the number bare at the
+			// foot of the page, so the range is bare too. It has to be written:
+			// a section with no printed pages on it cannot be the target of a
+			// reference that gives a page, and Algebra VIII refers to Set Theory
+			// by page 223 times.
+			first, last = strconv.Itoa(r.FirstFolio), strconv.Itoa(r.LastFolio)
+		}
+		if s := pageRange(first, last); s != "" {
 			out = append(out, s)
 		}
 	}

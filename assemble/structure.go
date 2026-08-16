@@ -3,6 +3,7 @@ package assemble
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -39,8 +40,13 @@ func subsections(parts []part) []corpus.Subsection {
 			}
 			n, _ := strconv.Atoi(m[1])
 			s := corpus.Subsection{Number: n, Title: m[2], PDFPage: p.page}
+			// The page the book prints, from whichever of the two the volume
+			// has. A labelled volume carries "A VIII.7" and a volume paginated
+			// straight through carries a bare 7 at the foot.
 			if l, ok := corpus.ParsePageLabel(p.label); ok {
 				s.Page = l.Page
+			} else {
+				s.Page = p.folio
 			}
 			out = append(out, s)
 		}
@@ -202,7 +208,10 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 	var run corpus.Ref    // the run of remarks or examples now open, if any
 	next := 0             // the number the next member of that run would carry
 	occ := map[corpus.Ref]int{}
-	for _, b := range blocks {
+	opened := map[corpus.Ref]bool{} // the runs a bare lead has already opened, by no.
+	queue := slices.Clone(blocks)
+	for i := 0; i < len(queue); i++ {
+		b := queue[i]
 		if m := subsecRE.FindStringSubmatch(b.text); m != nil {
 			no, _ = strconv.Atoi(m[1])
 			next = 0
@@ -217,6 +226,54 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 				return err
 			}
 			continue
+		}
+		// A lead that carries none of the run it opens. It is a statement of
+		// nothing, so it is passed through as prose and only the run bookkeeping
+		// moves: the members number from 1 under it, and each of them becomes a
+		// statement of its own the same way a member of any other run does.
+		//
+		// A second run of the same kind in one no. is left alone. Three no. of
+		// Theory of Sets print one: no. 1 of § 1 of chapter III sets three
+		// examples on page 131 and four more on page 132, and the second lot
+		// starts again at (1). The volume cites both by their printed numbers,
+		// "no. 1, Example 3" on one page meaning the third of the second lot, so
+		// there are two Example 3 in that no. and a label can hold one. Numbering
+		// the second lot on from the first would put a number on a statement that
+		// the book does not give it, so the members stay as they are printed and
+		// the audit goes on saying the § has no Example 4. What is not done here
+		// is guessing.
+		if pr.runHead != nil {
+			if k := pr.runHead.FindStringSubmatch(b.text); k != nil {
+				kind, ok := corpus.KindFromHeading(k[1])
+				if !ok {
+					return fmt.Errorf("nothing in the corpus is called a %q", k[1])
+				}
+				key := corpus.Ref{Book: id.Book, Chapter: id.Chapter, Section: id.Section,
+					Kind: kind, Subsec: no}
+				if opened[key] {
+					next = 0 // the run is closed, so its members do not carry on into this one
+				} else {
+					opened[key] = true
+					run, next = key, 1
+				}
+				if err := f(b, corpus.Ref{}, "", "", false); err != nil {
+					return err
+				}
+				continue
+			}
+		}
+		// The printing sets each member of a run as a paragraph of its own, and a
+		// page read without the blank line between two of them arrives as one
+		// block. Page 16 of Theory of Sets is read that way, with (2) on the line
+		// under (1), and the second member would go into the body of the first.
+		// Cut it off and put it back in the queue as the block it is printed as.
+		if next > 0 {
+			if head, rest, ok := cutRunMember(b.text, next); ok {
+				b.text = head
+				t := b
+				t.text, t.label = rest, ""
+				queue = slices.Insert(queue, i+1, t)
+			}
 		}
 		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, taken, pr)
 		if err != nil {
@@ -340,14 +397,14 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	if m == nil {
 		// A paragraph opening on the number the open run is up to is the next
 		// member of that run.
-		i := exNumRE.FindStringSubmatch(text)
-		if next == 0 || i == nil || i[3] != strconv.Itoa(next) {
+		num, marker, tail, ok := runItem(text)
+		if next == 0 || !ok || num != strconv.Itoa(next) {
 			return corpus.Ref{}, "", "", false, nil
 		}
 		r := run
 		r.Number = next
 		took(r)
-		return r, "", body(afterMarker(i[0], text[markerLen(i):])), true, nil
+		return r, "", body(afterMarker(marker, tail)), true, nil
 	}
 	// The head matched one of the branches of pr.head and left the others empty,
 	// and every branch pairs its kind with its number, so running the pairs
@@ -376,7 +433,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		// A run is headed by its kind in the plural and numbered inside:
 		// "Remarks. — 2)" is Remark 2 and the head carries no number of its own.
 		if i := exNumRE.FindStringSubmatch(rest); i != nil {
-			num, rest = i[3], afterMarker(i[0], rest[markerLen(i):])
+			num, rest = i[2], afterMarker(i[0], rest[markerLen(i):])
 		}
 	}
 	// The mark that opens a passage in small type stands in front of the head and
@@ -515,8 +572,74 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // opens on a number and a full stop. What keeps it honest at all is the rule
 // that already keeps the parenthesis honest, that a marker counts only when it
 // carries the number the run is up to.
+//
+// The marks in front of the number are read as one run of marks rather than in
+// a fixed order, because Theory of Sets prints them in both orders and outside
+// the mathematics: "* 4." on page 214, "\* 9." on page 215 where the text layer
+// escaped the star, and "¶ * 18." on page 218 with the pilcrow first. Which mark
+// the exercise carries is then read off the run. § 1 of chapter III stopped at
+// its third exercise where the volume prints twenty four.
 var exNumRE = regexp.MustCompile(
-	`^(?:\*\*)?(?:\$\s*(\*)?\s*)?(?:(\\P|¶)\s*\$?\s*)?(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
+	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|¶)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
+		`(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
+
+// marks are the star and the pilcrow a book can set in front of an exercise
+// number. The bold that extraction writes around the number of some of them is
+// taken off first, so that it is not read as a star.
+func marksOf(prefix string) (star, pilcrow string) {
+	prefix = strings.ReplaceAll(prefix, "**", "")
+	if p := markOf(prefix, `\P`); p != "" {
+		return markOf(prefix, "*"), p
+	}
+	return markOf(prefix, "*"), markOf(prefix, "¶")
+}
+
+// runNumRE is the other way a volume numbers a member of a run: the number in
+// parentheses, at the head of a paragraph of its own.
+//
+// Theory of Sets writes every run this way. Page 16 sets its examples under
+// "Examples" in italic and then "(1) The assembly ∨1 is represented by ⇒." and
+// "(2) The following symbols represent assemblies", each a paragraph of its own,
+// and 30 of the volume's 34 runs open exactly like that. The other four open on
+// the star that brackets a passage in small type, which is why the star is read
+// here as well and put back with the rest of the body.
+//
+// This is only ever asked of a paragraph while a run is open and only ever
+// accepted when the number is the one the run is up to, which is what keeps the
+// enumerations out. Page 15 lists the signs of a theory as "(1) The logical
+// signs", "(2) The letters", "(3) The specific signs", under no head and inside
+// a sentence that runs into them, and no run is open there.
+var runNumRE = regexp.MustCompile(`^(?:\\?\*\s*)?\((\d+)\)\s+`)
+
+// runItem reads the marker on a member of a run, either way a volume writes it,
+// and says what the number is, how much of the block the marker takes, and what
+// is left after it.
+// cutRunMember cuts a block that opens on member now of an open run at the line
+// where member now+1 begins, so that each member is the block the printing sets
+// it as. It cuts on nothing else: a bracketed number that is not the one the run
+// is up to is a reference to a formula or a case, not a member.
+func cutRunMember(text string, now int) (head, rest string, ok bool) {
+	if num, _, _, ok := runItem(text); !ok || num != strconv.Itoa(now) {
+		return "", "", false
+	}
+	lines := strings.Split(text, "\n")
+	for i := 1; i < len(lines); i++ {
+		if num, _, _, ok := runItem(lines[i]); ok && num == strconv.Itoa(now+1) {
+			return strings.Join(lines[:i], "\n"), strings.Join(lines[i:], "\n"), true
+		}
+	}
+	return "", "", false
+}
+
+func runItem(text string) (num, marker, rest string, ok bool) {
+	if i := exNumRE.FindStringSubmatch(text); i != nil {
+		return i[2], i[0], text[markerLen(i):], true
+	}
+	if i := runNumRE.FindStringSubmatch(text); i != nil {
+		return i[1], i[0], text[len(i[0]):], true
+	}
+	return "", "", "", false
+}
 
 // markerLen is how much of a block the marker takes, which is not always the
 // whole of what matched: a lettered part is matched to prove the number opens
@@ -524,8 +647,8 @@ var exNumRE = regexp.MustCompile(
 // and not part of its number.
 func markerLen(m []string) int {
 	n := len(m[0])
-	if len(m) > 4 && strings.TrimSpace(m[4]) != "" {
-		n -= len(m[4])
+	if len(m) > 3 && strings.TrimSpace(m[3]) != "" {
+		n -= len(m[3])
 	}
 	return n
 }
@@ -593,8 +716,9 @@ func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 			}
 			e := corpus.Exercise{Pages: spanning(nil, b)}
 			e.Meta.Exercise = len(out) + 1
-			e.Meta.Supplementary = m[1] != ""
-			e.Meta.Starred = m[2] != ""
+			star, pilcrow := marksOf(m[1])
+			e.Meta.Supplementary = star != ""
+			e.Meta.Starred = pilcrow != ""
 			e.Meta.PDFPage = b.page
 			if l, ok := corpus.ParsePageLabel(b.label); ok {
 				e.Meta.BookPage = l.String()
@@ -628,7 +752,7 @@ var inlineNumRE = regexp.MustCompile(`[\s$*]\$?\*?\s*(\d+)\)\*?\$?\s*`)
 // second, so does "(VIII, p. 210, Exercise 13)".
 func itemStart(text string, n int) (int, []string) {
 	if m := exNumRE.FindStringSubmatch(text); m != nil {
-		if got, _ := strconv.Atoi(m[3]); got == n {
+		if got, _ := strconv.Atoi(m[2]); got == n {
 			return 0, m
 		}
 	}
@@ -659,7 +783,7 @@ func itemStart(text string, n int) (int, []string) {
 				// exercise before it ended in, which is why the book prints
 				// "$*19)$" and never "$19)*$" when it means the mark.
 				raw, marks := text[at:off+loc[1]], text[at:off+loc[2]]
-				m = []string{raw, markOf(marks, "*"), markOf(marks, `\P`), strconv.Itoa(got), ""}
+				m = []string{raw, marks, strconv.Itoa(got), ""}
 			}
 			return at, m
 		}
@@ -711,11 +835,21 @@ func markOf(raw, c string) string {
 // with the whole of exercise 14 opening in the paragraph that ended exercise 13.
 var pilcrowBefore = regexp.MustCompile(`\$?\s*(?:\\P|¶)\s*\$?\s*$`)
 
+// shortened is a full stop that closes a word the book writes short rather than
+// a sentence. Every citation of a no. carries one, and the number after it is a
+// number the § is very likely to be up to: "(Chapter II, § 6, no. 3)" in the
+// second exercise of § 1 of chapter III of Theory of Sets was read as the start
+// of the third, which cost that § the twenty exercises printed after it.
+var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])(?:no|nos|p|pp|cf|fig|chap|vol|resp|art)\.$`)
+
 // sentenceEnd reports whether the text before a number is the end of a
 // sentence, with the marks the book closes a passage with, and the mark it
 // opens one with, taken off.
 func sentenceEnd(s string) bool {
 	s = strings.TrimRight(pilcrowBefore.ReplaceAllString(s, ""), " $*")
+	if shortened.MatchString(s) {
+		return false
+	}
 	return strings.HasSuffix(s, ".") || strings.HasSuffix(s, ")")
 }
 
