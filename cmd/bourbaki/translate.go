@@ -780,6 +780,12 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 			return "", "", []translate.Problem{{Rule: "archive", Msg: err.Error()}}
 		}
 		problems := translate.Audit(lang, c.Body, answer.Text)
+		// The terminology is asked here and not inside Audit, which compares
+		// two texts and holds no glossary. It is the same test L10 makes of the
+		// finished file, put while the run can still do something: a term left
+		// in English is a complaint askChunk can hand back on the second ask,
+		// and after the file is written it is a finding nobody acts on.
+		problems = append(problems, translate.AuditTerms(lang, terms, c.Body, answer.Text)...)
 		if len(problems) == 0 {
 			// Said here rather than left to L08, which reads the file after it is
 			// written. Nobody chooses the model, so this is not a refusal; it is
