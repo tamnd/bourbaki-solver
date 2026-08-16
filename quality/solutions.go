@@ -2,6 +2,7 @@ package quality
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -29,6 +30,8 @@ func init() {
 			Title: "every tag a solution says it uses exists", Run: x03, Need: needUses},
 		Check{ID: "X04", Group: Solutions, Hard: false,
 			Title: "no provider leakage and no meta-commentary", Run: x04, Need: needSolutions},
+		Check{ID: "X05", Group: Solutions, Hard: false,
+			Title: "a solution writes its mathematics in TeX", Run: x05, Need: needSolutions},
 	)
 }
 
@@ -235,6 +238,100 @@ func x04(c *Corpus) ([]Finding, error) {
 				}
 			}
 		}
+	}
+	return out, nil
+}
+
+// mathGlyph is a character that belongs inside a math span and nowhere else.
+//
+// The ranges are the ones a model reaches for when it writes mathematics as
+// text instead of as TeX: the operators, the arrows, the two supplemental
+// operator blocks, Greek, and the raised and lowered digits. What is
+// deliberately out is everything the prose of this corpus does use, so §, é,
+// the dashes and the quotation marks are not here, and neither is × on its own,
+// which the extraction leaves in the running text of a page range.
+func mathGlyph(r rune) bool {
+	switch {
+	case r >= 0x0370 && r <= 0x03FF: // Greek, which is only ever a variable here
+		return true
+	case r >= 0x2070 && r <= 0x209F: // raised and lowered digits and letters
+		return true
+	case r >= 0x2190 && r <= 0x21FF: // arrows
+		return true
+	case r >= 0x2200 && r <= 0x22FF: // mathematical operators
+		return true
+	case r >= 0x27C0 && r <= 0x27EF, r >= 0x2A00 && r <= 0x2AFF: // supplements
+		return true
+	case r == 0x2102, r == 0x2115, r == 0x211A, r == 0x211D, r == 0x2124: // C N Q R Z
+		return true
+	}
+	return false
+}
+
+// inMath marks the runes of a body that a math span covers.
+func inMath(body string) []bool {
+	covered := make([]bool, len([]rune(body)))
+	spans, _ := Math(body)
+	for _, s := range spans {
+		for i := s.Start; i < s.End && i < len(covered); i++ {
+			if i >= 0 {
+				covered[i] = true
+			}
+		}
+	}
+	return covered
+}
+
+// X05. A solution writes its mathematics in TeX.
+//
+// Every other document in this corpus was typed from a printed page, so its
+// mathematics is TeX because that is the only way the page could be
+// transcribed. A solution is written by a model, and a model asked for
+// mathematics in a chat window will answer in the symbols a chat window can
+// draw: Γ, ⊂, ⋂, ∀. The answer reads correctly and is unusable, because
+// nothing downstream can see it. M01 finds no unclosed span in it, M04 and P04
+// have nothing to parse, the reference graph finds no notation to follow, and a
+// translation of it has no math spans to hold in place. One solution of the
+// twenty five on this corpus came back that way, with 181 such characters and
+// not one dollar sign, and every rule passed it.
+//
+// Soft, like the rest of this group. The solution is wrong in its writing and
+// not in its mathematics, and the answer is to ask for it again rather than to
+// turn the repository red.
+func x05(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		if d.Kind != KindSolution {
+			continue
+		}
+		covered := inMath(d.Body)
+		line, seen := 1, map[rune]bool{}
+		count, first := 0, 0
+		for i, r := range []rune(d.Body) {
+			if r == '\n' {
+				line++
+				continue
+			}
+			if covered[i] || !mathGlyph(r) {
+				continue
+			}
+			if count == 0 {
+				first = line
+			}
+			count++
+			seen[r] = true
+		}
+		if count == 0 {
+			continue
+		}
+		var glyphs []rune
+		for r := range seen {
+			glyphs = append(glyphs, r)
+		}
+		slices.Sort(glyphs)
+		out = append(out, Finding{File: d.Path, Line: d.BodyLine(first),
+			Msg: fmt.Sprintf("%d characters of mathematics stand outside any math span, as %s, "+
+				"so the solution was written in symbols rather than in TeX", count, string(glyphs))})
 	}
 	return out, nil
 }
