@@ -43,6 +43,7 @@ is the only evidence of how.
 flags:
   -lang       which printing to solve, en by default
   -label      one exercise, by permanent label
+  -book       only this book, by short name, ens for Theory of Sets
   -section    only this §, by number
   -limit      stop after this many exercises
   -status     only exercises standing at this status, unattempted included
@@ -62,6 +63,7 @@ flags:
 type solveRunFlags struct {
 	lang       string
 	label      string
+	book       string
 	section    string
 	limit      int
 	status     string
@@ -84,6 +86,7 @@ func runSolveRun(args []string) error {
 	var f solveRunFlags
 	fs.StringVar(&f.lang, "lang", "en", "printing to solve")
 	fs.StringVar(&f.label, "label", "", "one exercise")
+	fs.StringVar(&f.book, "book", "", "only this book")
 	fs.StringVar(&f.section, "section", "", "only this §")
 	fs.IntVar(&f.limit, "limit", 0, "stop after this many exercises")
 	fs.StringVar(&f.status, "status", "", "only solutions at this status")
@@ -165,8 +168,27 @@ func solvePlan(c *solve.Corpus, store solve.Store, f solveRunFlags) ([]string, e
 		}
 		all = []string{f.label}
 	}
+	// A book nothing is labelled with is a misspelling, and a misspelling that
+	// went through would print "nothing to solve", which is also what a book
+	// already solved through prints.
+	if f.book != "" {
+		found := false
+		for _, label := range all {
+			if inBook(label, f.book) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("%s: the %s printing has no exercises of that book, it has %s",
+				f.book, f.lang, strings.Join(booksOf(all), ", "))
+		}
+	}
 	var out []string
 	for _, label := range all {
+		if f.book != "" && !inBook(label, f.book) {
+			continue
+		}
 		if f.section != "" && !inSection(label, f.section) {
 			continue
 		}
@@ -204,6 +226,38 @@ func solvePlan(c *solve.Corpus, store solve.Store, f solveRunFlags) ([]string, e
 // appendix. The two are different sections with the same number, and a run that
 // asked for § 1 and got the appendix would be a run whose report names 43
 // exercises of a § that has 43 different ones.
+// inBook says whether an exercise belongs to the book named, by the short name
+// the labels are built on.
+//
+// The run takes the exercises of every printing it can read, and a corpus of
+// six books is 858 of them in one queue, taken a chapter at a time across all
+// of them at once. A book is the unit a person works in and the unit a
+// milestone is written about, so it is the unit the run has to be able to take.
+func inBook(label, book string) bool {
+	r, err := corpus.ParseLabel(label)
+	if err != nil {
+		return false
+	}
+	return r.Book == book
+}
+
+// booksOf is the books the labels are drawn from, in the order they first
+// appear, which is what a misspelled -book is answered with.
+func booksOf(labels []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, label := range labels {
+		r, err := corpus.ParseLabel(label)
+		if err != nil || seen[r.Book] {
+			continue
+		}
+		seen[r.Book] = true
+		out = append(out, r.Book)
+	}
+	sort.Strings(out)
+	return out
+}
+
 func inSection(label, section string) bool {
 	r, err := corpus.ParseLabel(label)
 	if err != nil {

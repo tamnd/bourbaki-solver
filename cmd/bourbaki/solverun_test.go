@@ -44,3 +44,24 @@ func TestASectionAndAnAppendixOfTheSameNumber(t *testing.T) {
 		}
 	}
 }
+
+// The book has to be the whole of the short name and not the front of it, since
+// alg and alg-x are both books of the corpus and a run asked for one of them
+// would otherwise take the exercises of the other as well.
+func TestABookIsTakenWhole(t *testing.T) {
+	cases := []struct {
+		label, book string
+		want        bool
+	}{
+		{"ens-iii-s1-ex-3", "ens", true},
+		{"ens-iii-s1-ex-3", "alg", false},
+		{"ens-iii-s1-ex-3", "en", false},
+		{"lie-viii-s2-ex-1", "lie", true},
+		{"not a label", "ens", false},
+	}
+	for _, c := range cases {
+		if got := inBook(c.label, c.book); got != c.want {
+			t.Errorf("inBook(%q, %q) = %v", c.label, c.book, got)
+		}
+	}
+}
