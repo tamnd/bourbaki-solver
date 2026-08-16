@@ -403,3 +403,53 @@ func TestATranslationWithNoSourceIsStillAFinding(t *testing.T) {
 		t.Errorf("want one finding for a translation with no source, got %v", bad)
 	}
 }
+
+// L12 is the rule Theory of Sets needed. The formula is chapter I's C6 and the
+// words in it are prose, so a translation that copies the mathematics through
+// as it stands has left part of the section in English.
+func TestL12FindsTheWordsOfAFormulaLeftInEnglish(t *testing.T) {
+	const en = "Đây là quy tắc C6.\n\n" +
+		`$((\text{not } A) \text{ or } B) \Rightarrow ((\text{not not } A) \text{ or } B)$`
+	docs := pairDocs(
+		"This is criterion C6.\n\n"+
+			`$((\text{not } A) \text{ or } B) \Rightarrow ((\text{not not } A) \text{ or } B)$`,
+		en)
+	got := run(t, l12, docs...)
+	if len(got) != 4 {
+		t.Fatalf("got %d findings, want one per run: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, `\text{not }`) {
+		t.Errorf("the finding does not name the run: %s", got[0].Msg)
+	}
+}
+
+// The same formula with its words translated is a translated formula, and L01
+// has to let it through or the section can never be written at all.
+func TestL01AndL12AcceptAFormulaWhoseWordsWereTranslated(t *testing.T) {
+	docs := pairDocs(
+		"This is criterion C6.\n\n"+
+			`$(\text{not } A) \text{ or } B$`,
+		"Đây là quy tắc C6.\n\n"+
+			`$(\text{không } A) \text{ hoặc } B$`)
+	if got := run(t, l01, docs...); len(got) != 0 {
+		t.Fatalf("L01 refuses a translated formula: %v", got)
+	}
+	if got := run(t, l12, docs...); len(got) != 0 {
+		t.Fatalf("L12 reports a translated formula: %v", got)
+	}
+}
+
+// Everything outside the words is still compared character for character, which
+// is what L01 is for. A renamed variable inside a formula that also carries
+// words has to be refused the same as one in a formula that does not.
+func TestL01StillRefusesASymbolThatMovedInsideAFormulaWithWordsInIt(t *testing.T) {
+	docs := pairDocs(
+		"This is criterion C6.\n\n"+
+			`$(\text{not } A) \text{ or } B$`,
+		"Đây là quy tắc C6.\n\n"+
+			`$(\text{không } A) \text{ hoặc } C$`)
+	got := run(t, l01, docs...)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+}

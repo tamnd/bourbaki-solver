@@ -15,6 +15,15 @@ rename a variable. The spans are pulled out of your answer and compared with the
 ones in the source one at a time, and an answer whose mathematics differs
 anywhere is thrown away whole.
 
+One thing inside the mathematics is not mathematics: a word set with `\text{...}`
+or `\textit{...}`. That is prose, put in a formula because TeX has no other way
+of writing a word in one, and it is translated like the rest of the prose.
+`$(\text{not } A) \text{ or } B$` has two words in it and they both become
+{{LANGUAGE}}. Nothing else inside the dollar signs moves: the same symbols, the
+same brackets, the same spacing, and the braces of the `\text` itself stay where
+they are. A name the book sets upright rather than a word, `\text{Card }` or
+`\text{resp. }`, is not prose and stays exactly as it is.
+
 The count has to match as well as the contents, so do not put dollar signs
 around anything that does not already have them. A number written as an ordinary
 word in the source stays an ordinary word: if the source says `and 1 belongs to

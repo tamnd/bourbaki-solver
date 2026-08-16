@@ -52,6 +52,8 @@ func init() {
 			Title: "no English term was left standing", Run: l10, Need: needGlossary},
 		Check{ID: "L11", Group: Translation, Hard: true,
 			Title: "no sentence was left untranslated", Run: l11, Need: needTranslations},
+		Check{ID: "L12", Group: Translation, Hard: true,
+			Title: "a word set inside the mathematics is translated too", Run: l12, Need: needTranslations},
 	)
 }
 
@@ -154,6 +156,11 @@ func (c *Corpus) pairs() ([]pair, []Finding) {
 // Compared as text and in sequence, not as a count. A translation that has the
 // right number of formulae in the wrong order is what comes back when a model
 // reflows a paragraph, and it is invisible to anything that counts.
+//
+// The one part of a span a translation may change is the words inside a \text,
+// which are prose set in a formula because TeX has no other way of writing a
+// word in one. glossary.SameMath is where that is decided and why; L12 is the
+// rule that those words were in fact translated.
 func l01(c *Corpus) ([]Finding, error) {
 	ps, out := c.pairs()
 	for _, p := range ps {
@@ -165,7 +172,7 @@ func l01(c *Corpus) ([]Finding, error) {
 			continue
 		}
 		for i := range tr {
-			if tr[i].Text != en[i].Text || tr[i].Display != en[i].Display {
+			if !glossary.SameMath(en[i].Text, tr[i].Text) || tr[i].Display != en[i].Display {
 				out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(tr[i].Line),
 					Msg: fmt.Sprintf("math span %d is %q and the English has %q",
 						i+1, ellipsis(tr[i].Text, 40), ellipsis(en[i].Text, 40))})
@@ -537,6 +544,48 @@ func l11(c *Corpus) ([]Finding, error) {
 			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(para.line),
 				Msg: fmt.Sprintf("paragraph %d has a run of %d words with nothing of %s in it: %s",
 					i+1, len(strings.Fields(run)), p.tr.Lang, ellipsis(run, 60))})
+		}
+	}
+	return out, nil
+}
+
+// L12. A word set inside the mathematics is translated too.
+//
+// Theory of Sets is the volume that needed this. The other five write formulae
+// out of symbols, and the assumption underneath L07, that what is left of a
+// display when the dollars come off carries no English, holds for every one of
+// them. Chapter I of Theory of Sets states its criteria as
+//
+//	$((\text{not } A) \text{ or } B) \Rightarrow ((\text{not not } A) \text{ or } B)$
+//
+// and a translation that copies the mathematics through as it was told to hands
+// back a Vietnamese chapter whose every formula is half English. L07 saw it,
+// twenty six times, and had nothing to say about it that anybody could act on:
+// the paragraph is a display and the words are inside the mathematics, which
+// L01 forbade changing. Two hard rules, one file, no way through.
+//
+// So the mathematics is copied byte for byte apart from those runs, which are
+// prose and are translated, and this is the rule that they were. What counts as
+// prose and what counts as a name the printing sets upright is decided in
+// glossary.UntranslatedMathProse, off the same word list L07 and L11 use.
+//
+// Hard, and for L07's reason rather than L10's: a formula that says "not" to a
+// reader who does not read English is not a formula that reader can use, and
+// nothing else in the audit will ever mention it.
+func l12(c *Corpus) ([]Finding, error) {
+	ps, out := c.pairs()
+	for _, p := range ps {
+		tr, _ := Math(p.tr.Body)
+		en, _ := Math(p.en.Body)
+		if len(tr) != len(en) {
+			continue // L01 says so, and the spans are not paired up any more
+		}
+		for i := range tr {
+			for _, run := range glossary.UntranslatedMathProse(en[i].Text, tr[i].Text) {
+				out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(tr[i].Line),
+					Msg: fmt.Sprintf("math span %d holds %s, which is prose and is still in English",
+						i+1, run)})
+			}
 		}
 	}
 	return out, nil

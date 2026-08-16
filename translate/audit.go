@@ -58,6 +58,7 @@ func (p Problem) String() string {
 // Rule names. Every problem carries one of these.
 const (
 	RuleMath        = "math"
+	RuleMathProse   = "math prose"
 	RuleTag         = "tag"
 	RuleStructure   = "structure"
 	RuleReference   = "reference"
@@ -154,12 +155,18 @@ func auditCommentary(tr string) []Problem {
 	return out
 }
 
-// Invariant 1. The mathematics is byte-identical and in order.
+// Invariant 1. The mathematics is byte-identical and in order, apart from the
+// words a printing sets inside it, which are prose and are translated.
 //
 // Compared span by span in sequence and not as a set, because a model that
 // reflows a paragraph moves a formula without losing it, and a set comparison
 // says nothing happened. mathtex.Split is the same splitter the extraction and
 // the audit use, so a span here is a span everywhere.
+//
+// The exception is glossary.SameMath's and the reasoning for it is written out
+// there. Everything outside a \text is still compared character for character,
+// and a name the printing sets upright inside one, Card or resp., is compared
+// the same way; what may move is a run holding an English word.
 func auditMath(en, tr string) []Problem {
 	var out []Problem
 	got, unclosed := mathtex.Split(tr)
@@ -173,7 +180,7 @@ func auditMath(en, tr string) []Problem {
 			Msg: fmt.Sprintf("has %d math spans and the English has %d", len(got), len(want))})
 	}
 	for i := 0; i < len(got) && i < len(want); i++ {
-		if got[i].Text == want[i].Text && got[i].Display == want[i].Display {
+		if glossary.SameMath(want[i].Text, got[i].Text) && got[i].Display == want[i].Display {
 			continue
 		}
 		out = append(out, Problem{Rule: RuleMath, Line: got[i].Line,
@@ -183,6 +190,30 @@ func auditMath(en, tr string) []Problem {
 		// and every one after it reports as changed, which buries the one that
 		// actually moved under a hundred that did not.
 		break
+	}
+	return append(out, auditMathProse(en, tr)...)
+}
+
+// Invariant 1 read the other way round. A word set inside the mathematics is
+// prose, so a span that comes back with the English words still in it is an
+// untranslated piece of the section rather than a formula copied correctly.
+//
+// It is reported apart from the mathematics because the two failures want
+// opposite things done about them. A span that differs is a model that touched
+// what it was told to copy; a span whose words stand is a model that did what
+// the prompt used to say. Every run is named rather than the first, since a
+// display of chapter I holds four of them and they are all the same mistake
+// made once.
+func auditMathProse(en, tr string) []Problem {
+	got, _ := mathtex.Split(tr)
+	want, _ := mathtex.Split(en)
+	var out []Problem
+	for i := 0; i < len(got) && i < len(want); i++ {
+		for _, run := range glossary.UntranslatedMathProse(want[i].Text, got[i].Text) {
+			out = append(out, Problem{Rule: RuleMathProse, Line: got[i].Line,
+				Msg: fmt.Sprintf("math span %d holds %s, which is prose and is not translated",
+					i+1, run)})
+		}
 	}
 	return out
 }

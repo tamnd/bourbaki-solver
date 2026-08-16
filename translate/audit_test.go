@@ -319,3 +319,40 @@ func TestATermWithNoRenderingIsNotSent(t *testing.T) {
 		t.Fatalf("sent a row with no Vietnamese in it: %q", got)
 	}
 }
+
+// The line of chapter I of Theory of Sets that this rule was written for. The
+// words inside the formula are prose, and an answer that copies them through
+// with the symbols has left part of the section in English.
+const enProse = en + "\n\nThe relation $((\\text{not } A) \\text{ or } B)$ holds for every A."
+
+func TestWordsLeftInEnglishInsideAFormulaAreRefused(t *testing.T) {
+	bad := vi + "\n\nHệ thức $((\\text{not } A) \\text{ or } B)$ đúng với mọi A."
+	ps := Audit("vi", enProse, bad)
+	if len(ps) != 2 {
+		t.Fatalf("wanted both runs reported, got %v: %v", rules(ps), ps)
+	}
+	for _, p := range ps {
+		if p.Rule != RuleMathProse {
+			t.Fatalf("wanted rule %s, got %v", RuleMathProse, p)
+		}
+		if !strings.Contains(p.Msg, "math span 6") {
+			t.Fatalf("did not name the span: %v", p)
+		}
+	}
+}
+
+func TestWordsTranslatedInsideAFormulaAreAccepted(t *testing.T) {
+	good := vi + "\n\nHệ thức $((\\text{không } A) \\text{ hoặc } B)$ đúng với mọi A."
+	if ps := Audit("vi", enProse, good); len(ps) != 0 {
+		t.Fatalf("a translated formula was refused: %v", ps)
+	}
+}
+
+// The symbols are still compared, words in the span or not.
+func TestASymbolThatMovedInsideAFormulaWithWordsIsStillRefused(t *testing.T) {
+	bad := vi + "\n\nHệ thức $((\\text{không } A) \\text{ hoặc } C)$ đúng với mọi A."
+	p := only(t, Audit("vi", enProse, bad), RuleMath)
+	if !strings.Contains(p.Msg, "math span 6") {
+		t.Fatalf("did not name the span that changed: %v", p)
+	}
+}

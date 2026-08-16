@@ -497,7 +497,7 @@ func translateSection(ctx context.Context, root string, q *queue.Queue, hosts []
 						continue
 					}
 					a := accepted{Source: j.source, Chunk: index, Of: c.Of,
-						Input: item.InputSHA256, Model: model, Text: text}
+						Input: item.InputSHA256, Prompt: promptHash, Model: model, Text: text}
 					if err := writeAccepted(root, lang, a); err != nil {
 						// The answer is in hand and cannot be put down, so the
 						// job goes back rather than counting as done: the
