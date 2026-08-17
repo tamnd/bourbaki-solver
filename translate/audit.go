@@ -415,6 +415,23 @@ func refs(body string) []string {
 
 func tighten(s string) string { return strings.Join(strings.Fields(s), "") }
 
+// wordRE is a run of letters long enough to be a word somebody translates. Two
+// and not one, because a part's name is a single letter in brackets, `(a)`, and
+// it is a name rather than a word: a solution cites it and it comes through as
+// it stands.
+var wordRE = regexp.MustCompile(`\p{L}{2,}`)
+
+// hasProse says whether a passage has anything in it to translate.
+//
+// The mathematics comes out first, by the same reckoning the terminology rule
+// uses: a display goes whole, an inline span goes through mathtex.Strip, and a
+// heading's attribute block goes, since the identifier and the class are markup
+// the translator is told to copy. What is left is the prose, and a passage with
+// no word in it has none.
+func hasProse(body string) bool {
+	return wordRE.MatchString(prose(body))
+}
+
 // The answer has to be in the language that was asked for.
 //
 // Three ways it is not. A model can hand back the English unchanged, which is
@@ -434,6 +451,21 @@ func tighten(s string) string { return strings.Join(strings.Fields(s), "") }
 // function saying it, for the reason L08 is: finding out in the first minute
 // costs one more ask, and finding out afterwards costs a section.
 func auditLanguage(lang, en, tr string) []Problem {
+	// A passage with no prose in it is a passage whose translation is itself,
+	// and both rules below would refuse the only correct answer there is.
+	//
+	// Bourbaki writes whole blocks in symbols. One chunk of exercise 8 of the
+	// appendix to chapter I is three displays of the tables for not and or and
+	// nothing else, and one chunk of chapter II, § 2 is the single line
+	// $A' \times B' \subset A \times B.$ Asked for those in Vietnamese, every
+	// model hands back what it was given, which is right, and the run then
+	// refuses it, asks twice more, kills the chunk and refuses the whole
+	// section. Two files of Theory of Sets were held out of the corpus by
+	// exactly this, and no number of further attempts would ever have got them
+	// in.
+	if !hasProse(en) {
+		return nil
+	}
 	if strings.TrimSpace(tr) == strings.TrimSpace(en) {
 		return []Problem{{Rule: RuleLanguage, Msg: "is the English, unchanged"}}
 	}
