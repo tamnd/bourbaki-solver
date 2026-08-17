@@ -265,8 +265,23 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 // once. The outer edge carries the page label, A VIII.4. The inner edge carries
 // the § on a left-hand page and the no. on a right-hand one. Between them sits
 // the title of the § or of the chapter, in capitals.
+//
+// The letter in front of the numeral is the Book, and it is one letter in
+// Algebra and two or three in most of the rest: page vii of every recent volume
+// prints the table, and Topologie algébrique heads its pages "TA I.144" and
+// Théories spectrales "TS III.5". Reading the label as a single A left the
+// other letters behind in the title, which is how the corpus shipped 468 pages
+// of Topologie algébrique with a running head reading "T EXERCICES" and
+// "EXERCICES T", and how every page of Théories spectrales kept its label
+// inside its title, since the label there has no A in it to match at all.
+//
+// The letters are the eleven the Éléments print and not a run of capitals of
+// the right length, because there is nothing between the title and the label to
+// say where one ends and the other begins. Sixty pages of Algebra VIII head a
+// title that runs the whole measure, and the two arrive with no space between
+// them: "CRITÈRES POUR QU’UNE ALGÈBRE DE QUATERNIONS SOIT UN CORPSA VIII.357".
 var (
-	labelRE  = regexp.MustCompile(`A\s?([IVX]+)\.\s?(\d+)`)
+	labelRE  = regexp.MustCompile(`(` + strings.Join(corpus.BookLetters(), "|") + `)\s?([IVX]+)\.\s?(\d+)`)
 	sectRE   = regexp.MustCompile(`§\s?(\d+)`)
 	subsecRE = regexp.MustCompile(`\bNo\s?(\d+)`)
 )
@@ -283,7 +298,7 @@ func (p *Page) readHead() {
 		return m
 	}
 	if m := cut(labelRE); m != nil {
-		p.Label = "A " + m[1] + "." + m[2]
+		p.Label = m[1] + " " + m[2] + "." + m[3]
 	}
 	if m := cut(sectRE); m != nil {
 		p.Section, _ = strconv.Atoi(m[1])

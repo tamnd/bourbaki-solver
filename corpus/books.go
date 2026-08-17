@@ -137,6 +137,28 @@ var bookLetters = map[string]string{
 // build and should leave the label empty rather than make one up.
 func BookLetter(book string) string { return bookLetters[book] }
 
+// BookLetters is every one of those abbreviations, longest first. It is what
+// says a run of capitals in a running head opens a page label rather than a
+// title: the head of Topologie algébrique reads "TA I.144 EXERCICES", and the
+// two letters in front of the numeral are the Book and not the last word of the
+// title.
+//
+// Longest first because a reader matching them in turn has to be offered TA
+// before A, or the head of Topologie algébrique reads as Algebra.
+func BookLetters() []string {
+	out := make([]string, 0, len(bookLetters))
+	for _, l := range bookLetters {
+		out = append(out, l)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if len(out[i]) != len(out[j]) {
+			return len(out[i]) > len(out[j])
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
+
 // bookOrder is the order the Éléments print their Books in, which is the order
 // a reader expects to find them shelved and is not alphabetical. A slug nobody
 // has numbered here sorts after the ones that are.
