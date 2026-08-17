@@ -110,9 +110,10 @@ func TestAClusterKeepsItsReachAfterItIsPutBack(t *testing.T) {
 
 // Page 226 prints a two by two matrix inline and pdftohtml flattens it the same
 // way it flattens a stack: X, 0, 0, I, one row read into the superscript and
-// one into the subscript. It must be left alone, and what says so is the gap
-// the page leaves between the two columns: the X ends at 384 and the 0 of the
-// second column opens at 389, where the two halves of an inverse touch.
+// one into the subscript. restack must leave it alone, and what says so is the
+// gap the page leaves between the two columns: the X ends at 384 and the 0 of
+// the second column opens at 389, where the two halves of an inverse touch.
+// What it is instead is a grid, which grid.go reads as the matrix it is.
 const matrixPage = `<?xml version="1.0" encoding="UTF-8"?>
 <pdf2xml>
 <page number="226" position="absolute" top="0" left="0" height="999" width="659">
@@ -129,12 +130,12 @@ const matrixPage = `<?xml version="1.0" encoding="UTF-8"?>
 </pdf2xml>
 `
 
-func TestAFlattenedMatrixIsLeftAlone(t *testing.T) {
+func TestAFlattenedMatrixIsNotAStack(t *testing.T) {
 	lines := parse(t, matrixPage)
 	if len(lines) != 1 {
 		t.Fatalf("got %d lines, want 1", len(lines))
 	}
-	const want = `(A) to the class of the matrix $(^X_0^0_I)$. Prove that if the ring A is`
+	const want = `(A) to the class of the matrix $\begin{pmatrix} X & 0 \\ 0 & I \end{pmatrix}$. Prove that if the ring A is`
 	if got := Render(lines[0]); got != want {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
