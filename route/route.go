@@ -74,6 +74,19 @@ type Route struct {
 	// chatgpt-tool ocr-batch over ssh and a gateway has no box to run it on, so
 	// the two are not interchangeable and nothing should quietly try.
 	Gateway bool `json:"gateway,omitempty"`
+
+	// Command says this route is neither a box nor an endpoint but a program on
+	// the machine the run is on, and names it.
+	//
+	// The subscription that the CLI in question speaks to is paid for already
+	// and needs no browser, no rented box and no key in the environment. It is
+	// a third kind of route because the two kinds above are both limits a run
+	// spends its wall clock waiting on: a box runs out of turns and a free
+	// gateway answers 429 with fourteen hours on it.
+	//
+	// A route with a command has no base URL and no wire, since nothing is sent
+	// over a socket, and like a gateway it reads no page images.
+	Command string `json:"command,omitempty"`
 }
 
 // WireChat is the only wire: POST /v1/chat/completions, streaming.
@@ -121,7 +134,9 @@ func (r Route) Validate() error {
 	if wire := strings.TrimSpace(r.Wire); wire != "" && wire != WireChat {
 		return fmt.Errorf("route %s has unknown wire %q, want %q", r.Name, wire, WireChat)
 	}
-	if strings.TrimSpace(r.BaseURL) == "" {
+	// A command is run rather than called, so there is no address to be missing
+	// and asking for one would refuse a route that works.
+	if strings.TrimSpace(r.BaseURL) == "" && strings.TrimSpace(r.Command) == "" {
 		return fmt.Errorf("route %s has no base_url", r.Name)
 	}
 	if r.Concurrency < 0 {
@@ -366,6 +381,16 @@ func Default() Registry {
 			Rank: 90, Concurrency: 2, Timeout: Duration(5 * time.Minute),
 			Note: "the sixth and last, and the quickest, so it is ranked behind the rest",
 		},
+		{
+			Name: "codex-mini", Command: CodexCommand, Model: CodexMini,
+			Rank: 100, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "the subscription on this machine, on the cheap model, which is tried first and which L08 reports",
+		},
+		{
+			Name: "codex", Command: CodexCommand, Model: CodexFull,
+			Rank: 110, Concurrency: 2, Timeout: Duration(5 * time.Minute),
+			Note: "the same subscription on the full model, which answers what the cheap one gets wrong",
+		},
 	}}
 	registry.sort()
 	return registry
@@ -417,6 +442,33 @@ const (
 	// ZenKeyEnv is the variable opencode itself writes, so a machine that has
 	// the CLI set up has the route working already.
 	ZenKeyEnv = "OPENCODE_API_KEY"
+)
+
+// The subscription this machine is signed in to, reached by running the codex
+// CLI rather than by calling anything.
+//
+// Two routes and not one, because the two models it serves are not the same
+// model and the cheaper one is not always enough. Measured on chunks the free
+// gateway had already answered, both are quicker than anything else the run
+// has: the cheap model about seventeen seconds on a chunk of six thousand
+// characters and the full one about forty, against forty to seventy on a box
+// and five minutes of waiting when a box has quietly stopped. And on the chunk
+// of chapter I, § 4 that three attempts on the free gateway could not get
+// right, and which is dead on the queue because of it, the full model answered
+// clean and the cheap one left \text{not } and \text{ or } standing in English.
+//
+// So the cheap one is ranked first and the full one behind it, which is the
+// order the run wants anyway: the cheap model answers most chunks correctly and
+// costs a fraction, and the chunks it cannot do are refused by the rules and
+// asked again, and the model that answers them next is the one above it.
+//
+// CodexMini is a cut down model by its name, so quality.SmallModel says so and
+// L08 reports any section it writes, which is the same treatment the cut down
+// slug on the free gateway gets.
+const (
+	CodexCommand = "codex"
+	CodexMini    = "gpt-5.4-mini"
+	CodexFull    = "gpt-5.4"
 )
 
 // Key is the credential to send, preferring a literal one from the command line

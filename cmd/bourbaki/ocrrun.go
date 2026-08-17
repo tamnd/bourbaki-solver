@@ -445,6 +445,15 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 	var out []ocr.Host
 	var refused []string
 	for _, value := range registry.Enabled() {
+		if value.Command != "" {
+			// A command on this machine has no box either, and the same
+			// reasoning applies: it is only worth a line when somebody asked
+			// for it by name and is waiting to hear why it is not being used.
+			if asked {
+				refused = append(refused, value.Name+": a command on this machine reads no page images")
+			}
+			continue
+		}
 		if value.Gateway {
 			// A gateway answers HTTP and has no box to run chatgpt-tool on, so
 			// it was never a candidate to read a page. Saying so on every run
@@ -509,6 +518,15 @@ func askHosts(routeFile, names string) ([]ocr.Host, error) {
 	var out []ocr.Host
 	var boxes bool
 	for _, value := range registry.Enabled() {
+		if value.Command != "" {
+			lanes := value.Concurrency
+			if lanes <= 0 {
+				lanes = 1
+			}
+			out = append(out, ocr.Host{Name: value.Name, Lanes: lanes,
+				Command: value.Command, Model: value.Model})
+			continue
+		}
 		if !value.Gateway {
 			boxes = true
 			continue

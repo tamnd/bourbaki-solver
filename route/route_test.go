@@ -164,8 +164,12 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 	// allowance is per model, so one slug out of turns is not the gateway out of
 	// turns, and the six do not come back together either: probed an hour apart,
 	// one probe had a single slug answering and the next had two.
-	if got := registry.Names(); strings.Join(got, ",") != "server3,server2,server1,zen,zen-hy3,zen-laguna,zen-deepseek,zen-mimo,zen-lightning" {
-		t.Errorf("Names = %v; the fleet ranks on verified profiles then free memory, and the gateway ranks last", got)
+	// The subscription on this machine ranks behind both, cheap model first.
+	// Not because it is worse, it is quicker and better than either, but
+	// because the boxes and the free gateway cost nothing at all and a
+	// subscription has a week's allowance to spend on what they cannot do.
+	if got := registry.Names(); strings.Join(got, ",") != "server3,server2,server1,zen,zen-hy3,zen-laguna,zen-deepseek,zen-mimo,zen-lightning,codex-mini,codex" {
+		t.Errorf("Names = %v; the fleet ranks on verified profiles then free memory, then the gateway, then this machine", got)
 	}
 	// Every route is enabled and every one carries the numbers it was ranked
 	// on, so a rank that stops matching the fleet is visible in the diff rather
@@ -175,7 +179,7 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 		concurrency int
 	}{{"server3", 4}, {"server2", 3}, {"server1", 1}, {"zen", 2},
 		{"zen-hy3", 2}, {"zen-laguna", 2}, {"zen-deepseek", 2},
-		{"zen-mimo", 2}, {"zen-lightning", 2}} {
+		{"zen-mimo", 2}, {"zen-lightning", 2}, {"codex-mini", 2}, {"codex", 2}} {
 		value, ok := registry.Find(want.name)
 		if !ok {
 			t.Fatalf("%s is missing from the built-in fleet", want.name)
@@ -191,20 +195,30 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 			t.Errorf("%s has no note saying what it was ranked on", want.name)
 		}
 	}
-	if got := NewPool(registry).Lanes(); got != 20 {
-		t.Errorf("the fleet and the gateway carry %d calls at once, want 20", got)
+	if got := NewPool(registry).Lanes(); got != 24 {
+		t.Errorf("the fleet, the gateway and this machine carry %d calls at once, want 24", got)
 	}
-	// The gateway is the only route with no box behind it, and that is what
-	// keeps OCR off it.
+	// Neither the gateway nor the command has a box behind it, and that is
+	// what keeps OCR off both of them. A route is exactly one of the three
+	// kinds, and the one thing every kind must have is a way to be reached.
 	for _, value := range registry.Routes {
 		if strings.HasPrefix(value.Name, "zen") != value.Gateway {
 			t.Errorf("%s: gateway = %v", value.Name, value.Gateway)
 		}
-		if value.Gateway && value.Host != "" {
-			t.Errorf("%s is a gateway and names an ssh host %q", value.Name, value.Host)
+		if strings.HasPrefix(value.Name, "codex") != (value.Command != "") {
+			t.Errorf("%s: command = %q", value.Name, value.Command)
 		}
-		if !value.Gateway && value.Host == "" {
-			t.Errorf("%s is not a gateway and names no ssh host, so it can neither be probed nor read a page", value.Name)
+		if value.Gateway && value.Command != "" {
+			t.Errorf("%s is a gateway and a command at once", value.Name)
+		}
+		if (value.Gateway || value.Command != "") && value.Host != "" {
+			t.Errorf("%s has no box and names an ssh host %q", value.Name, value.Host)
+		}
+		if !value.Gateway && value.Command == "" && value.Host == "" {
+			t.Errorf("%s is a box and names no ssh host, so it can neither be probed nor read a page", value.Name)
+		}
+		if value.Command != "" && value.BaseURL != "" {
+			t.Errorf("%s is run rather than called and names a base url %q", value.Name, value.BaseURL)
 		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -216,6 +217,30 @@ type Prober struct {
 	Timeout    time.Duration
 	Deep       bool
 	Now        func() time.Time
+	// Look says where a program is, and is exec.LookPath unless a test says
+	// otherwise. It is the whole of what a route with a command can be asked
+	// without running the thing.
+	Look func(name string) (string, error)
+}
+
+// command is the probe for a route that is a program on this machine.
+//
+// Being on PATH is the whole of the shallow check. Whether the subscription
+// behind it is signed in and has turns left is not something to ask without
+// spending one, so a deep probe asks the question the same way every other
+// route's deep probe does, by putting a real question, and that is done by the
+// caller through Client rather than here.
+func (p Prober) command(_ context.Context, value Route) Signal {
+	look := p.Look
+	if look == nil {
+		look = exec.LookPath
+	}
+	path, err := look(value.Command)
+	if err != nil {
+		return Signal{State: StateUnreachable,
+			Detail: fmt.Sprintf("%s is not on PATH on this machine: %v", value.Command, err)}
+	}
+	return Signal{State: StateLive, Detail: fmt.Sprintf("command, %s", path)}
 }
 
 func (p Prober) now() time.Time {
@@ -262,6 +287,15 @@ func (p Prober) Probe(ctx context.Context, value Route) Health {
 	}
 	if err := value.Validate(); err != nil {
 		return finish(Signal{State: StateBroken, Detail: err.Error()})
+	}
+
+	// A command is not something to make a request to. There is no /health to
+	// ask, no catalogue to list and no key to be rejected, so the whole of the
+	// probe is whether the program is on this machine and, if the caller wants
+	// it, whether it will answer. Everything below this line speaks HTTP and
+	// would report a working route as broken.
+	if value.Command != "" {
+		return finish(p.command(ctx, value))
 	}
 
 	// A gateway has no /health and no pool, so the catalogue below is the whole

@@ -98,8 +98,9 @@ func (g Gateway) Do(ctx context.Context) (Answer, error) {
 	return out, nil
 }
 
-// NewAsk builds the right transport for a host: HTTP when the host is a
-// gateway, and the fleet's ssh and rsync when it is a box.
+// NewAsk builds the right transport for a host: a program on this machine when
+// the host names one, HTTP when the host is a gateway, and the fleet's ssh and
+// rsync when it is a box.
 //
 // It exists so the four commands that ask a question do not each decide this.
 // They all want the same thing, which is an answer from whatever will answer,
@@ -123,6 +124,9 @@ func NewAsk(host Host, shell Shell, copier Copier, prompt, id string, keep bool)
 // takes its bound from the HTTP client its route built and this is not passed
 // down to it, since a route already names the longest it will wait.
 func NewAskWithin(host Host, shell Shell, copier Copier, prompt, id string, keep bool, deadline time.Duration) Asker {
+	if host.Command != "" {
+		return Codex{Name: host.Name, Model: host.Model, Prompt: prompt, ID: id, Deadline: deadline}
+	}
 	if host.Client != nil {
 		return Gateway{Name: host.Name, Client: host.Client, Model: host.Model, Prompt: prompt, ID: id}
 	}
