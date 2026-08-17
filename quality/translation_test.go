@@ -396,6 +396,12 @@ func TestL08NamesTheFileASmallModelWrote(t *testing.T) {
 		// as much worth doing again as all of it.
 		"gpt-5-6, gpt-5-6-mini": true,
 		"gpt-5-6, gpt-5-7":      false,
+		// The free gateway names the cut down nemotron by a different word and
+		// then puts -free behind it. Both halves of that are why the rule is
+		// written the way it is: the word is a suffix of the model name and not
+		// of the whole string, and lightning is one of the words.
+		"nemotron-3.5-lightning-free": true,
+		"nemotron-3-ultra-free":       false,
 	}
 	for model, want := range cases {
 		t.Run(model, func(t *testing.T) {

@@ -379,7 +379,7 @@ func Default() Registry {
 			Name: "zen-lightning", Wire: WireChat, Gateway: true,
 			BaseURL: ZenBaseURL, Model: ZenLightning, APIKeyEnv: ZenKeyEnv,
 			Rank: 90, Concurrency: 2, Timeout: Duration(5 * time.Minute),
-			Note: "the sixth and last, and the quickest, so it is ranked behind the rest",
+			Note: "the sixth and last, cut down and quick, ranked behind the rest and reported by L08",
 		},
 		{
 			Name: "codex-mini", Command: CodexCommand, Model: CodexMini,
@@ -432,8 +432,10 @@ const (
 	// rather than a list on one, because the pool ranks and counts routes and a
 	// route that is out of turns has to be the thing that is out.
 	//
-	// ZenDeepseek is a cut down model by its name, so quality.SmallModel says
-	// so, L08 reports any section it writes, and it is ranked last of the four.
+	// ZenDeepseek and ZenLightning are cut down models by their names, so
+	// quality.SmallModel says so and L08 reports any section either of them
+	// writes. The word is flash in one name and lightning in the other, and both
+	// carry -free behind it.
 	ZenHy3       = "hy3-free"
 	ZenLaguna    = "laguna-s-2.1-free"
 	ZenDeepseek  = "deepseek-v4-flash-free"
