@@ -251,8 +251,22 @@ func plan(q *queue.Queue, root, lang, promptHash string, j job, force, redoSmall
 			// of chapter I, § 1 again to replace the four of them that came
 			// back on gpt-5-6-mini, which is thirty eight questions nobody
 			// needs to put and, on the free gateway, most of a day.
+			//
+			// An answer today's rules refuse is passed over as well, and this
+			// is § 7 of chapter III. Two of its chunks were accepted weeks ago
+			// with \textit{whenever} copied through, because copying it was
+			// what the rules asked for then; the word counts as prose now, the
+			// file is put together out of every accepted chunk, and the audit
+			// of the whole file refused it over two spans no chunk was ever
+			// going to be asked about again. A cached answer that the rule
+			// standing today will not accept is not an answer, for the same
+			// reason readAccepted compares the hashes rather than trusting
+			// them. The terminology is not asked here because it is inside the
+			// input hash already, so a glossary that moved has re-asked the
+			// chunk before this line is reached.
 			if a, ok := readAccepted(root, lang, j.source, c.Index, input, promptHash); ok &&
-				!(redoSmall && quality.SmallModel(a.Model)) {
+				!(redoSmall && quality.SmallModel(a.Model)) &&
+				len(translate.Audit(lang, c.Body, a.Text)) == 0 {
 				have[c.Index] = a
 				continue
 			}
