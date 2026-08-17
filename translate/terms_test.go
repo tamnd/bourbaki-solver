@@ -10,6 +10,7 @@ import (
 func rows() *glossary.Glossary {
 	return &glossary.Glossary{Version: 3, Terms: []glossary.Term{
 		{EN: "square", VI: "bình phương"},
+		{EN: "calculus", VI: "phép tính"},
 		{EN: "ring", VI: "vành"},
 		{EN: "Hausdorff", VI: "Hausdorff"},
 		{EN: "fortiori", VI: "a fortiori"},
@@ -76,6 +77,44 @@ func TestAWordInsideTheMathematicsIsNotATermLeftInEnglish(t *testing.T) {
 	const displayVI = "Xét\n\n$$\n\\text{square}(x) = x^2\n$$\n\nvới mọi $x$."
 	if problems := AuditTerms("vi", rows(), display, displayVI); len(problems) != 0 {
 		t.Errorf("the display block was read as prose: %v", problems)
+	}
+}
+
+// A name in quotation marks that the book prints in Latin is kept, and keeping
+// it is not a term left in English.
+//
+// This is chunk 4 of the historical note of chapter IV, where Leibniz calls his
+// logic a "Calculus ratiocinator". Every model that was asked for the paragraph
+// kept the name, which is what a reader wants, and the terminology rule read the
+// word calculus in it and refused the chunk over "phép tính".
+func TestALatinNameInQuotationMarksIsNotATermLeftInEnglish(t *testing.T) {
+	const en = `he called it a "Calculus ratiocinator", and the square of it.`
+	const tr = `ông gọi nó là một “Calculus ratiocinator”, và bình phương của nó.`
+	if problems := AuditTerms("vi", rows(), en, tr); len(problems) != 0 {
+		t.Errorf("a Latin name the book prints in quotation marks was refused: %v", problems)
+	}
+
+	// The term outside the quotation is still read, so the exclusion covers the
+	// name and nothing around it.
+	const left = `ông gọi nó là một “Calculus ratiocinator”, và the square của nó.`
+	if problems := AuditTerms("vi", rows(), en, left); len(problems) != 1 {
+		t.Errorf("%d problems, want the term outside the quotation: %v", len(problems), problems)
+	}
+
+	// An English sentence in quotation marks is English prose, whoever it is
+	// quoted from, and a model that copies it rather than rendering it is
+	// reported as before.
+	const said = `he wrote that "the square of every element is the same", and said so twice.`
+	const copied = `ông viết rằng “the square of every element is the same”, và nói vậy hai lần.`
+	if problems := AuditTerms("vi", rows(), said, copied); len(problems) != 1 {
+		t.Errorf("%d problems, want the copied English quotation: %v", len(problems), problems)
+	}
+
+	// A quotation the English does not have is not a quotation from the book,
+	// so it stands to be read like the rest of the answer.
+	const own = `ông gọi nó là một “the calculus of it”, và bình phương của nó.`
+	if problems := AuditTerms("vi", rows(), en, own); len(problems) != 1 {
+		t.Errorf("%d problems, want the quotation the English never printed: %v", len(problems), problems)
 	}
 }
 
