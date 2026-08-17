@@ -503,19 +503,22 @@ func l07(c *Corpus) ([]Finding, error) {
 	ps, out := c.pairs()
 	for _, p := range ps {
 		for i, para := range paragraphs(p.tr.Body) {
-			words := englishWords(para.text)
+			// A work the sentence cites by name stands as printed, the way an
+			// entry does. See translate.WithoutCitations.
+			text := translate.WithoutCitations(p.en.Body, para.text)
+			words := englishWords(text)
 			if words < 2 {
 				continue
 			}
 			if translate.BiblioEntry(para.text) {
 				continue // it stands as printed, and L14 is what watches that
 			}
-			if translatedInto(p.tr.Lang, para.text) {
+			if translatedInto(p.tr.Lang, text) {
 				continue
 			}
 			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(para.line),
 				Msg: fmt.Sprintf("paragraph %d carries %d English words and nothing of %s: %s",
-					i+1, words, p.tr.Lang, ellipsis(para.text, 50))})
+					i+1, words, p.tr.Lang, ellipsis(text, 50))})
 		}
 	}
 	return out, nil
@@ -548,14 +551,15 @@ func l11(c *Corpus) ([]Finding, error) {
 	ps, out := c.pairs()
 	for _, p := range ps {
 		for i, para := range paragraphs(p.tr.Body) {
-			run, words := glossary.Untranslated(p.tr.Lang, para.text)
+			text := translate.WithoutCitations(p.en.Body, para.text)
+			run, words := glossary.Untranslated(p.tr.Lang, text)
 			if words < 2 {
 				continue
 			}
 			if translate.BiblioEntry(para.text) {
 				continue // it stands as printed, and L14 is what watches that
 			}
-			if !translatedInto(p.tr.Lang, para.text) {
+			if !translatedInto(p.tr.Lang, text) {
 				// The whole paragraph came back in English and L07 says so.
 				// Two rules on one paragraph is one finding too many.
 				continue
