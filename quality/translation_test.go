@@ -338,6 +338,47 @@ func TestL11LeavesTheMathematicsAlone(t *testing.T) {
 	}
 }
 
+// The sentence is the third paragraph of the Vietnamese introduction to Theory
+// of Sets as gpt-5.4 wrote it, with либо where hoặc belongs. L07 and L11 both
+// pass it, because the paragraph and every run of words in it are Vietnamese.
+func TestL13FindsAWordInAnotherAlphabet(t *testing.T) {
+	const en = "Its use is a source of error, either because the same word has been " +
+		"used in different senses, or because a rule has been applied outside its scope."
+	const vi = "Việc dùng nó là một nguồn sai lầm, либо bởi vì cùng một từ đã được dùng " +
+		"theo những nghĩa khác nhau, hoặc bởi vì một quy tắc đã được áp dụng ngoài phạm vi của nó."
+	docs := pairDocs(en, vi)
+	for _, c := range []struct {
+		id  string
+		run func(*Corpus) ([]Finding, error)
+	}{{"L07", l07}, {"L11", l11}} {
+		if got := run(t, c.run, docs...); len(got) != 0 {
+			t.Fatalf("%s already reports this, so L13 has nothing to add: %v", c.id, got)
+		}
+	}
+	got := run(t, l13, docs...)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, "либо") || !strings.Contains(got[0].Msg, "Cyrillic") {
+		t.Errorf("the finding does not name the word and its alphabet: %s", got[0].Msg)
+	}
+}
+
+// A Greek letter the English sets in prose is one the Vietnamese may keep, and
+// the mathematics is out of scope altogether. Both of these are in the corpus.
+func TestL13LeavesTheBooksOwnGreekAlone(t *testing.T) {
+	for _, c := range [][2]string{
+		{"Let $\\alpha$ be an ordinal and σ a permutation.",
+			"Cho $\\alpha$ là một số thứ tự và σ là một phép hoán vị."},
+		{"The relation $\\varepsilon \\in \\Gamma$ holds.",
+			"Hệ thức $\\varepsilon \\in \\Gamma$ đúng."},
+	} {
+		if got := run(t, l13, pairDocs(c[0], c[1])...); len(got) != 0 {
+			t.Errorf("%q was reported: %v", c[1], got)
+		}
+	}
+}
+
 // The two names are real. The same section on the same host a half hour apart
 // came back as gpt-5-6 and then gpt-5-6-mini.
 func TestL08NamesTheFileASmallModelWrote(t *testing.T) {

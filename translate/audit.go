@@ -28,7 +28,9 @@ package translate
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
@@ -65,6 +67,7 @@ const (
 	RuleFrontMatter = "front matter"
 	RuleCommentary  = "commentary"
 	RuleLanguage    = "language"
+	RuleScript      = "script"
 )
 
 // Audit compares a translated body with the English it was made from.
@@ -90,6 +93,7 @@ func Audit(lang, en, tr string) []Problem {
 	out = append(out, auditBlocks(en, tr)...)
 	out = append(out, auditRefs(en, tr)...)
 	out = append(out, auditLanguage(lang, en, tr)...)
+	out = append(out, AuditScript(lang, en, tr)...)
 	return out
 }
 
@@ -479,6 +483,104 @@ func auditLanguage(lang, en, tr string) []Problem {
 			len(strings.Fields(run)), lang, short(run))}}
 	}
 	return nil
+}
+
+// scripts is what each language of the corpus is written in.
+//
+// A language not listed is not checked, which is the safe way round: a rule
+// that does not know what a language looks like has nothing to say about it.
+var scripts = map[string][]*unicode.RangeTable{
+	"en": {unicode.Latin},
+	"fr": {unicode.Latin},
+	"vi": {unicode.Latin},
+	"zh": {unicode.Han, unicode.Bopomofo, unicode.Latin},
+	"ja": {unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Latin},
+}
+
+// AuditScript says the answer has to be written in one alphabet, and it is not
+// always. It is exported because L13 of the audit asks the same question of the
+// files already on disk, and a run that refused one thing while the audit
+// reported another would be two rules pretending to be one.
+//
+// The introduction to Theory of Sets came back from gpt-5.4 in fluent
+// Vietnamese with two words in it that are not Vietnamese and not words of the
+// source either: либо, Russian for "or", standing where the Vietnamese "hoặc"
+// belongs, and որևէ, Armenian for "any", standing where "bất kỳ" belongs. Both
+// sit inside a correct sentence, both carry the meaning the English has, and
+// every rule above passes them: the mathematics is intact, the headings are
+// intact, the block count is right, the chunk is plainly written in Vietnamese
+// and there is no run of two consecutive words that is not. A reader who does
+// not read Russian sees a typo, and a reader who does sees that the model
+// changed language for one word in the middle of a sentence.
+//
+// It is cheap to catch because a Vietnamese section has no business carrying a
+// Cyrillic or Armenian letter at all. What it must not catch is the Greek the
+// book itself sets, so a script the English source uses is a script the
+// translation may use, and the mathematics is out of scope entirely: prose
+// takes the displays and the inline spans out before anything here looks at a
+// letter.
+func AuditScript(lang, en, tr string) []Problem {
+	allow, ok := scripts[lang]
+	if !ok {
+		return nil
+	}
+	quoted := straysIn(prose(en), allow)
+	var out []Problem
+	seen := map[string]bool{}
+	for i, line := range strings.Split(prose(tr), "\n") {
+		for _, word := range strings.Fields(line) {
+			name := strayScript(word, allow)
+			if name == "" || quoted[name] || seen[name+" "+word] {
+				continue
+			}
+			seen[name+" "+word] = true
+			out = append(out, Problem{Rule: RuleScript, Line: i + 1, Msg: fmt.Sprintf(
+				"%s is written in %s, and this is %s", short(word), name, lang)})
+		}
+	}
+	return out
+}
+
+// strayScript names the script of the first letter of a word that is not one
+// the language is written in, and is empty when every letter is.
+func strayScript(word string, allow []*unicode.RangeTable) string {
+	for _, r := range word {
+		if !unicode.IsLetter(r) || unicode.In(r, allow...) {
+			continue
+		}
+		return scriptName(r)
+	}
+	return ""
+}
+
+// straysIn is every script a passage uses that the language is not written in.
+func straysIn(text string, allow []*unicode.RangeTable) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range text {
+		if unicode.IsLetter(r) && !unicode.In(r, allow...) {
+			out[scriptName(r)] = true
+		}
+	}
+	return out
+}
+
+// scriptName is what Unicode calls the script a letter belongs to.
+//
+// The names are sorted before the search so that a letter in more than one
+// table, which happens for a few of the historic ones, is reported by the same
+// name every time rather than by whichever the map handed over first.
+func scriptName(r rune) string {
+	names := make([]string, 0, len(unicode.Scripts))
+	for name := range unicode.Scripts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		if unicode.Is(unicode.Scripts[name], r) {
+			return name
+		}
+	}
+	return "no script Unicode names"
 }
 
 func notIn(a, b []string) []string {
