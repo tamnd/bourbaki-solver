@@ -59,15 +59,16 @@ func (p Problem) String() string {
 
 // Rule names. Every problem carries one of these.
 const (
-	RuleMath        = "math"
-	RuleMathProse   = "math prose"
-	RuleTag         = "tag"
-	RuleStructure   = "structure"
-	RuleReference   = "reference"
-	RuleFrontMatter = "front matter"
-	RuleCommentary  = "commentary"
-	RuleLanguage    = "language"
-	RuleScript      = "script"
+	RuleMath         = "math"
+	RuleMathProse    = "math prose"
+	RuleTag          = "tag"
+	RuleStructure    = "structure"
+	RuleReference    = "reference"
+	RuleFrontMatter  = "front matter"
+	RuleCommentary   = "commentary"
+	RuleLanguage     = "language"
+	RuleBibliography = "bibliography"
+	RuleScript       = "script"
 )
 
 // Audit compares a translated body with the English it was made from.
@@ -92,6 +93,7 @@ func Audit(lang, en, tr string) []Problem {
 	out = append(out, auditHeadings(en, tr)...)
 	out = append(out, auditBlocks(en, tr)...)
 	out = append(out, auditRefs(en, tr)...)
+	out = append(out, auditBiblio(en, tr)...)
 	out = append(out, auditLanguage(lang, en, tr)...)
 	out = append(out, AuditScript(lang, en, tr)...)
 	return out
@@ -317,6 +319,55 @@ func headings(body string) []heading {
 			h.num = n[1]
 		}
 		out = append(out, h)
+	}
+	return out
+}
+
+// bibEntryRE opens a bibliography entry: the number the note cites the work by,
+// as "12." or "2 (*bis*).". Over the whole English corpus the shape appears 57
+// times and every one of them is under a BIBLIOGRAPHY heading, so a line that
+// looks like this is one.
+var bibEntryRE = regexp.MustCompile(`^\d+\s*(\(\*?bis\*?\)\s*)?\.\s`)
+
+// A bibliography entry stands as printed.
+//
+// The bibliography is apparatus and not prose. "Vorlesungen über die Geschichte
+// der antiken Mathematik" is the name of a book, and a reader who wants to find
+// it needs the name the library has it under; a Vietnamese rendering of the
+// title is a work nobody can look up. The same goes for the journal, the
+// volume, the year and the pages, which is all the rest of the entry.
+//
+// This also settles a loop. Chunk 30 of the historical note of chapters I to IV
+// is 49 bibliography entries, and their titles hold the English words
+// hypothesis, topology, algebra, choice, formal, method and remark. The
+// terminology rule read those as seven terms left untranslated and refused the
+// chunk over and over, correctly by its own lights and wrongly, because the
+// words are inside the names of books. prose leaves the entries out for the
+// same reason it leaves out a display.
+func auditBiblio(en, tr string) []Problem {
+	want, got := bibEntries(en), bibEntries(tr)
+	if len(got) != len(want) {
+		return []Problem{{Rule: RuleBibliography, Msg: fmt.Sprintf(
+			"has %d bibliography entries and the English has %d", len(got), len(want))}}
+	}
+	for i := range want {
+		if got[i] == want[i] {
+			continue
+		}
+		mine, theirs := ShortDiff(got[i], want[i])
+		return []Problem{{Rule: RuleBibliography, Msg: fmt.Sprintf(
+			"bibliography entry %d is %s and the English has %s, and an entry stands as printed",
+			i+1, mine, theirs)}}
+	}
+	return nil
+}
+
+func bibEntries(body string) []string {
+	var out []string
+	for _, b := range blocks(body) {
+		if bibEntryRE.MatchString(b) {
+			out = append(out, strings.Join(strings.Fields(b), " "))
+		}
 	}
 	return out
 }

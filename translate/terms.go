@@ -70,6 +70,11 @@ func AuditTerms(lang string, g *glossary.Glossary, en, tr string) []Problem {
 // answers already on disk, the rule without this line reported 281 findings
 // and with it reports far fewer, and the difference was all that one class
 // name.
+//
+// A bibliography entry goes for the reason auditBiblio gives: it stands as
+// printed, so the English words in the title of a book are not English left in
+// the answer. Seven terms of chunk 30 of the historical note were that, and the
+// chunk was refused over them every time it was asked for.
 func prose(body string) string {
 	var b strings.Builder
 	inDisplay := false
@@ -78,7 +83,7 @@ func prose(body string) string {
 			inDisplay = !inDisplay
 			continue
 		}
-		if inDisplay {
+		if inDisplay || bibEntryRE.MatchString(line) {
 			continue
 		}
 		b.WriteString(mathtex.Strip(attrRE.ReplaceAllString(line, " ")))

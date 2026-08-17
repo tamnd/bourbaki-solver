@@ -145,6 +145,38 @@ func TestAnAnswerThatStopsEarlyIsRefused(t *testing.T) {
 	}
 }
 
+// A bibliography entry is the name a library has the work under, so it stands
+// as printed. The one below is entry 1 of the historical note of chapters I to
+// IV, and the Vietnamese is what a run actually wrote for the note of chapter
+// III, where nobody can look the book up any more.
+func TestATranslatedBibliographyEntryIsRefused(t *testing.T) {
+	bib := "1. O. Neugebauer, *Vorlesungen über die Geschichte der antiken " +
+		"Mathematik*, Vol. I, Berlin (Springer), 1934."
+	bad := "1. O. NEUGEBAUER, *Các bài giảng về lịch sử toán học cổ đại*, " +
+		"tập I, Berlin (Springer), 1934."
+	p := only(t, Audit("vi", bib, bad), RuleBibliography)
+	if !strings.Contains(p.Msg, "bibliography entry 1") || !strings.Contains(p.Msg, "stands as printed") {
+		t.Fatalf("did not say which entry, or why: %v", p)
+	}
+	if ps := Audit("vi", bib, bib); len(ps) != 0 {
+		t.Fatalf("an entry copied as printed was refused: %v", ps)
+	}
+}
+
+// The terminology rule read the titles of the 49 works chunk 30 of the note
+// cites as seven terms left in English, and refused the chunk every time.
+func TestTermsInsideABibliographyEntryAreNotTermsLeftInEnglish(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{
+		{EN: "choice", VI: "lựa chọn"},
+		{EN: "remark", VI: "chú ý"},
+	}}
+	bib := "43. K. GÖDEL, *The consistency of the axiom of choice*, Princeton, 1940.\n" +
+		"45. M. ZORN, \"A remark on method in transfinite algebra\", **41** (1935)."
+	if ps := AuditTerms("vi", g, bib, bib); len(ps) != 0 {
+		t.Fatalf("the titles of two books were read as English left in: %v", ps)
+	}
+}
+
 func TestAMisquotedReferenceIsRefused(t *testing.T) {
 	// p. 20 became p. 26. This is the failure a reader cannot see and cannot
 	// check without the English open beside them.
