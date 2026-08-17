@@ -167,6 +167,7 @@ func (a Ask) Do(ctx context.Context) (Answer, error) {
 	if err != nil {
 		return Answer{}, fmt.Errorf("read the answer from %s: %w", a.Host.Name, err)
 	}
+	text = clean(text)
 	// The service answers its own failures in the same place it answers
 	// questions, with nothing else to say it did. Read as an answer, that page is
 	// a judge with no verdict in it, and the caller files the exercise as failed
