@@ -14,6 +14,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/extract"
 	"github.com/tamnd/bourbaki-solver/mathtex"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/toc"
 )
 
 // fix is the repairs that are a function of the Markdown alone: no PDF, no
@@ -38,14 +39,15 @@ commands:
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
   folio     move the printed page number off the foot and into the front matter
+  heading   set a numbered heading at the level the table of contents gives it
   seal      write content_sha256 over a section body that was edited by hand
 
 Run the first three in that order. Everything after an unclosed delimiter reads
 as mathematics, so stray comes first and the other two will not touch a span
 whose end they cannot see, and parens comes before math so that math reads the
-spans as they will be rather than as they are. folio touches no mathematics and
-can be run at any point before assemble. seal works on content/ and not on
-pages/, and is the last thing run after a hand correction.
+spans as they will be rather than as they are. folio and heading touch no
+mathematics and can be run at any point before assemble. seal works on content/
+and not on pages/, and is the last thing run after a hand correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
 `
@@ -165,6 +167,35 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixHeadingUsage = `usage: bourbaki fix heading [flags]
+
+Sets a numbered heading at the level the table of contents gives it.
+
+A § and a no. are printed the same way, a number and a title alone on a line,
+and the only thing separating them on the page is the size of the type. The
+reading decides by that and on Theory of Sets it decided wrong eight times, all
+in the same direction: a no. written as a §. Chapter III, § 1 then carried
+twelve no. where the contents lists thirteen, and the assembler stopped there.
+
+manifests/toc.yaml is the authority. It gives every § and every no. with the
+page it begins on, so the heading is looked up rather than guessed at. Both the
+number and the title have to agree with it: a § and its first no. begin on the
+same page in most §§ and both are numbered 1, so the number alone would make
+the no. into a second §.
+
+It changes the level and nothing else. The number, the title, the supplementary
+star and the rest of the page are written back as they stand, and a heading the
+contents does not put on that page is left alone and named, since a heading in
+a place the contents does not know about is a disagreement worth reading rather
+than a level worth changing.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
 const fixSealUsage = `usage: bourbaki fix seal [flags]
 
 Writes content_sha256 over a section file whose body no longer hashes to it.
@@ -213,6 +244,8 @@ func runFix(args []string) error {
 		return fixParens(args[1:])
 	case "folio":
 		return fixFolio(args[1:])
+	case "heading":
+		return fixHeading(args[1:])
 	case "seal":
 		return fixSeal(args[1:])
 	}
@@ -521,6 +554,85 @@ func folioLabel(has, letter, chapter string, folio int) string {
 // page carries a number, which makes writing one an invention. A reader holding
 // the printed book would go looking for it at the foot and find blank paper.
 const folioFromMap = "folio from the page map, printed on the page and dropped by this reading"
+
+func fixHeading(args []string) error {
+	fs := flag.NewFlagSet("fix heading", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixHeadingUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+	man, err := corpus.LoadTOC(root)
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, unknown int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		bt, ok := man.Get(f.Meta.Book)
+		if !ok {
+			// A volume whose contents has not been read yet. There is nothing
+			// to look a heading up in, which is not a fault of the page.
+			return nil
+		}
+		lines := strings.Split(f.Body, "\n")
+		moved := false
+		for i, line := range lines {
+			h, ok := toc.ParseHeading(line)
+			if !ok {
+				continue
+			}
+			level := toc.Level(*bt, f.Meta.PDFPage, h.Number, h.Title)
+			switch {
+			case level == 0:
+				// The contents does not give this heading on this page. The
+				// front pages of a volume are mostly this: the contents itself
+				// is set as a list of numbered titles and reads as a page full
+				// of headings. So it is counted and not printed one by one.
+				unknown++
+			case level != h.Level:
+				lines[i] = h.Write(level)
+				moved = true
+				if *check {
+					fmt.Printf("%s:%d  %s\n", rel(root, path), i+1, lines[i])
+				}
+			}
+		}
+		if !moved {
+			return nil
+		}
+		changed++
+		if *check {
+			return nil
+		}
+		f.Body = strings.Join(lines, "\n")
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	verb := "moved a heading on"
+	if *check {
+		verb = "would move a heading on"
+	}
+	heading := "headings"
+	if unknown == 1 {
+		heading = "heading"
+	}
+	fmt.Printf("fix heading: %d pages read, %s %d of them, %d %s the contents does not have\n",
+		pages, verb, changed, unknown, heading)
+	if changed > 0 && !*check {
+		fmt.Println("fix heading: run bourbaki assemble")
+	}
+	return nil
+}
 
 func fixMath(args []string) error {
 	fs := flag.NewFlagSet("fix math", flag.ExitOnError)
