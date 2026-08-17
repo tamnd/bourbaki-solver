@@ -28,6 +28,8 @@ commands:
   extract     mine candidate terms out of the English corpus
   translate   ask the fleet for the rendering of the terms that have none
   set         correct renderings that are already there, by hand
+  drop        take out a row that is right about the word and wrong about
+              these books
   tidy        remove the rows the rules would not accept today
   status      what manifests/glossary.yaml holds, per language
 
@@ -46,6 +48,8 @@ func runGlossary(args []string) error {
 		return glossaryTranslate(args[1:])
 	case "set":
 		return glossarySet(args[1:])
+	case "drop":
+		return glossaryDrop(args[1:])
 	case "tidy":
 		return glossaryTidy(args[1:])
 	case "status":
