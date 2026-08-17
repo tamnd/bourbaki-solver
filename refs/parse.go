@@ -165,9 +165,25 @@ type Citation struct {
 // title is not a title lost, it is the locator lost with it: the chapter in Roman
 // is then all there is to go on, so every one of those pointed at a chapter of
 // the Book doing the citing.
+//
+// The Summary of Results is not a Book. It is the fascicule printed at the end
+// of Theory of Sets, from page 347 of the volume, and it is here because a
+// citation names it exactly where a citation names a Book: "cf. Summary of
+// Results, §4, no. 10". Its code is the book's own, from "To the Reader": the
+// Summaries of Results are quoted by the letter R, so Set Theory, R is the
+// Summary of Results of the Theory of Sets, and ER is that pair written the way
+// a code is written here. Nothing has read the fascicule in, so a reference to
+// it leaves the corpus and says where it went, which is what the report of what
+// to ingest next is for.
+//
+// Left unread the name was not what was lost. The § after it was read as a § of
+// the chapter doing the citing, and the corpus writes three of them: two inside
+// chapter II, which has a § 4 with a no. 2 and a no. 10 of its own, so both
+// resolved and both pointed at the wrong text without anything being reported.
 var books = []struct{ Name, Code string }{
 	{"Set Theory", "E"},
 	{"Theory of Sets", "E"},
+	{"Summary of Results", "ER"},
 	{"General Topology", "TG"},
 	{"Gen. Top.", "TG"},
 	{"Commutative Algebra", "AC"},
@@ -566,7 +582,22 @@ var (
 	// statement, and the § doing the citing was reported as missing a Theorem 10
 	// that belongs to Kostant.
 	outsideRE = regexp.MustCompile(`\bpp\.\s*\d+-\d+,\s*(?:` + kindAlt + `)\s*\d+` + run)
-	localRE   = regexp.MustCompile(`\b(` + kindAlt + `)\s+(\d+)\b`)
+	// A statement of another author's work, standing where that work's own
+	// divisions are given: "he assumes (*Elements*, Book I, Proposition 1) that
+	// two circles, each of which passes through the centre of the other, have a
+	// common point". It is read for the same reason the one above is, so that it
+	// is not read as anything else, and nothing is made of it.
+	//
+	// The word Book is what marks it. The Éléments are made of Books and cite
+	// each other by title and then by chapter, "Algebra, Chap. IV, §2, no. 3",
+	// and no citation in the corpus writes a Book numeral in front of a
+	// statement. Euclid does, and so the one place that writes this shape is the
+	// historical note of Theory of Sets, whose whole subject is other people's
+	// work. Unread, the Proposition 1 of Euclid was a bare statement hunted for
+	// in the § the sentence stands in, and the note was reported as citing a
+	// Proposition 1 that chapter IV does not have.
+	otherBookRE = regexp.MustCompile(`\bBook\s+[IVX]+,\s*(?:` + kindAlt + `)\s*\d+` + run)
+	localRE     = regexp.MustCompile(`\b(` + kindAlt + `)\s+(\d+)\b`)
 
 	// A statement heading is not a citation of itself, and neither is the bold
 	// lead a statement is printed with. The lead should not be in a body at all,
@@ -580,7 +611,8 @@ var (
 // prefers the earliest match and, among matches at the same place, the first
 // alternative that matches, which is exactly the precedence wanted here.
 var forms = []*regexp.Regexp{namedRE, sectionParentRE, attachedRE, leadRE, sectionNamedRE, sectionAttachedRE,
-	sectionRE, pageRE, formulaRE, namedLocCitRE, locCitRE, contRE, sectionContRE, noRE, outsideRE, localRE}
+	sectionRE, pageRE, formulaRE, namedLocCitRE, locCitRE, contRE, sectionContRE, noRE, outsideRE,
+	otherBookRE, localRE}
 
 var scanner = regexp.MustCompile(alternation(forms))
 
@@ -613,7 +645,8 @@ var (
 	atSecCont     = atCont + contRE.NumSubexp()
 	atNo          = atSecCont + sectionContRE.NumSubexp()
 	atOutside     = atNo + noRE.NumSubexp()
-	atLocal       = atOutside + outsideRE.NumSubexp()
+	atOtherBook   = atOutside + outsideRE.NumSubexp()
+	atLocal       = atOtherBook + otherBookRE.NumSubexp()
 )
 
 // Parse reads every citation out of one file's body.
