@@ -798,7 +798,26 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 // not pass.
 func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, lang string, j job, c translate.Chunk, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	terms := g.For(j.meta.Book)
-	question, err := translateQuestion(terms, lang, c.Body)
+	// A chunk with nothing in it to translate is not put to anybody. See
+	// translate.SelfTranslation: what comes back has to be what went out, so the
+	// ask can only cost time and lose entries, and chunk 30 of the historical
+	// note of chapters I to IV lost nine of twenty every time it was tried.
+	if translate.SelfTranslation(lang, c.Body) {
+		logf("%s chunk %d of %d: nothing in it is translated, so it is copied", j.source, c.Index, c.Of)
+		return c.Body, copiedModel, nil
+	}
+	// The bibliography is not asked for either. See translate.WithoutBiblio: the
+	// entries stand as printed, so putting them in the question only asks a model
+	// to copy thousands of characters of German and French titles letter for
+	// letter, which is the one thing models are worst at and which no route
+	// managed on chunk 30. What is asked for is the rest, and the entries go back
+	// where they stood in the answer.
+	body := translate.WithoutBiblio(c.Body)
+	if body != c.Body {
+		logf("%s chunk %d of %d: %d of its %d characters are bibliography and stand as printed, so they are not asked for",
+			j.source, c.Index, c.Of, len(c.Body)-len(body), len(c.Body))
+	}
+	question, err := translateQuestion(terms, lang, body)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 	}
@@ -806,7 +825,7 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 	for attempt := 1; attempt <= 2; attempt++ {
 		ask := question
 		if attempt == 2 {
-			if ask, err = translateQuestionWithNote(terms, lang, c.Body, retryNote(last)); err != nil {
+			if ask, err = translateQuestionWithNote(terms, lang, body, retryNote(last)); err != nil {
 				return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 			}
 		}
@@ -837,14 +856,28 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// translate.Respace: a correct translation whose only fault is that it
 		// wrote $M \cap N$ for $M\cap N$ is worth putting right rather than
 		// asking again for five minutes to get it laid out some third way.
-		answer.Text = translate.Respace(c.Body, answer.Text)
-		problems := translate.Audit(lang, c.Body, answer.Text)
+		answer.Text = translate.Respace(body, answer.Text)
+		problems := translate.Audit(lang, body, answer.Text)
 		// The terminology is asked here and not inside Audit, which compares
 		// two texts and holds no glossary. It is the same test L10 makes of the
 		// finished file, put while the run can still do something: a term left
 		// in English is a complaint askChunk can hand back on the second ask,
 		// and after the file is written it is a finding nobody acts on.
-		problems = append(problems, translate.AuditTerms(lang, terms, c.Body, answer.Text)...)
+		problems = append(problems, translate.AuditTerms(lang, terms, body, answer.Text)...)
+		// The entries go back before anything is written, and the whole chunk is
+		// read once more with them in it. What was asked for and what is kept are
+		// two different texts here, and the rules have to hold over the one that
+		// is kept.
+		if len(problems) == 0 && body != c.Body {
+			whole, ok := translate.WithBiblio(c.Body, answer.Text)
+			if !ok {
+				problems = append(problems, translate.Problem{Rule: translate.RuleStructure,
+					Msg: "the answer has no block for every block it was asked for, so the bibliography cannot go back around it"})
+			} else {
+				answer.Text = whole
+				problems = append(problems, translate.Audit(lang, c.Body, whole)...)
+			}
+		}
 		if len(problems) == 0 {
 			// Said here rather than left to L08, which reads the file after it is
 			// written. Nobody chooses the model, so this is not a refusal; it is

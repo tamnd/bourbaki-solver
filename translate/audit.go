@@ -387,6 +387,86 @@ func withoutBiblio(body string) string {
 	return joinBlocks(out)
 }
 
+// WithoutBiblio is a passage as a question: the numbered entries taken out, so
+// that what is asked for is what is actually going to be translated.
+//
+// Chunk 30 of the historical note of chapters I to IV is why. It is 5,940
+// characters, of which 4,900 are twenty entries from Dedekind to Cohen that
+// stand as printed, and the rest is three footnotes. Asked whole, the chunk
+// makes a model reproduce nearly five thousand characters of German and French
+// titles, page ranges and volume numbers letter for letter, and no route
+// managed it: the best answer came back with eleven entries of the twenty and
+// twenty two citations gone. Asked as three footnotes it is a small question.
+//
+// WithBiblio is the other half and the two are only correct together.
+//
+// A passage with no entries in it comes back exactly as it stands, rather than
+// through the block join, which would put the layout of every question through
+// a normalisation for no reason. Three chunks of the 5,228 the English corpus
+// comes to hold a bibliography, and they are the historical notes.
+func WithoutBiblio(body string) string {
+	for _, b := range blocks(body) {
+		if BiblioEntry(b) {
+			return withoutBiblio(body)
+		}
+	}
+	return body
+}
+
+// WithBiblio puts the entries back where they stood, around an answer that was
+// asked for everything else.
+//
+// The blocks of the answer go into the places the blocks of the English left
+// empty, in order, and the entries are copied from the English. It fails if the
+// answer does not have one block for every block it was asked for, which is
+// auditBlocks over again, said here because the splice cannot be done at all
+// without it and a wrong splice would silently move a footnote under the wrong
+// citation.
+func WithBiblio(en, answer string) (string, bool) {
+	got, i := blocks(answer), 0
+	var out []string
+	for _, b := range blocks(en) {
+		// The blank line between two blocks belongs to the join and not to
+		// either of them. A block that keeps one of its own comes out of a place
+		// where the English left two blank lines, and putting it back through
+		// the join would leave three.
+		if BiblioEntry(b) {
+			out = append(out, strings.Trim(b, "\n"))
+			continue
+		}
+		if i >= len(got) {
+			return "", false
+		}
+		out = append(out, strings.Trim(got[i], "\n"))
+		i++
+	}
+	if i != len(got) {
+		return "", false
+	}
+	return joinBlocks(out), true
+}
+
+// SelfTranslation says the English of a passage is its own translation.
+//
+// Chunk 30 of the historical note of chapters I to IV is twenty bibliography
+// entries and nothing else, 5,940 characters of Dedekind, Peano, Hilbert and
+// Zermelo. An entry stands as printed, so every line of a correct answer is a
+// line of the question, and the only thing asking for it can do is go wrong. It
+// did, on every route it was put to: the best answer came back with eleven of
+// the twenty entries and twenty two citations missing.
+//
+// The test is in two halves. Nothing is left to translate once the mathematics
+// and the entries are taken out, and the passage passes its own audit as its
+// own answer. The second half is what keeps a heading or one stray sentence
+// from riding along with a list of entries: a passage with any prose in it
+// fails the language rule against itself and is asked for like anything else.
+func SelfTranslation(lang, en string) bool {
+	if hasProse(withoutBiblio(en)) {
+		return false
+	}
+	return len(Audit(lang, en, en)) == 0
+}
+
 // BiblioEntry says whether a block is one numbered bibliography entry.
 //
 // It is exported because the same question is asked in two places. The run asks

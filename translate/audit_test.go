@@ -588,6 +588,31 @@ func TestAChunkOfNothingButBibliographyIsItsOwnTranslation(t *testing.T) {
 	for _, p := range Audit("vi", body, body) {
 		t.Errorf("a page of citations was refused: %s", p)
 	}
+	if !SelfTranslation("vi", body) {
+		t.Error("a page of citations was put to a model, and the answer can only be the question")
+	}
+}
+
+// The other side of it. A chunk with a sentence in it goes to a model however
+// many entries sit under the sentence, and so does an ordinary paragraph.
+func TestAPassageWithProseInItIsNotItsOwnTranslation(t *testing.T) {
+	for _, body := range []string{
+		"The sources are listed below.\n\n1. N. BOURBAKI, *Théorie des ensembles*, Paris (Hermann), 1954.\n",
+		"Let A be a ring and E an A-module.\n",
+		"## BIBLIOGRAPHY\n",
+	} {
+		if SelfTranslation("vi", body) {
+			t.Errorf("%q was copied instead of translated", body)
+		}
+	}
+}
+
+// A display and nothing else is copied, which is what the mathematics rule
+// requires of it anyway.
+func TestAChunkOfNothingButMathematicsIsItsOwnTranslation(t *testing.T) {
+	if !SelfTranslation("vi", "$$\\sum_{i\\in I} x_i^2 = 0$$\n") {
+		t.Error("a display was put to a model, and every rule says it comes back unchanged")
+	}
 }
 
 // The prose around the entries is still held to the language it was asked for.
@@ -605,5 +630,60 @@ func TestTheProseBesideABibliographyIsStillChecked(t *testing.T) {
 	}
 	if !got {
 		t.Error("a paragraph left in English beside a bibliography was accepted")
+	}
+}
+
+// Chunk 29 of the historical note of chapters I to IV: a paragraph, a heading
+// and nine entries. What is asked for is the paragraph and the heading, and the
+// entries go back around the answer where they stood.
+func TestABibliographyIsNotPutToTheModel(t *testing.T) {
+	const en = "The most remarkable result in this direction is Cohen's.\n\n" +
+		"# BIBLIOGRAPHY\n\n" +
+		"1. O. NEUGEBAUER, *Vorlesungen über die Geschichte der antiken Mathematik*, Berlin (Springer), 1934.\n\n" +
+		"2. *The Works of Aristotle*, translated under the editorship of W. D. Ross, Oxford, 1928.\n"
+	ask := WithoutBiblio(en)
+	if strings.Contains(ask, "NEUGEBAUER") || strings.Contains(ask, "Aristotle") {
+		t.Fatalf("the entries were put in the question: %q", ask)
+	}
+	if !strings.Contains(ask, "BIBLIOGRAPHY") || !strings.Contains(ask, "Cohen") {
+		t.Fatalf("the question lost the writing: %q", ask)
+	}
+
+	answer := strings.Replace(ask, "The most remarkable result in this direction is Cohen's.",
+		"Kết quả đáng chú ý nhất theo hướng này là của Cohen.", 1)
+	answer = strings.Replace(answer, "# BIBLIOGRAPHY", "# THƯ MỤC", 1)
+	got, ok := WithBiblio(en, answer)
+	if !ok {
+		t.Fatal("the entries would not go back")
+	}
+	if !strings.Contains(got, "NEUGEBAUER") || !strings.Contains(got, "editorship") {
+		t.Errorf("an entry did not come back as printed: %q", got)
+	}
+	if p := Audit("vi", en, got); len(p) != 0 {
+		t.Errorf("the spliced chunk was refused: %v", p)
+	}
+}
+
+// The English is its own splice. Every chunk of the corpus that holds a
+// bibliography comes back byte for byte this way, which is what makes the
+// entries safe to keep out of the question.
+func TestPuttingTheBibliographyBackAroundTheEnglishIsTheEnglish(t *testing.T) {
+	const en = "A note.\n\n1. N. BOURBAKI, *Théorie des ensembles*, Paris (Hermann), 1954.\n\nAnd a line after it.\n"
+	got, ok := WithBiblio(en, WithoutBiblio(en))
+	if !ok {
+		t.Fatal("the entries would not go back")
+	}
+	if strings.TrimSpace(got) != strings.TrimSpace(en) {
+		t.Errorf("came back as %q", got)
+	}
+}
+
+// An answer that lost a block cannot be spliced, because there is no telling
+// which block it lost, and a wrong guess files a footnote under the wrong
+// citation.
+func TestASplicceRefusesAnAnswerWithTheWrongNumberOfBlocks(t *testing.T) {
+	const en = "A note.\n\n1. N. BOURBAKI, *Théorie des ensembles*, Paris (Hermann), 1954.\n\nAnd a line after it.\n"
+	if _, ok := WithBiblio(en, "Một ghi chú."); ok {
+		t.Error("an answer of one block was spliced into a chunk that asked for two")
 	}
 }
