@@ -1,6 +1,7 @@
 package translate
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -335,6 +336,50 @@ func TestAChunkCarriesOnlySoMuchMathematics(t *testing.T) {
 	}
 	if Join(rejoined) != Join([]string{body}) {
 		t.Fatal("splitting on the mathematics lost some of the body")
+	}
+}
+
+// The footnotes of a note are 83 definitions with no blank line between them,
+// which read as one block of 35,000 characters and went over as one question.
+func TestARunOfFootnotesIsChunkedAndPutBackAsItWasWritten(t *testing.T) {
+	var lines []string
+	for i := 1; i <= 60; i++ {
+		lines = append(lines, fmt.Sprintf("[^%d]: %s", i,
+			strings.TrimSpace(strings.Repeat("a note on the text. ", 20))))
+	}
+	body := "The note itself.\n\n" + strings.Join(lines, "\n")
+	cs := Chunks(body)
+	if len(cs) < 2 {
+		t.Fatalf("a run of %d footnotes came out as one chunk", len(lines))
+	}
+	var rejoined []string
+	for _, c := range cs {
+		if len(c.Body) > 2*ChunkChars {
+			t.Errorf("chunk %d of %d is %d characters", c.Index, c.Of, len(c.Body))
+		}
+		rejoined = append(rejoined, c.Body)
+	}
+	got := Join(rejoined)
+	if got != Join([]string{body}) {
+		t.Fatal("the chunks do not put the note back together")
+	}
+	// One blank line, the one between the note and the first definition.
+	if n := strings.Count(got, "\n\n[^"); n != 1 {
+		t.Fatalf("%d definitions have a blank line above them, want 1", n)
+	}
+}
+
+// A definition that runs on to a second line keeps it, and a definition that
+// goes missing is caught.
+func TestAFootnoteDefinitionIsABlockOfItsOwn(t *testing.T) {
+	body := "[^1]: The first.\n    It runs on.\n[^2]: The second.\n[^3]: The third."
+	if got := len(blocks(body)); got != 3 {
+		t.Fatalf("the run came to %d blocks, want 3", got)
+	}
+	bad := "[^1]: Cái thứ nhất.\n    Nó chạy tiếp.\n[^2]: Cái thứ hai."
+	p := only(t, Audit("vi", body, bad), RuleStructure)
+	if !strings.Contains(p.Msg, "has 2 blocks, the English has 3") {
+		t.Fatalf("a dropped definition was not counted: %v", p)
 	}
 }
 
