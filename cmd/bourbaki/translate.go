@@ -821,11 +821,19 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 	}
+	// What the answers already on disk for this chunk are refused for goes into
+	// the first ask, so a pass does not begin by making the mistake the pass
+	// before it ended on. See refusedBefore.
+	prior := refusedBefore(root, lang, terms, j, c, body)
+	if len(prior) > 0 {
+		logf("%s chunk %d of %d: an earlier pass was refused for %d things, and the ask carries them",
+			j.source, c.Index, c.Of, len(prior))
+	}
 	var last []translate.Problem
 	for attempt := 1; attempt <= 2; attempt++ {
 		ask := question
-		if attempt == 2 {
-			if ask, err = translateQuestionWithNote(terms, lang, body, retryNote(last)); err != nil {
+		if note := merge(prior, last); len(note) > 0 {
+			if ask, err = translateQuestionWithNote(terms, lang, body, retryNote(note)); err != nil {
 				return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 			}
 		}
@@ -916,6 +924,70 @@ func transportOnly(bad []translate.Problem) bool {
 		}
 	}
 	return true
+}
+
+// refusedBefore is what the answers this chunk already has on disk are refused
+// for today, in the order they were written and once each.
+//
+// Two attempts are all a pass has, and a chunk that survives a pass is asked
+// again by the next one from nothing. Chunk 4 of the historical note of chapter
+// IV spent four passes going round the same circle on that: the first ask, which
+// carries no note, wrote tr. 185 for p. 185, the second ask was told that a page
+// number is an address and kept it, and left the word Chapter standing in
+// English instead, and the pass after it began again at tr. 185. Neither fault
+// is hard and no ask ever saw both complaints at once.
+//
+// The archive is where the answers are, so nothing new is written down: the
+// answer comes back off disk and is read again by the rules as they stand
+// today. That also means a chunk refused under an older rule which today's
+// rules pass adds nothing to the note, which is right, and it is the same
+// reading plan makes of an accepted answer before it trusts it.
+func refusedBefore(root, lang string, terms *glossary.Glossary, j job, c translate.Chunk, body string) []translate.Problem {
+	var out []translate.Problem
+	for _, text := range archivedAnswers(root, lang, j.source, c.Index) {
+		text = translate.Respace(body, text)
+		out = merge(out, translate.Audit(lang, body, text))
+		out = merge(out, translate.AuditTerms(lang, terms, body, text))
+	}
+	return out
+}
+
+// merge is the complaints of both lists, in order, once each.
+func merge(a, b []translate.Problem) []translate.Problem {
+	said := map[string]bool{}
+	var out []translate.Problem
+	for _, p := range append(append([]translate.Problem{}, a...), b...) {
+		if said[p.Rule+"\x00"+p.Msg] {
+			continue
+		}
+		said[p.Rule+"\x00"+p.Msg] = true
+		out = append(out, p)
+	}
+	return out
+}
+
+// archivedAnswers is what this chunk was answered before, oldest attempt first.
+//
+// The conversation link archiveChunk writes above the answer comes off again:
+// it is a comment for a person following the answer back to where it was
+// written, and to the rules it is a block the English has no block for.
+func archivedAnswers(root, lang, source string, index int) []string {
+	dir := filepath.Join(root, "work", "translate", lang, strings.ReplaceAll(source, "/", "_"))
+	var out []string
+	for attempt := 1; attempt <= 2; attempt++ {
+		b, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("%03d-%d.answer.md", index, attempt)))
+		if err != nil {
+			continue
+		}
+		text := string(b)
+		if strings.HasPrefix(text, "<!--") {
+			if i := strings.Index(text, "-->\n\n"); i > 0 {
+				text = text[i+len("-->\n\n"):]
+			}
+		}
+		out = append(out, text)
+	}
+	return out
 }
 
 // retryNote is what the second ask adds.
