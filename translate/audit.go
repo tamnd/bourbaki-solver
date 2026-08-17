@@ -709,7 +709,9 @@ func auditLanguage(lang, en, tr string) []Problem {
 		return []Problem{{Rule: RuleLanguage,
 			Msg: "carries no " + lang + " writing at all"}}
 	}
-	if run, words := glossary.Untranslated(lang, tr); words >= 2 {
+	// A work the sentence cites by name goes the way an entry goes, and for the
+	// same reason. See WithoutCitations.
+	if run, words := glossary.Untranslated(lang, WithoutCitations(en, tr)); words >= 2 {
 		return []Problem{{Rule: RuleLanguage, Msg: fmt.Sprintf(
 			"has a run of %d words with nothing of %s in it: %s",
 			len(strings.Fields(run)), lang, short(run))}}

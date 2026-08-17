@@ -360,6 +360,36 @@ func TestTheLanguageRulesLeaveABibliographyAsPrinted(t *testing.T) {
 	}
 }
 
+// A work cited by name in the middle of a sentence stands as printed too, and
+// the rules read the sentence around it.
+//
+// The historical note of chapter IV cites Curry inside a paragraph of prose,
+// with the publisher in brackets of its own inside the citation. The title is
+// the name of a book on a shelf, so a translation keeps it, and L11 read the
+// sixteen words of it as a sentence left in English.
+func TestTheLanguageRulesLeaveACitedWorkAsPrinted(t *testing.T) {
+	const cite = "(H. CURRY, *Outlines of a Formalist Philosophy of Mathematics*, " +
+		"Amsterdam (North Holland Publ. Co.), 1951, p. 57)"
+	const en = "Some formalists insisted that it is an objective science " + cite + "."
+	const tr = "Một số nhà hình thức khẳng định rằng nó là một khoa học khách quan " + cite + "."
+	docs := pairDocs(en, tr)
+	for _, c := range []struct {
+		id  string
+		run func(*Corpus) ([]Finding, error)
+	}{{"L07", l07}, {"L11", l11}} {
+		if got := run(t, c.run, docs...); len(got) != 0 {
+			t.Errorf("%s reported a work that stands as printed: %v", c.id, got)
+		}
+	}
+
+	// And the sentence around it is still read, so a paragraph that kept the
+	// citation and left its own prose in English is reported as before.
+	const kept = "Some formalists insisted that it is an objective science " + cite + "."
+	if got := run(t, l07, pairDocs(en, kept)...); len(got) != 1 {
+		t.Errorf("got %d findings, want the English sentence around the citation: %v", len(got), got)
+	}
+}
+
 // Taking the entries out is not taking the note out. The prose of a historical
 // note runs to pages and the bibliography is the last block of it.
 func TestTheProseAboveABibliographyIsStillRead(t *testing.T) {
