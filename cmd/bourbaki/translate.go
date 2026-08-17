@@ -865,6 +865,15 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// wrote $M \cap N$ for $M\cap N$ is worth putting right rather than
 		// asking again for five minutes to get it laid out some third way.
 		answer.Text = translate.Respace(body, answer.Text)
+		// And the second repair, for the same reason: a citation the model wrote
+		// in the words of the language it was translating into is a citation
+		// whose number is right and whose two letters in front of it are not the
+		// address the corpus keeps. See translate.Readdress.
+		if put := translate.Readdress(lang, body, answer.Text); put != answer.Text {
+			logf("%s chunk %d of %d: a citation came back written in %s, and the English abbreviation is put back",
+				j.source, c.Index, c.Of, lang)
+			answer.Text = put
+		}
 		problems := translate.Audit(lang, body, answer.Text)
 		// The terminology is asked here and not inside Audit, which compares
 		// two texts and holds no glossary. It is the same test L10 makes of the
