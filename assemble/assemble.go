@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -282,7 +283,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 				ch.Numeral, out[b.piece].Name(), b.page, out[a.piece].Name(), a.page)
 		}
 	}
-	spans, err := gathered(out, body, pages, pr)
+	spans, err := gathered(ch, out, body, pages, pr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
 	}
@@ -303,7 +304,9 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 // contents already says what page each block of exercises begins on; that page
 // either carries the printing's own Exercises heading, and the block is the §'s
 // own, or it does not, and the block was gathered.
-func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr printing) ([]span, error) {
+//
+// A third case is the same block listed a different way. See chapterRuns.
+func gathered(ch corpus.Chapter, pieces []Piece, body []span, pages map[int]corpus.PageFile, pr printing) ([]span, error) {
 	out := slices.Clone(body)
 	// heads is the gathered heading of a page, kept aside until the runs are in
 	// printed order, because which run it belongs to is not known until then.
@@ -338,6 +341,7 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 		out = append(out, span{page: page, off: off, piece: b.piece,
 			head: pr.exercises, mark: headingText(pages[page].Body, off)})
 	}
+	out = append(out, chapterRuns(ch, pieces, pages, pr, heads)...)
 	slices.SortFunc(out, func(a, b span) int {
 		if a.page != b.page {
 			return a.page - b.page
@@ -379,6 +383,82 @@ func gathered(pieces []Piece, body []span, pages map[int]corpus.PageFile, pr pri
 		}
 	}
 	return out, nil
+}
+
+// chapterRuns is a run for every § marked inside a block of exercises the
+// contents gives to the chapter rather than to a §.
+//
+// A volume that gathers its exercises can be listed either way. Lie 7 to 9
+// prints one block at the end of a chapter and its contents names every § in
+// it, "Exercises for § 3", so each § carries a locator of its own and the loop
+// above has everything it needs. Topologie algebrique prints its four blocks
+// the same way and its contents gives one line for each, "Exercices" and a page
+// and nothing more. Read literally that line belongs to no §, and the four
+// chapters came out with 0 of the 500 exercises the volume prints.
+//
+// The pages say what the contents leaves out. The block runs from the page the
+// contents names to the end of the chapter, the §§ inside are marked as they
+// are in the volumes above, and each mark opens the run of the § it names. A §
+// the block does not mark gets nothing, which is the honest reading: it has no
+// exercises.
+//
+// The locator is written back onto the § because it is what the rest of the
+// assembler asks. Verify refuses a piece whose pages carry exercises the
+// contents gives none of, and it is right to: a mark read by mistake would
+// otherwise go by in silence. The contents does give these, once for the whole
+// chapter, and this is the reading of that line.
+func chapterRuns(ch corpus.Chapter, pieces []Piece, pages map[int]corpus.PageFile,
+	pr printing, heads map[int]int) []span {
+	if ch.Exercises == nil {
+		return nil
+	}
+	var out []span
+	for page := ch.Exercises.PDFPage; page <= chapterEnd(ch, pages, pr); page++ {
+		f, ok := pages[page]
+		if !ok {
+			continue
+		}
+		for i := range pieces {
+			s := pieces[i].Section
+			if pieces[i].Front || pieces[i].Historical || s.Exercises != nil {
+				continue
+			}
+			off, err := findLine(pages, page, runMark(s).MatchString)
+			if err != nil {
+				continue
+			}
+			pieces[i].Section.Exercises = &corpus.Locator{Page: printedNumber(f), PDFPage: page}
+			out = append(out, span{page: page, off: off, piece: i,
+				head: pr.exercises, mark: headingText(f.Body, off)})
+		}
+		if at, err := findLine(pages, page, func(l string) bool {
+			return strings.EqualFold(l, pr.gathered)
+		}); err == nil {
+			if have, ok := heads[page]; !ok || at < have {
+				heads[page] = at
+			}
+		}
+	}
+	return out
+}
+
+// printedNumber is the page number the volume prints on a page, which is the
+// folio where it prints one and the tail of the label where it prints a label
+// instead: Topologie algebrique heads its pages "A I.139" and the number of
+// that page is 139.
+func printedNumber(f corpus.PageFile) int {
+	if f.Meta.Folio > 0 {
+		return f.Meta.Folio
+	}
+	label := f.Meta.PageLabel
+	if i := strings.LastIndexByte(label, '.'); i >= 0 {
+		label = label[i+1:]
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(label))
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 // runMark is the mark a chapter that gathers its exercises puts at the head of
