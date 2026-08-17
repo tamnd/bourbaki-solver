@@ -418,6 +418,39 @@ func TestL08NamesTheFileASmallModelWrote(t *testing.T) {
 	}
 }
 
+// And the gateway models are named by the rule beside it, since none of them
+// carries a suffix L08 knows and a file written on one of them otherwise reads
+// as full model work.
+func TestL15NamesTheFileTheFreeGatewayWrote(t *testing.T) {
+	cases := map[string]bool{
+		"nemotron-3-ultra-free": true,
+		"hy3-free":              true,
+		"gpt-5-6":               false,
+		"":                      false,
+		// The word has to be the suffix of the model name. A model that is free
+		// in the middle of its name is somebody else's model.
+		"free-lunch-01": false,
+		// The gateway is the fallback, so it is exactly the case where half a
+		// section comes from one place and half from another, and either half
+		// is worth asking for again.
+		"gpt-5-6, deepseek-v4-flash-free": true,
+		"gpt-5-6, gpt-5-7":                false,
+	}
+	for model, want := range cases {
+		t.Run(model, func(t *testing.T) {
+			docs := pairDocs("Let A be a ring.", "Cho A là một vành.")
+			docs[1].Section.TranslationModel = model
+			out, err := l15(&Corpus{Docs: docs})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := len(out) == 1; got != want {
+				t.Errorf("l15 on %q reported %v, want %v: %v", model, got, want, out)
+			}
+		})
+	}
+}
+
 // content/fr is read off the French volume, not translated from the English, so
 // it names no translated_from and must not be reported as a translation with a
 // missing source. The library is printed in two languages and only one of them
