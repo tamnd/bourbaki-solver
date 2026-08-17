@@ -644,11 +644,24 @@ func units(c []token) []unit {
 // gathering has pulled in the limits of the display above, which touch and
 // interleave but sit beside each other rather than one within the other.
 //
-// A cluster that carries the same box at both levels is refused whatever else
-// it does. Four pages of chapter VIII print a sum under a sum and the two
-// limits arrive at the same place on the line, one read as above it and one as
-// below, and merging them would write the limit out twice and say nothing about
-// the two lines that were run together to make it.
+// A cluster that carries the same box at both levels, a line apart, is refused
+// whatever else it does. Four pages of chapter VIII print a sum under a sum and
+// the two limits arrive at the same place on the line, one read as above it and
+// one as below, and merging them would write the limit out twice and say
+// nothing about the two lines that were run together to make it.
+//
+// How far apart they stand is asked because the box alone refuses a stack TeX
+// sets every day. A superscript and a subscript of one base start at the same
+// place, which is what a stack is, and where the two are set in glyphs of one
+// width they end at the same place too: page 120 of Théories spectrales writes
+// the positive elements of norm under one as A with < 1 above and + below, the
+// < and the + are both ten units wide, and the volume shipped A^<_+^1 nine
+// times over. The two scripts of a base are set a script apart, touching or
+// overlapping by the rounding on a box, and the two lines of a display that
+// were run together are set a line apart. That is the difference, and it is
+// what is measured: 36 units of clear space between the limits of the double
+// sum against a script 9 units tall, and 2 between the exponent and the index
+// of the norm on page 20 against a script 11 units tall.
 func stacked(c []token, us []unit) bool {
 	if len(us) < 3 {
 		return false
@@ -675,12 +688,24 @@ func stacked(c []token, us []unit) bool {
 	}
 	for i, a := range c {
 		for _, b := range c[i+1:] {
-			if a.level != b.level && a.left == b.left && a.right == b.right {
+			if a.level != b.level && a.left == b.left && a.right == b.right &&
+				aline(a, b) {
 				return false
 			}
 		}
 	}
 	return true
+}
+
+// aline reports whether two boxes stand a line apart rather than a script
+// apart, which is what says they came off two lines the gathering ran together
+// rather than off the two sides of one base.
+func aline(a, b token) bool {
+	lo, hi := a, b
+	if hi.top < lo.top {
+		lo, hi = hi, lo
+	}
+	return hi.top-lo.bottom > max(a.bottom-a.top, b.bottom-b.top)
 }
 
 // touching reports whether the pieces one level is written in stand close
