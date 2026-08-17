@@ -144,7 +144,8 @@ func readAccepted(root, lang, source string, index int, input, promptHash string
 	return a, true
 }
 
-// chunkDeadline is the longest one ask of one chunk may take.
+// chunkDeadline is the longest one ask of one chunk may take, on a fleet
+// answering at the speed the fleet answered at when this was measured.
 //
 // A chunk of six thousand characters has measured between forty and seventy
 // seconds, and five minutes is what the gateway routes already allow, so a box
@@ -153,9 +154,28 @@ func readAccepted(root, lang, source string, index int, input, promptHash string
 // not for this. server3 sat on three of these for nine minutes with nothing
 // coming back, which is three of its four lanes doing nothing while the queue
 // counted them as busy.
+//
+// It is the default of -deadline rather than the law, because the number
+// measures the fleet and the fleet is not always the same. On a slow afternoon
+// bourbaki fleet ask -host server3 took three minutes four seconds to answer
+// the word ok, and under a five minute cap the eight footnote chunks of the
+// historical note of chapter IV timed out on every pass on both boxes while
+// chapter III was going through the same routes at one to two minutes a chunk.
+// Nothing there is the question failing. Raising the cap for that run is what
+// the flag is for, and it stays a cap: a box that answers nothing still loses
+// the lane rather than the section.
 const chunkDeadline = 5 * time.Minute
 
-// chunkLease is how long a worker says it will be.
+// maxChunkDeadline is as far as -deadline may be pushed.
+//
+// The reason the cap exists at all is that a lane holding a question is a lane
+// not asking anything else, so a deadline long enough to be a page timeout puts
+// the run back where it was before there was one. Twenty minutes is the
+// slowest a browser route says it will ever be, in route.Default, so no honest
+// chunk needs more than that.
+const maxChunkDeadline = 20 * time.Minute
+
+// chunkLeaseFor is how long a worker says it will be, for a given deadline.
 //
 // It has to outlast the work, or the queue hands the chunk to somebody else
 // while the first lane is still legitimately on it and the book gets asked for
@@ -163,6 +183,9 @@ const chunkDeadline = 5 * time.Minute
 // lease, so the lease is two deadlines plus the ssh and rsync either side of
 // each, and the queue adds its own slack on top of that. It was three minutes,
 // which was under one deadline let alone two.
+func chunkLeaseFor(deadline time.Duration) time.Duration { return 2*deadline + 2*time.Minute }
+
+// chunkLease is chunkLeaseFor the default deadline.
 const chunkLease = 2*chunkDeadline + 2*time.Minute
 
 // chunkOf finds the chunk a leased job is for.

@@ -81,6 +81,8 @@ about a fifth of the words.
                  by term, and ask nothing
   -all           with -check-glossary, every term and not only the missed ones
   -keep          leave the questions on the boxes, for debugging
+  -deadline DUR  the longest one ask of one chunk may take, default 5m, up to
+                 20m, for a day the boxes are answering slowly
   -queue PATH    the work list, default $BOURBAKI_WORK/queue
 
 A file is skipped when its translation is there, its source_content_sha256 is
@@ -103,6 +105,15 @@ in chapter VIII is 97,520 characters and no measurement here says a browser
 composer will take that. The chunks are put back together with a blank line
 between them, which is exactly how they were cut, and the whole file is audited
 again after the join.
+
+-deadline is the cap on one ask. Five minutes fits a fleet that answers a chunk
+in forty to seventy seconds, and it does not fit a fleet that takes three
+minutes to answer the word ok, which is what bourbaki fleet ask measured on
+server3 on the afternoon the historical note of chapter IV would not go
+through: eight short chunks timed out on both boxes, pass after pass, while
+chapter III went over the same routes. A run on a slow day is worth more time
+per question. It is still a cap, and a lane that spends it has still spent it
+doing nothing, so raise it for the run that needs it rather than in the file.
 
 Every question and every answer is kept under work/translate, which is not in
 the repository. What goes in the repository is the file, and the file is only
@@ -153,6 +164,7 @@ func runTranslate(args []string) error {
 	checkGlossary := fs.Bool("check-glossary", false, "hold what is on disk to the glossary and ask nothing")
 	all := fs.Bool("all", false, "with -check-glossary, every term and not only the missed ones")
 	keep := fs.Bool("keep", false, "leave the questions on the boxes")
+	deadline := fs.Duration("deadline", chunkDeadline, "the longest one ask of one chunk may take")
 	queueRoot := fs.String("queue", defaultQueueRoot(), "queue directory")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -168,6 +180,9 @@ func runTranslate(args []string) error {
 	if !known(*lang) {
 		fs.Usage()
 		os.Exit(2)
+	}
+	if *deadline <= 0 || *deadline > maxChunkDeadline {
+		return fmt.Errorf("-deadline is %s, and one ask of one chunk is held to between nothing and %s", *deadline, maxChunkDeadline)
 	}
 	root, err := corpusRoot(*dir)
 	if err != nil {
@@ -246,7 +261,7 @@ func runTranslate(args []string) error {
 	run := runID(*lang, promptHash, jobs)
 	var written, refused int
 	for _, job := range jobs {
-		body, model, problems := translateFile(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *redoSmall, *keep, logf)
+		body, model, problems := translateFile(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *redoSmall, *keep, *deadline, logf)
 		if len(problems) > 0 {
 			refused++
 			logf("%s: refused, nothing written", job.source)
@@ -632,7 +647,7 @@ func freshOnly(hosts []ocr.Host) map[string]func(queue.Job) bool {
 	return want
 }
 
-func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, redoSmall, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
+func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, redoSmall, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force, redoSmall)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "queue", Msg: err.Error()}}
@@ -654,7 +669,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 			go func(host ocr.Host) {
 				defer wg.Done()
 				for ctx.Err() == nil {
-					item, err := q.LeaseWhere(queue.StageTranslate, host.Name, group, fresh[host.Name], chunkLease)
+					item, err := q.LeaseWhere(queue.StageTranslate, host.Name, group, fresh[host.Name], chunkLeaseFor(deadline))
 					if errors.Is(err, queue.ErrEmpty) {
 						return
 					}
@@ -672,7 +687,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 						}
 						continue
 					}
-					text, model, bad := askChunk(ctx, root, host, g, lang, j, c, keep, logf)
+					text, model, bad := askChunk(ctx, root, host, g, lang, j, c, keep, deadline, logf)
 					if len(bad) > 0 && ctx.Err() != nil {
 						// Somebody pressed Ctrl-C while this chunk was out. The
 						// model did not get it wrong, so the attempt is given
@@ -781,7 +796,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 
 // askChunk asks once, and asks again with the complaint if the first answer did
 // not pass.
-func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, lang string, j job, c translate.Chunk, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
+func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, lang string, j job, c translate.Chunk, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	terms := g.For(j.meta.Book)
 	question, err := translateQuestion(terms, lang, c.Body)
 	if err != nil {
@@ -796,7 +811,7 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 			}
 		}
 		answer, err := ocr.NewAskWithin(host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
-			ask, chunkID(lang, j.source, c, attempt), keep, chunkDeadline).Do(ctx)
+			ask, chunkID(lang, j.source, c, attempt), keep, deadline).Do(ctx)
 		if err != nil {
 			logf("%s chunk %d on %s: %v", j.source, c.Index, host.Name, err)
 			last = []translate.Problem{{Rule: "transport", Msg: err.Error()}}
