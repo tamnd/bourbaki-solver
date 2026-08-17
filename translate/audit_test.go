@@ -262,6 +262,26 @@ func TestASentenceLeftInEnglishIsRefused(t *testing.T) {
 	}
 }
 
+// A formula standing between two words breaks the run, so the rule above sees
+// one word and then one word and passes them both. This is numbered formula
+// (11) of chapter III, § 7 as it was written into the corpus: two connecting
+// words left in English with a display on either side of them. It was accepted,
+// the file was joined and written, and L07 of the audit refused the file for a
+// paragraph no chunk was ever going to be asked about again.
+func TestAWordStandingBetweenTwoFormulasIsRead(t *testing.T) {
+	const source = "We have\n\n(11) $\\qquad f_{\\alpha\\gamma} = f_{\\alpha\\beta} \\circ f_{\\beta\\gamma}$ " +
+		"whenever $\\alpha \\leqslant \\beta \\leqslant \\gamma$ and $\\lambda \\leqslant \\mu$.\n"
+	kept := strings.Replace(source, "We have", "Ta có", 1)
+	p := only(t, Audit("vi", source, kept), RuleLanguage)
+	if !strings.Contains(p.Msg, "whenever and") {
+		t.Fatalf("did not say which words were left standing: %v", p)
+	}
+	done := strings.NewReplacer("whenever", "mỗi khi", " and ", " và ").Replace(kept)
+	if ps := Audit("vi", source, done); len(ps) != 0 {
+		t.Fatalf("the line with both words translated was refused: %v", ps)
+	}
+}
+
 // Both of these are real. gpt-5.4 wrote them into the Vietnamese introduction
 // to Theory of Sets, one word each, inside sentences that are otherwise correct
 // Vietnamese and that every other rule accepts.
