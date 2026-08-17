@@ -704,7 +704,13 @@ func stripMath(s string) string { return mathtex.Strip(s) }
 // Matched on the name and not on a list of models, because the list changes
 // under us and the naming does not: a provider that serves a smaller variant
 // says so in the suffix.
-var smallModel = regexp.MustCompile(`(?i)[-_](mini|nano|lite|small|flash|turbo)\b`)
+//
+// lightning is in the list because nemotron-3.5-lightning-free is the cut down
+// nemotron and says so the way flash and turbo say it, and without the word
+// here the rule read seven files of chapter I as full model work. The suffix is
+// not always last: that name carries -free after it, so the word is matched
+// where it stands rather than at the end.
+var smallModel = regexp.MustCompile(`(?i)[-_](mini|nano|lite|small|flash|turbo|lightning)\b`)
 
 // SmallModel is the same test, for the run rather than for the audit.
 //
