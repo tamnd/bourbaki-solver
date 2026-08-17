@@ -93,7 +93,7 @@ func Audit(lang, en, tr string) []Problem {
 	out = append(out, auditHeadings(en, tr)...)
 	out = append(out, auditBlocks(en, tr)...)
 	out = append(out, auditRefs(en, tr)...)
-	out = append(out, auditBiblio(en, tr)...)
+	out = append(out, AuditBiblio(en, tr)...)
 	out = append(out, auditLanguage(lang, en, tr)...)
 	out = append(out, AuditScript(lang, en, tr)...)
 	return out
@@ -329,7 +329,8 @@ func headings(body string) []heading {
 // looks like this is one.
 var bibEntryRE = regexp.MustCompile(`^\d+\s*(\(\*?bis\*?\)\s*)?\.\s`)
 
-// A bibliography entry stands as printed.
+// AuditBiblio holds a translation to Invariant 1 for the apparatus: a
+// bibliography entry stands as printed.
 //
 // The bibliography is apparatus and not prose. "Vorlesungen über die Geschichte
 // der antiken Mathematik" is the name of a book, and a reader who wants to find
@@ -344,7 +345,7 @@ var bibEntryRE = regexp.MustCompile(`^\d+\s*(\(\*?bis\*?\)\s*)?\.\s`)
 // chunk over and over, correctly by its own lights and wrongly, because the
 // words are inside the names of books. prose leaves the entries out for the
 // same reason it leaves out a display.
-func auditBiblio(en, tr string) []Problem {
+func AuditBiblio(en, tr string) []Problem {
 	want, got := bibEntries(en), bibEntries(tr)
 	if len(got) != len(want) {
 		return []Problem{{Rule: RuleBibliography, Msg: fmt.Sprintf(

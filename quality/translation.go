@@ -58,6 +58,8 @@ func init() {
 			Title: "a word set inside the mathematics is translated too", Run: l12, Need: needTranslations},
 		Check{ID: "L13", Group: Translation, Hard: true,
 			Title: "no word is written in another alphabet", Run: l13, Need: needTranslations},
+		Check{ID: "L14", Group: Translation, Hard: true,
+			Title: "a bibliography entry stands as printed", Run: l14, Need: needTranslations},
 	)
 }
 
@@ -623,6 +625,30 @@ func l13(c *Corpus) ([]Finding, error) {
 	for _, p := range ps {
 		for _, q := range translate.AuditScript(p.tr.Lang, p.en.Body, p.tr.Body) {
 			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(q.Line), Msg: q.Msg})
+		}
+	}
+	return out, nil
+}
+
+// L14. A bibliography entry stands as printed.
+//
+// The historical note of chapter III came back with its bibliography in
+// Vietnamese: Vorlesungen über die Geschichte der antiken Mathematik is a
+// Vietnamese title in that file, and the work behind it cannot be looked up
+// under a name no library has. The entry is the one part of a note that is
+// there to be followed rather than read.
+//
+// The rule is the run's, translate.AuditBiblio, so a file written before the
+// run had it is caught here rather than never. That is why the audit runs over
+// the corpus and not only over what is being written today.
+//
+// Hard. A citation that leads nowhere is worse than no citation, because a
+// reader cannot tell from the page that it leads nowhere.
+func l14(c *Corpus) ([]Finding, error) {
+	ps, out := c.pairs()
+	for _, p := range ps {
+		for _, q := range translate.AuditBiblio(p.en.Body, p.tr.Body) {
+			out = append(out, Finding{File: p.tr.Path, Line: 1, Msg: q.Msg})
 		}
 	}
 	return out, nil
