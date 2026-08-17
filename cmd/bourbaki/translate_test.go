@@ -498,15 +498,15 @@ func TestTheRetryNoteSaysAPageNumberKeepsItsLetter(t *testing.T) {
 // chunk that has been asked before carries the complaint the last one ended on.
 //
 // This is chunk 4 of the historical note of chapter IV, which went round the
-// same circle four times: the first ask of a pass wrote tr. 185 for p. 185, the
-// second ask was told a page number is an address and kept it and left the word
-// Chapter in English instead, and the pass after that began again at tr. 185.
+// same circle four times: the first ask of a pass, which carried no note, left
+// the word Chapter standing in English, the second ask was told about it and
+// broke a formula instead, and the pass after that began again at Chapter.
 func TestAPassReadsWhatTheOneBeforeItWasRefusedFor(t *testing.T) {
 	root := t.TempDir()
-	const en = "The square of a ring element, p. 185, is defined."
+	const en = "The square of $M\\cap N$ is a ring element."
 	if err := archiveChunk(root, "vi", "content/en/ens/IV/historical_note.md",
 		translate.Chunk{Index: 4, Of: 40, Body: en}, 2,
-		"the question", "The square của một phần tử vành, tr. 185, được định nghĩa.",
+		"the question", "The square của $M \\cup N$ là một phần tử vành.",
 		"https://chatgpt.com/c/1"); err != nil {
 		t.Fatal(err)
 	}
@@ -515,13 +515,27 @@ func TestAPassReadsWhatTheOneBeforeItWasRefusedFor(t *testing.T) {
 	j := job{source: "content/en/ens/IV/historical_note.md"}
 	prior := refusedBefore(root, "vi", g, j, translate.Chunk{Index: 4, Of: 40, Body: en}, en)
 	if len(prior) != 2 {
-		t.Fatalf("%d complaints came back off disk, want the page number and the term: %v", len(prior), prior)
+		t.Fatalf("%d complaints came back off disk, want the formula and the term: %v", len(prior), prior)
 	}
 	note := retryNote(prior)
-	for _, want := range []string{"p. 13 stays p. 13", "bình phương"} {
+	for _, want := range []string{"math span", "bình phương"} {
 		if !strings.Contains(note, want) {
 			t.Errorf("the first ask of the next pass does not say %q:\n%s", want, note)
 		}
+	}
+
+	// What the repairs put right is not a complaint. An answer whose only fault
+	// is that it wrote the page number the Vietnamese way is an answer the run
+	// accepts, so the pass after it has nothing to say about it. See
+	// translate.Readdress.
+	const cited = "The ring is defined, p. 185."
+	if err := archiveChunk(root, "vi", "content/en/ens/IV/historical_note.md",
+		translate.Chunk{Index: 9, Of: 40, Body: cited}, 1,
+		"the question", "Vành được định nghĩa, tr. 185.", ""); err != nil {
+		t.Fatal(err)
+	}
+	if prior := refusedBefore(root, "vi", g, j, translate.Chunk{Index: 9, Of: 40, Body: cited}, cited); len(prior) != 0 {
+		t.Errorf("an answer the run would have repaired carried %v", prior)
 	}
 
 	// A chunk nobody has asked for yet is asked without a note, which is every

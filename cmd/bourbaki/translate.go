@@ -954,7 +954,10 @@ func transportOnly(bad []translate.Problem) bool {
 func refusedBefore(root, lang string, terms *glossary.Glossary, j job, c translate.Chunk, body string) []translate.Problem {
 	var out []translate.Problem
 	for _, text := range archivedAnswers(root, lang, j.source, c.Index) {
-		text = translate.Respace(body, text)
+		// Read the way the run reads: both repairs first, so that the note
+		// carries what an answer is refused for and not what it would have been
+		// refused for if nobody had put its formulas and its citations back.
+		text = translate.Readdress(lang, body, translate.Respace(body, text))
 		out = merge(out, translate.Audit(lang, body, text))
 		out = merge(out, translate.AuditTerms(lang, terms, body, text))
 	}
