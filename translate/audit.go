@@ -716,6 +716,32 @@ func auditLanguage(lang, en, tr string) []Problem {
 			"has a run of %d words with nothing of %s in it: %s",
 			len(strings.Fields(run)), lang, short(run))}}
 	}
+	// A run is consecutive words, and a formula standing between two of them
+	// breaks it. Numbered formula (11) of chapter III, § 7 is a display, the
+	// word whenever, a display, the word and, and a display, and both words
+	// were left in English. No run in that line is longer than one word, so
+	// every test above passes it, the chunk is accepted, the file is written,
+	// and L07 of the audit refuses the file over a paragraph no chunk is ever
+	// going to be asked about again.
+	//
+	// So read the blocks one at a time as well: what a block says in words is
+	// English, and none of it is in the language. Two words is the floor the
+	// run uses and it is the floor here, for the same reason. The English side
+	// is read too, because a block the English writes in symbols is a block
+	// whose translation is itself, and the blocks line up: the rule beside this
+	// one refuses an answer that has a different number of them.
+	ens := blocks(en)
+	for i, b := range blocks(tr) {
+		if i >= len(ens) || !hasProse(ens[i]) {
+			continue
+		}
+		text := strings.Join(strings.Fields(prose(WithoutCitations(en, b))), " ")
+		if glossary.EnglishWords(text) >= 2 && !glossary.WrittenIn(lang, text) {
+			return []Problem{{Rule: RuleLanguage, Msg: fmt.Sprintf(
+				"has a block whose words are English and none of them %s: %s",
+				lang, short(text))}}
+		}
+	}
 	return nil
 }
 
