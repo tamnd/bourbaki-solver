@@ -779,6 +779,13 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		if err := archiveChunk(root, lang, j.source, c, attempt, ask, answer.Text, answer.Conversation); err != nil {
 			return "", "", []translate.Problem{{Rule: "archive", Msg: err.Error()}}
 		}
+		// The archive holds what the model wrote and the audit reads what the
+		// repair leaves, which is the answer with the English layout back in any
+		// formula the model re-spaced and nothing else moved. See
+		// translate.Respace: a correct translation whose only fault is that it
+		// wrote $M \cap N$ for $M\cap N$ is worth putting right rather than
+		// asking again for five minutes to get it laid out some third way.
+		answer.Text = translate.Respace(c.Body, answer.Text)
 		problems := translate.Audit(lang, c.Body, answer.Text)
 		// The terminology is asked here and not inside Audit, which compares
 		// two texts and holds no glossary. It is the same test L10 makes of the
