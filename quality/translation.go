@@ -507,6 +507,9 @@ func l07(c *Corpus) ([]Finding, error) {
 			if words < 2 {
 				continue
 			}
+			if translate.BiblioEntry(para.text) {
+				continue // it stands as printed, and L14 is what watches that
+			}
 			if translatedInto(p.tr.Lang, para.text) {
 				continue
 			}
@@ -548,6 +551,9 @@ func l11(c *Corpus) ([]Finding, error) {
 			run, words := glossary.Untranslated(p.tr.Lang, para.text)
 			if words < 2 {
 				continue
+			}
+			if translate.BiblioEntry(para.text) {
+				continue // it stands as printed, and L14 is what watches that
 			}
 			if !translatedInto(p.tr.Lang, para.text) {
 				// The whole paragraph came back in English and L07 says so.
