@@ -481,6 +481,19 @@ func TestTheRetryNoteSaysWhatABibliographyEntryIs(t *testing.T) {
 	}
 }
 
+// Chunk 30 of the historical note of chapters I to IV wrote tr. 13 for p. 13,
+// which is how a Vietnamese book writes a page number and is not where the
+// citation points. It did it twice, with the general sentence about addresses
+// in front of it, so the note names the abbreviation.
+func TestTheRetryNoteSaysAPageNumberKeepsItsLetter(t *testing.T) {
+	note := retryNote([]translate.Problem{
+		{Rule: translate.RuleReference, Msg: "the English cites 2 things this answer does not: p.13 p.439"},
+	})
+	if !strings.Contains(note, "p. 13 stays p. 13") {
+		t.Errorf("the note does not say what to do with the letter in front of the number:\n%s", note)
+	}
+}
+
 // And a chunk that failed on something else does not carry advice about the
 // bibliography. A note that says everything says nothing.
 func TestTheRetryNoteOnlyAdvisesOnWhatFailed(t *testing.T) {
