@@ -408,6 +408,31 @@ func TestParse(t *testing.T) {
 		in:   "The homomorphism $f(G,T)$ is surjective by Prop. 3 (§2, no. 4). We denote by",
 		want: []Citation{{Raw: "Prop. 3 (§2, no. 4)", Form: FormSection,
 			Section: 2, Subsec: 4, Kind: corpus.KindProposition, Number: 3}},
+	}, {
+		// Page 108 of Theory of Sets. Read as a bare § the reference points at
+		// the § 4 of the chapter the sentence stands in, which is a § the
+		// sentence is not talking about and which answered it in silence.
+		name: "the Summary of Results",
+		in: "the criteria governing its use absolve us from the necessity of formulating " +
+			"an \"axiom of choice\" to legalize this operation (cf. Summary of Results, §4, no. 10).",
+		want: []Citation{{Raw: "Summary of Results, §4, no. 10", Form: FormSection,
+			Book: "Summary of Results", Section: 4, Subsec: 10}},
+	}, {
+		// Page 93 of the same volume writes the name in italic, which is the
+		// difference the locator already tolerates for the title of a Book.
+		name: "the Summary of Results in italic",
+		in: "which is the assumption made in the definition of union given in " +
+			"*Summary of Results*, §4, no. 2).",
+		want: []Citation{{Raw: "*Summary of Results*, §4, no. 2", Form: FormSection,
+			Book: "Summary of Results", Section: 4, Subsec: 2}},
+	}, {
+		// Page 320 of the same volume, in the historical note. The Book is
+		// Euclid's and the Proposition is Euclid's, and neither belongs in a
+		// graph over the Éléments.
+		name: "a statement of another author's work",
+		in: "for example when he assumes (*Elements*, Book I, Proposition 1) that two circles, " +
+			"each of which passes through the centre of the other, have a common point",
+		want: nil,
 	}} {
 		t.Run(tc.name, func(t *testing.T) {
 			got := Parse(tc.in, 1)
