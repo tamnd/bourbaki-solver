@@ -373,6 +373,32 @@ func bibEntries(body string) []string {
 	return out
 }
 
+// withoutBiblio is the passage with the numbered entries taken out, which is
+// what a rule about the language of the writing has to look at. The entries are
+// not writing, they are addresses, and they are in whatever language the book
+// they name was printed in.
+func withoutBiblio(body string) string {
+	var out []string
+	for _, b := range blocks(body) {
+		if !BiblioEntry(b) {
+			out = append(out, b)
+		}
+	}
+	return joinBlocks(out)
+}
+
+// BiblioEntry says whether a block is one numbered bibliography entry.
+//
+// It is exported because the same question is asked in two places. The run asks
+// it of a chunk before it reads the language of the writing, and the audit asks
+// it of a paragraph of a file already on disk. A rule that reads the language
+// and does not ask it will call every entry an untranslated run, since standing
+// as printed is precisely what AuditBiblio requires of one, and the two rules
+// then hold a file between them with no answer that satisfies both.
+func BiblioEntry(block string) bool {
+	return bibEntryRE.MatchString(strings.TrimSpace(block))
+}
+
 // Invariant 3 again, the part of it that catches an answer stopping early.
 //
 // Blocks and not paragraphs: a heading, a display, a list and a paragraph are
@@ -568,6 +594,19 @@ func hasProse(body string) bool {
 // function saying it, for the reason L08 is: finding out in the first minute
 // costs one more ask, and finding out afterwards costs a section.
 func auditLanguage(lang, en, tr string) []Problem {
+	// The bibliography goes first, because the rule beside this one says an
+	// entry stands as printed and this one would then refuse the answer that
+	// does it. Chunk 29 of the historical note of chapter IV is nine entries
+	// and a line of prose, and the entries are German and French book titles,
+	// so an answer that keeps them, which is the only answer AuditBiblio
+	// accepts, carries a run of seventy eight words with nothing Vietnamese in
+	// it. It was asked for eleven times over three models and refused every
+	// time, half of them for translating the titles and half for not.
+	//
+	// A chunk that is nothing but entries has no prose left once they are out,
+	// and hasProse then says so and this rule says nothing at all, which is the
+	// same answer it already gives to a chunk that is nothing but displays.
+	en, tr = withoutBiblio(en), withoutBiblio(tr)
 	// A passage with no prose in it is a passage whose translation is itself,
 	// and both rules below would refuse the only correct answer there is.
 	//

@@ -338,6 +338,44 @@ func TestL11LeavesTheMathematicsAlone(t *testing.T) {
 	}
 }
 
+// The entries are the second and the fifth of the historical note of chapters I
+// to IV, which stand as printed because that is what L14 requires of them and
+// because a reader follows a citation to a library. L07 and L11 read the
+// language of the writing, and an entry left alone is exactly what they would
+// otherwise call English. The run refused those two chunks for weeks over this,
+// one rule demanding the entries be kept and the other refusing them for being
+// kept, and there was no answer that satisfied both.
+func TestTheLanguageRulesLeaveABibliographyAsPrinted(t *testing.T) {
+	const bib = "## BIBLIOGRAPHY\n\n" +
+		"2. ARISTOTLE, *Organon*, translated under the editorship of W. D. Ross, Oxford, 1928.\n\n" +
+		"5. H. HANKEL, *Theorie der complexen Zahlensysteme*, Leipzig (Teubner), 1867.\n"
+	docs := pairDocs(bib, bib)
+	for _, c := range []struct {
+		id  string
+		run func(*Corpus) ([]Finding, error)
+	}{{"L07", l07}, {"L11", l11}} {
+		if got := run(t, c.run, docs...); len(got) != 0 {
+			t.Errorf("%s reported an entry that stands as printed: %v", c.id, got)
+		}
+	}
+}
+
+// Taking the entries out is not taking the note out. The prose of a historical
+// note runs to pages and the bibliography is the last block of it.
+func TestTheProseAboveABibliographyIsStillRead(t *testing.T) {
+	const en = "The theory of sets is the work of Cantor.\n\n" +
+		"1. G. CANTOR, *Gesammelte Abhandlungen*, Berlin (Springer), 1932.\n"
+	const tr = "The theory of sets is the work of Cantor.\n\n" +
+		"1. G. CANTOR, *Gesammelte Abhandlungen*, Berlin (Springer), 1932.\n"
+	got := run(t, l07, pairDocs(en, tr)...)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want the paragraph above the bibliography: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, "Cantor") {
+		t.Errorf("the finding does not point at the prose: %s", got[0].Msg)
+	}
+}
+
 // The sentence is the third paragraph of the Vietnamese introduction to Theory
 // of Sets as gpt-5.4 wrote it, with либо where hoặc belongs. L07 and L11 both
 // pass it, because the paragraph and every run of words in it are Vietnamese.

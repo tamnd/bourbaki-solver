@@ -555,3 +555,55 @@ func TestAPassageWithProseMayNot(t *testing.T) {
 		}
 	}
 }
+
+// The two rules about the bibliography have to agree with each other.
+//
+// AuditBiblio says an entry stands as printed. The language rule says a run of
+// words with nothing of the target language in it is an answer that stopped
+// translating. A chunk that is mostly entries satisfies the first only by
+// failing the second, and chunk 29 of the historical note of chapter IV, nine
+// German and French titles under one line of prose, was refused eleven times
+// over three models for exactly that: half of them for translating the titles
+// and half for leaving them.
+func TestABibliographyLeftAsPrintedIsNotAnUntranslatedRun(t *testing.T) {
+	en := "The sources of this chapter are listed below.\n\n" +
+		"1. O. NEUGEBAUER, *Vorlesungen über die Geschichte der antiken mathematischen Wissenschaften*, Bd. I, Berlin (Springer), 1934.\n\n" +
+		"2. H. HANKEL, *Zur Geschichte der Mathematik im Alterthum und Mittelalter*, Leipzig (Teubner), 1874.\n\n" +
+		"3. B. DATTA and A. N. SINGH, *History of Hindu Mathematics*, Lahore (Motilal Banarsi Das), 1935.\n"
+	tr := "Các nguồn của chương này được liệt kê dưới đây.\n\n" +
+		"1. O. NEUGEBAUER, *Vorlesungen über die Geschichte der antiken mathematischen Wissenschaften*, Bd. I, Berlin (Springer), 1934.\n\n" +
+		"2. H. HANKEL, *Zur Geschichte der Mathematik im Alterthum und Mittelalter*, Leipzig (Teubner), 1874.\n\n" +
+		"3. B. DATTA and A. N. SINGH, *History of Hindu Mathematics*, Lahore (Motilal Banarsi Das), 1935.\n"
+	for _, p := range Audit("vi", en, tr) {
+		t.Errorf("the answer that keeps the entries was refused: %s", p)
+	}
+}
+
+// And a chunk that is nothing but entries is like a chunk that is nothing but
+// displays: its translation is itself, and the language rule has nothing to say
+// about it rather than everything.
+func TestAChunkOfNothingButBibliographyIsItsOwnTranslation(t *testing.T) {
+	body := "1. N. BOURBAKI, *Théorie des ensembles*, Paris (Hermann), 1954.\n\n" +
+		"2. D. HILBERT and P. BERNAYS, *Grundlagen der Mathematik*, Bd. I, Berlin (Springer), 1934.\n"
+	for _, p := range Audit("vi", body, body) {
+		t.Errorf("a page of citations was refused: %s", p)
+	}
+}
+
+// The prose around the entries is still held to the language it was asked for.
+// Taking the bibliography out must not take the rule out with it.
+func TestTheProseBesideABibliographyIsStillChecked(t *testing.T) {
+	en := "The sources of this chapter are listed below, and the reader who wants the detail should begin with the first of them.\n\n" +
+		"1. O. NEUGEBAUER, *Vorlesungen über die Geschichte der antiken mathematischen Wissenschaften*, Bd. I, Berlin (Springer), 1934.\n"
+	tr := "The sources of this chapter are listed below, and the reader who wants the detail should begin with the first of them.\n\n" +
+		"1. O. NEUGEBAUER, *Vorlesungen über die Geschichte der antiken mathematischen Wissenschaften*, Bd. I, Berlin (Springer), 1934.\n"
+	var got bool
+	for _, p := range Audit("vi", en, tr) {
+		if p.Rule == RuleLanguage {
+			got = true
+		}
+	}
+	if !got {
+		t.Error("a paragraph left in English beside a bibliography was accepted")
+	}
+}
