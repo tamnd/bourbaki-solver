@@ -144,6 +144,43 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	rec := corpus.BookSections{ID: book}
 	exrec := corpus.BookExercises{ID: book}
 	files := map[string][]byte{}
+
+	// The introduction goes first, because it stands first in the book. It is
+	// not in the table of contents and so is not in the loop below, and that is
+	// the whole reason it was missing: the assembler walks chapters, the seven
+	// pages Bourbaki opens Theory of Sets with are in no chapter, and nothing
+	// ever asked for them.
+	if in := b.Introduction; in != nil {
+		if gap := unread(pages, in.FirstPDFPage, in.LastPDFPage); len(gap) > 0 && partial {
+			fmt.Fprintf(os.Stderr, "the introduction runs pdf %d to %d and %d of those pages are not read yet, skipping it\n",
+				in.FirstPDFPage, in.LastPDFPage, len(gap))
+		} else {
+			f, p, err := introFile(*b, lang, pages)
+			if err != nil {
+				return nil, nil, sum, err
+			}
+			path := corpus.SectionPath(root, lang, f.Meta)
+			out, err := f.Bytes()
+			if err != nil {
+				return nil, nil, sum, err
+			}
+			files[path] = out
+			r, _ := filepath.Rel(root, path)
+			rec.Introduction = &corpus.SectionRecord{
+				Kind:          corpus.KindIntroduction,
+				Title:         f.Meta.SectionTitle,
+				Path:          filepath.ToSlash(r),
+				FirstPDFPage:  p.First(),
+				LastPDFPage:   p.Last(),
+				BookPages:     f.Meta.BookPages,
+				Extraction:    f.Meta.Extraction,
+				ContentSHA256: corpus.ContentSHA256(f.Body),
+			}
+			if verbose {
+				fmt.Printf("%-46s %4d-%-4d\n", filepath.Base(path), p.First(), p.Last())
+			}
+		}
+	}
 	done := make([]corpus.Chapter, 0, len(bt.Chapters))
 	for i, ch := range bt.Chapters {
 		if partial {

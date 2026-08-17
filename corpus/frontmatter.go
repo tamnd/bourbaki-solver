@@ -469,6 +469,11 @@ func SectionPath(root, lang string, m SectionFrontMatter) string {
 		// 00 puts the chapter's opening pages first, ahead of § 1, which is
 		// where the book puts them.
 		name = "00_frontmatter.md"
+	case KindIntroduction:
+		// The Book's introduction belongs to no chapter, so Chapter is empty
+		// and this lands beside the chapter directories rather than inside one,
+		// where the printing puts it. 00 keeps it first.
+		name = "00_introduction.md"
 	case KindHistorical:
 		// The note comes after everything, including the appendices, so its
 		// name has to sort after a leading A. It is the only file here named

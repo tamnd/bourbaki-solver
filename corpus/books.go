@@ -48,6 +48,38 @@ type Book struct {
 	// and records what it found rather than asking anyone to remember.
 	Grammar    string `yaml:"grammar,omitempty"`
 	Pagination string `yaml:"pagination,omitempty"`
+	// Introduction is the Book's own introduction, where it has one, and is
+	// empty where it has not.
+	Introduction *Introduction `yaml:"introduction,omitempty"`
+}
+
+// Introduction is the pages of a Book's introduction.
+//
+// It stands before chapter I and belongs to no chapter, which is why it is here
+// and not in the table of contents. The table of contents is what assembly
+// walks and every entry in it is a chapter with numbered sections; the seven
+// pages Theory of Sets opens with are neither. They are also not front matter
+// in the sense the half title and the table of contents are: it is Bourbaki
+// writing about what a proof is and why the Elements is formalized the way it
+// is, referred to from the body, and a corpus of this Book without it is a
+// corpus missing the part that says what the rest is for.
+//
+// The pages are given rather than found. A heading reading INTRODUCTION is also
+// the running head of every page after the first, so looking for one finds
+// seven beginnings, and the end of it is the beginning of chapter I, which the
+// table of contents already names. Two numbers said once are what the volume
+// knows about itself.
+type Introduction struct {
+	// Title is the heading the printing gives it, which is INTRODUCTION in the
+	// English of Theory of Sets and Introduction in a French volume that sets
+	// it that way. It is written at the top of the assembled file, so it is
+	// what a reader sees, and a translation renders it like any other heading.
+	Title string `yaml:"title"`
+	// Page is the printed number of the first page, for the record and for the
+	// front matter of the file. The last is worked out from the pages.
+	Page         int `yaml:"page"`
+	FirstPDFPage int `yaml:"first_pdf_page"`
+	LastPDFPage  int `yaml:"last_pdf_page"`
 }
 
 // bookTitles is what the Éléments call their Books, as against what a publisher

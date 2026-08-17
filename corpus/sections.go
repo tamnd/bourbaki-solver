@@ -24,8 +24,13 @@ type SectionsManifest struct {
 
 // BookSections is one volume.
 type BookSections struct {
-	ID       string            `yaml:"id"`
-	Chapters []ChapterSections `yaml:"chapters"`
+	ID string `yaml:"id"`
+	// Introduction is the Book's own introduction, where the volume has one. It
+	// is beside the chapters rather than in them because it is in no chapter,
+	// and it is accounted for like any other file: a part of the book that is
+	// written and not counted is a part nobody notices is missing.
+	Introduction *SectionRecord    `yaml:"introduction,omitempty"`
+	Chapters     []ChapterSections `yaml:"chapters"`
 }
 
 // ChapterSections is one chapter.
@@ -57,10 +62,14 @@ type SectionRecord struct {
 
 // Section kinds.
 const (
-	KindFront      = "front"
-	KindSection    = "section"
-	KindAppendix   = "appendix"
-	KindHistorical = "historical"
+	KindFront = "front"
+	// KindIntroduction is the Book's own introduction, which stands before
+	// chapter I and belongs to no chapter. It is the one kind whose file is not
+	// in a chapter directory. See Book.Introduction.
+	KindIntroduction = "introduction"
+	KindSection      = "section"
+	KindAppendix     = "appendix"
+	KindHistorical   = "historical"
 )
 
 // LoadSections reads manifests/sections.yaml. A missing file is an empty
