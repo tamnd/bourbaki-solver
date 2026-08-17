@@ -65,6 +65,12 @@ func chunkInput(body, terms string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// copiedModel is what the front matter records for a chunk no model was shown,
+// because there was nothing in it to translate. It is a name no route has and no
+// rule about cut down or free models matches, which is the point: the text came
+// off the English page and not off a model at all.
+const copiedModel = "copied"
+
 // accepted is a chunk's answer, kept because the run that asked for it may not
 // be the run that writes the section.
 type accepted struct {
