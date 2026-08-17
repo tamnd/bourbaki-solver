@@ -36,11 +36,25 @@ import (
 // word that both languages spell the same way says nothing about which language
 // a piece of writing is in, and this list is only worth having if every word on
 // it does.
+//
+// whenever is on it because of § 7 of chapter III, which sets its condition on
+// a limit as $\textit{whenever } \alpha \leqslant \beta$. A word inside the
+// mathematics counts as prose, and so may be translated, exactly when this list
+// knows it, so the run came back translated and the math rule refused it as
+// tampering while L12 had nothing to say. The list already carries when, where,
+// while, whereas and whom, and the absence of this one was an oversight rather
+// than a decision. Vietnamese spells nothing that way.
+//
+// The rest of what the corpus sets upright inside a formula was counted at the
+// same time and left alone: resp. six times, Card five, otherwise, i.e., odd
+// and even once each, and quotation marks. Those stand as printed today in six
+// files that are translated and current, the rules accept them there, and
+// moving them would ask for those six files again for no reader's benefit.
 var english = map[string]bool{}
 
 func init() {
 	for _, w := range strings.Fields(`the of is and for be we that it as if then every there
-this which are has have let was were from but not all such where when its they one on or
+this which are has have let was were from but not all such where when whenever its they one on or
 thus hence therefore follows also only same each other into over under between because since
 while what who whose whom does did shall will would could might must been being had here now
 first second third these those`) {

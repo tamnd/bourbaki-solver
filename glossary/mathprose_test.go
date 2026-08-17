@@ -27,6 +27,24 @@ func TestAFormulaCopiedThroughIsReported(t *testing.T) {
 	}
 }
 
+// Formula (5) of § 7 of chapter III, which is where whenever came from. The
+// word is prose and a reader of the Vietnamese has to be able to read it, so
+// the condition on the limit may be translated and stands reported if it is
+// not.
+func TestTheConditionOnALimitIsProse(t *testing.T) {
+	en := `f_{\alpha\beta} \circ u_\beta = u_\alpha \qquad \textit{whenever } \alpha \leqslant \beta`
+	vi := `f_{\alpha\beta} \circ u_\beta = u_\alpha \qquad \textit{mỗi khi } \alpha \leqslant \beta`
+	if !SameMath(en, vi) {
+		t.Error("the translated condition was read as a different formula")
+	}
+	if got := UntranslatedMathProse(en, vi); len(got) != 0 {
+		t.Errorf("reported %v as left in English", got)
+	}
+	if got := UntranslatedMathProse(en, en); len(got) != 1 {
+		t.Errorf("reported %v, want the run copied through", got)
+	}
+}
+
 // A variable renamed inside a formula is still refused, which is the whole
 // reason the mathematics is compared at all.
 func TestASymbolThatMovedIsStillRefused(t *testing.T) {
