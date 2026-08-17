@@ -444,11 +444,29 @@ func blocks(lines []Line, v Volume) string {
 // name carries on with no space: Lie 7 to 9 heads three no. that way and the
 // corpus shipped "POINCARE-BIRKHOFF- WITT", "SEMI- SIMPLE" and "INFINITELY-
 // DIFFERENTIABLE".
-func carryHead(head, rest string) string {
+//
+// TeX breaks a title at a hyphen of its own making too, and then the hyphen has
+// to go: Théories spectrales heads no. 2 of chapter I "sur un espace locale-"
+// and "ment compact" under it, and no. 13 "dans une algèbre nor-" and "mable
+// complète". Which hyphen it is, is the question compound.go answers for the
+// body of the volume, and a title is asked it the same way. Only where both
+// halves are lower case, since the compounds of a volume are collected in lower
+// case and a title set in capitals is not in that book.
+func carryHead(head, rest string, c Compounds) string {
 	if strings.HasSuffix(head, "-") {
+		if lowerBreak(head, rest) && !c.Keeps(head, rest) {
+			return strings.TrimSuffix(head, "-") + rest
+		}
 		return head + rest
 	}
 	return head + " " + rest
+}
+
+// lowerBreak reports whether a title broken at a hyphen has a lower case word
+// on both sides of it, which is what the compounds of a volume are written in.
+func lowerBreak(head, rest string) bool {
+	return tailWord(strings.TrimSuffix(head, "-")) != "" &&
+		headWord(strings.TrimLeft(rest, " ")) != ""
 }
 
 // join puts the lines of one block back into paragraphs.
@@ -498,7 +516,7 @@ func join(lines []Line, v Volume) string {
 			if head == i-1 && len(out) > 0 && !opensHead(h) &&
 				!chapterLine(lines[i-1]) &&
 				l.Top-lines[i-1].Top <= headLead(lines[i-1]) {
-				out[len(out)-1] = carryHead(out[len(out)-1], strings.TrimLeft(h, "# "))
+				out[len(out)-1] = carryHead(out[len(out)-1], strings.TrimLeft(h, "# "), v.Compounds)
 				head = i
 				continue
 			}
@@ -510,7 +528,7 @@ func join(lines []Line, v Volume) string {
 		// The rest of a title broken after a word, where what carries on is not
 		// itself the shape of a heading. See headTail.
 		if head == i-1 && len(out) > 0 && headTail(l) && l.Top-lines[i-1].Top <= headLead(lines[i-1]) {
-			out[len(out)-1] = carryHead(out[len(out)-1], headingText(l))
+			out[len(out)-1] = carryHead(out[len(out)-1], headingText(l), v.Compounds)
 			head = i
 			continue
 		}

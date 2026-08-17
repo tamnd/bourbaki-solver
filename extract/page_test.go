@@ -102,3 +102,33 @@ func TestATitleBrokenAtAHyphenCarriesOnWithNoSpace(t *testing.T) {
 		t.Errorf("body:\n%s\nwant a line reading\n%s", p.Body, want)
 	}
 }
+
+// The head of no. 2 of chapter I of Théories spectrales, which is too long for
+// the measure and is set on two lines. TeX broke it inside the word
+// "localement", so the hyphen at the end of the first line is TeX's own and has
+// to go: the table of contents of the volume prints the title in one line and
+// spells the word whole. Read the way a printed hyphen is read, the corpus
+// shipped "locale- ment compact" and then "locale-ment compact".
+const hyphenatedHeadXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="44" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="0" size="16" family="LUWBDQ+SnsrnnQjcxplMknsjpVdyrqvLMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="UTVESS+HffhfwKtmmhhDxmflvFbvqwsLMRoman10" color="#000000"/>
+<text top="106" left="81" width="497" height="15" font="3"><b>2. Fonctions continues nulles à l’infini sur un espace locale-</b></text>
+<text top="128" left="105" width="117" height="15" font="3"><b>ment compact</b></text>
+<text top="169" left="252" width="326" height="14" font="0">est un espace localement compact. On note</text>
+</page>
+</pdf2xml>
+`
+
+func TestATitleBrokenInsideAWordLosesTheHyphen(t *testing.T) {
+	lay, err := pdfsrc.ParseXML(strings.NewReader(hyphenatedHeadXML))
+	if err != nil {
+		t.Fatalf("ParseXML: %v", err)
+	}
+	p := ReadPage(lay, lay.Pages[0])
+	const want = "2. Fonctions continues nulles à l’infini sur un espace localement compact"
+	if !strings.Contains(p.Body, want) {
+		t.Errorf("body:\n%s\nwant a line reading\n%s", p.Body, want)
+	}
+}
