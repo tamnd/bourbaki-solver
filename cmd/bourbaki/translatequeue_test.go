@@ -35,6 +35,15 @@ func section() job {
 		chunks: translate.Chunks(body), terms: "terms-v1"}
 }
 
+// viOf is a chunk of the fixture as a translation of itself: the mathematics
+// where it stood and the words around it in Vietnamese. An answer has to be one
+// the rules accept, since plan reads them over what is on disk before it takes
+// an answer as answered.
+func viOf(body string) string {
+	body = strings.ReplaceAll(body, "Let", "Cho")
+	return strings.ReplaceAll(body, " be elements of E.", " là các phần tử của E.")
+}
+
 func openQueue(t *testing.T) (*queue.Queue, string) {
 	t.Helper()
 	root := t.TempDir()
@@ -65,7 +74,7 @@ func TestAnAnsweredChunkIsNotAskedFor(t *testing.T) {
 	// The first chunk comes back and is written down, the way a worker writes it.
 	first := j.chunks[0]
 	answer := accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
-		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: "Đoạn thứ nhất."}
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: viOf(first.Body)}
 	if err := writeAccepted(root, "vi", answer); err != nil {
 		t.Fatal(err)
 	}
@@ -88,6 +97,31 @@ func TestAnAnsweredChunkIsNotAskedFor(t *testing.T) {
 	}
 }
 
+// Section 7 of chapter III is where this comes from. Two of its chunks were
+// accepted weeks ago with a word inside a formula copied through, which is what
+// the rules asked for then, the word counts as prose now, and the file put
+// together out of every accepted chunk was refused over two spans that no chunk
+// was ever going to be asked about again. A cached answer the rule standing
+// today will not take is not an answer.
+func TestAnAnswerTodaysRulesRefuseIsAskedForAgain(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	first := j.chunks[0]
+	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6",
+		Text: strings.ReplaceAll(viOf(first.Body), "$x_{0}$", "$y_{0}$")}); err != nil {
+		t.Fatal(err)
+	}
+
+	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) != 0 || queued != 3 {
+		t.Fatalf("have %d and queued %d, want the renamed variable refused and all three asked for", len(have), queued)
+	}
+}
+
 // The terminology is part of the question, so a glossary row that reaches this
 // section makes the answer on disk an answer to something else.
 func TestAChangeOfTerminologyIsANewChunk(t *testing.T) {
@@ -95,7 +129,7 @@ func TestAChangeOfTerminologyIsANewChunk(t *testing.T) {
 	j := section()
 	first := j.chunks[0]
 	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
-		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: viOf(first.Body)}); err != nil {
 		t.Fatal(err)
 	}
 	moved := j
@@ -118,7 +152,7 @@ func TestAChangeOfInstructionsIsANewChunk(t *testing.T) {
 	j := section()
 	first := j.chunks[0]
 	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
-		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6", Text: viOf(first.Body)}); err != nil {
 		t.Fatal(err)
 	}
 	have, queued, _, err := plan(q, root, "vi", "prompt-v2", j, false, false)
@@ -137,7 +171,7 @@ func TestAnAnswerWithNoInstructionsRecordedIsAskedAgain(t *testing.T) {
 	j := section()
 	first := j.chunks[0]
 	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
-		Input: chunkInput(first.Body, j.terms), Model: "gpt-5-6", Text: "Đoạn thứ nhất."}); err != nil {
+		Input: chunkInput(first.Body, j.terms), Model: "gpt-5-6", Text: viOf(first.Body)}); err != nil {
 		t.Fatal(err)
 	}
 	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false, false)
@@ -503,7 +537,7 @@ func TestRedoSmallAsksAgainOnlyForWhatTheSmallModelAnswered(t *testing.T) {
 		c := j.chunks[i]
 		if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: c.Index, Of: c.Of,
 			Input: chunkInput(c.Body, j.terms), Prompt: "prompt-v1", Model: model,
-			Text: "Đoạn thứ " + model + "."}); err != nil {
+			Text: viOf(c.Body)}); err != nil {
 			t.Fatal(err)
 		}
 	}
