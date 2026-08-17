@@ -63,6 +63,29 @@ func TestATidiedFormulaIsRefused(t *testing.T) {
 	}
 }
 
+func TestAFormulaTidiedLateStillShowsWhereItChanged(t *testing.T) {
+	// A span of the inverse limits of chapter III opens with forty characters
+	// two readings share, so a message cut from the front reads "the span is
+	// x... and the English has x...", the same text twice. A chunk sat in the
+	// queue for an hour being told that.
+	want := `u_\beta \circ f_{\beta\alpha} = u_\alpha \circ g_{\alpha\beta}`
+	got := strings.Replace(want, `g_{\alpha\beta}`, `g_{\alpha \beta}`, 1)
+	mine, theirs := ShortDiff(got, want)
+	if mine == theirs {
+		t.Fatalf("the two halves of the message read alike: %s", mine)
+	}
+	if !strings.Contains(mine, `\\alpha \\beta`) || !strings.Contains(theirs, `\\alpha\\beta}`) {
+		t.Fatalf("the window is not on the difference: %s and %s", mine, theirs)
+	}
+}
+
+func TestAShortFormulaIsShownWhole(t *testing.T) {
+	mine, theirs := ShortDiff(`x + y`, `x+y`)
+	if mine != `"x + y"` || theirs != `"x+y"` {
+		t.Fatalf("a short span was not shown whole: %s and %s", mine, theirs)
+	}
+}
+
 func TestADroppedFormulaIsRefused(t *testing.T) {
 	bad := strings.Replace(vi, ` và $A/\mathfrak{m}$ là một trường`, "", 1)
 	ps := Audit("vi", en, bad)

@@ -187,9 +187,9 @@ func auditMath(en, tr string) []Problem {
 		if glossary.SameMath(want[i].Text, got[i].Text) && got[i].Display == want[i].Display {
 			continue
 		}
+		mine, theirs := ShortDiff(got[i].Text, want[i].Text)
 		out = append(out, Problem{Rule: RuleMath, Line: got[i].Line,
-			Msg: fmt.Sprintf("math span %d is %s and the English has %s",
-				i+1, short(got[i].Text), short(want[i].Text))})
+			Msg: fmt.Sprintf("math span %d is %s and the English has %s", i+1, mine, theirs)})
 		// One is enough. After the first difference the spans are out of step
 		// and every one after it reports as changed, which buries the one that
 		// actually moved under a hundred that did not.
@@ -600,11 +600,48 @@ func notIn(a, b []string) []string {
 }
 
 func short(s string) string {
-	s = strings.Join(strings.Fields(s), " ")
-	if len(s) <= 40 {
-		return fmt.Sprintf("%q", s)
+	return window([]rune(strings.Join(strings.Fields(s), " ")), 0)
+}
+
+// ShortDiff renders two spans that are meant to be the same and are not, with
+// the window placed on the first rune where they part rather than on the head
+// of each.
+//
+// short cuts at forty characters from the front, and a span of the inverse
+// limits of chapter III opens with forty characters of \alpha and \beta that
+// both sides share. The message read "math span 1 is x... and the English has
+// x...", with the same forty characters twice, and it is that message the model
+// is handed when it is asked again. It sat in the queue for an hour being told
+// nothing. The difference is what has to be on the screen.
+func ShortDiff(got, want string) (string, string) {
+	g := []rune(strings.Join(strings.Fields(got), " "))
+	w := []rune(strings.Join(strings.Fields(want), " "))
+	n := 0
+	for n < len(g) && n < len(w) && g[n] == w[n] {
+		n++
 	}
-	return fmt.Sprintf("%q", s[:40]+"...")
+	start := 0
+	if n > 12 {
+		start = n - 12 // a little of what they share, to place the rest
+	}
+	return window(g, start), window(w, start)
+}
+
+// window quotes at most forty characters of s from start, marking either end
+// that it cuts.
+func window(r []rune, start int) string {
+	if start > len(r) {
+		start = len(r)
+	}
+	lead, trail := "", ""
+	if start > 0 {
+		lead = "..."
+	}
+	seg := r[start:]
+	if len(seg) > 40 {
+		seg, trail = seg[:40], "..."
+	}
+	return fmt.Sprintf("%q", lead+string(seg)+trail)
 }
 
 func quoteOrNone(s string) string {

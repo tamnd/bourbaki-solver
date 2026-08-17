@@ -182,9 +182,9 @@ func l01(c *Corpus) ([]Finding, error) {
 		}
 		for i := range tr {
 			if !glossary.SameMath(en[i].Text, tr[i].Text) || tr[i].Display != en[i].Display {
+				mine, theirs := translate.ShortDiff(tr[i].Text, en[i].Text)
 				out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(tr[i].Line),
-					Msg: fmt.Sprintf("math span %d is %q and the English has %q",
-						i+1, ellipsis(tr[i].Text, 40), ellipsis(en[i].Text, 40))})
+					Msg: fmt.Sprintf("math span %d is %s and the English has %s", i+1, mine, theirs)})
 				break
 			}
 		}
