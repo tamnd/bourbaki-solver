@@ -494,6 +494,43 @@ func TestTheRetryNoteSaysAPageNumberKeepsItsLetter(t *testing.T) {
 	}
 }
 
+// A pass reads what the pass before it was refused for, so the first ask of a
+// chunk that has been asked before carries the complaint the last one ended on.
+//
+// This is chunk 4 of the historical note of chapter IV, which went round the
+// same circle four times: the first ask of a pass wrote tr. 185 for p. 185, the
+// second ask was told a page number is an address and kept it and left the word
+// Chapter in English instead, and the pass after that began again at tr. 185.
+func TestAPassReadsWhatTheOneBeforeItWasRefusedFor(t *testing.T) {
+	root := t.TempDir()
+	const en = "The square of a ring element, p. 185, is defined."
+	if err := archiveChunk(root, "vi", "content/en/ens/IV/historical_note.md",
+		translate.Chunk{Index: 4, Of: 40, Body: en}, 2,
+		"the question", "The square của một phần tử vành, tr. 185, được định nghĩa.",
+		"https://chatgpt.com/c/1"); err != nil {
+		t.Fatal(err)
+	}
+
+	g := &glossary.Glossary{Version: 4, Terms: []glossary.Term{{EN: "square", VI: "bình phương"}}}
+	j := job{source: "content/en/ens/IV/historical_note.md"}
+	prior := refusedBefore(root, "vi", g, j, translate.Chunk{Index: 4, Of: 40, Body: en}, en)
+	if len(prior) != 2 {
+		t.Fatalf("%d complaints came back off disk, want the page number and the term: %v", len(prior), prior)
+	}
+	note := retryNote(prior)
+	for _, want := range []string{"p. 13 stays p. 13", "bình phương"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("the first ask of the next pass does not say %q:\n%s", want, note)
+		}
+	}
+
+	// A chunk nobody has asked for yet is asked without a note, which is every
+	// chunk of every section the first time it goes over the fleet.
+	if prior := refusedBefore(root, "vi", g, j, translate.Chunk{Index: 7, Of: 40, Body: en}, en); len(prior) != 0 {
+		t.Errorf("a chunk with no answer on disk carried %v", prior)
+	}
+}
+
 // And a chunk that failed on something else does not carry advice about the
 // bibliography. A note that says everything says nothing.
 func TestTheRetryNoteOnlyAdvisesOnWhatFailed(t *testing.T) {
