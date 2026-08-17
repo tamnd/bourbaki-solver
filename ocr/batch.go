@@ -90,6 +90,15 @@ type Host struct {
 	// kind each one is.
 	Client api.Completer
 	Model  string
+
+	// Command is set when the host is neither a box nor a gateway but a program
+	// on this machine, and it names which program. There is one, CodexBin, and
+	// the field holds a name rather than a boolean so that the next such
+	// transport is a row in the route table rather than a second flag here.
+	//
+	// Like a gateway it reads no page images, so it never reaches the batch
+	// machinery the fields above describe.
+	Command string
 }
 
 // DefaultDisplay is where Xvfb is on these hosts. run-serve.sh starts it on :99
