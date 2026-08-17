@@ -172,4 +172,3 @@ func TestAssembleHoldsAnIntroductionWithAHoleInIt(t *testing.T) {
 		t.Errorf("a partial run wrote a partial introduction: %v", err)
 	}
 }
-
