@@ -10,6 +10,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
 	"github.com/tamnd/bourbaki-solver/ocr"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/queue"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
@@ -458,5 +459,59 @@ func TestACutDownRunOnItsOwnTakesEverything(t *testing.T) {
 	hosts := []ocr.Host{{Name: "codex-mini", Model: "gpt-5.4-mini"}, {Name: "zen-deepseek", Model: "deepseek-chat-lite"}}
 	if want := freshOnly(hosts); len(want) != 0 {
 		t.Errorf("%d routes were held to a first ask with nothing to escalate to", len(want))
+	}
+}
+
+// The complaint alone did not move the bibliography, so the note names the
+// words the model kept translating.
+//
+// Chunk 3 of the historical note of chapter III came back four times with Vol.
+// written Tap and and written va inside a numbered entry, on three different
+// models, each time having been told that an entry stands as printed.
+func TestTheRetryNoteSaysWhatABibliographyEntryIs(t *testing.T) {
+	note := retryNote([]translate.Problem{
+		{Rule: translate.RuleBibliography, Msg: `bibliography entry 1 is "...Tap I..." and the English has "...Vol. I..."`},
+		{Rule: translate.RuleBibliography, Msg: "another entry of the same kind"},
+	})
+	if !strings.Contains(note, "copied out of the English character for") {
+		t.Errorf("the note says what was wrong and not what to do:\n%s", note)
+	}
+	if n := strings.Count(note, "A numbered bibliography entry"); n != 1 {
+		t.Errorf("the sentence is in the note %d times, want it once however often the rule fired", n)
+	}
+}
+
+// And a chunk that failed on something else does not carry advice about the
+// bibliography. A note that says everything says nothing.
+func TestTheRetryNoteOnlyAdvisesOnWhatFailed(t *testing.T) {
+	note := retryNote([]translate.Problem{{Rule: translate.RuleMath, Msg: "math span 6 is not the English one"}})
+	if strings.Contains(note, "bibliography") {
+		t.Errorf("a chunk that lost a formula was told about citations:\n%s", note)
+	}
+}
+
+// The note is built at ask time and is not part of what prompt_sha256 covers,
+// which is the reason it is where it is. A sentence added to the prompt itself
+// marks every translated file in the corpus stale and buys a run of the whole
+// fleet; a sentence added here changes nothing that is already written.
+func TestTheRetryNoteDoesNotMoveThePromptHash(t *testing.T) {
+	before, err := prompt.TranslateSHA256("vi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err := prompt.Translate("vi", "", retryNote([]translate.Problem{
+		{Rule: translate.RuleBibliography, Msg: "an entry was translated"}}), "Let A be a ring.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(q, "A numbered bibliography entry") {
+		t.Error("the advice did not reach the question")
+	}
+	after, err := prompt.TranslateSHA256("vi")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before != after {
+		t.Error("asking with a note moved the prompt hash, which marks every translated file stale")
 	}
 }

@@ -891,6 +891,21 @@ func transportOnly(bad []translate.Problem) bool {
 // person to read and a model reads them the same way. What is not sent is the
 // first answer: asking a model to fix its own text invites it to keep the parts
 // it likes, and the parts it likes are the ones this is complaining about.
+//
+// A few rules also carry a sentence saying what to do, and those are there
+// because the complaint alone did not work. "an entry stands as printed" tells
+// a reader everything and told the model nothing: chunk 3 of the historical
+// note of chapter III came back four times with Vol. written Tap and and
+// written va inside a numbered bibliography entry, on three different models,
+// each time after being told what was wrong. Naming the words is what the
+// answer needed.
+//
+// The sentences live here and not in the prompt on purpose. The prompt is
+// hashed into every translated file, so a sentence added there marks all 240
+// Vietnamese files stale at once and they would have to go over the fleet
+// again; the note is built at ask time and changes nothing that is already
+// written. That is the whole reason the retry note exists, and it is the right
+// place for a rule that only the hard chunks need.
 func retryNote(problems []translate.Problem) string {
 	var b strings.Builder
 	b.WriteString("Your previous answer to this section was thrown away. What was wrong with it:\n\n")
@@ -901,9 +916,43 @@ func retryNote(problems []translate.Problem) string {
 		}
 		b.WriteString("  " + p.String() + "\n")
 	}
+	for _, line := range retryAdvice(problems) {
+		b.WriteString("\n" + line + "\n")
+	}
 	b.WriteString("\nTranslate the section again from the beginning. Do not send the previous\n" +
 		"answer back with a correction on top of it.\n")
 	return b.String()
+}
+
+// retryAdvice is the extra sentence for each rule that has one, in rule order
+// and once each however many times the rule fired.
+func retryAdvice(problems []translate.Problem) []string {
+	said := map[string]bool{}
+	var out []string
+	for _, p := range problems {
+		if said[p.Rule] {
+			continue
+		}
+		said[p.Rule] = true
+		if line, ok := advice[p.Rule]; ok {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+var advice = map[string]string{
+	translate.RuleBibliography: "A numbered bibliography entry is copied out of the English character for\n" +
+		"character. Nothing inside one is translated: not the title, not the name of\n" +
+		"the journal, not the place, and not the words around them such as Vol., and,\n" +
+		"ed., pp. or the abbreviation of a series. A reader follows a citation to a\n" +
+		"library, and a citation in another language does not lead anywhere.",
+	translate.RuleReference: "Every citation in the English is in the answer, spelled as the English\n" +
+		"spells it: the page numbers, the volume numbers and the bracketed numbers of\n" +
+		"the bibliography. Those are addresses and not words.",
+	translate.RuleScript: "Write the answer in the language that was asked for and in no other. A\n" +
+		"single character of another writing system is enough for the answer to be\n" +
+		"thrown away.",
 }
 
 func translateQuestion(g *glossary.Glossary, lang, body string) (string, error) {
