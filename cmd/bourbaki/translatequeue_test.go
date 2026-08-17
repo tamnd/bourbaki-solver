@@ -12,6 +12,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/glossary"
 	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/queue"
+	"github.com/tamnd/bourbaki-solver/route"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
 
@@ -291,7 +292,7 @@ func TestAnInterruptedChunkIsNotAskedTwice(t *testing.T) {
 	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "element", VI: "phần tử"}}}
 	asks := 0
 	_, _, bad := askChunk(ctx, t.TempDir(), ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false"},
-		g, "vi", j, j.chunks[0], false, func(format string, args ...any) { asks++ })
+		g, "vi", j, j.chunks[0], false, chunkDeadline, func(format string, args ...any) { asks++ })
 	if asks != 1 {
 		t.Errorf("the chunk was asked %d times, want the one that was interrupted", asks)
 	}
@@ -383,7 +384,7 @@ func TestAProviderThatWillNotAnswerDoesNotKillTheChunks(t *testing.T) {
 	// the end of this loop.
 	for run := 1; run <= 4; run++ {
 		_, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, g,
-			"vi", "prompt-v1", j, false, false, false, func(string, ...any) {})
+			"vi", "prompt-v1", j, false, false, false, chunkDeadline, func(string, ...any) {})
 		if len(problems) == 0 {
 			t.Fatalf("run %d: the section was written by a host that answers nothing", run)
 		}
@@ -454,6 +455,35 @@ func TestALeaseOutlastsBothAttemptsAtAChunk(t *testing.T) {
 	// somebody having copied the wrong constant.
 	if chunkDeadline > 10*time.Minute {
 		t.Errorf("one ask of one chunk is allowed %s, which is a number for a photograph of a page", chunkDeadline)
+	}
+}
+
+// And it still outlasts them when a run raises the deadline.
+//
+// -deadline is for a day the fleet is slow. A lease that stayed at the default
+// while the asks got longer is the same fault read from the other end: the
+// queue would hand the chunk on while the lane that raised the deadline is
+// still legitimately waiting on it, and the book gets asked for twice.
+func TestARaisedDeadlineTakesALeaseThatOutlastsIt(t *testing.T) {
+	for _, d := range []time.Duration{time.Minute, chunkDeadline, maxChunkDeadline} {
+		if got := chunkLeaseFor(d); got < 2*d {
+			t.Errorf("a %s deadline takes a %s lease, and the two asks it covers are %s", d, got, 2*d)
+		}
+	}
+	if chunkLeaseFor(chunkDeadline) != chunkLease {
+		t.Errorf("the default deadline takes a %s lease and the constant says %s",
+			chunkLeaseFor(chunkDeadline), chunkLease)
+	}
+	// The ceiling is what a browser route says of itself, so that -deadline
+	// cannot be pushed past the point the transport under it gives up anyway.
+	var browser time.Duration
+	for _, r := range route.Default().Routes {
+		if r.Host != "" && time.Duration(r.Timeout) > browser {
+			browser = time.Duration(r.Timeout)
+		}
+	}
+	if maxChunkDeadline > browser {
+		t.Errorf("-deadline goes up to %s and the slowest route says it will be %s", maxChunkDeadline, browser)
 	}
 }
 
