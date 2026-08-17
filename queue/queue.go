@@ -348,6 +348,31 @@ func (q *Queue) Lease(stage Stage, host, group string, expected time.Duration) (
 //
 // A nil want takes everything, which is Lease.
 func (q *Queue) LeasePart(stage Stage, host, group string, want func(target string) bool, expected time.Duration) (Job, error) {
+	if want == nil {
+		return q.LeaseWhere(stage, host, group, nil, expected)
+	}
+	return q.LeaseWhere(stage, host, group, func(job Job) bool { return want(job.Target) }, expected)
+}
+
+// LeaseWhere is LeasePart shown the whole job rather than the target alone.
+//
+// What a worker can usefully take is not always a question about the name of
+// the work. A translation chunk that a cut down model has already got wrong is
+// work a cut down model should not take again: the two routes on this machine
+// are the same subscription on the cheap model and on the full one, the cheap
+// one is tried first because it is cheap, and without this the cheap lane picks
+// its own failure back up, gets it wrong the same way, and spends the chunk's
+// three attempts without the full model ever being asked. One exercise of
+// chapter IV went round that loop for fifty minutes.
+//
+// Attempts is what says so, and it says it honestly: Lease spends one, Fail
+// keeps it spent, and Release gives it back, so a pending job with attempts on
+// it is a job some model read and answered wrongly.
+//
+// A lane whose predicate leaves nothing gets ErrEmpty and stops, which is the
+// right end of it. The work is still pending and a lane that can take it is
+// still running.
+func (q *Queue) LeaseWhere(stage Stage, host, group string, want func(Job) bool, expected time.Duration) (Job, error) {
 	jobs, err := q.pending(stage, group)
 	if err != nil {
 		return Job{}, err
@@ -355,7 +380,7 @@ func (q *Queue) LeasePart(stage Stage, host, group string, want func(target stri
 	if want != nil {
 		kept := jobs[:0]
 		for _, job := range jobs {
-			if want(job.Target) {
+			if want(job) {
 				kept = append(kept, job)
 			}
 		}

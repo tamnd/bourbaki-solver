@@ -596,6 +596,42 @@ func currentExercise(root, lang, source string, en corpus.ExerciseFrontMatter, b
 // every accepted answer as it arrives. A run that is killed at chunk twelve
 // costs chunk twelve, and the next run asks for that one and joins it to the
 // eleven already on disk.
+// freshOnly says which hosts may take only a chunk nobody has got wrong yet.
+//
+// The route table has the cheap model ranked ahead of the full one and says of
+// the full one that it answers what the cheap one gets wrong. It did not: any
+// lane could take any pending chunk, so a chunk the cheap model refused went
+// back on the pile and the cheap lane, which is the one asking first, picked it
+// straight back up. Chunk 2 of chapter IV, § 2, exercise 6, thirty six formulae
+// in one paragraph, went round that three times in fifty minutes and each time
+// lost the same two spans. The full model is sitting beside it.
+//
+// So a cut down model gets first ask and no second one. It is the cheap way
+// round: nearly every chunk is straightforward and the cheap model answers it,
+// and the hard ones stop costing the whole section its attempts.
+//
+// This only applies where there is somewhere to escalate to. A run given
+// nothing but cut down routes filters nothing, because a rule that leaves work
+// for a lane that does not exist is a rule that translates nothing at all.
+func freshOnly(hosts []ocr.Host) map[string]func(queue.Job) bool {
+	big := false
+	for _, h := range hosts {
+		if !quality.SmallModel(h.Model) {
+			big = true
+		}
+	}
+	want := map[string]func(queue.Job) bool{}
+	if !big {
+		return want
+	}
+	for _, h := range hosts {
+		if quality.SmallModel(h.Model) {
+			want[h.Name] = func(job queue.Job) bool { return job.Attempts == 0 }
+		}
+	}
+	return want
+}
+
 func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, redoSmall, keep bool, logf func(string, ...any)) (string, string, []translate.Problem) {
 	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force, redoSmall)
 	if err != nil {
@@ -609,6 +645,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 	}
 
 	group := translateGroup(lang, j.source)
+	fresh := freshOnly(hosts)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	for _, host := range hosts {
@@ -617,7 +654,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 			go func(host ocr.Host) {
 				defer wg.Done()
 				for ctx.Err() == nil {
-					item, err := q.Lease(queue.StageTranslate, host.Name, group, chunkLease)
+					item, err := q.LeaseWhere(queue.StageTranslate, host.Name, group, fresh[host.Name], chunkLease)
 					if errors.Is(err, queue.ErrEmpty) {
 						return
 					}
