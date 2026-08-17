@@ -197,7 +197,7 @@ func (f Follow) Ask(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("read the answer from %s: %w", f.Host.Name, err)
 	}
 	f.logf("%s: %s answered in %s", f.Host.Name, f.ID, time.Since(started).Round(time.Second))
-	return answer, nil
+	return clean(answer), nil
 }
 
 // push writes the prompt to a local temp file and copies it over.
