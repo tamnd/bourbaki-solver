@@ -38,12 +38,12 @@ import (
 func runAssemble(args []string) error {
 	fs := flag.NewFlagSet("assemble", flag.ExitOnError)
 	book := fs.String("book", "", "book id, as in manifests/books.yaml")
-	lang := fs.String("lang", "en", "language of the pages being assembled")
+	lang := fs.String("lang", "", "language of the pages being assembled, and by default the language of the book")
 	check := fs.Bool("check", false, "assemble but write nothing, and report what differs from what is committed")
 	partial := fs.Bool("partial", false, "assemble the chapters that are read through and skip the ones that are not")
 	quiet := fs.Bool("q", false, "print only the totals")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki assemble -book <id> [-lang en] [-check] [-partial]\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki assemble -book <id> [-lang fr] [-check] [-partial]\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -95,6 +95,15 @@ type assembleTotals struct{ statements, exercises int }
 // It is here rather than in package assemble because it is the driver and not
 // the algorithm: it reads the manifests, walks the chapters and lays out the
 // paths, and moving it would take the command's tests with it for no gain.
+//
+// An empty lang is the language of the book, which is what every caller wants
+// and what none of them used to get. The flag defaulted to English, and a
+// French volume assembled that way stops on the first page it reads, since the
+// assembler is looking for "## CHAPTER" where the page prints "## CHAPITRE".
+// The audit ran that way over every book, so the four French volumes were
+// reported as pages the assembler could not read and were quietly left out of
+// S09, which is the rule that says the committed content is what assembly
+// writes. They were out of it long enough for two of them to go stale.
 func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]byte, []string, assembleTotals, error) {
 	var sum assembleTotals
 	books, err := corpus.LoadBooks(root)
@@ -104,6 +113,12 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	b, ok := books.Get(book)
 	if !ok {
 		return nil, nil, sum, fmt.Errorf("no book %q in %s", book, corpus.BooksPath(root))
+	}
+	if lang == "" {
+		lang = b.Lang
+	}
+	if lang == "" {
+		return nil, nil, sum, fmt.Errorf("no lang for %q in %s, and none given", book, corpus.BooksPath(root))
 	}
 	toc, err := corpus.LoadTOC(root)
 	if err != nil {
