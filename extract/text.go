@@ -50,7 +50,7 @@ func Render(l Line) string {
 	toks = restack(toks)
 	toks = marked(toks)
 	toks = extend(toks)
-	return statementHead(emit(toks), capsOpen(toks))
+	return joinMaps(statementHead(emit(toks), capsOpen(toks)))
 }
 
 // headWord is the word a statement opens with, for the statements Bourbaki sets

@@ -1,6 +1,7 @@
 package extract
 
 import (
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -446,6 +447,30 @@ var symbolPairs = []struct{ from, to string }{
 	{"· · ·", `\cdots `},
 	{"·· ·", `\cdots `},
 	{"· ··", `\cdots `},
+}
+
+// splitMapsRE is the hook and the arrow of a mapsto that arrived as two runs
+// rather than as the two characters of one.
+//
+// symbolPairs reads "7→" inside a run, which is how poppler prints the pair
+// nearly everywhere. Three lines of the French volumes print it split instead:
+// page 309 of Topologie algébrique sets the hook as a run of its own, in the
+// blue of a hyperlink and zero units wide, and the arrow beside it in the black
+// of the text, and the two arrive as separate runs at the same left edge. The
+// pair never matches, the hook falls through to cmsy, and the line ships
+// "\mapstochar \rightarrow", which is what TeX builds \mapsto out of and not
+// what anyone writes.
+//
+// A hook on its own is never anything else, so the two are read back together
+// wherever they end up beside each other.
+var splitMapsRE = regexp.MustCompile(`\\mapstochar\s*\\(long)?rightarrow\s*`)
+
+// joinMaps puts a split mapsto back together.
+func joinMaps(s string) string {
+	if !strings.Contains(s, `\mapstochar`) {
+		return s
+	}
+	return splitMapsRE.ReplaceAllString(s, `\${1}mapsto `)
 }
 
 // cmsy is the part of the mathematics symbol font poppler could not name. It

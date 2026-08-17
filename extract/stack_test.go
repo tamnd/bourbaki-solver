@@ -617,3 +617,72 @@ func TestTheNearHalfOfAScriptIsReadByWhereItIsDrawnAndNotByItsLevel(t *testing.T
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// Page 120 of Théories spectrales I and II writes the positive elements of A of
+// norm under one as A with < 1 above and + below. The < of the exponent and the
+// + of the index are both ten units wide and both start at 450, so the two
+// boxes are the same box, and the cluster was refused for it: the volume
+// shipped A^<_+^1 nine times over. The two scripts overlap by a unit, which is
+// what TeX does with the two sides of one base.
+const oneWidthStackPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="133" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="SNSRNN+LMRoman10" color="#000000"/>
+<fontspec id="3" size="12" family="WKQCXM+LMMathItalic8" color="#000000"/>
+<fontspec id="4" size="12" family="XKDTCH+LMRoman8" color="#000000"/>
+<text top="502" left="393" width="40" height="14" font="2">(resp.</text>
+<text top="502" left="438" width="12" height="14" font="2">A</text>
+<text top="499" left="450" width="10" height="11" font="3"><i>&#60;</i></text>
+<text top="509" left="450" width="10" height="11" font="4">+</text>
+<text top="499" left="460" width="6" height="11" font="4">1</text>
+<text top="502" left="467" width="111" height="14" font="2">) l&#8217;ensemble des</text>
+</page>
+</pdf2xml>
+`
+
+func TestTwoScriptsOfOneWidthAreStillAStack(t *testing.T) {
+	lines := parse(t, oneWidthStackPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `(resp. $A^{<1}_+)$ l’ensemble des`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Page 20 of the same volume sets the spectral radius as the limit of the norm
+// of x to the n, raised to one over n, in a norm that carries an index of its
+// own. The 1 of the exponent and the 1 of the index are the same glyph at the
+// same place, two units of clear space apart, and the line shipped as
+// \|x^n\|^1_1^{/n}.
+const normIndexPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="33" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="VXCFTV+LMRoman10" color="#000000"/>
+<fontspec id="3" size="16" family="QNNXQJ+LMMathItalic10" color="#000000"/>
+<fontspec id="4" size="16" family="WSBXWF+LMMathSymbols10" color="#000000"/>
+<fontspec id="5" size="12" family="WKQCXM+LMMathItalic8" color="#000000"/>
+<fontspec id="6" size="12" family="XKDTCH+LMRoman8" color="#000000"/>
+<text top="805" left="264" width="23" height="14" font="2">lim</text>
+<text top="804" left="297" width="8" height="15" font="4"><i>k</i></text>
+<text top="805" left="305" width="9" height="15" font="3"><i>x</i></text>
+<text top="802" left="315" width="8" height="11" font="5"><i>n</i></text>
+<text top="804" left="323" width="8" height="15" font="4"><i>k</i></text>
+<text top="800" left="331" width="6" height="11" font="6">1</text>
+<text top="813" left="331" width="6" height="11" font="6">1</text>
+<text top="800" left="338" width="14" height="11" font="5"><i>/n</i></text>
+</page>
+</pdf2xml>
+`
+
+func TestAnExponentAndAnIndexOfOneGlyphAreStillAStack(t *testing.T) {
+	lines := parse(t, normIndexPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `lim $\|x^n\|^{1/n}_1$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}

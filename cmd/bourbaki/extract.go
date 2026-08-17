@@ -335,14 +335,22 @@ func extractRun(args []string) error {
 // label to build, and the page keeps whatever its own head said.
 func pageLabel(pm *pagemap.Map, b *corpus.Book, p *extract.Page) string {
 	letter := corpus.BookLetter(b.Book)
-	// A page label counts pages inside a chapter, which is what "A VIII.13"
-	// says and what corpus.ParsePageLabel reads back. The volumes that number
-	// their pages straight through the book print no such label anywhere, and
-	// gluing the chapter of a page to its running number would make one up:
-	// "E IV.289" would read as page 289 of chapter IV, and chapter IV of Theory
-	// of Sets is 60 pages long. Those volumes carry the bare number instead,
-	// in Folio, and no label.
-	if b.Pagination != "" && b.Pagination != string(pagemap.PerChapter) {
+	// Whether there is a label to build is what the volume prints and not what
+	// the number in it counts. A volume that prints a bare number at the foot
+	// has no label anywhere, and gluing the chapter of a page to its running
+	// number would make one up: "E IV.289" would read as page 289 of chapter
+	// IV, and chapter IV of Theory of Sets is 60 pages long. Those volumes
+	// carry the bare number in Folio and no label.
+	//
+	// Pagination was asked here instead, and it is the wrong question. Théories
+	// spectrales prints TS I.1 to TS I.197 and then TS II.200, so the numeral
+	// says which chapter the page is in while the number counts the volume:
+	// head-label and continuous both, and there is nothing made up about the
+	// label, since the volume prints it on the page. Asking pagination dropped
+	// the label from every page of Théories spectrales and Topologie
+	// algébrique that does not carry a running head, which is every page that
+	// opens anything.
+	if b.Grammar != "" && b.Grammar != string(pagemap.HeadLabel) {
 		return p.Label
 	}
 	if pm != nil && letter != "" {
