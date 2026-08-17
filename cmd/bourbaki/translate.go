@@ -982,7 +982,11 @@ var advice = map[string]string{
 		"library, and a citation in another language does not lead anywhere.",
 	translate.RuleReference: "Every citation in the English is in the answer, spelled as the English\n" +
 		"spells it: the page numbers, the volume numbers and the bracketed numbers of\n" +
-		"the bibliography. Those are addresses and not words.",
+		"the bibliography. Those are addresses and not words.\n" +
+		"The letters in front of the number are part of the address and are not\n" +
+		"translated either. p. 13 stays p. 13 and does not become tr. 13, No. 1 stays\n" +
+		"No. 1, and Vol. II stays Vol. II. A reader takes a citation to the printed\n" +
+		"page it names, and every other page of this corpus writes it that way.",
 	translate.RuleScript: "Write the answer in the language that was asked for and in no other. A\n" +
 		"single character of another writing system is enough for the answer to be\n" +
 		"thrown away.",
