@@ -99,6 +99,19 @@ type Corpus struct {
 	Pages     map[string][]corpus.PageFile // per book, in page order
 	PagePaths map[string][]string          // the paths of those pages, same order
 
+	// Sources are the files of a source language the caller did not ask to
+	// audit, read only so that a translation can be compared with the thing it
+	// was translated from. They are not audited and no rule walks them.
+	//
+	// bourbaki audit -lang vi means audit the Vietnamese, and Docs holds what
+	// that run is about. But every translation rule reads a file and the English
+	// beside it, and a run that had loaded no English reported all forty nine
+	// files as translations whose source does not exist, once per rule, four
+	// hundred and forty one findings for a corpus that had nothing wrong with
+	// it. The English has to be in hand and out of scope at the same time, so it
+	// is read into its own list.
+	Sources []Doc
+
 	Maps map[string]*pagemap.Map // per book, as committed
 
 	Refs *refs.Result // the reference graph over English
@@ -163,6 +176,9 @@ func Load(opt Options) (*Corpus, error) {
 	}
 
 	if c.Docs, err = readDocs(c.Root, c.Langs); err != nil {
+		return nil, err
+	}
+	if err := c.readSources(); err != nil {
 		return nil, err
 	}
 	// Before the pages, because which pages count is which pages git has.
@@ -253,17 +269,11 @@ func hasLang(langs []string, l string) bool {
 func readDocs(root string, langs []string) ([]Doc, error) {
 	var out []Doc
 	for _, lang := range langs {
-		dir := filepath.Join(root, "content", lang)
-		if err := walkMarkdown(dir, func(path string) error {
-			d, err := readDoc(root, path, lang)
-			if err != nil {
-				return err
-			}
-			out = append(out, d)
-			return nil
-		}); err != nil {
+		docs, err := readLang(root, lang)
+		if err != nil {
 			return nil, err
 		}
+		out = append(out, docs...)
 	}
 	if err := walkMarkdown(filepath.Join(root, "content", "solutions"), func(path string) error {
 		rest, err := filepath.Rel(filepath.Join(root, "content", "solutions"), path)
@@ -282,6 +292,47 @@ func readDocs(root string, langs []string) ([]Doc, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+// readLang reads the content files of one language, in the order the walk finds
+// them. A language with no directory reads as nothing, which is what a corpus
+// that has not been translated yet should say.
+func readLang(root, lang string) ([]Doc, error) {
+	var out []Doc
+	err := walkMarkdown(filepath.Join(root, "content", lang), func(path string) error {
+		d, err := readDoc(root, path, lang)
+		if err != nil {
+			return err
+		}
+		out = append(out, d)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// readSources reads the source languages the caller left out of the run, so
+// that the file each translated_from names can be found even when the audit is
+// of one translation. Nothing here is audited; see Corpus.Sources.
+func (c *Corpus) readSources() error {
+	var langs []string
+	for l := range c.SourceLangs() {
+		if !hasLang(c.Langs, l) {
+			langs = append(langs, l)
+		}
+	}
+	sort.Strings(langs)
+	for _, lang := range langs {
+		docs, err := readLang(c.Root, lang)
+		if err != nil {
+			return err
+		}
+		c.Sources = append(c.Sources, docs...)
+	}
+	sort.Slice(c.Sources, func(i, j int) bool { return c.Sources[i].Path < c.Sources[j].Path })
+	return nil
 }
 
 func walkMarkdown(dir string, fn func(string) error) error {
