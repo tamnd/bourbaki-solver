@@ -118,6 +118,11 @@ func Prose(body string) string { return prose(body) }
 // named for its title.
 func (c *Corpus) pairs() ([]pair, []Finding) {
 	byPath := map[string]Doc{}
+	// Sources first, so that a language which is both audited and a source is
+	// taken from the list the rules walk and there is one Doc for one path.
+	for _, d := range c.Sources {
+		byPath[d.Path] = d
+	}
 	for _, d := range c.Docs {
 		byPath[d.Path] = d
 	}

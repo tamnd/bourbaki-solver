@@ -453,3 +453,84 @@ func TestL01StillRefusesASymbolThatMovedInsideAFormulaWithWordsInIt(t *testing.T
 		t.Fatalf("got %d findings, want 1: %v", len(got), got)
 	}
 }
+
+// A run over one translation still has to find the English beside it.
+//
+// bourbaki audit -lang vi loads the Vietnamese, because that is what the run is
+// about, and for a while it loaded nothing else. Every translation rule reads a
+// file and its source, so all forty nine translated files of Theory of Sets came
+// back as translations whose source does not exist, in nine rules, four hundred
+// and forty one findings against a corpus that had nothing wrong with it. The
+// English is read into Sources: in hand for the comparison, out of scope for the
+// rules that walk Docs.
+func TestARunOverOneLanguageStillFindsTheEnglishItWasTranslatedFrom(t *testing.T) {
+	root := t.TempDir()
+	writeSection(t, root, "content/en/ens/III/00_frontmatter.md", corpus.SectionFrontMatter{
+		Book: "ens", Lang: "en", Section: 1,
+	}, "Let $E$ be a set.")
+	writeSection(t, root, "content/vi/ens/III/00_frontmatter.md", corpus.SectionFrontMatter{
+		Book: "ens", Lang: "vi", Section: 1,
+		TranslatedFrom: "content/en/ens/III/00_frontmatter.md",
+	}, "Cho $E$ là một tập hợp.")
+
+	c := &Corpus{Root: root, Books: &corpus.BooksManifest{}, Langs: []string{"vi"}}
+	docs, err := readDocs(root, c.Langs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Docs = docs
+	if err := c.readSources(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Out of scope: the rules walk Docs and the English is not in it, so an
+	// English file with something wrong with it is not this run's business.
+	for _, d := range c.Docs {
+		if d.Lang != "vi" {
+			t.Errorf("a run over vi loaded %s for auditing", d.Path)
+		}
+	}
+	ps, bad := c.pairs()
+	if len(bad) != 0 {
+		t.Fatalf("the pairing reported %v", bad)
+	}
+	if len(ps) != 1 {
+		t.Fatalf("got %d pairs, want 1", len(ps))
+	}
+	if ps[0].en.Path != "content/en/ens/III/00_frontmatter.md" {
+		t.Errorf("paired with %s", ps[0].en.Path)
+	}
+}
+
+// Asking for every language reads each file once, and the pairing takes it from
+// the list the rules walk rather than from a second copy of the same bytes.
+func TestARunOverEveryLanguageReadsTheEnglishOnce(t *testing.T) {
+	root := t.TempDir()
+	writeSection(t, root, "content/en/ens/III/00_frontmatter.md", corpus.SectionFrontMatter{
+		Book: "ens", Lang: "en", Section: 1,
+	}, "Let $E$ be a set.")
+
+	c := &Corpus{Root: root, Books: &corpus.BooksManifest{}, Langs: []string{"en", "vi"}}
+	docs, err := readDocs(root, c.Langs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Docs = docs
+	if err := c.readSources(); err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Sources) != 0 {
+		t.Errorf("read %d files a second time: %v", len(c.Sources), c.Sources)
+	}
+}
+
+func writeSection(t *testing.T, root, rel string, meta corpus.SectionFrontMatter, body string) {
+	t.Helper()
+	path := filepath.Join(root, filepath.FromSlash(rel))
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := (corpus.SectionFile{Meta: meta, Body: body + "\n"}).Write(path); err != nil {
+		t.Fatal(err)
+	}
+}
