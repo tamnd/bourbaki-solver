@@ -661,3 +661,111 @@ func TestCutPageDoesNotLetANoteMarkItself(t *testing.T) {
 		t.Errorf("the note followed the definition rather than the mark:\n%s", top)
 	}
 }
+
+// A chapter of three §§ whose exercises are printed in one block at the end,
+// with the block listed in the table of contents under the chapter and not
+// under the §§. Two of the three are marked inside the block and the third is
+// not, which is Topologie algebrique: § 4 of chapter II prints no exercises and
+// the block says so by marking § 3 and then § 5.
+func gatheredChapter() (corpus.Chapter, map[int]corpus.PageFile) {
+	ch := corpus.Chapter{
+		Book: "ta", Numeral: "I", Title: "Revetements", Page: 1, PDFPage: 18,
+		Sections: []corpus.Section{
+			{Number: 1, Title: "Produits Fibres", Page: 1, PDFPage: 18},
+			{Number: 2, Title: "Applications Etales", Page: 2, PDFPage: 19},
+			{Number: 3, Title: "Faisceaux", Page: 3, PDFPage: 20},
+		},
+		Exercises: &corpus.Locator{Page: 4, PDFPage: 21},
+	}
+	pages := map[int]corpus.PageFile{
+		18: page(18, "A I.1", false, strings.Join([]string{
+			"## CHAPTER I REVETEMENTS",
+			"## § 1. PRODUITS FIBRES",
+			"**Definition 1.** — A fibre product is what it is.",
+		}, "\n\n")),
+		19: page(19, "A I.2", false, strings.Join([]string{
+			"## § 2. APPLICATIONS ETALES",
+			"**Definition 2.** — An etale map is what it is.",
+		}, "\n\n")),
+		20: page(20, "A I.3", false, strings.Join([]string{
+			"## § 3. FAISCEAUX",
+			"**Definition 3.** — A sheaf is what it is.",
+		}, "\n\n")),
+		21: page(21, "A I.4", false, strings.Join([]string{
+			"# EXERCISES",
+			"§1",
+			"1) Show that the fibre product is a limit.",
+			"§3",
+			"1) Show that a sheaf is a limit too.",
+		}, "\n\n")),
+		22: page(22, "", false, "# BIBLIOGRAPHY"),
+	}
+	return ch, pages
+}
+
+// The block is read from the page the contents names, each mark opens the run
+// of the § it names, and a § the block does not mark gets nothing.
+func TestChapterReadsAGatheredBlockTheContentsGivesToTheChapter(t *testing.T) {
+	ch, pages := gatheredChapter()
+	got, err := Chapter("ta", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("%d pieces, want the front matter and three §§", len(got))
+	}
+	for i, want := range []string{"Show that the fibre product is a limit.", "", "Show that a sheaf is a limit too."} {
+		p := got[i+1]
+		if want == "" {
+			if len(p.Exercises) != 0 {
+				t.Errorf("%s has %d exercises, and the block marks it nowhere", p.Name(), len(p.Exercises))
+			}
+			continue
+		}
+		if len(p.Exercises) != 1 {
+			t.Errorf("%s has %d exercises, want 1", p.Name(), len(p.Exercises))
+			continue
+		}
+		if body := p.Exercises[0].Body; !strings.HasPrefix(body, want) {
+			t.Errorf("%s exercise 1 is %q, want %q", p.Name(), body, want)
+		}
+	}
+}
+
+// The § is given the locator the contents gave the chapter, on the page its own
+// mark stands on, because that is what the rest of assembly asks for. The page
+// prints its number in a label and not in a folio, so the number is the tail of
+// the label.
+func TestAGatheredBlockGivesEachSectionThePageItsMarkIsOn(t *testing.T) {
+	ch, pages := gatheredChapter()
+	got, err := Chapter("ta", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range got[1:] {
+		if p.Number == 2 {
+			if p.Section.Exercises != nil {
+				t.Errorf("§ 2 was given a locator: %+v", p.Section.Exercises)
+			}
+			continue
+		}
+		want := corpus.Locator{Page: 4, PDFPage: 21}
+		if p.Section.Exercises == nil || *p.Section.Exercises != want {
+			t.Errorf("%s has locator %+v, want %+v", p.Name(), p.Section.Exercises, want)
+		}
+	}
+}
+
+func TestPrintedNumber(t *testing.T) {
+	if got := printedNumber(page(21, "A I.139", false, "")); got != 139 {
+		t.Errorf("the number of A I.139 is %d, want 139", got)
+	}
+	folio := page(21, "", false, "")
+	folio.Meta.Folio = 18
+	if got := printedNumber(folio); got != 18 {
+		t.Errorf("the number of a page with a folio is %d, want 18", got)
+	}
+	if got := printedNumber(page(21, "", false, "")); got != 0 {
+		t.Errorf("a page that prints no number is %d, want 0", got)
+	}
+}
