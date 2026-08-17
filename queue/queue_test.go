@@ -932,3 +932,47 @@ func TestSupersedeIgnoresATargetItWasNotAskedAbout(t *testing.T) {
 		t.Errorf("another section's chunk is %s: %v", state, err)
 	}
 }
+
+// A cut down model gets one ask at a chunk and no second one. Its lane leases
+// what nobody has answered wrongly yet, the chunk it fails goes back on the pile
+// for a lane that can do better, and its own next lease passes over it rather
+// than picking its own failure up again.
+func TestLeaseWhereLeavesAFailedJobToTheLaneThatCanTakeIt(t *testing.T) {
+	q := open(t)
+	for _, chunk := range []string{"ens-vi/001", "ens-vi/002"} {
+		add(t, q, chunk)
+	}
+	firstAsk := func(job Job) bool { return job.Attempts == 0 }
+
+	job, err := q.LeaseWhere(StageOCR, "codex-mini", "ens-vi", firstAsk, time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseWhere: %v", err)
+	}
+	if job.Target != "ens-vi/001" {
+		t.Fatalf("leased %s, want ens-vi/001", job.Target)
+	}
+	if _, err := q.Fail(job, "two math spans came back wrong"); err != nil {
+		t.Fatal(err)
+	}
+
+	// The small lane goes on to the chunk nobody has tried.
+	next, err := q.LeaseWhere(StageOCR, "codex-mini", "ens-vi", firstAsk, time.Minute)
+	if err != nil {
+		t.Fatalf("LeaseWhere: %v", err)
+	}
+	if next.Target != "ens-vi/002" {
+		t.Errorf("the small lane took %s, want ens-vi/002 and not its own failure", next.Target)
+	}
+	if _, err := q.LeaseWhere(StageOCR, "codex-mini", "ens-vi", firstAsk, time.Minute); !errors.Is(err, ErrEmpty) {
+		t.Errorf("the small lane found more work: %v", err)
+	}
+
+	// The full model takes what the small one got wrong.
+	big, err := q.Lease(StageOCR, "codex", "ens-vi", time.Minute)
+	if err != nil {
+		t.Fatalf("Lease: %v", err)
+	}
+	if big.Target != "ens-vi/001" {
+		t.Errorf("the full lane took %s, want the chunk the small one failed", big.Target)
+	}
+}

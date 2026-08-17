@@ -9,6 +9,8 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
+	"github.com/tamnd/bourbaki-solver/ocr"
+	"github.com/tamnd/bourbaki-solver/queue"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
 
@@ -425,4 +427,36 @@ func writeVietnameseBy(t *testing.T, root string, g *glossary.Glossary, n int, e
 	}
 	f.Meta.TranslationModel = model
 	writeSection(t, path, corpus.SectionFile(f))
+}
+
+// The cheap route asks first and the full one answers what it gets wrong, which
+// is what the route table has said all along and what this makes true.
+func TestOnlyTheCutDownRoutesAreHeldToAFirstAsk(t *testing.T) {
+	hosts := []ocr.Host{
+		{Name: "codex-mini", Model: "gpt-5.4-mini"},
+		{Name: "codex", Model: "gpt-5.4"},
+	}
+	want := freshOnly(hosts)
+	if _, ok := want["codex"]; ok {
+		t.Error("the full model is held to a first ask, so a failed chunk has nowhere to go")
+	}
+	take, ok := want["codex-mini"]
+	if !ok {
+		t.Fatal("the cut down model may take anything, which is the loop this is here to stop")
+	}
+	if !take(queue.Job{Attempts: 0}) {
+		t.Error("the cut down model will not take a chunk nobody has asked about")
+	}
+	if take(queue.Job{Attempts: 1}) {
+		t.Error("the cut down model will take back a chunk it got wrong")
+	}
+}
+
+// A run with nothing but cut down routes filters nothing. Holding work for a
+// lane that is not in the run means translating none of it.
+func TestACutDownRunOnItsOwnTakesEverything(t *testing.T) {
+	hosts := []ocr.Host{{Name: "codex-mini", Model: "gpt-5.4-mini"}, {Name: "zen-deepseek", Model: "deepseek-chat-lite"}}
+	if want := freshOnly(hosts); len(want) != 0 {
+		t.Errorf("%d routes were held to a first ask with nothing to escalate to", len(want))
+	}
 }
