@@ -60,6 +60,8 @@ func init() {
 			Title: "no word is written in another alphabet", Run: l13, Need: needTranslations},
 		Check{ID: "L14", Group: Translation, Hard: true,
 			Title: "a bibliography entry stands as printed", Run: l14, Need: needTranslations},
+		Check{ID: "L15", Group: Translation, Hard: false,
+			Title: "no translation was written on the free gateway", Run: l15, Need: needTranslations},
 	)
 }
 
@@ -788,6 +790,69 @@ func l08(c *Corpus) ([]Finding, error) {
 	}
 	return out, nil
 }
+
+// L15. No translation was written on the free gateway.
+//
+// L08 reads the model name for a cut down variant of a model, which is a suffix
+// on a name: mini, nano, flash, lightning. The free gateway is not that. It is
+// a different provider serving different models altogether, and none of their
+// names carries a suffix that says anything, so a section written on
+// nemotron-3-ultra-free reads to L08 as full model work and to a reader of the
+// corpus as nothing at all.
+//
+// It matters because of when the gateway gets used. Nobody reaches for it while
+// the subscription has allowance left; it is what the run falls back to when
+// codex is out and the boxes will not answer, which is to say it writes the
+// files nothing else would write, and those are usually the awkward ones. Eight
+// chunks of the historical note of chapter IV are the case in front of us.
+//
+// Soft, for L08's reason. The text may well be right, and the corpus should not
+// go red because the good routes were unavailable on the day. What it should do
+// is say so, so that a later pass with allowance can ask again for these and
+// not discover them by reading.
+//
+// The test is the -free suffix the gateway puts on every model it serves, in
+// route.Default and in the catalogue behind it, and not a list of names, for
+// the reason smallModel gives: the list changes under us and the naming does
+// not.
+func l15(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		if d.Lang == "" || d.Lang == "en" {
+			continue
+		}
+		var model string
+		switch {
+		case d.Section != nil:
+			model = d.Section.TranslationModel
+		case d.Exercise != nil:
+			model = d.Exercise.TranslationModel
+		}
+		if !FreeGatewayModel(model) {
+			continue
+		}
+		out = append(out, Finding{File: d.Path, Line: 1, Msg: fmt.Sprintf(
+			"was translated by %s, which is a free gateway model, so the section is worth doing again", model)})
+	}
+	return out, nil
+}
+
+// FreeGatewayModel says whether a model name is one the free gateway serves.
+//
+// A file translated on two routes records both names, so the test is per name
+// rather than on the whole string: one gateway answer anywhere in a file is a
+// file worth asking for again, which is how L08 reads a cut down model too.
+func FreeGatewayModel(name string) bool {
+	for _, part := range strings.Split(name, ", ") {
+		if freeModel.MatchString(strings.TrimSpace(part)) {
+			return true
+		}
+	}
+	return false
+}
+
+// freeModel is the suffix the gateway puts on the models it gives away.
+var freeModel = regexp.MustCompile(`(?i)[-_]free$`)
 
 // L10. No English term was left standing.
 //
