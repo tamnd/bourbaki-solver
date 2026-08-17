@@ -41,6 +41,14 @@ import (
 // decided by the English side: a run holding an English word is prose and may
 // be rewritten, and a run holding none is a name the printing sets upright,
 // Card or resp. or a quotation mark, and has to come back as it went.
+//
+// Byte for byte means byte for byte, and a formula that was only re-spaced is
+// refused here like any other. That is not because the spacing matters to what
+// the formula says, TeX sets $A/\mathfrak{m}$ and $A / \mathfrak{m}$ the same,
+// but because a model that has touched the mathematics at all is a model to be
+// suspicious of, and because the corpus is worth more when the English and the
+// Vietnamese hold the same bytes between the dollars. translate.Respace is
+// where a re-spaced answer is put right rather than thrown away.
 func SameMath(en, tr string) bool {
 	if mathtex.MaskText(en) != mathtex.MaskText(tr) {
 		return false
