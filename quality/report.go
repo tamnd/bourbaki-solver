@@ -119,7 +119,12 @@ func scope(c *Corpus) string {
 	}
 	chapters := map[string]bool{}
 	for _, d := range c.Docs {
-		if d.Lang == "en" && d.Section != nil {
+		// A file in no chapter names none, and the introduction to Theory of
+		// Sets is one: it sits beside the chapter directories because that is
+		// where the printing puts it. Counted as written, an empty chapter name
+		// is a chapter, and the line then says the corpus holds nine chapters
+		// of a book that has eight.
+		if d.Lang == "en" && d.Section != nil && d.Section.Chapter != "" {
 			chapters[d.Section.Book+" "+d.Section.Chapter] = true
 		}
 	}
