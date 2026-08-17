@@ -56,6 +56,8 @@ func init() {
 			Title: "no sentence was left untranslated", Run: l11, Need: needTranslations},
 		Check{ID: "L12", Group: Translation, Hard: true,
 			Title: "a word set inside the mathematics is translated too", Run: l12, Need: needTranslations},
+		Check{ID: "L13", Group: Translation, Hard: true,
+			Title: "no word is written in another alphabet", Run: l13, Need: needTranslations},
 	)
 }
 
@@ -593,6 +595,34 @@ func l12(c *Corpus) ([]Finding, error) {
 					Msg: fmt.Sprintf("math span %d holds %s, which is prose and is still in English",
 						i+1, run)})
 			}
+		}
+	}
+	return out, nil
+}
+
+// L13. No word is written in another alphabet.
+//
+// The introduction to Theory of Sets is where this came from. It came back in
+// Vietnamese with либо standing where hoặc belongs and որևէ standing where bất
+// kỳ belongs, one Russian word and one Armenian word, both inside sentences
+// that are otherwise right, and the twelve rules above all passed it: the
+// mathematics is intact, the tags and the headings and the counts are the
+// English ones, the file plainly reads as Vietnamese, and there is no run of
+// two words that carries none of it. A model changing alphabet for one word is
+// not a failure any of them was built to see.
+//
+// The rule is the run's, translate.AuditScript, called on the files as they
+// stand. Anything written before the run had it is caught here rather than
+// never, which is the point of running the audit over the corpus rather than
+// only over what is being written today.
+//
+// Hard. A word a reader cannot read is not a translation of the word the book
+// has, and unlike a clumsy rendering there is no reading of it that is right.
+func l13(c *Corpus) ([]Finding, error) {
+	ps, out := c.pairs()
+	for _, p := range ps {
+		for _, q := range translate.AuditScript(p.tr.Lang, p.en.Body, p.tr.Body) {
+			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(q.Line), Msg: q.Msg})
 		}
 	}
 	return out, nil

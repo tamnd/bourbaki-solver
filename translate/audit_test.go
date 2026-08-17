@@ -206,6 +206,58 @@ func TestASentenceLeftInEnglishIsRefused(t *testing.T) {
 	}
 }
 
+// Both of these are real. gpt-5.4 wrote them into the Vietnamese introduction
+// to Theory of Sets, one word each, inside sentences that are otherwise correct
+// Vietnamese and that every other rule accepts.
+func TestAWordInAnotherAlphabetIsRefused(t *testing.T) {
+	for _, c := range []struct{ word, script string }{
+		{"либо", "Cyrillic"},
+		{"որևէ", "Armenian"},
+	} {
+		bad := strings.Replace(vi, "và", c.word, 1)
+		p := only(t, Audit("vi", en, bad), RuleScript)
+		if !strings.Contains(p.Msg, c.word) || !strings.Contains(p.Msg, c.script) {
+			t.Errorf("did not name the word and its alphabet: %v", p)
+		}
+		if p.Line != 3 {
+			t.Errorf("%s was reported on line %d", c.word, p.Line)
+		}
+	}
+}
+
+// The mathematics is full of Greek and it is not prose, so nothing in a formula
+// is a word this rule has an opinion about.
+func TestGreekInsideAFormulaIsNotAStrayAlphabet(t *testing.T) {
+	src := strings.Replace(en, `$\mathfrak{m}$`, `$α$`, 1)
+	tr := strings.Replace(vi, `$\mathfrak{m}$`, `$α$`, 1)
+	if ps := Audit("vi", src, tr); len(ps) != 0 {
+		t.Fatalf("a formula was read as prose: %v", ps)
+	}
+}
+
+// A letter the English itself sets in prose is a letter the translation may
+// keep. The book names Greek letters in words as well as in formulae, and a
+// rule that refused those would refuse the only faithful answer.
+func TestAnAlphabetTheEnglishUsesIsAllowed(t *testing.T) {
+	src := strings.Replace(en, "a maximal ideal", "a maximal ideal, written σ,", 1)
+	tr := strings.Replace(vi, "một iđêan tối đại", "một iđêan tối đại, viết là σ,", 1)
+	if ps := Audit("vi", src, tr); len(ps) != 0 {
+		t.Fatalf("a letter the source uses was refused: %v", ps)
+	}
+}
+
+// Japanese is written in four alphabets and Vietnamese in one, and a rule that
+// did not know that would refuse every Japanese section there is.
+func TestJapaneseIsNotRefusedForBeingJapanese(t *testing.T) {
+	ja := "#### 系 1 {#alg-viii-a3-thm-1-cor-1 .statement tag=00RV}\n\nカタカナと漢字とひらがな。"
+	if ps := AuditScript("ja", en, ja); len(ps) != 0 {
+		t.Fatalf("Japanese was refused: %v", ps)
+	}
+	if ps := AuditScript("vi", en, ja); len(ps) == 0 {
+		t.Fatal("Japanese passed as Vietnamese")
+	}
+}
+
 func TestEveryProblemIsReportedAndNotJustTheFirst(t *testing.T) {
 	bad := strings.Replace(vi, "tag=00RV", "tag=00RW", 1)
 	bad = strings.Replace(bad, "p. 20", "p. 26", 1)
