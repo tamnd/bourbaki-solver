@@ -346,10 +346,71 @@ func blocks(body string) []string {
 	var out []string
 	for _, b := range strings.Split(corpus.NormalizeBody(body), "\n\n") {
 		if strings.TrimSpace(b) != "" {
-			out = append(out, b)
+			out = append(out, footnoteDefs(b)...)
 		}
 	}
 	return out
+}
+
+// footnoteDefRE opens a footnote definition, which is the only block of the
+// corpus written one to a line with no blank line between.
+var footnoteDefRE = regexp.MustCompile(`^\[\^[^\]]+\]:`)
+
+// footnoteDefs splits a run of footnote definitions into one block each.
+//
+// The definitions of a body sit together at the foot of the file with no blank
+// line between them, so a paragraph split reads the whole run as a single
+// block, and a block is never split. The historical note of chapters I to IV
+// has 83 of them and they came to 35,000 characters, six times ChunkChars, in
+// one question. It was answered with nothing, twice, and the chunk sat in the
+// queue.
+//
+// A definition that runs on to a second line keeps that line, which is what the
+// leading bracket test is for. Both sides go through here, so a translation
+// that writes its definitions with a blank line between them counts the same as
+// one that writes them the way the English does.
+func footnoteDefs(b string) []string {
+	if !footnoteDefRE.MatchString(b) {
+		return []string{b}
+	}
+	var out []string
+	for _, line := range strings.Split(b, "\n") {
+		if len(out) > 0 && !footnoteDefRE.MatchString(line) {
+			out[len(out)-1] += "\n" + line
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+// lastBlockOf is the part of a chunk after the last blank line, which is what
+// decides whether the chunk ends in a footnote definition. Join is handed whole
+// chunks rather than blocks, and a chunk that opens with the prose of the note
+// can still end in the first of its definitions.
+func lastBlockOf(s string) string {
+	if i := strings.LastIndex(s, "\n\n"); i >= 0 {
+		return s[i+2:]
+	}
+	return s
+}
+
+// joinBlocks puts blocks back in the order they came, with the blank line
+// between them that separated them, except between two footnote definitions,
+// which the printing sets one to a line.
+func joinBlocks(parts []string) string {
+	var b strings.Builder
+	for i, p := range parts {
+		switch {
+		case i == 0:
+		case footnoteDefRE.MatchString(lastBlockOf(parts[i-1])) && footnoteDefRE.MatchString(p):
+			b.WriteString("\n")
+		default:
+			b.WriteString("\n\n")
+		}
+		b.WriteString(p)
+	}
+	return b.String()
 }
 
 // refRE is the skeleton of a Bourbaki cross reference: the chapter in roman

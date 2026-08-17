@@ -96,21 +96,23 @@ func Chunks(body string) []Chunk {
 		return nil
 	}
 	var out []Chunk
-	cur, curSpans := "", 0
+	var cur []string
+	curLen, curSpans := 0, 0
 	for _, b := range bs {
 		n := spanCount(b)
 		switch {
-		case cur == "":
-			cur, curSpans = b, n
-		case len(cur)+2+len(b) <= ChunkChars && curSpans+n <= ChunkSpans:
-			cur += "\n\n" + b
+		case len(cur) == 0:
+			cur, curLen, curSpans = []string{b}, len(b), n
+		case curLen+2+len(b) <= ChunkChars && curSpans+n <= ChunkSpans:
+			cur = append(cur, b)
+			curLen += 2 + len(b)
 			curSpans += n
 		default:
-			out = append(out, Chunk{Body: cur})
-			cur, curSpans = b, n
+			out = append(out, Chunk{Body: joinBlocks(cur)})
+			cur, curLen, curSpans = []string{b}, len(b), n
 		}
 	}
-	out = append(out, Chunk{Body: cur})
+	out = append(out, Chunk{Body: joinBlocks(cur)})
 	for i := range out {
 		out[i].Index, out[i].Of = i+1, len(out)
 	}
@@ -138,7 +140,7 @@ func Join(answers []string) string {
 			parts = append(parts, s)
 		}
 	}
-	return corpus.NormalizeBody(strings.Join(parts, "\n\n"))
+	return corpus.NormalizeBody(joinBlocks(parts))
 }
 
 // GlossaryBlock is the terminology for one chunk, one term to a line.
