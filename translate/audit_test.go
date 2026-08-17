@@ -356,3 +356,50 @@ func TestASymbolThatMovedInsideAFormulaWithWordsIsStillRefused(t *testing.T) {
 		t.Fatalf("did not name the span that changed: %v", p)
 	}
 }
+
+// A passage written entirely in symbols translates to itself, and the language
+// rule has to let it.
+//
+// Bourbaki writes whole blocks with no prose in them. One chunk of exercise 8 of
+// the appendix to chapter I is three displays of the tables for not and or, and
+// one chunk of chapter II, § 2 is a single containment. Every model hands those
+// back as they stand, because that is the right answer, and the run refused
+// them, asked twice more, killed the chunk and refused the section. Both files
+// were held out of the corpus by it.
+func TestAPassageOfPureMathematicsMayComeBackUnchanged(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		body string
+	}{
+		{"three displays and nothing else",
+			"$$\\neg 0 = 1, \\qquad \\neg 1 = 0,$$\n$$\\vee 11 = 1, \\qquad \\vee 12 = 2.$$"},
+		{"one containment", "$$A' \\times B' \\subset A \\times B.$$"},
+		{"a display written between fences", "$$\n(C'|y)(B|x)A\n$$"},
+		{"a part's name and its formula", "(a) $x \\in A$"},
+	} {
+		if got := Audit("vi", c.body, c.body); len(got) > 0 {
+			t.Errorf("%s: Audit refused an answer identical to a passage with no prose in it: %v", c.name, got)
+		}
+	}
+}
+
+// And a passage that does have prose is still refused when it comes back in
+// English, which is the whole point of the rule.
+func TestAPassageWithProseMayNot(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		body string
+	}{
+		{"a sentence around the mathematics", "Let $A$ be a set and let $B$ be another one."},
+		{"a heading over a display", "#### Lemma 2 {#ens-ii-lem-2 .statement tag=00LC}\n\n$$A \\subset B.$$"},
+	} {
+		got := Audit("vi", c.body, c.body)
+		if len(got) == 0 {
+			t.Errorf("%s: Audit accepted the English back unchanged", c.name)
+			continue
+		}
+		if got[0].Rule != RuleLanguage {
+			t.Errorf("%s: first complaint is %s, want %s", c.name, got[0].Rule, RuleLanguage)
+		}
+	}
+}
