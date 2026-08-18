@@ -134,6 +134,48 @@ func TestRewriteWithoutEncodings(t *testing.T) {
 	}
 }
 
+// The ten point symbol font of Lie groups and Lie algebras, chapters 7 to 9,
+// cut out of the object stream it is compressed into. The double bar of the
+// Hilbert norm of page 360 is the bardbl at the end of the run of names.
+const lieVIIIX = `%PDF-1.5
+41 0 obj
+<<
+/Subtype /Type1
+/BaseFont /BXFHUL+LMMathSymbols10
+/FontDescriptor 42 0 R
+/Encoding 43 0 R
+>>
+endobj
+43 0 obj
+<<
+/Type /Encoding
+/Differences [1/greaterequal/arrowright/element/propersubset/negationslash/circlemultiply/arrowdblleft/arrowdblright/mapsto/circleplus/intersection/lessequal/propersuperset/openbullet/infinity/logicaland/union/angbracketleft/angbracketright/bardbl/equivalence/aleph/radical/lessmuch/greatermuch/asteriskmath 123/braceleft/bar/braceright 138/minus 167/section 177/plusminus 182/paragraph/periodcentered 215/multiply]
+>>
+endobj
+`
+
+// The norm bars of Lie 9 are drawn out of code 0x6B of the symbol font and the
+// French style printing names that code bardbl, which poppler cannot resolve:
+// every one of them arrived as an empty run, so page 360 said A_u^2_2 where it
+// prints the norm of A_u squared and wrote the norm the sentence names as
+// nothing at all. The replacement is k because 0x6B is where the double bar
+// sits, and extract's cmsy table already reads k back as the norm.
+func TestRewriteNamesTheDoubleBar(t *testing.T) {
+	out, res, err := Rewrite([]byte(lieVIIIX))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Names["bardbl"] != 1 {
+		t.Fatalf("replaced bardbl %d times, want 1", res.Names["bardbl"])
+	}
+	if !strings.Contains(string(out), "/k     /equivalence") {
+		t.Error("the double bar did not land on k")
+	}
+	if len(res.Unknown) != 0 {
+		t.Errorf("reported %v, and every name of this encoding is known", res.Unknown)
+	}
+}
+
 // A glyph name that only TeX uses and that this package has no replacement for
 // is reported, because the way it fails otherwise is a page that reads well
 // with a symbol missing out of the middle of a formula.
