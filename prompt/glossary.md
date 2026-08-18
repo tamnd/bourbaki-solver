@@ -39,6 +39,7 @@ every line of this is read by a person who will check it against the
 literature, and a term that goes into the glossary wrong goes into every file
 that uses it.
 
+{{NOTE}}
 The terms:
 
 {{TERMS}}

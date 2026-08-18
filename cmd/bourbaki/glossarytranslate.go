@@ -40,7 +40,10 @@ const glossaryTranslateUsage = `usage: bourbaki glossary translate -lang CODE [f
 Asks the fleet for the rendering of every term that has none in this language,
 audits each line, and merges what survives into manifests/glossary.yaml.
 
-  -lang CODE     vi, zh or ja, required
+  -lang CODE     vi, zh, ja or fr, required. The first three are what a
+                 translation is held to. fr is the other direction: it is the
+                 French the printing spells the term with, and it is what the
+                 volumes that were never printed in English are read against.
   -corpus DIR    the checkout, default $BOURBAKI_CORPUS
   -add N         also ask about the N commonest mined candidates that are not
                  in the glossary yet, from manifests/glossary-candidates.yaml.
@@ -99,7 +102,7 @@ func glossaryTranslate(args []string) error {
 	fs := flag.NewFlagSet("glossary translate", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, glossaryTranslateUsage) }
 	dir := fs.String("corpus", "", "the checkout")
-	lang := fs.String("lang", "", "vi, zh or ja")
+	lang := fs.String("lang", "", "vi, zh, ja or fr")
 	add := fs.Int("add", 0, "also ask about this many mined candidates")
 	min := fs.Int("min", 0, "when adding, only candidates used at least this often")
 	only := fs.String("only", "", "when adding, only candidates from this source")
@@ -241,7 +244,7 @@ func glossaryTranslate(args []string) error {
 		}
 	}
 	if len(suspect) > 0 {
-		fmt.Printf("\nthese %d were accepted and are worth an eye, because nothing here can tell\na diacritic-free Vietnamese word from an English one left standing:\n", len(suspect))
+		fmt.Printf("\nthese %d were accepted and are worth an eye, because nothing here can tell\na word of the language that looks English from an English one left standing:\n", len(suspect))
 		for _, s := range suspect {
 			fmt.Printf("\t%-30s %s\n", s.EN, s.TR)
 		}
@@ -452,14 +455,7 @@ func (t *termList) Set(s string) error {
 	return nil
 }
 
-func known(lang string) bool {
-	for _, l := range glossary.Langs {
-		if l == lang {
-			return true
-		}
-	}
-	return false
-}
+func known(lang string) bool { return glossary.Fillable(lang) }
 
 // name is a term for a log line, for the case where the line was so far from a
 // row that there was no term to blame.

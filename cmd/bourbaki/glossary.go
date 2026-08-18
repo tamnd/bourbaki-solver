@@ -292,7 +292,7 @@ func glossaryStatus(args []string) error {
 		return nil
 	}
 	fmt.Printf("glossary status: version %d, %d terms\n", g.Version, len(g.Terms))
-	for _, l := range glossary.Langs {
+	for _, l := range append(append([]string{}, glossary.Langs...), glossary.Sources...) {
 		n := len(g.In(l))
 		fmt.Printf("\t%-3s %5d of %d  %5.1f%%\n", l, n, len(g.Terms), 100*float64(n)/float64(len(g.Terms)))
 	}

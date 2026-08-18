@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -118,6 +119,20 @@ func (t *Term) Set(lang, value string) {
 
 // Langs are the languages a glossary row carries, in the order M7 does them.
 var Langs = []string{"vi", "zh", "ja"}
+
+// Sources are the languages a row is recognised by rather than held to. French
+// is one because half the series was never printed in English, and a passage
+// out of those volumes has to be matched on the French before there is anything
+// to hold it to. It is not in Langs because nothing audits a French column: it
+// is Bourbaki's own words and the audit reads translations.
+var Sources = []string{"fr"}
+
+// Fillable says whether a pass may write this column. Everything a row is held
+// to, and the French it is recognised by. English is not fillable anywhere: it
+// is the headword the rest of the row hangs off.
+func Fillable(lang string) bool {
+	return slices.Contains(Langs, lang) || slices.Contains(Sources, lang)
+}
 
 // Path is where the glossary lives.
 func Path(root string) string { return filepath.Join(root, "manifests", "glossary.yaml") }

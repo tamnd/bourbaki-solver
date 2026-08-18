@@ -72,7 +72,26 @@ func (b Batch) Prompt() string {
 	for i, term := range b.Terms {
 		fmt.Fprintf(&list, "%d | %s\n", i+1, term)
 	}
-	return prompt.Glossary(Language(b.Lang), list.String())
+	return prompt.Glossary(Language(b.Lang), languageNote(b.Lang), list.String())
+}
+
+// languageNote is what is true of one column and not of the other three.
+//
+// Only French has one. The other three are languages somebody is being asked to
+// write Bourbaki in, and the question is what a mathematician writing in them
+// would say. French is a language Bourbaki is already written in, and the
+// question is not what a French mathematician would say but what these books
+// say, which is a matter of fact and not of judgement. Without the note the
+// model answers the wrong question, and it answers it plausibly.
+func languageNote(lang string) string {
+	if lang != "fr" {
+		return ""
+	}
+	return "These books were written in French and the English is a translation" +
+		" of them, so the French of a term is not a rendering to be chosen. It is" +
+		" the word Bourbaki printed, and what is wanted is that word. Where the" +
+		" French spells it as the English does, module or radical, write it as it" +
+		" is spelled rather than reaching for something that differs."
 }
 
 // Row is one accepted rendering.
@@ -176,7 +195,7 @@ func (b Batch) Audit(answer string) Reply {
 		case unknown:
 			reply.Unknown = append(reply.Unknown, term)
 			continue
-		case suspect:
+		case suspect, shared:
 			reply.Suspect = append(reply.Suspect, Row{EN: term, TR: rendering})
 		default:
 			reply.Rejects = append(reply.Rejects, Reject{EN: term, Line: line, Reason: reason})
@@ -220,6 +239,20 @@ const unknown = "the model said it does not know"
 // Vietnamese word from an English one left standing.
 const suspect = "no diacritic, which a Vietnamese term may or may not have"
 
+// shared is a French rendering spelled the way the English is.
+//
+// Coming back with the English unchanged is a model failing to answer, and for
+// the three target languages that is all it can be. French is the one column
+// where it is often the truth: module is module, radical is radical, and the
+// English of those volumes took the word over from the French in the first
+// place. A rule that threw those away would empty the column of exactly the
+// terms both printings agree about.
+//
+// So it is a flag and not a refusal, on the same ground as suspect: what this
+// cannot tell apart is a French word that looks English from an English word
+// left standing, and a person can.
+const shared = "spelled as the English is, which a French term may or may not be"
+
 // badRendering is why a rendering cannot be used, or "".
 func badRendering(lang, term, tr string) string {
 	if tr == "" {
@@ -259,6 +292,9 @@ func badRendering(lang, term, tr string) string {
 		}
 	}
 	if Key(tr) == Key(term) {
+		if lang == "fr" {
+			return shared
+		}
 		return "the English came back unchanged"
 	}
 	if !WrittenIn(lang, tr) {
@@ -407,7 +443,7 @@ func (g *Glossary) Tidy() (dropped []Reject) {
 				continue
 			}
 			switch why := badRendering(lang, t.EN, v); why {
-			case "", unknown, suspect:
+			case "", unknown, suspect, shared:
 				any = true
 			default:
 				dropped = append(dropped, Reject{EN: t.EN, Line: lang + ": " + v, Reason: why})
