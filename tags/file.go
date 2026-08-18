@@ -8,19 +8,22 @@ import (
 	"strings"
 )
 
-// The four files of tags/, and the log.
+// The five files of tags/, and the log.
 //
 // tags is the record. new-tags is what the last assign run allocated, held back
 // so that a person looks at it before it becomes permanent. inactive is where a
 // tag goes when the statement it named leaves the corpus, and it is what stops
 // the allocator from ever handing that tag out again. aliases says that a label
 // was renamed, so that the tag follows the statement instead of being spent
-// twice on it.
+// twice on it. runs says where one merge stopped and the next began, which is
+// what T10 needs to tell a file whose tags do not climb from a file two runs
+// wrote.
 const (
 	TagsFile     = "tags"
 	NewTagsFile  = "new-tags"
 	InactiveFile = "inactive"
 	AliasesFile  = "aliases"
+	RunsFile     = "runs"
 	LogFile      = "migrations.log"
 )
 
@@ -35,6 +38,11 @@ var headers = map[string]string{
 	NewTagsFile:  "",
 	InactiveFile: "# Retired tags: TAG,full_label,reason,date\n# These tags are burned and must never be reassigned.\n",
 	AliasesFile:  "# Label renames: OLD_LABEL,NEW_LABEL\n# The tag follows the label.\n",
+	RunsFile: `# Assignment runs: FIRST_TAG,DATE,what the run read
+# One line per merge. The run holds every tag from FIRST_TAG up to the
+# FIRST_TAG of the line under it, which is the block the allocator handed
+# out that day. T10 reads a file's tags against the run that assigned them.
+`,
 }
 
 // Dir is where the four files live in a checkout of the corpus.
@@ -67,6 +75,7 @@ type Set struct {
 	New      []Entry
 	Inactive []Retired
 	Aliases  []Alias
+	Runs     []Run
 
 	// head is the comment block each file opens with, kept exactly as it was
 	// read. tags is append-only and that is checked against its own history, so
@@ -103,6 +112,9 @@ func Load(root string) (*Set, error) {
 	if s.Aliases, err = readAliases(Path(root, AliasesFile)); err != nil {
 		return nil, err
 	}
+	if s.Runs, err = readRuns(Path(root, RunsFile)); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 
@@ -121,6 +133,7 @@ func (s *Set) Files(root string) map[string][]byte {
 		Path(root, NewTagsFile):  entryBytes(s.header(NewTagsFile), s.New),
 		Path(root, InactiveFile): inactiveBytes(s.header(InactiveFile), s.Inactive),
 		Path(root, AliasesFile):  aliasBytes(s.header(AliasesFile), s.Aliases),
+		Path(root, RunsFile):     runBytes(s.header(RunsFile), s.Runs),
 	}
 }
 
@@ -140,7 +153,7 @@ func (s *Set) Save(root string) error {
 		return err
 	}
 	files := s.Files(root)
-	for _, name := range []string{TagsFile, NewTagsFile, InactiveFile, AliasesFile} {
+	for _, name := range []string{TagsFile, NewTagsFile, InactiveFile, AliasesFile, RunsFile} {
 		if err := os.WriteFile(Path(root, name), files[Path(root, name)], 0o644); err != nil {
 			return err
 		}

@@ -134,7 +134,7 @@ func TestOrder(t *testing.T) {
 		{Path: "s1.md", Line: 20, Tag: "0002"},
 		{Path: "s2.md", Line: 10, Tag: "0003"},
 	}
-	if bad := Order(climbing); len(bad) != 0 {
+	if bad := Order(climbing, nil); len(bad) != 0 {
 		t.Errorf("a file whose tags climb was reported: %v", bad)
 	}
 	// A tag from an earlier run sitting below a later one, which is what a
@@ -143,7 +143,7 @@ func TestOrder(t *testing.T) {
 		{Path: "s1.md", Line: 10, Tag: "0009"},
 		{Path: "s1.md", Line: 20, Tag: "0002"},
 	}
-	if bad := Order(swapped); len(bad) != 1 || bad[0].Rule != T10 {
+	if bad := Order(swapped, nil); len(bad) != 1 || bad[0].Rule != T10 {
 		t.Errorf("a file whose tags fall was reported as %v", bad)
 	}
 	// Two files are not compared with each other. Section 2 being assigned
@@ -152,12 +152,12 @@ func TestOrder(t *testing.T) {
 		{Path: "s1.md", Line: 10, Tag: "0009"},
 		{Path: "s2.md", Line: 10, Tag: "0002"},
 	}
-	if bad := Order(across); len(bad) != 0 {
+	if bad := Order(across, nil); len(bad) != 0 {
 		t.Errorf("two different files were compared: %v", bad)
 	}
 	// A statement with no tag yet is not out of order, it is unassigned.
 	none := []Item{{Path: "s1.md", Line: 10, Tag: "0009"}, {Path: "s1.md", Line: 20}}
-	if bad := Order(none); len(bad) != 0 {
+	if bad := Order(none, nil); len(bad) != 0 {
 		t.Errorf("an unassigned statement was reported: %v", bad)
 	}
 }
@@ -214,5 +214,48 @@ func TestAppendOnlyIgnoresTheHeader(t *testing.T) {
 	diff := "--- a/tags/tags\n+++ b/tags/tags\n-# the old wording\n+# the new wording\n"
 	if bad := AppendOnly(diff, nil, nil); len(bad) != 0 {
 		t.Errorf("a reworded header was reported: %v", bad)
+	}
+}
+
+// A run is a merge, and a file's tags climb inside one and need not climb from
+// one to the next. The exercise a later printing adds to the middle of § 3
+// takes the next free tag, which is above everything under it, and that is the
+// record working rather than a file to go and look at.
+func TestOrderReadsOneRunAtATime(t *testing.T) {
+	runs := []Run{{First: "0001", Date: "2026-08-11", Note: "the volume"},
+		{First: "0100", Date: "2026-09-01", Note: "the second printing"}}
+	added := []Item{
+		{Path: "s3.md", Line: 10, Tag: "0009"},
+		{Path: "s3.md", Line: 20, Tag: "0100"},
+		{Path: "s3.md", Line: 30, Tag: "000A"},
+	}
+	if bad := Order(added, runs); len(bad) != 0 {
+		t.Errorf("a statement a later run added was reported: %v", bad)
+	}
+	// Inside the later run the rule holds as it always did.
+	swapped := []Item{
+		{Path: "s3.md", Line: 10, Tag: "0102"},
+		{Path: "s3.md", Line: 20, Tag: "0009"},
+		{Path: "s3.md", Line: 30, Tag: "0101"},
+	}
+	if bad := Order(swapped, runs); len(bad) != 1 {
+		t.Errorf("two statements of one run out of order were reported as %v", bad)
+	}
+}
+
+// The boundary a tag falls on belongs to the run it opens, and a tag under the
+// first boundary is read as the first run rather than as no run at all.
+func TestRunAt(t *testing.T) {
+	runs := []Run{{First: "0010"}, {First: "0020"}}
+	for _, c := range []struct {
+		tag  Tag
+		want int
+	}{{"0001", 0}, {"0010", 0}, {"001Z", 0}, {"0020", 1}, {"0ZZZ", 1}} {
+		if got := RunAt(runs, c.tag); got != c.want {
+			t.Errorf("%s is in run %d, want %d", c.tag, got, c.want)
+		}
+	}
+	if got := RunAt(nil, "0400"); got != 0 {
+		t.Errorf("with no runs recorded %s is in run %d, want 0", "0400", got)
 	}
 }

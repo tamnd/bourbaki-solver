@@ -103,7 +103,7 @@ func t05(c *Corpus) ([]Finding, error) {
 func t10(c *Corpus) ([]Finding, error) {
 	var out []Finding
 	for _, lang := range c.Langs {
-		for _, f := range tags.Order(c.Items[lang]) {
+		for _, f := range tags.Order(c.Items[lang], c.Tags.Runs) {
 			out = append(out, findingAt(f.Msg))
 		}
 	}

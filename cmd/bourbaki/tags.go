@@ -229,6 +229,8 @@ func isExercise(path string) bool {
 
 func runTagsMerge(args []string) error {
 	fs := flag.NewFlagSet("tags merge", flag.ExitOnError)
+	note := fs.String("note", "", "what this run read, recorded in tags/runs")
+	date := fs.String("date", "", "the date to record, today by default")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -240,6 +242,10 @@ func runTagsMerge(args []string) error {
 	if err != nil {
 		return err
 	}
+	// The lowest tag of the batch is where this run begins, and it has to be
+	// read before the merge because the merge empties new-tags into the record
+	// and there is nothing left to tell the batch from what came before it.
+	first := lowest(set.New)
 	n, err := set.Merge()
 	if err != nil {
 		return err
@@ -248,6 +254,11 @@ func runTagsMerge(args []string) error {
 		fmt.Println("tags merge: nothing in tags/new-tags")
 		return nil
 	}
+	when := *date
+	if when == "" {
+		when = time.Now().UTC().Format("2006-01-02")
+	}
+	set.Open(first, when, *note)
 	if err := set.Save(root); err != nil {
 		return err
 	}
@@ -384,7 +395,7 @@ func runTagsVerify(args []string) error {
 	for lang, items := range found {
 		n += len(items)
 		seen = append(seen, lang)
-		soft = append(soft, tags.Order(items)...)
+		soft = append(soft, tags.Order(items, set.Runs)...)
 	}
 	sort.Strings(seen)
 	fmt.Printf("tags verify: %d tags over %d tagged units in %s, %d retired, all invariants hold\n",
@@ -464,4 +475,18 @@ func runTagsList(args []string) error {
 		return fmt.Errorf("no tag and no label %q", arg)
 	}
 	return nil
+}
+
+// lowest is the tag a batch begins at. new-tags is written in allocation order
+// and the allocator climbs, so this is its first line, but it is read as a
+// minimum rather than as a first line because a hand edit that reorders the
+// file is not a thing to record a wrong boundary over.
+func lowest(entries []tags.Entry) tags.Tag {
+	var out tags.Tag
+	for _, e := range entries {
+		if out == "" || e.Tag < out {
+			out = e.Tag
+		}
+	}
+	return out
 }
