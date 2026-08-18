@@ -164,18 +164,31 @@ func checkCorpus(s *Set, found map[string][]Item, printings []string) []Failure 
 // which is a larger number than everything after it in the file. The corpus is
 // then correct and T10 is broken, and a rule a correct edit breaks is not a
 // rule. So it is reported and counted and left at that.
-func Order(items []Item) []Failure {
+//
+// The runs are what keep it worth reading. A tag climbs against the tags its
+// own run assigned and against nothing else, because a later run reads a file
+// that already has tags on most of it and fills in what is new wherever it
+// stands. Comparing across runs is the correct edit above, and it was the whole
+// of what T10 reported: 236 findings, every one of them a volume read in August
+// against a statement added to it later. What is left is the thing the rule was
+// written for, two statements out of order inside one reading.
+func Order(items []Item, runs []Run) []Failure {
 	var out []Failure
-	last := map[string]Item{}
+	type where struct {
+		path string
+		run  int
+	}
+	last := map[where]Item{}
 	for _, it := range items {
 		if it.Tag == "" {
 			continue
 		}
-		if was, seen := last[it.Path]; seen && it.Tag < was.Tag {
-			out = append(out, Failure{T10, fmt.Sprintf("%s has %s after %s, which was assigned later",
+		key := where{it.Path, RunAt(runs, it.Tag)}
+		if was, seen := last[key]; seen && it.Tag < was.Tag {
+			out = append(out, Failure{T10, fmt.Sprintf("%s has %s after %s, which the same run assigned later",
 				at(it), it.Tag, was.Tag)})
 		}
-		last[it.Path] = it
+		last[key] = it
 	}
 	return out
 }
