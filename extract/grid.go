@@ -162,12 +162,20 @@ func twoRows(c []token) (sup, sub []token, ok bool) {
 		return nil, nil, false
 	}
 	// The top row is drawn above the bottom row and clear of it, which is what
-	// makes them two rows rather than one. Clear is measured with the same
-	// overhang a stack is, since a row is set out of glyphs of different
-	// depths and the box a glyph is reported in is not the ink inside it: the b
-	// of the diagonal matrix on page 379 is drawn a unit higher than the 0
-	// beside it, so the two rows touch.
-	if highestTop(sup) >= highestTop(sub) || lowest(sup) > highest(sub)+overhang {
+	// makes them two rows rather than one.
+	//
+	// Clear is measured against the depth of the type, not against a fixed
+	// number of units, because the box a glyph is reported in is not the ink
+	// inside it and the slack is the descent of the glyph. It is the same
+	// matrix printed twice that says so. Page 225 of chapter VIII sets X, 0
+	// over 0, Y out of LMRoman7 and LMRoman6 and reports every box 8 units
+	// tall, and the two rows abut exactly. Page 208 of the French printing
+	// sets the same four entries out of LMRoman8 and reports the letters 12
+	// units tall and the digits 8, so the top row hangs 3 units into the top
+	// of the bottom row while the printed page is the same page. A third of
+	// the depth is the descent a glyph reserves under its baseline, and it
+	// takes both: 0 of 8 on the English page and 3 of 12 on the French.
+	if highestTop(sup) >= highestTop(sub) || lowest(sup)-highest(sub) > deep(c)/descent {
 		return nil, nil, false
 	}
 	// The rows stand a script apart and not a line apart, which is what says
@@ -192,8 +200,19 @@ func byColumn(c []token) ([][]string, bool) {
 		if sup[i].left > sub[i].right || sub[i].left > sup[i].right {
 			return nil, false
 		}
-		// The columns stand apart, in the same order at both levels.
-		if i > 0 && (sup[i-1].right >= sup[i].left || sub[i-1].right >= sub[i].left) {
+		// The columns stand apart, in the same order at both levels, and the
+		// gap is what separates a matrix from a script written in more than
+		// one piece. \sum^{n+1}_{i=0} arrives as the two superscripts n and +1
+		// over the two subscripts i and =0, which pair off into columns as
+		// neatly as any matrix does; what says it is not one is that the pieces
+		// of a script are set touching and the columns of a matrix are not.
+		//
+		// Touching is measured on the ink. The first column of the matrix on
+		// page 208 of the French printing is the run "X ", and the space is
+		// inside the box the run is reported in, so its right edge falls
+		// exactly on the left edge of the 0 beside it and the matrix is refused
+		// for a gap it has.
+		if i > 0 && (inkRight(sup[i-1]) >= sup[i].left || inkRight(sub[i-1]) >= sub[i].left) {
 			return nil, false
 		}
 	}
@@ -328,6 +347,28 @@ func highestTop(ts []token) int {
 	}
 	return n
 }
+
+// inkRight is where a run stops printing, which is its right edge less whatever
+// trailing space it carries. A box is measured over the whole of the run's text
+// and a space is part of that text, so "X " is reported six units wider than the
+// X in it.
+//
+// The width of a space is taken as the run's own width shared out over its
+// characters, which is what there is to go on: the runs carry no per glyph
+// metrics. It is an estimate, and it is only ever asked whether two columns
+// touch, where being a unit or two out either way does not change the answer.
+func inkRight(t token) int {
+	trimmed := strings.TrimRight(t.text, " ")
+	n := len([]rune(t.text))
+	if n == 0 || trimmed == t.text {
+		return t.right
+	}
+	return t.left + (t.right-t.left)*len([]rune(trimmed))/n
+}
+
+// descent is what fraction of its box a glyph reserves below the baseline, as a
+// divisor. A third is what the printings measure and it is what type is set at.
+const descent = 3
 
 // deep is the tallest box in a cluster, which is the measure of what a line
 // apart means for the material in it.

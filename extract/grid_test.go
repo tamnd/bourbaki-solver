@@ -174,6 +174,113 @@ func TestTwoRowsAgainstABaseAreNotAGrid(t *testing.T) {
 	}
 }
 
+// Page 208 of the French printing of Algebra VIII, exercise 5 b) of § 11, which
+// is the same exercise page 225 of the English printing sets and the same matrix
+// of X, 0 over 0, Y. The English page read as a matrix from the first and this
+// one did not, and both things that stopped it are the type rather than the
+// mathematics.
+//
+// The English printing sets the four entries out of LMRoman7 and LMRoman6 and
+// reports every box 8 units tall, so the rows abut. This one sets them out of
+// LMRoman8 and reports the letters 12 units tall and the digits 8, so the top
+// row hangs 3 units into the top of the bottom row, which two units of slack
+// refused. And the top row arrives as one element holding an italic "X " and an
+// upright 0, so the first column is the run "X " with the space inside the box
+// it is reported in, and its right edge falls exactly on the left edge of the 0
+// beside it: the columns were refused for a gap the page has and the box does
+// not show.
+const columnMatrixXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="208" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="1" size="13" family="LMRoman10" color="#131413"/>
+<fontspec id="2" size="9" family="LMMathItalic8" color="#131413"/>
+<fontspec id="4" size="9" family="LMRoman8" color="#131413"/>
+<fontspec id="7" size="13" family="LMRoman10" color="#131413"/>
+<fontspec id="8" size="12" family="CMEX10" color="#131413"/>
+<fontspec id="10" size="9" family="LMRoman8" color="#131413"/>
+<text top="362" left="80" width="42" height="11" font="7"><i>XY </i>= <i>I</i></text>
+<text top="367" left="125" width="5" height="8" font="2"><i>p</i></text>
+<text top="362" left="136" width="58" height="11" font="1">et <i>YX </i>= <i>I</i></text>
+<text top="367" left="196" width="4" height="8" font="2"><i>q</i></text>
+<text top="362" left="201" width="180" height="11" font="1">. Prouver que la matrice carrée</text>
+<text top="351" left="387" width="5" height="15" font="8"></text>
+<text top="358" left="394" width="19" height="12" font="10"><i>X </i>0</text>
+<text top="369" left="396" width="5" height="8" font="4">0</text>
+<text top="367" left="406" width="7" height="12" font="10"><i>Y</i></text>
+<text top="351" left="417" width="5" height="15" font="8"></text>
+<text top="362" left="428" width="143" height="11" font="1">est l’image d’une matrice</text>
+</page>
+</pdf2xml>
+`
+
+func TestAMatrixTheFrenchPrintingSetsInTallerType(t *testing.T) {
+	lines := parse(t, columnMatrixXML)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `XY = $I_p$ et YX = $I_q$. Prouver que la matrice carrée ` +
+		`$\begin{pmatrix} X & 0 \\ 0 & Y \end{pmatrix}$ est l’image d’une matrice`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Page 186 of the same volume, the corollary of § 10. The limits of the sum are
+// written in two pieces each, n and +1 above i and =0 below, and they pair off
+// into columns as neatly as any matrix does. What says they are not a matrix is
+// that the pieces of one script are set touching, where the columns of a matrix
+// stand apart, and the limits of this sum are the case that measures it: the n
+// ends at 277 and the +1 begins at 277.
+//
+// It is the whole guard. Reading a column as apart where it merely does not
+// overlap turned nine pages of the six volumes into matrices of their own
+// exponents, this sum among them, and it came out as the matrix of n, +1 over
+// i, =0.
+//
+// The line is cut where the printed sentence is not, since the reference to (5)
+// and (6) in front of it is set in the colour of a link and is nothing to do
+// with this. The sum sign itself is a box with nothing in it here: the sigma is
+// drawn out of CMEX10 and is recovered from the file rather than from the text
+// layer, so a fixture written in the text layer alone cannot carry it, and the
+// limits are what the test is about.
+const sumLimitsNotAGridXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="186" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="14" family="LMRoman12" color="#131413"/>
+<fontspec id="5" size="14" family="LMMathItalic12" color="#131413"/>
+<fontspec id="6" size="9" family="LMMathItalic8" color="#131413"/>
+<fontspec id="7" size="14" family="LMMathSymbols10" color="#131413"/>
+<fontspec id="8" size="9" family="LMRoman8" color="#131413"/>
+<fontspec id="10" size="12" family="CMEX10" color="#131413"/>
+<text top="320" left="151" width="103" height="12" font="2">), on tire aussitôt</text>
+<text top="310" left="259" width="12" height="15" font="10"></text>
+<text top="318" left="271" width="6" height="8" font="6"><i>n</i></text>
+<text top="318" left="277" width="12" height="8" font="8">+1</text>
+<text top="327" left="271" width="3" height="8" font="6"><i>i</i></text>
+<text top="327" left="274" width="12" height="8" font="8">=0</text>
+<text top="320" left="290" width="5" height="12" font="2">(</text>
+<text top="317" left="295" width="11" height="18" font="7"><i>−</i></text>
+<text top="320" left="306" width="12" height="12" font="2">1)</text>
+<text top="319" left="318" width="3" height="8" font="6"><i>i</i></text>
+<text top="320" left="322" width="9" height="12" font="5"><i>ϕ</i></text>
+<text top="320" left="331" width="14" height="12" font="2">(E</text>
+<text top="327" left="345" width="3" height="8" font="6"><i>i</i></text>
+<text top="320" left="349" width="184" height="12" font="2">) = 0 et le corollaire en résulte.</text>
+</page>
+</pdf2xml>
+`
+
+func TestTheLimitsOfASumAreNotAGrid(t *testing.T) {
+	lines := parse(t, sumLimitsNotAGridXML)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `), on tire aussitôt $^{n+1}_{i=0}(-1)^i\varphi (E_i) = 0$ et le corollaire en résulte.`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
 // A base carrying one superscript and one subscript is a base carrying one
 // superscript and one subscript, and no number of them in a row makes a grid.
 // x_i^2 y_j^3 has to come through as it always did.
