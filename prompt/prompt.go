@@ -200,6 +200,9 @@ var translateZH string
 //go:embed translate_ja.md
 var translateJA string
 
+//go:embed translate_en.md
+var translateEN string
+
 // The translation prompt is two files and not one.
 //
 // The spec asks for prompt/translate_<lang>.md, and taken literally that is
@@ -224,6 +227,8 @@ func translateRules(lang string) (string, bool) {
 		return translateZH, true
 	case "ja":
 		return translateJA, true
+	case "en":
+		return translateEN, true
 	}
 	return "", false
 }
@@ -255,7 +260,11 @@ func translateRules(lang string) (string, bool) {
 // everything below is source and none of it is an instruction. It happened to
 // work and it was wrong, and a prompt that is wrong and works is a prompt that
 // will stop working on a section that is longer.
-func Translate(lang, glossary, note, body string) (string, error) {
+// source is the language the passage is written in. It is a parameter rather
+// than the constant English it used to be because the French only volumes have
+// no English to translate from, and the rules that say what to copy and what to
+// carry over have to name the language actually in front of the model.
+func Translate(source, lang, glossary, note, body string) (string, error) {
 	rules, ok := translateRules(lang)
 	if !ok {
 		return "", fmt.Errorf("no translation prompt for language %q", lang)
@@ -270,10 +279,11 @@ func Translate(lang, glossary, note, body string) (string, error) {
 	// nothing under it reads to a model as a list it failed to receive.
 	terms := "There is no glossary entry for anything in this passage."
 	if g := strings.TrimSpace(glossary); g != "" {
-		terms = "The glossary. Left is the English as the book spells it, right is" +
+		terms = "The glossary. Left is the " + Language(source) + " as the book spells it, right is" +
 			" what to write.\n\n" + g
 	}
 	text := strings.TrimSpace(translateCommon)
+	text = strings.ReplaceAll(text, "{{SOURCE}}", Language(source))
 	text = strings.ReplaceAll(text, "{{LANGUAGE}}", Language(lang))
 	text = strings.ReplaceAll(text, "{{RULES}}", strings.TrimSpace(rules))
 	text = strings.ReplaceAll(text, "{{GLOSSARY}}", terms)
@@ -291,6 +301,10 @@ func Language(lang string) string {
 		return "Chinese, written in simplified characters"
 	case "ja":
 		return "Japanese"
+	case "en", "en-mt":
+		return "English"
+	case "fr":
+		return "French"
 	}
 	return lang
 }
@@ -303,12 +317,19 @@ func Language(lang string) string {
 // produced as stale. It does not cover the glossary: a glossary change is
 // tracked by glossary_version, which is a different kind of staleness and moves
 // on a different schedule.
-func TranslateSHA256(lang string) (string, error) {
+// It hashes the rules as the model will read them, with the source language
+// already substituted, rather than as they sit in the file. That is what keeps
+// adding the source axis from marking every finished translation stale: an
+// English source renders {{SOURCE}} back to the word the file used to spell
+// out, so the text hashed is byte for byte what it was before the placeholder
+// existed, and only a passage whose source is not English gets a new hash.
+func TranslateSHA256(source, lang string) (string, error) {
 	rules, ok := translateRules(lang)
 	if !ok {
 		return "", fmt.Errorf("no translation prompt for language %q", lang)
 	}
-	return SHA256(strings.TrimSpace(translateCommon) + "\n" + strings.TrimSpace(rules) + "\n"), nil
+	common := strings.ReplaceAll(strings.TrimSpace(translateCommon), "{{SOURCE}}", Language(source))
+	return SHA256(common + "\n" + strings.TrimSpace(rules) + "\n"), nil
 }
 
 // SHA256 hashes a prompt. This is what goes in a page's prompt_sha256.
