@@ -45,6 +45,17 @@ audits each line, and merges what survives into manifests/glossary.yaml.
   -add N         also ask about the N commonest mined candidates that are not
                  in the glossary yet, from manifests/glossary-candidates.yaml.
                  This is how the file gets its first rows.
+  -term TERM     also ask about this mined candidate, wherever it stands in
+                 the frequency order. Give the flag once per term. The door
+                 into the glossary is otherwise the head of that order, and
+                 the term somebody has read the corpus and found is hardly
+                 ever at the head of it: "lattice" is used 61 times and sits
+                 under two hundred phrases, of which "prop", "chap" and
+                 "exerc" are three, so reaching it by -add means sending
+                 those. A term the miner never saw is refused, on the same
+                 ground that glossary set refuses to add: a term nothing in
+                 the corpus says is a typo, and a typo here becomes a row
+                 nobody ever looks at again
   -min N         when adding, only candidates the corpus uses at least N times
   -only SOURCE   when adding, only candidates this source found: title,
                  defined, prose or kind. The candidates are ordered by how
@@ -92,6 +103,8 @@ func glossaryTranslate(args []string) error {
 	add := fs.Int("add", 0, "also ask about this many mined candidates")
 	min := fs.Int("min", 0, "when adding, only candidates used at least this often")
 	only := fs.String("only", "", "when adding, only candidates from this source")
+	var named termList
+	fs.Var(&named, "term", "also ask about this mined candidate, once per term")
 	size := fs.Int("batch", glossary.DefaultBatch, "terms per question")
 	limit := fs.Int("limit", 0, "stop after this many questions")
 	votes := fs.Int("votes", 1, "ask every question this many times and keep what agrees")
@@ -114,7 +127,7 @@ func glossaryTranslate(args []string) error {
 	if err != nil {
 		return err
 	}
-	terms, err := needing(root, g, *lang, *add, *min, *only)
+	terms, err := needing(root, g, *lang, *add, *min, *only, named)
 	if err != nil {
 		return err
 	}
@@ -345,21 +358,58 @@ func archiveAsk(root, lang string, index int, question, answer, conversation str
 // a title with a count of one or two, sitting under two thousand phrases from
 // Algebra and Lie. Asking for the titles is how the terminology of a Book gets
 // settled before the Book is read.
-func needing(root string, g *glossary.Glossary, lang string, add, min int, only string) ([]string, error) {
+//
+// named is the terms a person asked for by name, which are taken whatever their
+// place in that order and counted apart from add: naming three terms that also
+// came out of the budget would silently drop three others, and somebody who
+// names a term wants that term as well as the pass, not instead of part of it.
+// The candidate's own spelling is what gets asked, since an answer is compared
+// to the term character for character and the miner's spelling is the one the
+// corpus uses.
+func needing(root string, g *glossary.Glossary, lang string, add, min int, only string, named []string) ([]string, error) {
 	var out []string
 	have := map[string]bool{}
+	rows := map[string]glossary.Term{}
 	for _, t := range g.Terms {
 		have[glossary.Key(t.EN)] = true
+		rows[glossary.Key(t.EN)] = t
 		if t.In(lang) == "" {
 			out = append(out, t.EN)
 		}
 	}
-	if add <= 0 {
+	if add <= 0 && len(named) == 0 {
 		return out, nil
 	}
 	cands, err := glossary.LoadCandidates(glossary.CandidatesPath(root))
 	if err != nil {
 		return nil, err
+	}
+	mined := map[string]string{}
+	for _, c := range cands.Terms {
+		if _, ok := mined[glossary.Key(c.EN)]; !ok {
+			mined[glossary.Key(c.EN)] = c.EN
+		}
+	}
+	for _, n := range named {
+		key := glossary.Key(n)
+		if t, ok := rows[key]; ok {
+			if r := t.In(lang); r != "" {
+				return nil, fmt.Errorf("-term %q is in the glossary already, as %q, and this never overwrites a rendering: bourbaki glossary set is what corrects one", n, r)
+			}
+			// The row is there and this language is what it is missing, so it
+			// is already being asked about and naming it changes nothing.
+			continue
+		}
+		en, ok := mined[key]
+		if !ok {
+			return nil, fmt.Errorf("-term %q is neither a row of the glossary nor a candidate in %s, and a term nothing in the corpus says is a typo",
+				n, rel(root, glossary.CandidatesPath(root)))
+		}
+		have[key] = true
+		out = append(out, en)
+	}
+	if add <= 0 {
+		return out, nil
 	}
 	// -add counts the candidates brought in and not the terms asked about. The
 	// two differ by however many rows the glossary already holds without a
@@ -383,6 +433,23 @@ func needing(root string, g *glossary.Glossary, lang string, add, min int, only 
 		out = append(out, c.EN)
 	}
 	return out, nil
+}
+
+// termList is -term, which is given once per term rather than as one comma
+// separated list. Every other list flag in this program is comma separated, and
+// that shape is wrong for this one: eight of the mined candidates have a comma
+// inside them, ORDERED SETS, CARDINALS, INTEGERS among them, and the term asked
+// about has to be the miner's spelling exactly.
+type termList []string
+
+func (t *termList) String() string { return strings.Join(*t, ", ") }
+
+func (t *termList) Set(s string) error {
+	if strings.TrimSpace(s) == "" {
+		return fmt.Errorf("an empty term")
+	}
+	*t = append(*t, s)
+	return nil
 }
 
 func known(lang string) bool {

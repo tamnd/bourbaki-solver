@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -119,7 +120,7 @@ func TestOnlyTakesTheCandidatesOfOneSource(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	got, err := needing(root, loaded(t, root), "vi", 10, 0, glossary.SourceTitle)
+	got, err := needing(root, loaded(t, root), "vi", 10, 0, glossary.SourceTitle, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,11 +129,92 @@ func TestOnlyTakesTheCandidatesOfOneSource(t *testing.T) {
 	}
 	// And without it the commonest come first, which is what -add has always
 	// done and what the rest of the corpus is filled by.
-	got, err = needing(root, loaded(t, root), "vi", 2, 0, "")
+	got, err = needing(root, loaded(t, root), "vi", 2, 0, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 || got[0] != "flat quiver" || got[1] != "wobbly quiver" {
 		t.Errorf("asked about %q, want the two commonest", got)
+	}
+}
+
+// A term somebody has read the corpus and found is hardly ever at the head of
+// the frequency order, and the head is the only door -add opens. "lattice" is
+// used 61 times across the series and the Vietnamese renders it two ways, dàn
+// in most places and mạng in eleven, which is a defect a person finds by
+// reading and not a phrase a miner ranks highly; reaching it by -add means
+// asking about two hundred phrases above it, of which "prop", "chap" and
+// "exerc" are three.
+func TestATermIsAskedAboutByName(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{
+		{EN: "simple", VI: "đơn"},
+		{EN: "quiver"},
+	}}
+	if err := g.Write(glossary.Path(root)); err != nil {
+		t.Fatal(err)
+	}
+	if err := glossary.WriteCandidates(glossary.CandidatesPath(root), glossary.Candidates{
+		Version: 1, From: "content/en", Terms: []glossary.Candidate{
+			{EN: "flat quiver", Count: 90, Sources: []string{glossary.SourceProse}},
+			{EN: "wobbly quiver", Count: 40, Sources: []string{glossary.SourceProse}},
+			{EN: "lattice", Count: 12, Sources: []string{glossary.SourceProse}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The row with no Vietnamese comes first, as it always has, and the named
+	// term after it, with nothing from the head of the order.
+	got, err := needing(root, loaded(t, root), "vi", 0, 0, "", []string{"lattice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"quiver", "lattice"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("asked about %q, want %q", got, want)
+	}
+	// Naming a term does not come out of the -add budget, since a person who
+	// names one wants it as well as the pass and not instead of part of it.
+	got, err = needing(root, loaded(t, root), "vi", 1, 0, "", []string{"lattice"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want = []string{"quiver", "lattice", "flat quiver"}
+	if len(got) != len(want) {
+		t.Fatalf("asked about %q, want %q", got, want)
+	}
+	for i, w := range want {
+		if got[i] != w {
+			t.Errorf("term %d is %q, want %q", i, got[i], w)
+		}
+	}
+}
+
+// The two ways of getting this wrong, both refused rather than written into the
+// file where nobody would look at them again. A term nothing in the corpus says
+// is a typo, and a rendering that is already there is glossary set's to correct
+// and never this command's to overwrite.
+func TestATermAskedAboutByNameIsOneTheCorpusSays(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "simple", VI: "đơn"}}}
+	if err := g.Write(glossary.Path(root)); err != nil {
+		t.Fatal(err)
+	}
+	if err := glossary.WriteCandidates(glossary.CandidatesPath(root), glossary.Candidates{
+		Version: 1, From: "content/en", Terms: []glossary.Candidate{
+			{EN: "lattice", Count: 12, Sources: []string{glossary.SourceProse}},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := needing(root, loaded(t, root), "vi", 0, 0, "", []string{"latice"}); err == nil {
+		t.Error("a term the miner never saw was accepted")
+	}
+	_, err := needing(root, loaded(t, root), "vi", 0, 0, "", []string{"simple"})
+	if err == nil {
+		t.Fatal("a term that already has its Vietnamese was accepted")
+	}
+	if !strings.Contains(err.Error(), "glossary set") {
+		t.Errorf("the error is %q, and it should say what does correct a rendering", err)
 	}
 }
