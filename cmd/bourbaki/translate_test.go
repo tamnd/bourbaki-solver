@@ -545,6 +545,27 @@ func TestAPassReadsWhatTheOneBeforeItWasRefusedFor(t *testing.T) {
 	}
 }
 
+// Counting the formulas told the model there were three too few and not which
+// three, and the three were the ones a translator stops seeing.
+//
+// Chunk 3 of exercise 17 of § 1 of chapter III came back six times, on two
+// hosts and two models, with the same eleven formulas out of fourteen: every
+// display and every $\mathfrak{P}(\mathrm{A})$ was there and the $x$ and the
+// $y$ of "a relative complement of $x$ with respect to $y$" had become plain
+// letters. The sentence names that case.
+func TestTheRetryNoteSaysAOneLetterFormulaIsAFormula(t *testing.T) {
+	note := retryNote([]translate.Problem{
+		{Rule: translate.RuleMath, Msg: "has 11 math spans and the English has 14"},
+		{Rule: translate.RuleMath, Msg: `math span 2 is "\\omega" and the English has "x"`},
+	})
+	if !strings.Contains(note, "the formula of a single letter") {
+		t.Errorf("the note counts the formulas and does not say which ones go missing:\n%s", note)
+	}
+	if n := strings.Count(note, "Every formula the English sets"); n != 1 {
+		t.Errorf("the sentence is in the note %d times, want it once however often the rule fired", n)
+	}
+}
+
 // And a chunk that failed on something else does not carry advice about the
 // bibliography. A note that says everything says nothing.
 func TestTheRetryNoteOnlyAdvisesOnWhatFailed(t *testing.T) {

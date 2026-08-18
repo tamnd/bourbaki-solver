@@ -1071,6 +1071,12 @@ var advice = map[string]string{
 		"translated either. p. 13 stays p. 13 and does not become tr. 13, No. 1 stays\n" +
 		"No. 1, and Vol. II stays Vol. II. A reader takes a citation to the printed\n" +
 		"page it names, and every other page of this corpus writes it that way.",
+	translate.RuleMath: "Every formula the English sets between dollar signs is in the answer, between\n" +
+		"dollar signs, and there are exactly as many of them as the English has. The\n" +
+		"one that goes missing is the formula of a single letter: $x$ and $y$ read\n" +
+		"like ordinary letters in the middle of a sentence and they are not, they are\n" +
+		"the same $x$ and $y$ the display above and the line below are about. Copy\n" +
+		"each formula across as it stands and translate only the words between them.",
 	translate.RuleScript: "Write the answer in the language that was asked for and in no other. A\n" +
 		"single character of another writing system is enough for the answer to be\n" +
 		"thrown away.",
