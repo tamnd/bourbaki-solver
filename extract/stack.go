@@ -125,7 +125,7 @@ func hoist(toks []token, top, bottom int) []token {
 				t.bottom > top && t.top < bottom && !astride(t, s) && t.left+overhang < edge {
 				break
 			}
-			if t.right < left-hoistGap || !nearest(t, s, signs) {
+			if t.right < left-hoistGap || !nearest(t, s, signs) || beside[strings.TrimSpace(s.text)] && hangs(out, j-1) {
 				break
 			}
 			j, left = j-1, min(left, t.left)
@@ -145,6 +145,65 @@ func hoist(toks []token, top, bottom int) []token {
 		out[j] = s
 	}
 	return out
+}
+
+// beside is the large operators whose limits TeX sets to the right of the sign
+// rather than across it, which is the integrals. \int and \oint are declared
+// \nolimits in plain TeX and stay that way in the classes these volumes are set
+// with, so what stands to the left of an integral sign is ordinarily not a limit
+// of it at all.
+//
+// Ordinarily and not always: the displays of Théories spectrales V do print an
+// integral with its domain over and under the sign, page 230 among them, and
+// those are read the same way a sum is. So this is not a licence to stop
+// hoisting over an integral, only the one place where the reading below is worth
+// the reach it costs.
+var beside = map[string]bool{`\int`: true, `\oint`: true}
+
+// hangs reports whether the token at i is the index of the term in front of it
+// rather than the limit of a sign further along the line.
+//
+// TeX sets a script flush against the box of its base and inside its band, so a
+// term that can carry a script, that ends where this token begins and that is
+// still being drawn where this token is drawn, is the term this token belongs
+// to. The sign to the right of it has no claim on what is already spoken for.
+//
+// The band is what does the work. A limit is set clear of the line, above the
+// sign or below it, so it shares no height with whatever stands in front of it,
+// and the product of English page 320 keeps its limit for that reason: the
+// times sign before it is on the line and the x of the limit is not.
+//
+// The reciprocal of an eigenvalue on page 531 of Théories spectrales V is the
+// reading this refuses. The page sets one over lambda sub n with an integral
+// after it, and the n of the eigenvalue stands five units to the left of the
+// integral sign, near enough for the walk to take it. Read as a limit the n
+// went inside the integral, the two halves of the fraction were no longer one
+// stretch of the line, and the page printed the numerator beside its
+// denominator instead of over it.
+func hangs(toks []token, i int) bool {
+	t := toks[i]
+	// Only a script written straight off the line can be mistaken for a limit.
+	// Anything deeper is a script of a script and belongs to whichever half of
+	// the limit it was found inside.
+	if t.depth != 1 {
+		return false
+	}
+	for j := i - 1; j >= 0; j-- {
+		base := toks[j]
+		// Once the walk is past the left edge of the script there is nothing
+		// left in front of it to hang off. A base and its script meet by
+		// construction, so anything that stops short of it is another term.
+		if base.right+overhang < t.left {
+			return false
+		}
+		if base.depth != 0 {
+			continue
+		}
+		if carries(base) && min(base.bottom, t.bottom) > max(base.top, t.top) {
+			return true
+		}
+	}
+	return false
 }
 
 // astride reports whether a token is written across a sign rather than beside
