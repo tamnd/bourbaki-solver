@@ -220,6 +220,23 @@ func laden(toks []token, r pdfsrc.Rule) (token, int, int, bool) {
 	if len(under) == 0 {
 		return token{}, 0, 0, false
 	}
+	// A bar is drawn against the top of what it covers, so the tallest thing
+	// under it begins at the rule and not a row further down. The two bars of
+	// the matrix on page 362 of Algebra VIII are drawn at 236 and at 247, one
+	// over the y of the top row and one over the x of the row below, and the
+	// top row is written in a run the first of them covers only a part of.
+	// Nothing in that row is a run the bar spans, so the bar was given to the
+	// x of the row below, which is the next thing to the right of it, and that
+	// x came out with two bars on it in a matrix that then read a row short.
+	//
+	// The measurement is made on the whole of what the bar covers and not run
+	// by run, since an index under a closure is set below the letter it hangs
+	// off and is no less under the bar for that. Depth is what says a row: the
+	// tallest piece of type under a bar reaches the rule within its own height,
+	// and a row further down begins beyond it.
+	if highest(under)-r.Top > deep(under) {
+		return token{}, 0, 0, false
+	}
 	// What stands above a bar is the numerator of a fraction only if the bar was
 	// drawn beside the type before it rather than under it.
 	//

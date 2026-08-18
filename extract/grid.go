@@ -491,15 +491,56 @@ func script(mark, s string) string {
 // whole. The matrix of page 70 arrives with its top row in two runs, u and 0,
 // and its bottom row as the single run "0 0", and the two rows come out two
 // cells each.
+//
+// Not every space in a row is white the page set. A LaTeX command name ends at
+// the first character that could not be part of it, so an entry written as a
+// command and a letter carries a space that is part of the name rather than a
+// gap between two cells. The matrix of page 362 of Algebra VIII holds -gamma y
+// bar in its top right corner and the top row was cut into three cells against
+// the two of the row below it, which left the matrix unread and the page saying
+// ^X_-^-_y^x_X^-_-^{\gamma y}_{\overline{x}}.
 func cut(row []slot) []string {
+	var out []string
 	var b strings.Builder
+	flush := func() {
+		out = append(out, apartWords(b.String())...)
+		b.Reset()
+	}
 	for i, p := range row {
 		if i > 0 && p.left-row[i-1].right >= cellGap {
-			b.WriteByte(' ')
+			flush()
 		}
 		abut(&b, p.text)
 	}
-	return strings.Fields(b.String())
+	flush()
+	return out
+}
+
+// apartWords cuts a cell at the white inside it, keeping the space that ends
+// the name of a command.
+func apartWords(s string) []string {
+	var out []string
+	var b strings.Builder
+	end := func() {
+		if t := strings.TrimSpace(b.String()); t != "" {
+			out = append(out, t)
+		}
+		b.Reset()
+	}
+	for _, c := range s {
+		if c != ' ' {
+			b.WriteRune(c)
+			continue
+		}
+		t := b.String()
+		if i := strings.LastIndexByte(t, '\\'); i >= 0 && word(t[i+1:]) {
+			b.WriteRune(c)
+			continue
+		}
+		end()
+	}
+	end()
+	return out
 }
 
 // cells puts one row back together out of the pieces it was drawn in and cuts
@@ -509,7 +550,14 @@ func cells(ts []token) ([]string, bool) {
 	for i, t := range ts {
 		// The pieces of a row stand in the order the row is read in and do not
 		// overlap, since they are pieces of one row.
-		if i > 0 && t.left < ts[i-1].right {
+		//
+		// Touching is not overlapping. The box pdftohtml reports is rounded to
+		// the pixel and the rounding falls either way, so two pieces set edge
+		// to edge are reported a unit apart or a unit into one another: the
+		// bottom row of the matrix on page 340 of Algebre VIII sets the minus
+		// of -y as the run 516 to 524 and the y as 523 to 528, and the row was
+		// refused for a unit. It is the same slack a script is read within.
+		if i > 0 && t.left+overhang < ts[i-1].right {
 			return nil, false
 		}
 		row = append(row, slot{text: t.text, left: t.left, right: t.right})
@@ -539,8 +587,21 @@ const cellGap = 3
 // before, page 72 of Théories spectrales 17. The narrowest is the 3 of page 73
 // of the same volume, where what stands in front is not a term at all but the
 // parenthesis TeX drew for the matrix.
+// A matrix the page prints between parentheses hangs off nothing either, and
+// it does not stand clear: TeX sets the grid flush against the delimiter it
+// drew, so the two touch. The French printing of page 362 of Algebra VIII draws
+// the parentheses of the matrix of u out of CMEX and the grid begins two units
+// after the one on the left, where the English printing has no delimiters in
+// the layer at all and the same grid stands eighteen units clear of the words
+// before it. A delimiter is not a term a script hangs off, which is the test
+// bar.go makes to tell a fraction from a bar over an index, and it is the same
+// question here.
 func loose(out []token, c []token) bool {
-	return len(out) == 0 || c[0].left-out[len(out)-1].right > restackGap
+	if len(out) == 0 {
+		return true
+	}
+	last := out[len(out)-1]
+	return c[0].left-last.right > restackGap || !carries(last)
 }
 
 // matrix writes the grid out as one token, standing where the whole cluster

@@ -1,6 +1,10 @@
 package extract
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tamnd/bourbaki-solver/pdfsrc"
+)
 
 // Page 379 of Algebra VIII, the isomorphism of the matrix algebra. The book
 // prints the diagonal matrix of a and b between parentheses, and TeX sets a two
@@ -421,5 +425,93 @@ func TestAMatrixDrawnByColumnAboveAndWholeBelow(t *testing.T) {
 	const want = `matrice $\begin{pmatrix} u_1 & 0 \\ 0 & 0 \end{pmatrix}$ où`
 	if got := Render(lines[0]); got != want {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Page 362 of Algebra VIII, the matrix of the endomorphism u of F[X] with
+// respect to the basis (1, j), which the book prints as X-x, -gamma y bar over
+// -y, X-x bar.
+//
+// Two things had to be right for this one to come out. The top row is written
+// out as \gamma y, and the space that ends the name of the command is not white
+// the page set: cut it there and the top row is three cells against the two of
+// the row below, and a matrix whose rows are different lengths is no matrix and
+// is left as it was. And the bar over the y of that row is drawn across a part
+// of the run rather than across the whole of it, so nothing in the row is one
+// the bar covers; it was passed over for the x of the row below, which is the
+// next thing to the right of it and a row further down, and that x took both
+// bars of the matrix and came out with two.
+//
+// The bar over the y is still missing here. It is drawn over one glyph of a run
+// of two and there is nothing in the layer that says where the run divides, so
+// the rule is dropped rather than guessed at.
+func TestAMatrixWrittenWithACommandInIt(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 379, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 239, Left: 80, Width: 188, Height: 13, Text: "with respect to the basis (1"},
+			{Top: 239, Left: 267, Width: 13, Height: 13, Font: 11, Text: ", j"},
+			{Top: 239, Left: 281, Width: 22, Height: 13, Text: ") is"},
+			{Top: 235, Left: 321, Width: 9, Height: 9, Font: 2, Text: "X"},
+			{Top: 246, Left: 326, Width: 9, Height: 10, Font: 12, Text: "−"},
+			{Top: 235, Left: 330, Width: 9, Height: 10, Font: 12, Text: "−"},
+			{Top: 247, Left: 335, Width: 6, Height: 9, Font: 13, Text: "y"},
+			{Top: 235, Left: 339, Width: 7, Height: 9, Font: 13, Text: "x"},
+			{Top: 247, Left: 350, Width: 9, Height: 9, Font: 2, Text: "X"},
+			{Top: 235, Left: 351, Width: 9, Height: 10, Font: 12, Text: "−"},
+			{Top: 246, Left: 359, Width: 9, Height: 10, Font: 12, Text: "−"},
+			{Top: 235, Left: 361, Width: 13, Height: 9, Font: 13, Text: "γy"},
+			{Top: 247, Left: 368, Width: 7, Height: 9, Font: 13, Text: "x"},
+			{Top: 239, Left: 387, Width: 191, Height: 13, Text: "; its determinant is equal to"},
+		},
+		Rules: []pdfsrc.Rule{
+			{Top: 236, Left: 367, Width: 6, Thickness: 0.339, Length: 4.29, Size: 3.5},
+			{Top: 247, Left: 368, Width: 7, Thickness: 0.339, Length: 4.51, Size: 3.5},
+		},
+	}
+	const want = `with respect to the basis $(1, j)$ is $\begin{pmatrix} X-x & -\gamma y \\ -y & X-\overline{x} \end{pmatrix}$ ; its determinant is equal to`
+	if got := sole(t, enlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// The French printing of the same page, which is page 340 of Algebre VIII, and
+// which draws the parentheses of the matrix that the English printing leaves
+// out of the layer altogether. They arrive out of CMEX as the runs "0" and "1",
+// which are the codes of the two halves of a tall bracket, and they are set
+// flush against the grid: the left one ends two units before the grid begins.
+// A cluster that close to the run before it is a script of that run everywhere
+// else on a page, so the grid was left as it was and the page shipped a matrix
+// written as scripts inside a pair of parentheses. What tells the two apart is
+// that a bracket is not a term a script hangs off.
+func TestAMatrixSetFlushAgainstItsParentheses(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 357, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 188, Left: 315, Width: 144, Height: 12, Font: 21, Text: "par rapport à la base (1"},
+			{Top: 188, Left: 459, Width: 12, Height: 12, Font: 22, Text: ", j"},
+			{Top: 188, Left: 471, Width: 27, Height: 12, Font: 21, Text: ") est"},
+			{Top: 173, Left: 503, Width: 7, Height: 15, Font: 17, Text: "0"},
+			{Top: 185, Left: 512, Width: 7, Height: 8, Font: 18, Text: "X"},
+			{Top: 192, Left: 516, Width: 8, Height: 12, Font: 19, Text: "−"},
+			{Top: 182, Left: 519, Width: 8, Height: 12, Font: 19, Text: "−"},
+			{Top: 195, Left: 523, Width: 5, Height: 8, Font: 20, Text: "y"},
+			{Top: 185, Left: 527, Width: 6, Height: 8, Font: 20, Text: "x"},
+			{Top: 195, Left: 536, Width: 7, Height: 8, Font: 18, Text: "X"},
+			{Top: 182, Left: 537, Width: 8, Height: 12, Font: 19, Text: "−"},
+			{Top: 192, Left: 543, Width: 8, Height: 12, Font: 19, Text: "−"},
+			{Top: 185, Left: 545, Width: 10, Height: 8, Font: 20, Text: "γy"},
+			{Top: 195, Left: 551, Width: 6, Height: 8, Font: 20, Text: "x"},
+			{Top: 173, Left: 559, Width: 7, Height: 15, Font: 17, Text: "1"},
+			{Top: 188, Left: 568, Width: 4, Height: 12, Font: 21, Text: ";"},
+		},
+		Rules: []pdfsrc.Rule{
+			{Top: 185, Left: 550, Width: 5, Thickness: 0.360, Length: 3.48, Size: 3.7},
+			{Top: 195, Left: 551, Width: 6, Thickness: 0.360, Length: 3.72, Size: 3.7},
+		},
+	}
+	const want = `par rapport à la base $(1, j)$ est $\begin{pmatrix} X-x & -\gamma y \\ -y & X-\overline{x} \end{pmatrix}$ ;`
+	if got := sole(t, frlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
