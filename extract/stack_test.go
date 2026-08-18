@@ -687,3 +687,90 @@ func TestAnExponentAndAnIndexOfOneGlyphAreStillAStack(t *testing.T) {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// Page 493 of Topologie algébrique I to IV writes x indexed by s to the minus
+// one sub n, times s sub one. The index is a stack in its own right, three
+// levels deep in all, and a stack inside a stack was only ever put back at the
+// outer level: the line shipped as x_{s^-_n^1s_1}. What puts it right is asking
+// the same question of what stands inside a unit that was asked of the cluster,
+// which is what nested does before the units of the outer level are cut.
+const nestedStackPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="493" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="3" size="15" family="IWFIMB+LMRoman10" color="#000000"/>
+<fontspec id="4" size="15" family="AQKDGP+LMMathItalic10" color="#000000"/>
+<fontspec id="5" size="15" family="IWFIMB+LMRoman10" color="#000000"/>
+<fontspec id="7" size="10" family="UNPVBI+LMMathItalic7" color="#000000"/>
+<fontspec id="16" size="7" family="LZFOFQ+LMMathSymbols5" color="#000000"/>
+<fontspec id="17" size="7" family="HPCJLQ+LMRoman5" color="#000000"/>
+<fontspec id="18" size="7" family="JDOPVZ+LMMathItalic5" color="#000000"/>
+<text top="612" left="246" width="37" height="19" font="3">, on a</text>
+<text top="616" left="289" width="7" height="13" font="4"><i>g</i></text>
+<text top="612" left="296" width="6" height="19" font="5">(</text>
+<text top="616" left="302" width="6" height="13" font="4"><i>c</i></text>
+<text top="612" left="309" width="22" height="19" font="5">) =</text>
+<text top="616" left="334" width="9" height="13" font="4"><i>x</i></text>
+<text top="624" left="343" width="6" height="9" font="7"><i>s</i></text>
+<text top="620" left="349" width="8" height="7" font="16">&#8722;</text>
+<text top="621" left="357" width="5" height="7" font="17">1</text>
+<text top="628" left="349" width="7" height="7" font="18"><i>n</i></text>
+<text top="624" left="363" width="6" height="9" font="7"><i>s</i></text>
+<text top="627" left="368" width="5" height="7" font="17">1</text>
+</page>
+</pdf2xml>
+`
+
+func TestAStackInsideAStackIsPutBackToo(t *testing.T) {
+	lines := parse(t, nestedStackPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `, on a $g(c) =x_{s^{-1}_ns_1}$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Page 488 of the same volume writes x with w sub i above and s sub i,2 below.
+// The i of the exponent is drawn after the exponent and before the index, and
+// the order alone hangs it on the index, which is how the line shipped as
+// x^w_{s_{i,}^i_2}. The two scripts are set at the same left edge, 230 both, and
+// there the order says nothing about which of them a run to the right was
+// written inside; the i sits 4 units from the middle of the w and 14 from the
+// middle of the s, so it is the exponent's. Nothing else on the line moves,
+// since the i, and the 2 are nearer the s than the w.
+const scriptOfTheFarScriptPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="488" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="15" family="IWFIMB+LMRoman10" color="#000000"/>
+<fontspec id="3" size="15" family="AQKDGP+LMMathItalic10" color="#000000"/>
+<fontspec id="5" size="15" family="IWFIMB+LMRoman10" color="#000000"/>
+<fontspec id="6" size="10" family="UNPVBI+LMMathItalic7" color="#000000"/>
+<fontspec id="13" size="7" family="JDOPVZ+LMMathItalic5" color="#000000"/>
+<fontspec id="14" size="7" family="HPCJLQ+LMRoman5" color="#000000"/>
+<text top="640" left="206" width="9" height="13" font="3"><i>&#181;</i></text>
+<text top="636" left="215" width="6" height="19" font="5">(</text>
+<text top="640" left="221" width="9" height="13" font="3"><i>x</i></text>
+<text top="638" left="230" width="9" height="9" font="6"><i>w</i></text>
+<text top="641" left="238" width="4" height="7" font="13"><i>i</i></text>
+<text top="647" left="230" width="6" height="9" font="6"><i>s</i></text>
+<text top="651" left="235" width="7" height="7" font="13"><i>i,</i></text>
+<text top="651" left="243" width="5" height="7" font="14">2</text>
+<text top="636" left="249" width="6" height="19" font="5">)</text>
+<text top="636" left="260" width="12" height="19" font="2">et</text>
+</page>
+</pdf2xml>
+`
+
+func TestAScriptOfTheFarScriptIsReadByHowFarApartTheyAreSet(t *testing.T) {
+	lines := parse(t, scriptOfTheFarScriptPage)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	// The µ is the micro sign the volume sets and mathtex is what turns it into
+	// \mu later, so it stands here as the page draws it.
+	const want = `$µ(x^{w_i}_{s_{i,2}})$ et`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}

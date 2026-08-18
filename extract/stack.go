@@ -569,6 +569,8 @@ type unit struct {
 // levels gathers a cluster into its two scripts, where the cluster is a stack
 // that came apart, and leaves it alone where it is not.
 func levels(c []token) []token {
+	c = belong(c)
+	c = nested(c)
 	us := units(c)
 	if !stacked(c, us) {
 		return c
@@ -593,6 +595,169 @@ func levels(c []token) []token {
 		left, right = min(left, t.left), max(right, t.right)
 	}
 	out[0].left, out[len(out)-1].right = left, right
+	return out
+}
+
+// belong puts what is written inside a script after the script it is written
+// inside, which is not always the one it was drawn after.
+//
+// A run deeper than the cluster is kept with the run it follows, and following
+// is read off the left edge, which is the order pdftohtml hands a page back in.
+// That is right wherever the scripts of a base stand apart, and a superscript
+// and a subscript of one base do not stand apart at all: TeX sets them at the
+// same place, one over the other, so the two start at the same left edge and
+// what is written inside either of them starts to the right of both. Exercise 25
+// of § 5 of Topologie algébrique writes x_{s_{i,2}}^{w_i}, the exponent and the
+// index of the x both beginning at 230, and the i of the exponent is drawn after
+// the comma of the index, so it was kept with the index and the page shipped
+// $x^w_{s_{i,}^i_2}$.
+//
+// What says which it belongs to is the height. The exponent of the x is set 9
+// units above the index of it, and the i is set within a couple of units of the
+// exponent and nine off the index, so the run is given to the script it is level
+// with rather than to the one it was drawn after. Where two candidates are level
+// with each other, which is every base carrying one script, the later one is
+// taken and the reading is the one the order already gave.
+func belong(c []token) []token {
+	top := c[0].depth
+	for _, t := range c {
+		top = min(top, t.depth)
+	}
+	owner := make([]int, len(c))
+	given := make([]bool, len(c))
+	moved := false
+	for i, t := range c {
+		if t.depth == top {
+			owner[i] = i
+			continue
+		}
+		owner[i], given[i] = holder(c, i)
+		moved = moved || given[i]
+	}
+	if !moved {
+		return c
+	}
+	out := make([]token, 0, len(c))
+	// A run is written after the run it hangs off and before anything else that
+	// hangs off the same one, at every level, so the order is the walk of the
+	// tree the owners make and not two passes over a list.
+	var place func(i int)
+	place = func(i int) {
+		t := c[i]
+		if given[i] {
+			// Which side of a run something inside it is written on was read
+			// against whatever stood before it, and for a run given back to an
+			// owner it was not drawn after that answer is about the wrong run.
+			// The i of the exponent is set below the index it was drawn after
+			// and above the exponent it belongs to, so it arrived a superscript
+			// and the page would have read x^{w^i} where it prints x^{w_i}.
+			t.level = side(c[owner[i]], t)
+		}
+		out = append(out, t)
+		for j := range c {
+			if j != i && owner[j] == i {
+				place(j)
+			}
+		}
+	}
+	for i := range c {
+		if owner[i] == i {
+			place(i)
+		}
+	}
+	// The cluster keeps the reach it had, for the reason levels keeps it: the
+	// token the cluster now ends on is no longer the one that reaches furthest,
+	// and what stands after the cluster measures its distance from that token.
+	// Exercise 7 of § 8 of Algèbre 8 read "$k(F^{p^{\infty}}_n$ )" with the
+	// closing parenthesis a word away, because the n the subscript now ends on
+	// stands where the infinity used to.
+	left, right := c[0].left, c[0].right
+	for _, t := range c {
+		left, right = min(left, t.left), max(right, t.right)
+	}
+	out[0].left, out[len(out)-1].right = left, right
+	return out
+}
+
+// holder is the run a run hangs off, which is the last one a level shallower
+// standing at or before it unless that one has a partner.
+//
+// The order is asked first and the height only where the order cannot answer.
+// Two runs of a cluster set at the same left edge and at opposite levels are the
+// two scripts of one base, and nothing in the order says which of them a run to
+// the right of both was written inside; anywhere else the order is the answer
+// and asking the height instead is worse than useless. The ∈ of Lie 7 to 9 is
+// reported 19 units high where the roman beside it is 13, so the index of a term
+// after an ∈ is nearer the middle of the ∈ than the middle of its own base, and
+// $(U_{\alpha})_{\alpha\in B_0}$ came out as \alpha\in_0B when the height was
+// asked of every run.
+//
+// It reports as well whether the height was asked and answered differently from
+// the order, which is the one case where the reading changes: the run is moved
+// and the side it is written on has to be read again against the run it has
+// been given to.
+func holder(c []token, i int) (int, bool) {
+	up := c[i].depth - 1
+	at := -1
+	for k := 0; k < i; k++ {
+		if c[k].depth == up && c[k].left <= c[i].left {
+			at = k
+		}
+	}
+	if at < 0 {
+		return i, false
+	}
+	after := at
+	for k := 0; k < i; k++ {
+		if k == at || c[k].depth != up ||
+			c[k].left != c[at].left || c[k].level == c[at].level {
+			continue
+		}
+		if apartBy(c[k], c[i]) < apartBy(c[at], c[i]) {
+			at = k
+		}
+	}
+	return at, at != after
+}
+
+// apartBy is how far apart two runs are set, measured between the middles of their
+// boxes, which is where a glyph of one size and a glyph of another can be
+// compared at all.
+func apartBy(a, b token) int {
+	d := (a.top + a.bottom) - (b.top + b.bottom)
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+// nested gathers the stack that came apart inside one unit of a cluster, which
+// is the same reading made a level further in.
+//
+// units cuts a cluster at the level of the cluster itself and keeps what is
+// written below that level with the token it hangs off, so a stack set inside a
+// script was never looked at: it arrives as one unit and one unit is not three.
+// Exercise 34 of § 5 of Topologie algébrique writes the product of the x over
+// s_n^{-1}s_1, so the whole of s_n^{-1} is written inside the index of an x, and
+// the page shipped $x_{s^-_n^1s_1}$ three times on the line. The minus and the
+// one of that exponent touch and the index lies inside what they span, which is
+// what a stack is at any level, and both measurements are made at the level the
+// pieces are written at rather than at the level of the line.
+//
+// The recursion is on a strictly shorter slice, since a unit gives up the token
+// it hangs off before what is inside it is read.
+func nested(c []token) []token {
+	us := units(c)
+	if len(us) == len(c) {
+		return c
+	}
+	out := make([]token, 0, len(c))
+	for _, u := range us {
+		out = append(out, c[u.lo])
+		if u.hi > u.lo+1 {
+			out = append(out, levels(c[u.lo+1:u.hi])...)
+		}
+	}
 	return out
 }
 
