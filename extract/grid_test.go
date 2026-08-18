@@ -307,3 +307,119 @@ func TestOneSuperscriptAndOneSubscriptAreNotAGrid(t *testing.T) {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }
+
+// Page 73 of Théories spectrales, the three congruences of the proof of
+// theorem 1. Each is a two by two matrix whose top left entry carries a script
+// of its own, and that script is set a level further in than the entries are:
+// the alpha and the zeros of the second matrix come out of LMRoman8 at 12 and
+// the -1 and the 0 written on the alpha out of LMRoman6 at 9, which is under
+// four fifths of it and so one level down again.
+//
+// Neither of the older shapes can read that. The columns are counted at one
+// level and the rows are cut at one level, and there are two here. The page
+// shipped the second matrix as ^{\alpha^-_0}_{0^1}^0_0, which is the exponent
+// of the entry landing on the entry of the row below it, since the 1 is drawn
+// after that entry and run order is not reading order once a script is
+// involved.
+const deepMatrixXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="73" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="4" size="16" family="KVZJDY+LMRoman10" color="#000000"/>
+<fontspec id="5" size="16" family="OSYQLC+LMMathItalic10" color="#000000"/>
+<fontspec id="6" size="12" family="KXVPXH+LMRoman8" color="#000000"/>
+<fontspec id="8" size="15" family="DOQQMC+LMMathExtension10" color="#000000"/>
+<fontspec id="9" size="12" family="JWXNWC+LMMathItalic8" color="#000000"/>
+<fontspec id="10" size="9" family="HYXHKT+LMMathSymbols6" color="#000000"/>
+<fontspec id="11" size="9" family="DVCVPT+LMRoman6" color="#000000"/>
+<fontspec id="14" size="16" family="PTVHYM+LMMathSymbols10" color="#000000"/>
+<text top="259" left="157" width="9" height="15" font="5"><i>u</i></text>
+<text top="258" left="171" width="13" height="15" font="14">≡</text>
+<text top="259" left="188" width="6" height="14" font="4">(</text>
+<text top="256" left="197" width="8" height="11" font="9"><i>α</i></text>
+<text top="256" left="210" width="6" height="11" font="6">0</text>
+<text top="267" left="198" width="18" height="11" font="6">0 0</text>
+<text top="259" left="219" width="6" height="14" font="4">)</text>
+<text top="259" left="234" width="5" height="15" font="5"><i>,</i></text>
+<text top="259" left="257" width="8" height="15" font="5"><i>v</i></text>
+<text top="264" left="265" width="6" height="11" font="6">0</text>
+<text top="258" left="277" width="13" height="15" font="14">≡</text>
+<text top="252" left="294" width="9" height="7" font="8"></text>
+<text top="256" left="306" width="8" height="11" font="9"><i>α</i></text>
+<text top="252" left="314" width="9" height="8" font="10">−</text>
+<text top="253" left="323" width="5" height="8" font="11">1</text>
+<text top="262" left="314" width="5" height="8" font="11">0</text>
+<text top="256" left="333" width="6" height="11" font="6">0</text>
+<text top="270" left="314" width="6" height="11" font="6">0</text>
+<text top="270" left="333" width="6" height="11" font="6">0</text>
+<text top="252" left="342" width="9" height="7" font="8"></text>
+<text top="259" left="360" width="5" height="15" font="5"><i>,</i></text>
+<text top="259" left="383" width="11" height="15" font="5"><i>φ</i></text>
+<text top="259" left="394" width="6" height="14" font="4">(</text>
+<text top="259" left="400" width="9" height="15" font="5"><i>u</i></text>
+<text top="259" left="410" width="6" height="14" font="4">)</text>
+<text top="258" left="421" width="13" height="15" font="14">≡</text>
+<text top="252" left="438" width="9" height="7" font="8"></text>
+<text top="258" left="449" width="8" height="11" font="9"><i>α</i></text>
+<text top="255" left="458" width="9" height="8" font="10">−</text>
+<text top="255" left="466" width="5" height="8" font="11">1</text>
+<text top="258" left="477" width="6" height="11" font="6">0</text>
+<text top="268" left="458" width="6" height="11" font="6">0</text>
+<text top="268" left="477" width="6" height="11" font="6">0</text>
+<text top="252" left="486" width="9" height="7" font="8"></text>
+<text top="259" left="498" width="5" height="15" font="5"><i>.</i></text>
+</page>
+</pdf2xml>
+`
+
+func TestAMatrixWhoseEntriesCarryTheirOwnScripts(t *testing.T) {
+	lines := parse(t, deepMatrixXML)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `$u\equiv \begin{pmatrix} \alpha & 0 \\ 0 & 0 \end{pmatrix},` +
+		`v_0\equiv \begin{pmatrix} \alpha_0^{-1} & 0 \\ 0 & 0 \end{pmatrix},` +
+		`\varphi (u)\equiv \begin{pmatrix} \alpha^{-1} & 0 \\ 0 & 0 \end{pmatrix}$.`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// Page 70 of the same volume, the matrix of u_1, 0 over 0, 0 in the paragraph
+// after definition 2. This one is drawn in both shapes at once: the top row is
+// boxed by column, the entry u with its index 1 and then the 0 beside it, and
+// the bottom row is boxed whole as the single run "0 0". The columns cannot be
+// paired, since there is one box below and two above, and the rows cannot be
+// cut at one level, since the index is a level deeper than the entry carrying
+// it. Cutting the rows at the white after the entries have been put back
+// together reads both, and the page had shipped it as ^u_{0 0^1}^0.
+//
+// The line is cut after the où, which the printed sentence runs on past.
+const mixedMatrixXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="70" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="0" size="16" family="KVZJDY+LMRoman10" color="#000000"/>
+<fontspec id="8" size="12" family="KXVPXH+LMRoman8" color="#000000"/>
+<fontspec id="9" size="15" family="DOQQMC+LMMathExtension10" color="#000000"/>
+<fontspec id="10" size="12" family="JWXNWC+LMMathItalic8" color="#000000"/>
+<fontspec id="11" size="9" family="DVCVPT+LMRoman6" color="#000000"/>
+<text top="312" left="81" width="55" height="14" font="0">matrice</text>
+<text top="308" left="151" width="7" height="11" font="10"><i>u</i></text>
+<text top="312" left="158" width="5" height="8" font="11">1</text>
+<text top="308" left="169" width="6" height="11" font="8">0</text>
+<text top="320" left="155" width="21" height="11" font="8">0 0</text>
+<text top="310" left="178" width="7" height="7" font="9"></text>
+<text top="312" left="191" width="18" height="14" font="0">où</text>
+</page>
+</pdf2xml>
+`
+
+func TestAMatrixDrawnByColumnAboveAndWholeBelow(t *testing.T) {
+	lines := parse(t, mixedMatrixXML)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	const want = `matrice $\begin{pmatrix} u_1 & 0 \\ 0 & 0 \end{pmatrix}$ où`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
