@@ -221,6 +221,17 @@ func readText(dec *xml.Decoder, start xml.StartElement) ([]Span, error) {
 		case xml.EndElement:
 			if depth == 0 {
 				flush()
+				if len(spans) == 0 {
+					// An element with no characters in it at all is a glyph
+					// poppler drew and could not name, and the box is where it
+					// stood. Lie chapters 7 to 9 names code 0x17 of its
+					// mathematics italic pi1, which is varpi, and wrote every
+					// one of them as <text ...><i></i></text>: dropping the
+					// element here is what made that loss invisible to
+					// everything downstream, since a page cannot be flagged
+					// for a run it never sees.
+					return []Span{base}, nil
+				}
 				return apportion(spans, base), nil
 			}
 			flush()
