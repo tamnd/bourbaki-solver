@@ -591,7 +591,14 @@ func joinBlocks(parts []string) string {
 // be one alternative rather than a lookahead, because Go's regexp has no
 // lookahead, and the § it looks ahead at is then inside the match: refs puts
 // both parts back.
-var refRE = regexp.MustCompile(`\b([IVXLC]+),\s*(§\s*\d+)|§\s*\d+|\bNo\.\s*\d+|\bp\.\s*\d+`)
+//
+// The number sign is matched with either letter, because the two halves of the
+// corpus print it differently: Algebra writes "No. 1" and Theory of Sets writes
+// "no. 8". Only the capital was matched, so every citation in Theory of Sets
+// went past this rule, and the Vietnamese of chapter III came back with "số 8"
+// in 22 places, which is the Vietnamese word for number and not the address the
+// English gives.
+var refRE = regexp.MustCompile(`\b([IVXLC]+),\s*(§\s*\d+)|§\s*\d+|\b[Nn]o\.\s*\d+|\bp\.\s*\d+`)
 
 // Invariant 4. Cross references keep their numbers.
 func auditRefs(en, tr string) []Problem {
@@ -631,12 +638,25 @@ func refs(body string) []string {
 			out = append(out, tighten(m[1]), tighten(m[2]))
 			continue
 		}
-		out = append(out, tighten(m[0]))
+		out = append(out, spelt(tighten(m[0])))
 	}
 	return out
 }
 
 func tighten(s string) string { return strings.Join(strings.Fields(s), "") }
+
+// spelt is a citation part with the one spelling difference taken out of it,
+// for the reason tighten takes the spacing out: which letter the number sign
+// starts with is the printing's choice and not the address. Algebra writes
+// "No. 1" and Theory of Sets writes "no. 8", and a translation that copies the
+// citation from a section of one volume into prose about the other is right
+// about where it points.
+func spelt(s string) string {
+	if strings.HasPrefix(s, "No.") {
+		return "no." + s[len("No."):]
+	}
+	return s
+}
 
 // wordRE is a run of letters long enough to be a word somebody translates. Two
 // and not one, because a part's name is a single letter in brackets, `(a)`, and

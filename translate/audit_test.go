@@ -707,3 +707,29 @@ func TestASplicceRefusesAnAnswerWithTheWrongNumberOfBlocks(t *testing.T) {
 		t.Error("an answer of one block was spliced into a chunk that asked for two")
 	}
 }
+
+// Theory of Sets prints the number sign in lower case, "(Chapter II, § 4, no.
+// 8)", and only the capital was matched, so every citation in that volume went
+// past this rule. The Vietnamese of chapter III came back with "số 8", which is
+// the Vietnamese word for number, in 22 places across the chapter.
+func TestALowerCaseNumberSignIsACitationToo(t *testing.T) {
+	const enNo = "Let F be the sum (Chapter II, § 4, no. 8) of the family."
+	const viNo = "Cho F là tổng (Chương II, § 4, no. 8) của họ."
+	if ps := Audit("vi", enNo, viNo); len(ps) != 0 {
+		t.Fatalf("a citation copied as the English spells it was refused: %v", ps)
+	}
+	bad := strings.Replace(viNo, "no. 8", "số 8", 1)
+	p := only(t, Audit("vi", enNo, bad), RuleReference)
+	if !strings.Contains(p.Msg, "no.8") {
+		t.Fatalf("did not name the citation the answer dropped: %v", p)
+	}
+}
+
+// And which letter it starts with is the printing's choice, not the address.
+func TestTheCaseOfTheNumberSignIsNotACitation(t *testing.T) {
+	const enNo = "The degree is finite (V, §4, No. 1, p. 20)."
+	const viNo = "Bậc là hữu hạn (V, §4, no. 1, p. 20)."
+	if ps := Audit("vi", enNo, viNo); len(ps) != 0 {
+		t.Fatalf("the other spelling of the number sign was refused: %v", ps)
+	}
+}
