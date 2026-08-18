@@ -386,13 +386,13 @@ func TestFlaggedIsTheOnlyWayIntoABornDigitalVolume(t *testing.T) {
 	setupCorpus(t, book, manifest, flags)
 	queueRoot := filepath.Join(t.TempDir(), "queue")
 
-	if _, err := ocrSetup("alg-viii", queueRoot, false); err == nil {
+	if _, err := ocrSetup("alg-viii", queueRoot, false, false); err == nil {
 		t.Fatal("a born-digital volume was let in without -flagged")
 	} else if !strings.Contains(err.Error(), "-flagged") {
 		t.Errorf("the refusal does not say what to do instead: %v", err)
 	}
 
-	s, err := ocrSetup("alg-viii", queueRoot, true)
+	s, err := ocrSetup("alg-viii", queueRoot, true, false)
 	if err != nil {
 		t.Fatalf("ocrSetup with -flagged: %v", err)
 	}
@@ -417,7 +417,7 @@ func TestWithoutFlaggedAScannedVolumeReadsEveryRenderedPage(t *testing.T) {
 	}}
 	setupCorpus(t, book, manifest, nil)
 
-	s, err := ocrSetup("alg-i-iii", filepath.Join(t.TempDir(), "queue"), false)
+	s, err := ocrSetup("alg-i-iii", filepath.Join(t.TempDir(), "queue"), false, false)
 	if err != nil {
 		t.Fatalf("ocrSetup: %v", err)
 	}
@@ -443,7 +443,7 @@ func TestUnreadLeavesThePagesAlreadyReadAlone(t *testing.T) {
 	root := setupCorpus(t, book, manifest, nil)
 	writePage(t, root, "ens-i-iv", 23, "Let $E$ be a set.\n")
 
-	s, err := ocrSetup("ens-i-iv", filepath.Join(t.TempDir(), "queue"), false)
+	s, err := ocrSetup("ens-i-iv", filepath.Join(t.TempDir(), "queue"), false, false)
 	if err != nil {
 		t.Fatalf("ocrSetup: %v", err)
 	}
@@ -453,5 +453,23 @@ func TestUnreadLeavesThePagesAlreadyReadAlone(t *testing.T) {
 	}
 	if all := s.sources(0, 0, false); len(all) != 3 {
 		t.Errorf("without -unread sources = %v, want all three", all)
+	}
+}
+
+func TestAContentsRunNeedsARange(t *testing.T) {
+	if err := contentsRange(false, 0, 0); err != nil {
+		t.Errorf("a run that is not reading a contents was refused: %v", err)
+	}
+	if err := contentsRange(true, 0, 0); err == nil {
+		t.Error("a contents run with no range was allowed, and it would put the whole volume through the contents prompt")
+	}
+	if err := contentsRange(true, 367, 0); err == nil {
+		t.Error("a contents run with no last page was allowed")
+	}
+	if err := contentsRange(true, 372, 367); err == nil {
+		t.Error("a contents run that ends before it starts was allowed")
+	}
+	if err := contentsRange(true, 367, 372); err != nil {
+		t.Errorf("a contents run with a range was refused: %v", err)
 	}
 }

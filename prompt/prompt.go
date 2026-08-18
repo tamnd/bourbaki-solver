@@ -93,6 +93,36 @@ func OCRNative() string { return strings.TrimSpace(ocrNative) + "\n" }
 // OCRNativeSHA256 is the hash of the born-digital prompt as embedded.
 func OCRNativeSHA256() string { return SHA256(OCRNative()) }
 
+//go:embed ocr_contents.md
+var ocrContents string
+
+// Contents is the prompt for reading a page of a table of contents.
+//
+// It is a third prompt and not a rule added to either of the other two, and the
+// reason is what those two do with a contents page. The scanned prompt asks for
+// Markdown with the structure marked in hashes, and a model following it reads
+// the contents of Theory of Sets as a list of headings with the leader dots and
+// the page numbers thrown away as layout. That is the right answer for a page of
+// prose and the wrong one here, where the page numbers are the whole content:
+// the contents is the only place in a volume that says where every no. begins,
+// and an entry without its page says nothing at all.
+//
+// So this asks for plain text laid out as the page lays it out, indentation and
+// leaders and page labels kept, which is what the volumes with a working text
+// layer hand the contents reader already. The reader downstream is then the same
+// code for both, and what the model says is checked against the page map and
+// against the order of the contents rather than believed.
+//
+// It exists because several volumes have no other source. The scan of Espaces
+// vectoriels topologiques prints every entry of its contents with leaders and no
+// page at all, and the scan of Groupes et algebres de Lie chapitre 9 keeps the
+// label on the last few lines and drops it from the rest. Nothing can be read
+// out of either.
+func Contents() string { return strings.TrimSpace(ocrContents) + "\n" }
+
+// ContentsSHA256 is the hash of the contents prompt as embedded.
+func ContentsSHA256() string { return SHA256(Contents()) }
+
 //go:embed clip_line.md
 var clipLine string
 

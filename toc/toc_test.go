@@ -852,3 +852,49 @@ func TestALabelWithNoLeadersIsStillALabel(t *testing.T) {
 		t.Errorf("the end of %q was read as a label", other)
 	}
 }
+
+// The two fixtures below are the contents of the French Espaces vectoriels
+// topologiques as pdftotext -layout returns it and as the model reads the same
+// page image. The scan captured the titles and the leader dots and not one of
+// the page numbers, which stand in a column of their own at the right margin.
+const evtLayer = `                                      Table des matières
+
+
+       § 1 . Espaces vectoriels topologiques . . . . . . . . . . . . . . . . . . . . . .
+              1. Définition d'un espace vectoriel topologique . . . . . . . . . . . .
+              2 . Espaces normés sur un corps valué . . . . . . . . . . . . . . . . . .`
+
+const evtRead = `Table des matières
+
+§ 1. Espaces vectoriels topologiques ....... II.1
+    1. Définition d'un espace vectoriel topologique ....... II.1
+    2. Espaces normés sur un corps valué ....... II.3`
+
+func TestAReadingWithThePagesOnItBeatsALayerWithout(t *testing.T) {
+	pages := []string{"front matter", evtLayer, "chapter I"}
+	out := Overlay(pages, map[int]string{2: evtRead})
+	if out[1] != evtRead {
+		t.Fatalf("the layer was kept over the reading:\n%s", out[1])
+	}
+	if out[0] != pages[0] || out[2] != pages[2] {
+		t.Errorf("a page nobody read was replaced")
+	}
+	// The originals are not written through.
+	if pages[1] != evtLayer {
+		t.Errorf("Overlay wrote into the pages it was given")
+	}
+}
+
+func TestAReadingThatCarriesLessThanTheLayerIsDropped(t *testing.T) {
+	// What the ordinary page prompt returns for a contents page. It is a fair
+	// reading of the words and it has thrown away every page number, which is
+	// the whole of what the contents is for.
+	const asHeadings = `## § 1. Espaces vectoriels topologiques
+### 1. Définition d'un espace vectoriel topologique
+### 2. Espaces normés sur un corps valué`
+	pages := []string{evtRead}
+	out := Overlay(pages, map[int]string{1: asHeadings})
+	if out[0] != evtRead {
+		t.Fatalf("a reading with no pages in it replaced one that had them:\n%s", out[0])
+	}
+}

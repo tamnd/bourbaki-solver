@@ -78,7 +78,7 @@ func ocrAudit(args []string) error {
 		os.Exit(2)
 	}
 
-	state, err := ocrSetup(*book, defaultQueueRoot(), false)
+	state, err := ocrSetup(*book, defaultQueueRoot(), false, false)
 	if err != nil {
 		return err
 	}

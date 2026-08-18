@@ -61,7 +61,10 @@ type setup struct {
 // could not carry: a commutative diagram is not in the text layer at all. Those
 // pages are named in the extraction report, rendered by render -flagged, and
 // read here, and nothing else of that volume is.
-func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
+//
+// contents is the door for the pages of a table of contents, which are asked a
+// different question. See prompt.Contents.
+func ocrSetup(book, queueRoot string, flagged, contents bool) (setup, error) {
 	var out setup
 	root, err := corpus.Root()
 	if err != nil {
@@ -80,6 +83,9 @@ func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
 			entry.ID, entry.Nature, entry.Extraction)
 	}
 	out.ask = prompt.OCRFor(entry.ID)
+	if contents {
+		out.ask = prompt.Contents()
+	}
 	var only map[int]bool
 	if flagged {
 		out.ask = prompt.OCRNative()
@@ -110,6 +116,28 @@ func ocrSetup(book, queueRoot string, flagged bool) (setup, error) {
 	out.root, out.entry, out.pmap = root, entry, pmap
 	out.manifest, out.queue, out.only = manifest, q, only
 	return out, nil
+}
+
+// contentsRange refuses a contents run that names no pages.
+//
+// The contents is a handful of pages and the prompt that reads it is wrong for
+// every other page of the volume: it asks for plain text with the leaders and
+// the page numbers kept, and a page of prose read that way loses its headings
+// and its mathematics. Without a range the run would put four hundred pages of
+// body text through it, at a page a minute, and overwrite the readings already
+// on disk. So the range is required rather than defaulted.
+func contentsRange(contents bool, first, last int) error {
+	if !contents {
+		return nil
+	}
+	if first <= 0 || last <= 0 {
+		return fmt.Errorf("-contents reads a table of contents and needs -f and -l: " +
+			"the prompt is wrong for a page of the body, and the default range is the whole volume")
+	}
+	if last < first {
+		return fmt.Errorf("-contents: page %d comes before page %d", last, first)
+	}
+	return nil
 }
 
 func (s setup) expect(page int) ocr.Expect {
@@ -189,6 +217,7 @@ func ocrFill(args []string) error {
 	fs := flag.NewFlagSet("ocr fill", flag.ExitOnError)
 	book, _, _, queueRoot, first, last, _, _, _, _ := ocrFlags(fs)
 	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
+	contents := fs.Bool("contents", false, "read the pages as a table of contents")
 	unread := fs.Bool("unread", false, "only the pages with no reading committed")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -197,7 +226,10 @@ func ocrFill(args []string) error {
 		fs.Usage()
 		os.Exit(2)
 	}
-	state, err := ocrSetup(*book, *queueRoot, *flagged)
+	if err := contentsRange(*contents, *first, *last); err != nil {
+		return err
+	}
+	state, err := ocrSetup(*book, *queueRoot, *flagged, *contents)
 	if err != nil {
 		return err
 	}
@@ -241,6 +273,9 @@ func ocrRun(args []string) error {
 	// purpose: rendering the pages of a born-digital volume is cheap and local,
 	// reading them costs rationed uploads.
 	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
+	// The contents of a volume is three to eight pages and is asked a different
+	// question from the rest of it, so it is asked for by name and with a range.
+	contents := fs.Bool("contents", false, "read the pages as a table of contents")
 	// A run against a starved pool spends its uploads on the pages nothing has
 	// read yet, and a re-read is then something asked for rather than something
 	// a prompt edit causes.
@@ -252,7 +287,10 @@ func ocrRun(args []string) error {
 		fs.Usage()
 		os.Exit(2)
 	}
-	state, err := ocrSetup(*book, *queueRoot, *flagged)
+	if err := contentsRange(*contents, *first, *last); err != nil {
+		return err
+	}
+	state, err := ocrSetup(*book, *queueRoot, *flagged, *contents)
 	if err != nil {
 		return err
 	}
