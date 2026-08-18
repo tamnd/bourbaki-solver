@@ -6,7 +6,7 @@ the question alone, since its number is held elsewhere, and it is often set in
 lettered parts, `(a)`, `(b)`, `(c)`. The letters are the parts' names and a
 solution cites them, so keep every one of them, in the same order, with the same
 brackets, and do not renumber them and do not run two of them together. An
-exercise asks the reader to do something, so keep it asking: what the English
+exercise asks the reader to do something, so keep it asking: what the {{SOURCE}}
 puts as show, deduce, prove or give an example is what the {{LANGUAGE}} puts,
 and not a statement that the thing is so.
 
@@ -61,7 +61,7 @@ blockquote markers, table pipes, the `---` of a rule. Bold and italic in
 Bourbaki mark a term being defined, so keep the marks around the {{LANGUAGE}}
 term.
 
-Use the terminology given below wherever the English term appears. It is the
+Use the terminology given below wherever the {{SOURCE}} term appears. It is the
 glossary this whole translation is held to, and a passage that renders a term
 its own way makes the book read as several books.
 
@@ -71,7 +71,7 @@ no closing remark. The first line of your answer is the first line of the
 passage. The last line of your answer is the last line of the passage.
 
 If a sentence defeats you, translate it as best you can and carry on. Do not
-leave it in English, do not write a note where it should be, and do not stop
+leave it in {{SOURCE}}, do not write a note where it should be, and do not stop
 early. An answer that ends in the middle is worse than an awkward sentence,
 because the missing part is not visible in the file that comes out.
 

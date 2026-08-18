@@ -201,7 +201,7 @@ func runTranslate(args []string) error {
 	if *checkGlossary {
 		return checkGlossaryOnDisk(root, *lang, *book, *chapter, *file, *all)
 	}
-	promptHash, err := prompt.TranslateSHA256(*lang)
+	promptHash, err := prompt.TranslateSHA256("en", *lang)
 	if err != nil {
 		return err
 	}
@@ -1087,7 +1087,7 @@ func translateQuestion(g *glossary.Glossary, lang, body string) (string, error) 
 }
 
 func translateQuestionWithNote(g *glossary.Glossary, lang, body, note string) (string, error) {
-	return prompt.Translate(lang, translate.GlossaryBlock(g, lang, body), note, body)
+	return prompt.Translate("en", lang, translate.GlossaryBlock(g, lang, body), note, body)
 }
 
 // modelsUsed is every model that answered a chunk of one section, in the order

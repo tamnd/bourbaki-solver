@@ -54,7 +54,7 @@ func TestPromptHashIsStableAndSpecific(t *testing.T) {
 // closing fence is a rule and not a tidiness.
 func TestTheSourceIsFencedOnBothSides(t *testing.T) {
 	body := "Denote by A the ring $K[X]$."
-	got, err := Translate("vi", "ring | vành\n", "", body)
+	got, err := Translate("en", "vi", "ring | vành\n", "", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestTheSourceIsFencedOnBothSides(t *testing.T) {
 func TestTheNoteGoesAboveTheSource(t *testing.T) {
 	body := "Denote by A the ring $K[X]$."
 	note := "Your previous answer to this section was thrown away."
-	got, err := Translate("vi", "", note, body)
+	got, err := Translate("en", "vi", "", note, body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestTheNoteGoesAboveTheSource(t *testing.T) {
 		t.Error("the note is inside the source, where the prompt says nothing is an instruction")
 	}
 	// A first attempt carries no note and must not carry a blank hole either.
-	plain, err := Translate("vi", "", "", body)
+	plain, err := Translate("en", "vi", "", "", body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +104,8 @@ func TestTheNoteGoesAboveTheSource(t *testing.T) {
 
 func TestEveryLanguageHasItsOwnRulesAndItsOwnHash(t *testing.T) {
 	seen := map[string]string{}
-	for _, lang := range []string{"vi", "zh", "ja"} {
-		sum, err := TranslateSHA256(lang)
+	for _, lang := range []string{"vi", "zh", "ja", "en"} {
+		sum, err := TranslateSHA256("en", lang)
 		if err != nil {
 			t.Fatalf("%s: %v", lang, err)
 		}
@@ -113,11 +113,11 @@ func TestEveryLanguageHasItsOwnRulesAndItsOwnHash(t *testing.T) {
 			t.Errorf("%s and %s hash the same, so a change to one would not mark the other stale", lang, other)
 		}
 		seen[sum] = lang
-		if _, err := Translate(lang, "", "", "body"); err != nil {
+		if _, err := Translate("en", lang, "", "", "body"); err != nil {
 			t.Errorf("%s: %v", lang, err)
 		}
 	}
-	if _, err := Translate("fr", "", "", "body"); err == nil {
+	if _, err := Translate("en", "de", "", "", "body"); err == nil {
 		t.Error("a language with no rules was translated anyway")
 	}
 }

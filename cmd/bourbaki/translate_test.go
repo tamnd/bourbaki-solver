@@ -580,11 +580,11 @@ func TestTheRetryNoteOnlyAdvisesOnWhatFailed(t *testing.T) {
 // marks every translated file in the corpus stale and buys a run of the whole
 // fleet; a sentence added here changes nothing that is already written.
 func TestTheRetryNoteDoesNotMoveThePromptHash(t *testing.T) {
-	before, err := prompt.TranslateSHA256("vi")
+	before, err := prompt.TranslateSHA256("en", "vi")
 	if err != nil {
 		t.Fatal(err)
 	}
-	q, err := prompt.Translate("vi", "", retryNote([]translate.Problem{
+	q, err := prompt.Translate("en", "vi", "", retryNote([]translate.Problem{
 		{Rule: translate.RuleBibliography, Msg: "an entry was translated"}}), "Let A be a ring.")
 	if err != nil {
 		t.Fatal(err)
@@ -592,7 +592,7 @@ func TestTheRetryNoteDoesNotMoveThePromptHash(t *testing.T) {
 	if !strings.Contains(q, "A numbered bibliography entry") {
 		t.Error("the advice did not reach the question")
 	}
-	after, err := prompt.TranslateSHA256("vi")
+	after, err := prompt.TranslateSHA256("en", "vi")
 	if err != nil {
 		t.Fatal(err)
 	}
