@@ -39,6 +39,13 @@ type Term struct {
 	ZH string `yaml:"zh,omitempty"`
 	JA string `yaml:"ja,omitempty"`
 
+	// FR is the term as the French printing spells it, and it is a source rather
+	// than a target: the other three columns are what a translation is held to,
+	// and this one is what a French passage is recognised by. It is what lets the
+	// French only volumes be read into English against the vocabulary the English
+	// volumes already use, instead of against whatever a model reaches for.
+	FR string `yaml:"fr,omitempty"`
+
 	// Note is for the term whose translation depends on something a translator
 	// cannot see in the phrase, which in these volumes is usually a Bourbaki
 	// convention: a ring is associative with a unit unless it says otherwise,
@@ -85,14 +92,17 @@ func (t Term) In(lang string) string {
 		return t.JA
 	case "en":
 		return t.EN
+	case "fr":
+		return t.FR
 	}
 	return ""
 }
 
 // Set writes the term's rendering in one language. A language this glossary
 // does not carry is ignored rather than added, because the audit and the
-// translation prompts both read the three fields by name and a fourth would go
-// nowhere.
+// translation prompts both read the columns by name and one they do not know
+// would go nowhere. English is not settable: it is the headword every other
+// column hangs off, and a pass that could rewrite it could unhang the row.
 func (t *Term) Set(lang, value string) {
 	switch lang {
 	case "vi":
@@ -101,6 +111,8 @@ func (t *Term) Set(lang, value string) {
 		t.ZH = value
 	case "ja":
 		t.JA = value
+	case "fr":
+		t.FR = value
 	}
 }
 
@@ -218,6 +230,23 @@ func (g Glossary) In(lang string) map[string]Term {
 	for _, t := range g.Terms {
 		if t.In(lang) != "" {
 			out[Key(t.EN)] = t
+		}
+	}
+	return out
+}
+
+// Keyed is every term that has a rendering in this language, keyed by that
+// rendering rather than by the English.
+//
+// In keys by the English because the English is the headword and the other
+// columns are what it is held to. Reading a French passage runs the other way:
+// what is in hand is the French and what is wanted is the row it belongs to, so
+// the French is what has to be looked up.
+func (g Glossary) Keyed(lang string) map[string]Term {
+	out := map[string]Term{}
+	for _, t := range g.Terms {
+		if v := t.In(lang); v != "" {
+			out[Key(v)] = t
 		}
 	}
 	return out
