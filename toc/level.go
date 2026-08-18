@@ -69,6 +69,11 @@ func Level(b corpus.BookTOC, pdfPage, number int, title string) int {
 	want := normalize(title)
 	section, subsection := false, false
 	for _, c := range b.Chapters {
+		for _, ss := range c.Subsections {
+			if ss.PDFPage == pdfPage && ss.Number == number && normalize(ss.Title) == want {
+				subsection = true
+			}
+		}
 		for _, s := range c.Sections {
 			if s.PDFPage == pdfPage && s.Number == number && normalize(s.Title) == want {
 				section = true

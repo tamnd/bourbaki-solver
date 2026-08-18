@@ -682,30 +682,90 @@ func TestALineWithATitleIsLeftAlone(t *testing.T) {
 	}
 }
 
-// A no. the contents lists with no § over it is reported, not dropped.
+// A chapter that prints no § owns its nos itself.
 //
-// Chapter I of the English Integration is the volume that does this: it prints
-// three nos straight under the chapter heading and never opens a §. Nothing in
-// the manifest can hold them, and a manifest that left them out quietly would
-// say that the chapter has no content at all.
-func TestANoWithNoSectionOverItIsReported(t *testing.T) {
+// Chapter I of the English Integration is the one chapter of the library that
+// does this: three nos straight under the chapter heading, then the run of
+// exercises the volume names for the chapter, then the historical note, and
+// never a § anywhere. The lines here are its contents entries with the leaders
+// shortened. Nothing in the manifest used to be able to hold them, and a
+// manifest that left them out would say the chapter has no content at all.
+func TestAChapterWithNoSectionOwnsItsNos(t *testing.T) {
 	const contents = `                                    Contents
 
 CHAPTER VIII INEQUALITIES OF CONVEXITY . . . . . . . . . . . . . . . . 1
    1. The fundamental inequality of convexity . . . . . . . . . . . . . 1
    2. The inequalities of Holder and Minkowski . . . . . . . . . . . . . 3
+   3. The semi-norms Np . . . . . . . . . . . . . . . . . . . . . . . . . 4
+Exercises for Ch. VIII . . . . . . . . . . . . . . . . . . . . . . . . . 6
+Historical note . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
 `
 	res, err := Parse([]string{contents}, testMap(), Options{Book: "test", Chapters: []string{"VIII"}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Problems) != 2 {
-		t.Fatalf("%d problems, want one for each no.: %v", len(res.Problems), res.Problems)
+	if len(res.Problems) > 0 {
+		t.Fatalf("problems: %v", res.Problems)
 	}
-	for _, p := range res.Problems {
-		if p.Chapter != "VIII" || !strings.Contains(p.Detail, "before any §") {
-			t.Errorf("problem = %v", p)
+	c, ok := res.Get("VIII")
+	if !ok {
+		t.Fatal("no chapter VIII")
+	}
+	if len(c.Sections) != 0 {
+		t.Errorf("%d §, want none: %+v", len(c.Sections), c.Sections)
+	}
+	if len(c.Subsections) != 3 {
+		t.Fatalf("%d no. on the chapter, want 3: %+v", len(c.Subsections), c.Subsections)
+	}
+	want := []corpus.Subsection{
+		{Number: 1, Title: "The fundamental inequality of convexity", Page: 1, PDFPage: 3},
+		{Number: 2, Title: "The inequalities of Holder and Minkowski", Page: 3, PDFPage: 5},
+		{Number: 3, Title: "The semi-norms Np", Page: 4, PDFPage: 6},
+	}
+	for i, sub := range c.Subsections {
+		if sub != want[i] {
+			t.Errorf("no. %d = %+v, want %+v", i+1, sub, want[i])
 		}
+	}
+	// The run of exercises is named for the chapter, because there is no § to
+	// name it for, so it goes where a chapter that gathers its exercises at the
+	// end keeps its own.
+	if c.Exercises == nil {
+		t.Fatal("the chapter's exercises were dropped")
+	}
+	if c.Exercises.Page != 6 || c.Exercises.PDFPage != 8 {
+		t.Errorf("exercises at printed %d, pdf %d, want 6 and 8", c.Exercises.Page, c.Exercises.PDFPage)
+	}
+	if c.Historical == nil || c.Historical.Page != 8 {
+		t.Errorf("historical note = %+v, want printed page 8", c.Historical)
+	}
+	if _, _, sub, ex := res.Counts(); sub != 3 || ex != 1 {
+		t.Errorf("counts say %d no. and %d exercise runs, want 3 and 1", sub, ex)
+	}
+}
+
+// A chapter that ends up holding both is a § line misread as a no.
+//
+// The two cannot be told apart on the line, because the § that settles it comes
+// further down the page, so the reader collects the nos and the refusal is made
+// once the whole contents has been read.
+func TestAChapterHoldingBothNosAndSectionsIsRefused(t *testing.T) {
+	const contents = `                                    Contents
+
+CHAPTER VIII INEQUALITIES OF CONVEXITY . . . . . . . . . . . . . . . . 1
+   1. The fundamental inequality of convexity . . . . . . . . . . . . . 1
+§ 1. Riesz spaces . . . . . . . . . . . . . . . . . . . . . . . . . . . . 3
+   1. Definition of Riesz spaces . . . . . . . . . . . . . . . . . . . . 3
+`
+	res, err := Parse([]string{contents}, testMap(), Options{Book: "test", Chapters: []string{"VIII"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) != 1 {
+		t.Fatalf("%d problems, want one: %v", len(res.Problems), res.Problems)
+	}
+	if p := res.Problems[0]; p.Chapter != "VIII" || !strings.Contains(p.Detail, "was read as a no.") {
+		t.Errorf("problem = %v", p)
 	}
 }
 

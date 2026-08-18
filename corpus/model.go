@@ -32,6 +32,18 @@ type Chapter struct {
 	// Where the volume prints them per §, this stays nil and each Section
 	// carries its own.
 	Exercises *Locator `yaml:"exercises,omitempty"`
+
+	// Subsections is a run of nos the chapter owns outright, with no § over
+	// them. Chapter I of the English Integration is the one chapter of the
+	// library that prints its content this way: three nos straight under the
+	// chapter heading, then "Exercises for Ch. I" and the historical note, and
+	// never a § anywhere. The volume cites them as I.1, I.3 and I.4, by chapter
+	// and page, because there is no § to name.
+	//
+	// A chapter has these or it has Sections, never both. One before the first §
+	// of a chapter that goes on to open §§ is a misread contents line, not a
+	// printing, and the reader says so rather than filing it here.
+	Subsections []Subsection `yaml:"subsections,omitempty"`
 }
 
 // Section is a § of a chapter.
