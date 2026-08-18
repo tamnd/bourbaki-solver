@@ -160,8 +160,11 @@ var (
 	// French "Appendice". Bourbaki closes chapters II, III and VIII with
 	// appendices that carry no. and exercises just as a § does, so they are
 	// held as sections with the appendix flag set rather than as a fourth kind
-	// of thing.
-	appendixRe = regexp.MustCompile(`(?i)^\s*appendi[xc]e?\s*([0-9IlO|]{1,2})?\s*[.,:]?\s*[\p{Pd}]?\s*(.*)$`)
+	// of thing. Chapter IX of the English Integration 7 to 9 closes with one it
+	// calls an annex, "ANNEX: Complements on Hilbert spaces", and it carries
+	// no. and exercises like the rest of them.
+	appendixRe = regexp.MustCompile(
+		`(?i)^\s*(?:appendi[xc]e?|annexe?)\s*([0-9IlO|]{1,2})?\s*[.,:]?\s*[\p{Pd}]?\s*(.*)$`)
 
 	// "Exercises", "Exercises for § 3", "Exercises on § 3", and the French
 	// "Exercices" and "Exercices du § 3". The number takes a space in the middle
@@ -176,7 +179,7 @@ var (
 	// before the § form or it comes out as the run of whatever § was listed
 	// last.
 	exercisesAppendixRe = regexp.MustCompile(
-		`(?i)^\s*exerci[cs]es?\b[^0-9§]*?appendi[xc]e?\s*([0-9IVXlO|]{1,4})?`)
+		`(?i)^\s*exerci[cs]es?\b[^0-9§]*?(?:appendi[xc]e?|annexe?)\s*([0-9IVXlO|]{1,4})?`)
 
 	// "Historical Note", and the French "Note historique".
 	historicalRe = regexp.MustCompile(`(?i)^\s*(?:historical\s+note|note\s+historique)\b`)
@@ -322,6 +325,32 @@ func writeRoman(n int) string {
 	return b.String()
 }
 
+// indentOf is how far a line is pushed in from the left margin.
+func indentOf(line string) int {
+	return len(line) - len(strings.TrimLeft(line, " \t"))
+}
+
+// nested says a numbered line is a list inside an entry rather than a no. of
+// its own. Chapter VII of the English Integration 7 to 9 lists no. 3 of § 3 as
+// "Examples: 1. General linear group" and sets its other seven examples on
+// their own lines, indented far past the nos around them. A no. is set at the
+// same indent as the rest of its run, give or take the width of its own
+// number, so anything pushed much further in belongs to the entry above it.
+//
+// The indent is only worth reading against the rest of the page it is on, and
+// that list runs over onto the next one, where there is nothing above it to
+// read it against. What carries it over is the numbering: examples 6, 7 and 8
+// go on from example 5 rather than from no. 3, which is where the § itself had
+// got to.
+const nestIndent = 8
+
+func nested(line string, runIndent, num, lastNo, nestNum int) bool {
+	if runIndent >= 0 && indentOf(line) >= runIndent+nestIndent {
+		return true
+	}
+	return nestNum > 0 && num == nestNum+1 && num != lastNo+1
+}
+
 // splitTail cuts a line into its text and the page it points at. A line with no
 // page is not an error: a long title wraps, and the page sits on the wrapped
 // line.
@@ -385,6 +414,39 @@ func noLeader(line, text string, e entry, mark SectionMark) (string, tail, bool,
 		return text, tail{}, false, e
 	}
 	return cut, tail{page: p}, true, got
+}
+
+// labelNoLeaderRe is a label at the end of a line with nothing but a space in
+// front of it.
+var labelNoLeaderRe = regexp.MustCompile(`\s([A-Za-z0-9.,\-|·]{2,8})\s*$`)
+
+// noLeaderLabel is noLeader for the volumes that number their pages by chapter.
+// The 2004 Integration sets three of its contents lines with no leaders at all,
+// among them the title of chapter IX, which runs the width of the line and
+// takes its label straight after the last word.
+//
+// It is held in tighter than noLeader is, because a label is a good deal easier
+// to see where there is none: as well as having to announce itself and to go on
+// announcing the same thing once the label is off, the label has to name the
+// chapter the line is already known to be in.
+func noLeaderLabel(line, text string, e entry, mark SectionMark, want string) (string, tail, bool, entry) {
+	if want == "" {
+		return text, tail{}, false, e
+	}
+	m := labelNoLeaderRe.FindStringSubmatchIndex(line)
+	if m == nil {
+		return text, tail{}, false, e
+	}
+	ch, p, ok := readLabel(line[m[2]:m[3]], want)
+	if !ok || ch != want {
+		return text, tail{}, false, e
+	}
+	cut := strings.TrimRight(line[:m[0]], " \t")
+	got := classify(cut, mark)
+	if got.kind != e.kind || got.number != e.number || got.numeral != e.numeral {
+		return text, tail{}, false, e
+	}
+	return cut, tail{chapter: ch, page: p}, true, got
 }
 
 // kind is what a contents line announces.
@@ -580,6 +642,12 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	// dropped on purpose and are not a chapter losing its content.
 	var underNote bool
 	var pend *pending
+	// runIndent is where the nos of the § being read start on the line, or -1
+	// between runs. It is what tells a numbered line that is really a list
+	// inside an entry from a no. of its own. lastNo is the last no. taken into
+	// the run, and nestNum the last item taken out of it, which is what reads
+	// a list that runs over onto the next page.
+	runIndent, lastNo, nestNum := -1, 0, 0
 
 	commit := func(e entry, t tail) {
 		switch e.kind {
@@ -656,6 +724,11 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		// A wrapped title never crosses a page break in these volumes, and
 		// letting one try is how a stray line picks up somebody else's page.
 		pend = nil
+		// The indent of a run is read off the page it is on. A contents that
+		// runs over sets the margin of the next page where it likes, and the
+		// English Algebra I moves it nine columns for the second half of the
+		// nos of chapter III § 8.
+		runIndent = -1
 		for _, line := range mend(strings.Split(pg, "\n"), g) {
 			if strings.TrimSpace(line) == "" {
 				continue
@@ -668,6 +741,28 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			e := classify(text, g.Mark)
 			if !hasPage && e.kind != kindNone && g.Page == Bare {
 				text, t, hasPage, e = noLeader(line, text, e, g.Mark)
+			}
+			if !hasPage && e.kind != kindNone && g.Page == Label {
+				// A chapter line carries its own numeral, and it is the
+				// chapter about to open rather than the one still open that
+				// its label names.
+				exp := want
+				if e.kind == kindChapter {
+					exp = e.numeral
+				}
+				text, t, hasPage, e = noLeaderLabel(line, text, e, g.Mark, exp)
+			}
+			if e.kind == kindSubsection && nested(line, runIndent, e.number, lastNo, nestNum) {
+				nestNum = e.number
+				e = entry{}
+			}
+			if e.kind == kindSubsection {
+				nestNum, lastNo = 0, e.number
+				if i := indentOf(line); runIndent < 0 || i < runIndent {
+					runIndent = i
+				}
+			} else if e.kind != kindNone {
+				runIndent, lastNo, nestNum = -1, 0, 0
 			}
 
 			if e.kind == kindNone {
@@ -942,11 +1037,18 @@ func mend(lines []string, g Grammar) []string {
 // a numeral would put a fictitious no. in the tree.
 const minEntries = 3
 
+// minRunEntries is what a page needs to go on with a run that is already open.
+// The last page of the contents of the English Integration 7 to 9 lists two
+// things, the exercises of the annex of chapter IX and the historical note,
+// and then turns to the index. A page that follows a page of contents has much
+// less to prove than one that has to open the run on its own.
+const minRunEntries = 2
+
 // contentsPages keeps the pages that carry a table of contents.
 func contentsPages(pages []string, g Grammar) []string {
 	var out []string
 	for _, pg := range pages {
-		if readsAsContents(pg, g) {
+		if readsAsContents(pg, g, minEntries) {
 			out = append(out, pg)
 		}
 	}
@@ -955,7 +1057,7 @@ func contentsPages(pages []string, g Grammar) []string {
 
 // readsAsContents reports whether the page carries enough complete contents
 // lines to be one.
-func readsAsContents(pg string, g Grammar) bool {
+func readsAsContents(pg string, g Grammar, min int) bool {
 	n := 0
 	for _, line := range strings.Split(pg, "\n") {
 		text, _, ok := splitTail(line, g.Page)
@@ -963,7 +1065,7 @@ func readsAsContents(pg string, g Grammar) bool {
 			n++
 		}
 	}
-	return n >= minEntries
+	return n >= min
 }
 
 // contentsRun is the table of contents as the volume prints it, which is a run
@@ -982,7 +1084,7 @@ func readsAsContents(pg string, g Grammar) bool {
 func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
 	keep := make([]bool, len(pages))
 	for i, pg := range pages {
-		if !readsAsContents(pg, g) {
+		if !readsAsContents(pg, g, minEntries) {
 			continue
 		}
 		e, ok := pm.Lookup(i + 1)
@@ -992,7 +1094,7 @@ func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
 		if !keep[i] {
 			continue
 		}
-		for j := i + 1; j < len(pages) && !keep[j] && readsAsContents(pages[j], g); j++ {
+		for j := i + 1; j < len(pages) && !keep[j] && readsAsContents(pages[j], g, minRunEntries); j++ {
 			keep[j] = true
 		}
 	}

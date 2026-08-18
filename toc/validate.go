@@ -87,7 +87,11 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 			if s.PDFPage == 0 {
 				add(c.Numeral, s.Number, "printed page %d is on no pdf page", s.Page)
 			}
-			if s.Title == "" {
+			// An appendix is allowed to have no title. Chapter VII of the
+			// English Integration 7 to 9 prints "Appendix I" and "Appendix II"
+			// bare, in the contents and over the appendix itself, and a § is
+			// the only thing that always carries one.
+			if s.Title == "" && !s.Appendix {
 				add(c.Numeral, s.Number, "no title")
 			}
 

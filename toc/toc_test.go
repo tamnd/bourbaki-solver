@@ -708,3 +708,147 @@ CHAPTER VIII INEQUALITIES OF CONVEXITY . . . . . . . . . . . . . . . . 1
 		}
 	}
 }
+
+// A numbered list inside an entry is not a run of nos, on the page it starts on
+// or on the page it runs over onto.
+//
+// Chapter VII of the English Integration 7 to 9 lists no. 3 of its § 3 as
+// "Examples: 1. General linear group" and sets the other seven examples on
+// their own lines. Read as nos they take the run to eleven where the volume
+// prints three, and the three problems that come of it kept the whole volume
+// out of the manifest.
+func TestAListInsideAnEntryIsNotARunOfNos(t *testing.T) {
+	const first = `                                    Contents
+
+CHAPTER VIII HAAR MEASURE . . . . . . . . . . . . . . . . . . . . . . . 1
+1. Applications and examples . . . . . . . . . . . . . . . . . . . . . . 1
+   1. Compact groups of linear mappings . . . . . . . . . . . . . . . . . 1
+   2. Triviality of fibered spaces . . . . . . . . . . . . . . . . . . . 3
+   3. Examples: 1. General linear group . . . . . . . . . . . . . . . . . 5
+                2. Affine group . . . . . . . . . . . . . . . . . . . . . 6
+                3. Strict triangular group . . . . . . . . . . . . . . . 7
+                4. Large triangular group . . . . . . . . . . . . . . . . 8
+                5. Special triangular group . . . . . . . . . . . . . . . 9
+`
+	const second = `18                              INTEGRATION
+
+                6. Special linear group . . . . . . . . . . . . . . . . . 10
+                7. Iwasawa decomposition . . . . . . . . . . . . . . . . . 10
+2. The space of closed subgroups . . . . . . . . . . . . . . . . . . . . 11
+   1. The space of Haar measures . . . . . . . . . . . . . . . . . . . . 11
+`
+	pages := make([]string, 22)
+	pages[19], pages[20] = first, second
+	res, err := Parse(pages, testMap(), Options{Book: "test", Chapters: []string{"VIII"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) > 0 {
+		t.Errorf("problems: %v", res.Problems)
+	}
+	c, ok := res.Get("VIII")
+	if !ok {
+		t.Fatal("no chapter VIII")
+	}
+	if len(c.Sections) != 2 {
+		t.Fatalf("chapter VIII has %d §, want 2", len(c.Sections))
+	}
+	if got := len(c.Sections[0].Subsections); got != 3 {
+		t.Errorf("§ 1 has %d no., want 3, so the examples were read as nos", got)
+	}
+	if got := len(c.Sections[1].Subsections); got != 1 {
+		t.Errorf("§ 2 has %d no., want 1", got)
+	}
+}
+
+// A no. that carries on the numbering of its own run after a page break is a
+// no. and not part of the list above it. The English Algebra I breaks the nos
+// of chapter III § 8 between 9 and 10 and sets the second page nine columns
+// further in.
+func TestARunThatCarriesOnOverAPageBreakIsARun(t *testing.T) {
+	const first = `                                    Contents
+
+CHAPTER VIII HAAR MEASURE . . . . . . . . . . . . . . . . . . . . . . . 1
+1. Projective spaces . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+     8. Projective completion of an affine space . . . . . . . . . . . . 3
+     9. Extension of rational functions . . . . . . . . . . . . . . . . . 4
+`
+	const second = `                                   CONTENTS
+
+              10. Projective linear mappings . . . . . . . . . . . . . . 5
+              11. Projective space structure . . . . . . . . . . . . . . 7
+`
+	pages := make([]string, 22)
+	pages[19], pages[20] = first, second
+	res, err := Parse(pages, testMap(), Options{Book: "test", Chapters: []string{"VIII"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := res.Get("VIII")
+	if !ok {
+		t.Fatal("no chapter VIII")
+	}
+	if got := len(c.Sections[0].Subsections); got != 4 {
+		t.Errorf("§ 1 has %d no., want 4, so the page break lost the rest of the run", got)
+	}
+}
+
+// An appendix the volume calls an annex is an appendix, and so is the run of
+// exercises that goes with it. Chapter IX of the English Integration 7 to 9 is
+// the only one of them that does this.
+func TestAnAnnexIsAnAppendix(t *testing.T) {
+	e := classify("ANNEX: Complements on Hilbert spaces", Pilcrow)
+	if e.kind != kindAppendix || e.title != "Complements on Hilbert spaces" {
+		t.Errorf("classify of the annex = %+v", e)
+	}
+	x := classify("Exercises for the Annex", Pilcrow)
+	if x.kind != kindExercises || !x.appendix {
+		t.Errorf("classify of the exercises of the annex = %+v", x)
+	}
+}
+
+// An appendix with no title is not missing anything. Chapter VII of the English
+// Integration 7 to 9 prints "Appendix I" and "Appendix II" bare, in the
+// contents and over the appendices themselves, and both were reported.
+func TestAnAppendixNeedsNoTitle(t *testing.T) {
+	const contents = `                                    Contents
+
+CHAPTER VIII HAAR MEASURE . . . . . . . . . . . . . . . . . . . . . . . 1
+1. Construction of a Haar measure . . . . . . . . . . . . . . . . . . . . 1
+   1. Definitions and notations . . . . . . . . . . . . . . . . . . . . . 1
+Appendix I . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+   1. Polynomial maps . . . . . . . . . . . . . . . . . . . . . . . . . . 5
+`
+	res, err := Parse([]string{contents}, testMap(), Options{Book: "test", Chapters: []string{"VIII"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range res.Problems {
+		if strings.Contains(p.Detail, "no title") {
+			t.Errorf("problem = %v", p)
+		}
+	}
+}
+
+// A line whose title runs the width of the page carries its label with nothing
+// but a space in front of it, and the label still has to name the chapter the
+// line is in.
+//
+// The 2004 Integration sets the title of chapter IX this way, and the label
+// stayed on the end of the title all the way into the manifest.
+func TestALabelWithNoLeadersIsStillALabel(t *testing.T) {
+	const line = "CHAPTER IX. - MEASURES ON HAUSDORFF TOPOLOGICAL SPACES IX.l"
+	text, tl, ok, _ := noLeaderLabel(line, line, classify(line, Pilcrow), Pilcrow, "IX")
+	if !ok || tl.chapter != "IX" || tl.page != 1 {
+		t.Fatalf("noLeaderLabel(%q) = %+v %v, want IX.1", line, tl, ok)
+	}
+	if strings.HasSuffix(text, "IX.l") {
+		t.Errorf("the label was left on the title: %q", text)
+	}
+	// And a title that ends in something that is not the label of the chapter
+	// it is in is left alone.
+	const other = "     2. Bounded measures and linear forms on L2"
+	if _, _, ok, _ := noLeaderLabel(other, other, classify(other, Pilcrow), Pilcrow, "IX"); ok {
+		t.Errorf("the end of %q was read as a label", other)
+	}
+}
