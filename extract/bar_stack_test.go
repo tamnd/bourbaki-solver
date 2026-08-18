@@ -321,3 +321,88 @@ func TestAFractionSetInlineLeavesTheLineAboveAlone(t *testing.T) {
 		t.Errorf("Render: %s, want the second printed line with its fraction", got)
 	}
 }
+
+// Two printed lines of page 100 of Théories spectrales I, the second of which
+// sets the conjugate of f*(1 ⊗ x). The overline of that conjugate runs from 370
+// to 437, and the f* of the sentence above it stands at 416 to 431, inside the
+// bar and well to the right of the middle of it.
+//
+// Nothing on the line above is the numerator of anything. The f* was read as
+// one all the same, the two printed lines were joined, and the Lemme of I,
+// paragraph 4, number 13 lost the heading that makes it a statement.
+var conjugate = pdfsrc.Page{
+	Number: 100, Width: 659, Height: 999,
+	Spans: []pdfsrc.Span{
+		{Top: 305, Left: 81, Width: 51, Height: 14, Text: "Lemme"},
+		{Top: 305, Left: 132, Width: 28, Height: 14, Text: ". —"},
+		{Top: 305, Left: 167, Width: 69, Height: 14, Text: "Pour tout"},
+		{Top: 305, Left: 242, Width: 8, Height: 15, Font: 1, Text: "f"},
+		{Top: 304, Left: 257, Width: 11, Height: 15, Font: 2, Text: "∈"},
+		{Top: 300, Left: 272, Width: 12, Height: 21, Font: 6, Text: "O"},
+		{Top: 305, Left: 286, Width: 25, Height: 14, Text: "(Sp"},
+		{Top: 312, Left: 310, Width: 10, Height: 11, Font: 3, Text: "A"},
+		{Top: 316, Left: 320, Width: 4, Height: 8, Font: 14, Text: "("},
+		{Top: 316, Left: 324, Width: 9, Height: 8, Font: 14, Text: "C"},
+		{Top: 316, Left: 333, Width: 4, Height: 8, Font: 14, Text: ")"},
+		{Top: 305, Left: 339, Width: 6, Height: 14, Text: "("},
+		{Top: 305, Left: 345, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 305, Left: 354, Width: 13, Height: 14, Text: "))"},
+		{Top: 305, Left: 367, Width: 43, Height: 14, Text: ", on a"},
+		{Top: 305, Left: 416, Width: 8, Height: 15, Font: 1, Text: "f"},
+		{Top: 301, Left: 425, Width: 6, Height: 11, Font: 13, Text: "∗"},
+		{Top: 305, Left: 432, Width: 15, Height: 14, Text: "(1"},
+		{Top: 304, Left: 451, Width: 13, Height: 15, Font: 2, Text: "⊗"},
+		{Top: 305, Left: 467, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 305, Left: 476, Width: 24, Height: 14, Text: ") ="},
+		{Top: 305, Left: 505, Width: 8, Height: 15, Font: 1, Text: "f"},
+		{Top: 305, Left: 514, Width: 15, Height: 14, Text: "(1"},
+		{Top: 304, Left: 532, Width: 13, Height: 15, Font: 2, Text: "⊗"},
+		{Top: 305, Left: 549, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 305, Left: 558, Width: 6, Height: 14, Text: ")"},
+		{Top: 305, Left: 565, Width: 5, Height: 14, Text: "."},
+
+		{Top: 331, Left: 99, Width: 115, Height: 14, Text: "Les applications"},
+		{Top: 331, Left: 218, Width: 8, Height: 15, Font: 1, Text: "f"},
+		{Top: 330, Left: 233, Width: 16, Height: 15, Font: 2, Text: "7→"},
+		{Top: 331, Left: 254, Width: 8, Height: 15, Font: 1, Text: "f"},
+		{Top: 331, Left: 263, Width: 15, Height: 14, Text: "(1"},
+		{Top: 330, Left: 281, Width: 13, Height: 15, Font: 2, Text: "⊗"},
+		{Top: 331, Left: 296, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 331, Left: 306, Width: 6, Height: 14, Text: ")"},
+		{Top: 331, Left: 317, Width: 14, Height: 14, Text: "et"},
+		{Top: 331, Left: 336, Width: 8, Height: 15, Font: 1, Text: "f"},
+		{Top: 330, Left: 350, Width: 16, Height: 15, Font: 2, Text: "7→"},
+		{Top: 331, Left: 371, Width: 8, Height: 15, Font: 1, Text: "f"},
+		{Top: 328, Left: 381, Width: 6, Height: 11, Font: 13, Text: "∗"},
+		{Top: 331, Left: 388, Width: 15, Height: 14, Text: "(1"},
+		{Top: 330, Left: 406, Width: 13, Height: 15, Font: 2, Text: "⊗"},
+		{Top: 331, Left: 422, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 331, Left: 432, Width: 6, Height: 14, Text: ")"},
+		{Top: 331, Left: 443, Width: 135, Height: 14, Text: "sont des homomor-"},
+	},
+	Rules: []pdfsrc.Rule{
+		{Top: 301, Left: 504, Width: 60, Thickness: 0.397, Length: 39.96, Size: 4.1},
+		{Top: 327, Left: 370, Width: 67, Thickness: 0.397, Length: 44.69, Size: 4.1},
+	},
+}
+
+// An overline does not take a numerator from the line above it.
+//
+// A numerator stands across the middle of its bar or starts where the bar
+// starts, because TeX centres both halves of a fraction on a bar drawn to the
+// width of the wider one. Something that merely laps over a bar does neither.
+func TestAnOverlineDoesNotJoinTheLineAboveIt(t *testing.T) {
+	lines := Lines(frlay, conjugate)
+	if len(lines) != 2 {
+		for i, one := range lines {
+			t.Logf("line %d: %s", i, Render(one))
+		}
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	if got := Render(lines[0]); !strings.HasPrefix(got, "Lemme") || !strings.HasSuffix(got, `\otimes x)}$.`) {
+		t.Errorf("Render: %s, want the whole of the first printed line and no more", got)
+	}
+	if got := Render(lines[1]); !strings.HasPrefix(got, "Les applications") || !strings.HasSuffix(got, "sont des homomor-") {
+		t.Errorf("Render: %s, want the second printed line whole", got)
+	}
+}
