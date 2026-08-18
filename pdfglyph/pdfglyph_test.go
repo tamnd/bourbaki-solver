@@ -548,3 +548,45 @@ endobj
 		t.Errorf("the CMap was not given the sharp:\n%s", out)
 	}
 }
+
+// A font that keeps its encoding to itself, in the shape the English Algebra
+// writes it: the /Differences array is an inline dictionary inside the font
+// object rather than an object the font points at.
+//
+// This is the extension font of Algebra chapter 8 with its array cut down.
+const algVIIIInline = `%PDF-1.5
+5276 0 obj
+<</BaseFont/XAEWAV+CMEX10/Encoding<</BaseEncoding/WinAnsiEncoding/Differences[0/parenleftbig/parenrightbig 80/summationtext/producttext 98/hatwide 101/tildewide]/Type/Encoding>>/FirstChar 0/FontDescriptor 5277 0 R/LastChar 103/Subtype/Type1/Type/Font>>
+endobj
+`
+
+// An encoding written inside its font is read as that font's.
+//
+// Getting this wrong is not one name missed, it is the wrong table picked for a
+// whole font. baseFonts only ever learned the name of a font that pointed at an
+// encoding of its own, so a font that kept its encoding inside itself had no
+// name, and a nameless font falls through to the mathematics table. The two
+// tables share the wide accents and nothing else of the extension font, so
+// Algebra chapter 8 had its hats and tildes rewritten and every delimiter, sum
+// and product of the volume passed over, and none of them were reported either,
+// since a name is only reported against a font that has one.
+func TestRewriteNamesAnEncodingWrittenInsideItsFont(t *testing.T) {
+	out, res, err := Rewrite([]byte(algVIIIInline))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"parenleftbig", "parenrightbig", "summationtext", "producttext"} {
+		if res.Names[name] != 1 {
+			t.Errorf("replaced %s %d times, want 1", name, res.Names[name])
+		}
+	}
+	// The accents are the two the mathematics table would also have caught, and
+	// they have to land where the extension font puts them and not where the
+	// AMS fonts do.
+	if !strings.Contains(string(out), "98/b       101/e") {
+		t.Errorf("the accents were not read as the extension font's:\n%s", out)
+	}
+	if !strings.Contains(string(out), "[0/zero        /one           80/P ") {
+		t.Errorf("the delimiters were not rewritten:\n%s", out)
+	}
+}

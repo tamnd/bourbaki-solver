@@ -756,15 +756,35 @@ func baseFonts(srcs []*source) map[int]string {
 		for _, o := range src.objs {
 			dict := o.dict(src.buf)
 			bf := baseFontRe.FindStringSubmatch(dict)
+			if bf == nil {
+				continue
+			}
+			name := base(bf[1])
 			ref := encRefRe.FindStringSubmatch(dict)
-			if bf == nil || ref == nil {
+			if ref == nil {
+				// A font that keeps its encoding to itself. The English
+				// Algebra writes /Encoding<</Differences[...]/Type/Encoding>>
+				// inside the font object rather than pointing at an object of
+				// its own, so the array to rewrite and the name of the font
+				// that uses it are the same object and the encoding is named
+				// by the object it is written in.
+				//
+				// Reading this wrong is not a name missed, it is a table
+				// picked. A font with no name falls through to the mathematics
+				// table, and the whole of the extension font of a volume is
+				// then read as though it were the symbol font: the names the
+				// two share are rewritten, everything that belongs to the
+				// extension font alone is passed over, and nothing is reported,
+				// because a name is only reported against a font that has one.
+				if diffRe.MatchString(dict) {
+					out[o.num] = name
+				}
 				continue
 			}
 			num, err := strconv.Atoi(ref[1])
 			if err != nil {
 				continue
 			}
-			name := base(bf[1])
 			if old, ok := out[num]; ok && old != name {
 				out[num] = ""
 				continue
@@ -857,7 +877,7 @@ func tableSum() string {
 	// The rewrite itself is versioned along with the tables, since a prepared
 	// copy is only as good as what made it and a change in what this package
 	// does to a file has to invalidate the copies as surely as a new name does.
-	b.WriteString("v3 tounicode;")
+	b.WriteString("v4 inline encodings;")
 	for _, t := range []map[string]string{cmexNames, mathNames} {
 		keys := make([]string, 0, len(t))
 		for k := range t {
