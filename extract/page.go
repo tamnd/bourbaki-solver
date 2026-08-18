@@ -743,6 +743,20 @@ func runOn(s, next string, c Compounds) (string, bool) {
 	next = strings.TrimLeft(next, " ")
 	switch {
 	case strings.HasSuffix(s, "-$") && compoundWord(next):
+		// An index that is nothing but the minus is a minus sign and not the
+		// spelling of the word on the next line, which is the same reading
+		// emit makes of a hyphen it finds at the end of a formula and for the
+		// same reason: taking the sign out leaves the underscore that opened
+		// the index with nothing after it, and KaTeX refuses the line. Page
+		// 154 of Lie 7 to 9 breaks after the sum of n plus and n minus and
+		// shipped as "$\mathfrak{n}_++\mathfrak{n}_$-in", and page 357 of
+		// Theories spectrales III to V breaks after A minus and shipped as
+		// "$A^$-des". Braces come off an index of one character, so an index
+		// that is nothing but the sign is the one way a line can end in an
+		// underscore and a hyphen.
+		if indexSign(s) {
+			return "", false
+		}
 		return strings.TrimRight(strings.TrimSuffix(s, "-$"), " ") + "$-" + next, true
 	case strings.HasSuffix(s, "$-"):
 		// The same compound with the letter set as mathematics, "$(K,G)$-" and
@@ -760,6 +774,13 @@ func runOn(s, next string, c Compounds) (string, bool) {
 		return strings.TrimSuffix(s, "-") + next, true
 	}
 	return "", false
+}
+
+// indexSign reports whether the hyphen a line ends its formula on is the whole
+// of an index rather than the hyphen of a word broken across the line.
+func indexSign(s string) bool {
+	s = strings.TrimSuffix(s, "-$")
+	return strings.HasSuffix(s, "_") || strings.HasSuffix(s, "^")
 }
 
 // oneLetter reports whether the hyphen a line ends on comes straight after a

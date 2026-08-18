@@ -219,3 +219,35 @@ func TestAPageThatLostAGlyphIsFlagged(t *testing.T) {
 		t.Errorf("the page reads %q", p.Body)
 	}
 }
+
+// A minus that is the whole of an index and stands at the end of a line stays
+// inside its formula.
+//
+// The line before the break ends in mathematics and the line after it opens in
+// prose, which is the shape of a compound word broken across a line: "$(K,G)$-"
+// and "algebras" is one, and moving the hyphen across the close of the
+// mathematics is what puts it back together. An index of one character carries
+// no braces, so a formula whose last index is a minus sign ends in exactly the
+// same two characters, and page 154 of Lie 7 to 9 shipped the orthogonal
+// complement of n plus and n minus as "$\mathfrak{n}_++\mathfrak{n}_$-in".
+// Page 357 of Theories spectrales III to V shipped "$A^$-des" the same way.
+// Both are lines KaTeX refuses, and both lose a sign the page prints.
+func TestAMinusThatIsAWholeIndexStaysInItsFormula(t *testing.T) {
+	for _, c := range []struct{ s, next, want string }{
+		{`is $\mathfrak{n}_++\mathfrak{n}_-$`, "in $\\mathfrak{g}^*$,", ""},
+		{`et $A^-$`, "des fonctions", ""},
+		{`the $(K,G)$-`, "algebras", `the $(K,G)$-algebras`},
+		{`a $K(\mathbf{T})-$`, "algebra", `a $K(\mathbf{T})$-algebra`},
+	} {
+		got, ok := runOn(c.s, c.next, Compounds{})
+		if c.want == "" {
+			if ok {
+				t.Errorf("runOn(%q, %q) joined as %q, want the lines left apart", c.s, c.next, got)
+			}
+			continue
+		}
+		if !ok || got != c.want {
+			t.Errorf("runOn(%q, %q) = %q, %v, want %q", c.s, c.next, got, ok, c.want)
+		}
+	}
+}
