@@ -186,7 +186,7 @@ func requireSection(d Doc) []Finding {
 	if m.Lang == "" {
 		miss("lang")
 	}
-	if m.Lang != "" && m.Lang != d.Lang {
+	if m.Lang != "" && m.Lang != spoken(d.Lang) {
 		out = append(out, Finding{File: d.Path, Line: 1,
 			Msg: fmt.Sprintf("lang is %q in a file under content/%s", m.Lang, d.Lang)})
 	}
@@ -208,11 +208,27 @@ func requireExercise(d Doc) []Finding {
 	if m.Exercise == 0 {
 		out = append(out, Finding{File: d.Path, Line: 1, Msg: "exercise number is 0"})
 	}
-	if m.Lang != "" && m.Lang != d.Lang {
+	if m.Lang != "" && m.Lang != spoken(d.Lang) {
 		out = append(out, Finding{File: d.Path, Line: 1,
 			Msg: fmt.Sprintf("lang is %q in a file under content/%s", m.Lang, d.Lang)})
 	}
 	return out
+}
+
+// spoken is the language a content tree holds, which is not always the name of
+// the tree.
+//
+// content/en-mt holds English. The name of the tree says where the English came
+// from, which is a model reading the French printing rather than a printing of
+// its own, and that is how the file was made and not what language it is in. So
+// a file under it carries lang: en, the same as one under content/en, and the
+// two are told apart by method and translated_from, which is where that belongs
+// and where every stage downstream already reads it.
+func spoken(tree string) string {
+	if tree == "en-mt" {
+		return "en"
+	}
+	return tree
 }
 
 func requireSolution(d Doc) []Finding {
