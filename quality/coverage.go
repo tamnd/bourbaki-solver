@@ -127,7 +127,7 @@ func coverageRows(c *Corpus) []coverageRow {
 			// one chapter of one Book either way, so it gets one row, and the
 			// fuller listing of the two says how many § it has.
 			if r, ok := byKey[key]; ok {
-				if n := len(ch.Sections); n > r.want {
+				if n := coverageWant(ch); n > r.want {
 					r.want = n
 				}
 				continue
@@ -135,7 +135,7 @@ func coverageRows(c *Corpus) []coverageRow {
 			n, _ := corpus.RomanOrder(ch.Numeral)
 			byKey[key] = &coverageRow{
 				book: work, bookTitle: corpus.BookTitle(work),
-				chapter: ch.Numeral, order: n, want: len(ch.Sections),
+				chapter: ch.Numeral, order: n, want: coverageWant(ch),
 			}
 			order = append(order, key)
 		}
@@ -201,6 +201,20 @@ func coverageRows(c *Corpus) []coverageRow {
 		return out[i].order < out[j].order
 	})
 	return out
+}
+
+// coverageWant is how many units of work a chapter is, which is its §§ and its
+// appendices.
+//
+// Chapter I of the English Integration prints no § at all and owns its three
+// nos itself, so counting its §§ makes it 0 of 0, which reads as a chapter with
+// nothing in it and nothing to do. It is one chapter of real content, and it
+// counts as one.
+func coverageWant(ch corpus.Chapter) int {
+	if len(ch.Sections) == 0 && len(ch.Subsections) > 0 {
+		return 1
+	}
+	return len(ch.Sections)
 }
 
 // chapterOfPage is which chapter a PDF page falls in, off the page map.
