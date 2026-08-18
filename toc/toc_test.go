@@ -535,6 +535,58 @@ func TestThePageLabelsThe1987ScanMisreads(t *testing.T) {
 	}
 }
 
+// The 2004 Integration scan runs the chapter numeral of a label into the page
+// it labels, and misreads letters on the way through.
+//
+// Sixty three of the entries of that volume ended in one of these, which is
+// most of chapter V, the whole of the run of exercises of chapters II and III,
+// and chapter I entire. The chapter each line is read in is what tells "ILl5"
+// that it is II.15 and not III.5.
+func TestTheLabelsThe2004IntegrationScanRunsTogether(t *testing.T) {
+	tests := []struct {
+		tok     string
+		in      string
+		chapter string
+		page    int
+	}{
+		{"Ll", "", "I", 1},          // chapter I, page 1
+		{"104", "I", "I", 4},        // the period read as a nought
+		{"1104", "II", "II", 4},     // the numeral read as two ones, and the same nought
+		{"ILl", "II", "II", 1},      // the numeral run into the page with no period at all
+		{"IIL13", "III", "III", 13}, // and the same, two figures
+		{"IliA", "III", "III", 4},   // the period and the four read as one letter
+		{"YA8", "V", "V", 48},       // the V read as a Y, and the same letter
+		{"Y.25", "V", "V", 25},
+		{"ILl5", "II", "II", 15},  // II.15, which is also a reading of III.5
+		{"IIL5", "III", "III", 5}, // and III.5, which the chapter tells apart from it
+		{"II.lO", "II", "II", 10}, // the 1987 scan, whose O is a nought and not a stray
+		{"IV. 11 0", "IV", "IV", 110},
+	}
+	for _, tt := range tests {
+		ch, p, ok := readLabel(tt.tok, tt.in)
+		if !ok || ch != tt.chapter || p != tt.page {
+			t.Errorf("readLabel(%q, %q) = %s.%d %v, want %s.%d",
+				tt.tok, tt.in, ch, p, ok, tt.chapter, tt.page)
+		}
+	}
+}
+
+// A numeral that is not written the way its number is written is not a chapter
+// numeral. RomanOrder reads IIII as four, and every label the 2004 scan runs
+// together offers one of those as a reading.
+func TestANumeralNobodyWritesIsNotAChapter(t *testing.T) {
+	for _, s := range []string{"IIII", "VIIII", "IIIII"} {
+		if isCanonicalRoman(s) {
+			t.Errorf("%q was taken for a chapter numeral", s)
+		}
+	}
+	for _, s := range []string{"I", "II", "III", "IV", "V", "VIII", "IX", "X"} {
+		if !isCanonicalRoman(s) {
+			t.Errorf("%q was refused as a chapter numeral", s)
+		}
+	}
+}
+
 // A running head with the folio in front of it is not a heading.
 //
 // It is set the way a chapter line is set, flush left and in capitals, and
@@ -627,5 +679,32 @@ func TestALineWithATitleIsLeftAlone(t *testing.T) {
 	}
 	if got := mend(lines, Grammar{Pilcrow, Bare}); got[0] != lines[0] || got[1] != lines[1] {
 		t.Errorf("mend rewrote a pair of complete lines to %q", got)
+	}
+}
+
+// A no. the contents lists with no § over it is reported, not dropped.
+//
+// Chapter I of the English Integration is the volume that does this: it prints
+// three nos straight under the chapter heading and never opens a §. Nothing in
+// the manifest can hold them, and a manifest that left them out quietly would
+// say that the chapter has no content at all.
+func TestANoWithNoSectionOverItIsReported(t *testing.T) {
+	const contents = `                                    Contents
+
+CHAPTER VIII INEQUALITIES OF CONVEXITY . . . . . . . . . . . . . . . . 1
+   1. The fundamental inequality of convexity . . . . . . . . . . . . . 1
+   2. The inequalities of Holder and Minkowski . . . . . . . . . . . . . 3
+`
+	res, err := Parse([]string{contents}, testMap(), Options{Book: "test", Chapters: []string{"VIII"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) != 2 {
+		t.Fatalf("%d problems, want one for each no.: %v", len(res.Problems), res.Problems)
+	}
+	for _, p := range res.Problems {
+		if p.Chapter != "VIII" || !strings.Contains(p.Detail, "before any §") {
+			t.Errorf("problem = %v", p)
+		}
 	}
 }

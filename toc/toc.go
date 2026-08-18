@@ -121,15 +121,14 @@ var (
 	bareTailRe = regexp.MustCompile(
 		leader + `\s*([0-9IlOgJ|]{1,3}(?:[\s\p{Pd}]+[0-9IlOgJ|]{1,3})?)\s*[.,\-\p{Pd}']?\s*$`)
 
-	// The 2003 scan splits and misreads the chapter numeral in the label as
-	// readily as it does in a running head: "V1. 10" for V.10, "v11.6" for
-	// VII.6, "V-9" for V.9.
-	// The S in the page is the 1987 Topological Vector Spaces scan, which reads
-	// IV.15 as "IV.lS". It is allowed here, where the chapter numeral and the
-	// separator in front of it say that a page is what follows, and nowhere
-	// else.
+	// A label is taken off the line whole and cut in readLabel rather than by
+	// the regexp, because the scanners break a label in every place there is to
+	// break one and no one pattern reads all of them. What is matched here is a
+	// short run of label characters at the end of the line, in up to three
+	// pieces where the scan put spaces: the 2003 scan sets V.10 as "V1. 10" and
+	// the 2004 Integration sets IV.110 as "IV. 11 0".
 	labelTailRe = regexp.MustCompile(
-		leader + `\s*([A-Za-z1l|]{1,5})\s*[.\-,oO]\s*([0-9IlOgS|]{1,4})\s*\.?\s*$`)
+		leader + `\s*([A-Za-z0-9.,\-|·]{1,8}(?:\s[A-Za-z0-9.,\-|·]{1,4}){0,2})\s*$`)
 
 	// The 2003 scan does not always read the word CHAPTER itself: the line
 	// that opens chapter IV comes out "CHAP-1 ER IV." So the word is matched
@@ -192,7 +191,10 @@ var (
 	// The N is two I's the scanner ran together: the 1987 Topological Vector
 	// Spaces scan sets the label of chapter II page 12 as "n.12". No roman
 	// numeral has an N in it, so nothing legitimate is being rewritten.
-	romanFixer = strings.NewReplacer("1", "I", "L", "I", "|", "I", "0", "O", "N", "II")
+	// The Y is the 2004 Integration scan, which reads the V of a label as a Y
+	// throughout chapter V: "Y.25", "Y.62". No roman numeral has a Y in it
+	// either.
+	romanFixer = strings.NewReplacer("1", "I", "L", "I", "|", "I", "0", "O", "N", "II", "Y", "V")
 )
 
 // dashes are what the 1995 scan puts inside a page number it split, "22-5" for
@@ -235,18 +237,108 @@ type tail struct {
 	page    int
 }
 
+// labelSeparators are the characters a scan puts between the chapter numeral
+// and the page of a label where the volume prints a period. The letters are the
+// 2003 and 2004 scans reading the period as an o, and the zero is the 2004
+// Integration reading it as a nought: II.4 comes out "1104".
+const labelSeparators = ".,·•-oO"
+
+// readLabel cuts a page label into the chapter it names and the page in that
+// chapter, and is where the several ways a scan can break a label are undone.
+//
+// The label is read from the right rather than matched: the longest prefix that
+// is a chapter numeral, written the way the number is written, and with a page
+// after it, is the answer. Reading it any other way gets the 2004 Integration
+// wrong. That scan runs the numeral into the page it labels, so III.13 comes
+// out "IIL13" and II.1 comes out "ILl", and a reader that takes as much as it
+// can for the numeral cuts "IIL13" into IIII and 3, both of which are a number
+// and neither of which is right. A reader that takes as little as it can cuts
+// "1104", which is II.4, into I and 104.
+//
+// The A is the same scan again, reading the period and the four that follows it
+// as one letter: III.4 comes out "IliA", V.48 comes out "YA8". It is read only
+// where a separator would stand, which is a place no chapter numeral and no
+// page begins.
+// Where two readings are both a numeral and a page, the chapter the line is
+// being read in settles it, because a label names the chapter it stands in. The
+// 2004 Integration sets the run of exercises of chapter II § 1 as "ILl5", which
+// is II.15 and is also III.5, and the entry is read while chapter II is open.
+func readLabel(tok, want string) (chapter string, page int, found bool) {
+	// What is trimmed off the end is punctuation the scanner added, and the
+	// letters the separator is misread as are not trimmed there: the 1987 scan
+	// sets II.10 as "II.lO", and a trim that took the O for a stray separator
+	// would leave II.1 and put no. 4 of chapter II § 2 nine pages before no. 3.
+	s := strings.TrimRight(strings.Join(strings.Fields(tok), ""), ".,·•-'")
+	for i := len(s); i > 0; i-- {
+		ch, ok := readRoman(s[:i])
+		if !ok || !isCanonicalRoman(ch) {
+			continue
+		}
+		rest := strings.TrimLeft(s[i:], labelSeparators)
+		if strings.HasPrefix(rest, "A") {
+			rest = "4" + rest[1:]
+		}
+		if rest == "" {
+			continue
+		}
+		p, ok := readNumber(rest)
+		if !ok {
+			continue
+		}
+		if ch == want {
+			return ch, p, true
+		}
+		if !found {
+			chapter, page, found = ch, p, true
+		}
+	}
+	return chapter, page, found
+}
+
+// isCanonicalRoman says whether a numeral is the way its number is written.
+// RomanOrder reads IIII as four, and a numeral that has run into the page it
+// labels is exactly the kind of numeral that comes out that way. No volume
+// numbers a chapter IIII.
+func isCanonicalRoman(s string) bool {
+	n, err := corpus.RomanOrder(s)
+	if err != nil {
+		return false
+	}
+	return writeRoman(n) == s
+}
+
+func writeRoman(n int) string {
+	var b strings.Builder
+	for _, r := range []struct {
+		n int
+		s string
+	}{{1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"}, {100, "C"}, {90, "XC"},
+		{50, "L"}, {40, "XL"}, {10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"}} {
+		for n >= r.n {
+			b.WriteString(r.s)
+			n -= r.n
+		}
+	}
+	return b.String()
+}
+
 // splitTail cuts a line into its text and the page it points at. A line with no
 // page is not an error: a long title wraps, and the page sits on the wrapped
 // line.
 func splitTail(line string, form PageForm) (text string, t tail, ok bool) {
+	return splitTailIn(line, form, "")
+}
+
+// splitTailIn is splitTail read inside a chapter, which is what tells a label
+// that could be read two ways which of the two it is.
+func splitTailIn(line string, form PageForm, want string) (text string, t tail, ok bool) {
 	if form == Label {
 		m := labelTailRe.FindStringSubmatchIndex(line)
 		if m == nil {
 			return line, tail{}, false
 		}
-		ch, chOK := readRoman(line[m[2]:m[3]])
-		p, pOK := readNumber(line[m[4]:m[5]])
-		if !chOK || !pOK {
+		ch, p, ok := readLabel(line[m[2]:m[3]], want)
+		if !ok {
 			return line, tail{}, false
 		}
 		return strings.TrimRight(line[:m[0]], " \t"), tail{chapter: ch, page: p}, true
@@ -482,6 +574,11 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	res := &Result{Book: opt.Book, Grammar: g}
 	var cur *corpus.Chapter
 	var curSec *corpus.Section
+	// underNote says the lines being read belong to a historical note or to a
+	// part rather than to a §. The French Theory of Spectra numbers the parts of
+	// its historical note from 1 and they read exactly like a no., so they are
+	// dropped on purpose and are not a chapter losing its content.
+	var underNote bool
 	var pend *pending
 
 	commit := func(e entry, t tail) {
@@ -490,7 +587,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			res.Chapters = append(res.Chapters, corpus.Chapter{
 				Book: opt.Book, Numeral: e.numeral, Title: shout(e.title), Page: t.page})
 			cur = &res.Chapters[len(res.Chapters)-1]
-			curSec = nil
+			curSec, underNote = nil, false
 		case kindSection, kindAppendix:
 			if cur == nil {
 				return
@@ -501,9 +598,19 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			cur.Sections = append(cur.Sections, corpus.Section{
 				Number: e.number, Title: e.title, Page: t.page,
 				Appendix: e.kind == kindAppendix})
-			curSec = &cur.Sections[len(cur.Sections)-1]
+			curSec, underNote = &cur.Sections[len(cur.Sections)-1], false
 		case kindSubsection:
 			if curSec == nil {
+				// A no. with no § over it is a no. nothing can hold, and a
+				// manifest that quietly leaves it out is a chapter the corpus
+				// says has no content. Chapter I of the English Integration is
+				// the one volume that does this on purpose: it prints three nos
+				// straight under the chapter heading and never opens a §.
+				if cur != nil && !underNote {
+					res.Problems = append(res.Problems, Problem{
+						Chapter: cur.Numeral,
+						Detail:  fmt.Sprintf("no. %d %q is listed before any §", e.number, e.title)})
+				}
 				return
 			}
 			curSec.Subsections = append(curSec.Subsections, corpus.Subsection{
@@ -536,12 +643,12 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			// The French Theory of Spectra lists the parts of its historical
 			// note the way it lists the no. of a §, numbered from 1. They are
 			// the note's, not the last §'s, so the § is closed here.
-			curSec = nil
+			curSec, underNote = nil, true
 		case kindPart:
 			// Whatever follows belongs to the part, not to the chapter that
 			// happened to be open, so nothing is collected again until the next
 			// chapter line.
-			cur, curSec = nil, nil
+			cur, curSec, underNote = nil, nil, true
 		}
 	}
 
@@ -553,7 +660,11 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
-			text, t, hasPage := splitTail(line, g.Page)
+			want := ""
+			if cur != nil {
+				want = cur.Numeral
+			}
+			text, t, hasPage := splitTailIn(line, g.Page, want)
 			e := classify(text, g.Mark)
 			if !hasPage && e.kind != kindNone && g.Page == Bare {
 				text, t, hasPage, e = noLeader(line, text, e, g.Mark)
