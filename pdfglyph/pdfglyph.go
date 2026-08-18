@@ -186,7 +186,21 @@ var cmexNames = map[string]string{
 	// front of the root of d(u). It is a surd here rather than a sqrt because
 	// the sign and what it covers are drawn apart and arrive apart: the bar is
 	// its own run and is already read as an overline.
-	"arrowtp": "uni23D0", "arrowbt": "uni23D0", "radicalbig": "uni221A",
+	"arrowtp": "uni23D0", "arrowbt": "uni23D0",
+
+	// The radical, in all four sizes onto the one sign, on the same argument as
+	// the delimiters above: a root is a root and how tall it was drawn is TeX's
+	// business. It is a surd and not a sqrt because the sign and the term it
+	// covers are drawn apart and arrive apart, and the bar over the term is read
+	// as an overline of its own.
+	"radicalbig": "uni221A", "radicalBig": "uni221A",
+	"radicalbigg": "uni221A", "radicalBigg": "uni221A",
+
+	// The square cup, under the other of the two names CMEX gives it. Topologie
+	// algebrique writes the disjoint union this way and Knuth's font calls the
+	// same code squareuniontext, so both names have to land on the same
+	// character.
+	"unionsqtext": "F", "unionsqdisplay": "G",
 }
 
 // mathNames is every other mathematics font: the symbol font, the AMS fonts and
@@ -347,7 +361,7 @@ func rewriteNames(src *source, fonts map[int]string, rewritten map[int]map[int]r
 		}
 		table := cmexNames
 		font := fonts[o.num]
-		if !strings.Contains(strings.ToUpper(font), "CMEX") {
+		if !extensionFont(font) {
 			table = mathNames
 		}
 		codes := map[int]rune{}
@@ -795,6 +809,33 @@ func baseFonts(srcs []*source) map[int]string {
 	return out
 }
 
+// extensionFont says whether a font is the mathematics extension font, which is
+// the one font of a printing whose names have to be read against cmexNames.
+//
+// It is not enough to look for CMEX. The Springer volumes embed Knuth's font
+// under its own name and the French volumes embed the Latin Modern redrawing of
+// it, which is called LMMathExtension10-Regular, and a name that is not
+// recognised is not a font left alone: rewriteNames falls back to the
+// mathematics table, so the whole extension font of a volume is read as though
+// it were the symbol font. The three volumes of Topologie and the four of
+// Topologie algebrique were reporting between 33 and 40 names with no
+// replacement, and every one of them was a delimiter, a sum or an integral that
+// cmexNames has had all along.
+//
+// A name that is neither is left to the mathematics table on purpose. Guessing
+// wrong the other way is worse: a name the two fonts share, like hatwide, means
+// an accent to draw over a letter in the extension font and a glyph of its own
+// in the AMS fonts.
+func extensionFont(name string) bool {
+	up := strings.ToUpper(name)
+	for _, s := range []string{"CMEX", "MATHEXTENSION", "EUEX"} {
+		if strings.Contains(up, s) {
+			return true
+		}
+	}
+	return false
+}
+
 // base strips the subset tag a typesetter's toolchain puts in front of a font
 // name, so that XAEWAV+CMEX10 reads as CMEX10.
 func base(s string) string {
@@ -877,7 +918,7 @@ func tableSum() string {
 	// The rewrite itself is versioned along with the tables, since a prepared
 	// copy is only as good as what made it and a change in what this package
 	// does to a file has to invalidate the copies as surely as a new name does.
-	b.WriteString("v4 inline encodings;")
+	b.WriteString("v5 extension fonts;")
 	for _, t := range []map[string]string{cmexNames, mathNames} {
 		keys := make([]string, 0, len(t))
 		for k := range t {
