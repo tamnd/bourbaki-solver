@@ -270,31 +270,58 @@ func alignedBatches(g *glossary.Glossary, pairs []pair, size int) []glossary.Bat
 			need[strings.ToLower(t.EN)] = true
 		}
 	}
-	var out []glossary.Batch
-	asked := map[string]bool{}
+	var cand []mention
 	for _, p := range pairs {
 		en, fr := translate.Blocks(p.en), translate.Blocks(p.fr)
 		for i, block := range en {
 			lower := strings.ToLower(block)
 			var terms []string
 			for _, t := range g.Terms {
-				key := strings.ToLower(t.EN)
-				if !need[key] || asked[key] || !glossary.Mentions(lower, glossary.Key(t.EN)) {
+				if !need[strings.ToLower(t.EN)] || !glossary.Mentions(lower, glossary.Key(t.EN)) {
 					continue
 				}
 				terms = append(terms, t.EN)
-				asked[key] = true
-				if len(terms) == size {
-					break
-				}
 			}
 			if len(terms) == 0 {
 				continue
 			}
-			out = append(out, glossary.Batch{Lang: "fr", Terms: terms, EN: block, FR: window(fr, i)})
+			cand = append(cand, mention{en: block, fr: window(fr, i), terms: terms})
 		}
 	}
+	// The richest paragraph first. A term is asked about once and most of them
+	// are said in many paragraphs, so taking the paragraphs in the order they
+	// are printed spends a whole question on one leftover term while a paragraph
+	// further on would have carried a dozen. Ordering by how many terms are
+	// still open puts the same work in a fraction of the questions.
+	sort.SliceStable(cand, func(i, j int) bool { return len(cand[i].terms) > len(cand[j].terms) })
+	var out []glossary.Batch
+	asked := map[string]bool{}
+	for _, c := range cand {
+		var terms []string
+		for _, term := range c.terms {
+			key := strings.ToLower(term)
+			if asked[key] {
+				continue
+			}
+			terms = append(terms, term)
+			asked[key] = true
+			if len(terms) == size {
+				break
+			}
+		}
+		if len(terms) == 0 {
+			continue
+		}
+		out = append(out, glossary.Batch{Lang: "fr", Terms: terms, EN: c.en, FR: c.fr})
+	}
 	return out
+}
+
+// mention is a paragraph in both printings and every open term it mentions,
+// before the terms are handed out to one question each.
+type mention struct {
+	en, fr string
+	terms  []string
 }
 
 // window is the French around the paragraph in the English's place.
