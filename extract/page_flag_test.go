@@ -173,3 +173,49 @@ const scriptPairXML = `<?xml version="1.0" encoding="UTF-8"?>
 </page>
 </pdf2xml>
 `
+
+// The head of Corollary 1 of Lie 8, § 7, no. 3, which names the family of
+// fundamental weights. The letter is the varpi at code 0x17 of the mathematics
+// italic, and poppler had no name and no CMap entry for it, so the element
+// carries a box and nothing else.
+const lostGlyphXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="141" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="2" size="15" family="DGLKJH+CMR10" color="#000000"/>
+<fontspec id="13" size="15" family="DGLMMN+CMMI10" color="#000000"/>
+<fontspec id="14" size="10" family="DGLMOM+CMMI7" color="#000000"/>
+<text top="260" left="82" width="112" height="13" font="2">COROLLARY 1.</text>
+<text top="260" left="226" width="6" height="13" font="2">(</text>
+<text top="260" left="232" width="12" height="13" font="13"><i></i></text>
+<text top="266" left="244" width="8" height="9" font="14"><i>α</i></text>
+<text top="260" left="253" width="6" height="13" font="2">)</text>
+</page>
+</pdf2xml>
+`
+
+// A page that lost a glyph outright says so.
+//
+// This is the loss nothing else catches. A glyph read as the wrong character
+// is on the page for a rule to find, and a glyph read as its code is
+// punctuation in the middle of a formula. A glyph read as nothing leaves a
+// page that reads well with a letter gone out of the middle of it, and this
+// corollary shipped as "the family ( )_{alpha in B}" for a year.
+func TestAPageThatLostAGlyphIsFlagged(t *testing.T) {
+	lay, err := pdfsrc.ParseXML(strings.NewReader(lostGlyphXML))
+	if err != nil {
+		t.Fatalf("ParseXML: %v", err)
+	}
+	p := ReadPage(lay, lay.Pages[0])
+	if p.Lost != 1 {
+		t.Errorf("Lost = %d, want 1", p.Lost)
+	}
+	if !slices.Contains(p.Flags, FlagDroppedGlyph) {
+		t.Errorf("Flags = %v, want one of them %s", p.Flags, FlagDroppedGlyph)
+	}
+	// The run itself is kept out of the reading. It has a box and no
+	// characters, so it is a gap nothing can be read out of, and the words
+	// around it are set as they were.
+	if !strings.Contains(p.Body, "COROLLARY 1.") {
+		t.Errorf("the page reads %q", p.Body)
+	}
+}

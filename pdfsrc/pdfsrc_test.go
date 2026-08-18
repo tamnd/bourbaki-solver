@@ -3,6 +3,7 @@ package pdfsrc
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -471,5 +472,44 @@ func TestUnregisteredCommandIsAnError(t *testing.T) {
 	s := fake("a.pdf", map[string]string{})
 	if _, err := s.Info(context.Background()); err == nil {
 		t.Error("an unregistered command should fail loudly")
+	}
+}
+
+// A glyph poppler drew and could not name arrives as an element with no
+// characters in it, and it has to survive the parse. Lie chapters 7 to 9 names
+// code 0x17 of its mathematics italic pi1, which is varpi, and its ToUnicode
+// CMap is that one code short: every fundamental weight of the volume came out
+// of pdftohtml as <text ...><i></i></text>. Dropping the element here is what
+// kept the loss out of the flags, off the reports, and out of the queue of
+// pages the model reads.
+func TestParseXMLKeepsAGlyphPopplerCouldNotName(t *testing.T) {
+	const page = `<?xml version="1.0"?>
+<pdf2xml>
+<page number="141" width="612" height="792">
+<fontspec id="2" size="15" family="DGLKJH+CMR10" color="#000000"/>
+<text top="260" left="226" width="6" height="13" font="2">(</text>
+<text top="260" left="232" width="12" height="13" font="13"><i></i></text>
+<text top="266" left="244" width="8" height="9" font="14"><i>&#945;</i></text>
+</page>
+</pdf2xml>
+`
+	l, err := ParseXML(strings.NewReader(page))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(l.Pages) != 1 {
+		t.Fatalf("read %d pages, want 1", len(l.Pages))
+	}
+	spans := l.Pages[0].Spans
+	if len(spans) != 3 {
+		t.Fatalf("read %d spans, want 3: %+v", len(spans), spans)
+	}
+	lost := spans[1]
+	if lost.Text != "" {
+		t.Errorf("the lost glyph reads %q", lost.Text)
+	}
+	// The box is what says where it stood and how wide the letter was.
+	if lost.Left != 232 || lost.Width != 12 || lost.Font != 13 {
+		t.Errorf("the box of the lost glyph is %+v", lost)
 	}
 }

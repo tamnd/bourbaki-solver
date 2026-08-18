@@ -115,10 +115,39 @@ type Page struct {
 	Minus     int
 	MinusLost int
 
+	// Lost is how many glyphs the page draws that poppler could not name. See
+	// Lost below.
+	Lost int
+
 	// Continues says the body opens in the middle of the paragraph the page
 	// before it ended in. Nothing on this page can be assembled without it, and
 	// nothing but this page can work it out: see continues below.
 	Continues bool
+}
+
+// Lost is how many glyphs of a page poppler drew a box for and could not name.
+//
+// This is the one loss the reader cannot see from what it was given. A glyph
+// read as the wrong character is on the page to be caught by a rule, and a
+// glyph read as a code is punctuation in the middle of a formula that stands
+// out a mile. A glyph read as nothing leaves a page that reads well with a
+// letter gone out of the middle of it: Lie chapters 7 to 9 lost every one of
+// its fundamental weights this way and Corollary 1 of § 7, no. 3 said "the
+// family ( )_{alpha in B}" for a year.
+//
+// pdfglyph puts back the ones whose name it knows, and the count here is what
+// it could not: a name no table has, or a piece of an extensible bracket that
+// has no character to be. The page is flagged for it and goes to the model
+// with its image, which is the reading of last resort and the right one when
+// the text layer is missing a character outright.
+func Lost(p pdfsrc.Page) int {
+	n := 0
+	for _, s := range p.Spans {
+		if s.Text == "" {
+			n++
+		}
+	}
+	return n
 }
 
 // Flagged reports whether the page needs repair.
@@ -146,6 +175,10 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 	// the runs, so that the rest of extraction sees a page with its operators
 	// on it. See rule.go.
 	p, out.Minus, out.MinusLost = Minus(l, p)
+	out.Lost = Lost(p)
+	if out.Lost > 0 {
+		out.flag(FlagDroppedGlyph)
+	}
 	lines, columns := LinesColumns(l, p)
 	out.Columns = columns
 	if len(lines) == 0 {

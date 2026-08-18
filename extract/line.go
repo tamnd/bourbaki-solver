@@ -80,6 +80,13 @@ func Lines(l *pdfsrc.Layout, p pdfsrc.Page) []Line {
 func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 	runs := make([]Run, 0, len(p.Spans))
 	for _, s := range p.Spans {
+		// A span with nothing in it is a glyph poppler dropped, and it is kept
+		// out of the geometry: it has a box and no characters, so it would be a
+		// gap in a formula that nothing can be read out of. The page says it
+		// has one through Lost below, which is what flags it.
+		if s.Text == "" {
+			continue
+		}
 		spec := l.Font(s)
 		s.Text = Unligature(s.Text)
 		runs = append(runs, Run{Span: s, Spec: spec, Class: Classify(spec, s)})
