@@ -465,7 +465,7 @@ func TestTheGlossaryBlockHoldsTheTermsThatAppear(t *testing.T) {
 		{EN: "maximal ideal", VI: "iđêan tối đại"},
 		{EN: "quaternion", VI: "quaternion"},
 	}}
-	got := GlossaryBlock(g, "vi", en)
+	got := GlossaryBlock(g, "en", "vi", en)
 	if strings.Contains(got, "quaternion") {
 		t.Fatalf("sent a term the section does not use:\n%s", got)
 	}
@@ -477,17 +477,17 @@ func TestTheGlossaryBlockHoldsTheTermsThatAppear(t *testing.T) {
 
 func TestATermInsideAWordIsNotATerm(t *testing.T) {
 	g := &glossary.Glossary{Terms: []glossary.Term{{EN: "ring", VI: "vành"}}}
-	if got := GlossaryBlock(g, "vi", "The generating subset is not a ringlet."); got != "" {
+	if got := GlossaryBlock(g, "en", "vi", "The generating subset is not a ringlet."); got != "" {
 		t.Fatalf("matched ring inside ringlet: %q", got)
 	}
-	if got := GlossaryBlock(g, "vi", "Let A be a ring."); got != "ring | vành\n" {
+	if got := GlossaryBlock(g, "en", "vi", "Let A be a ring."); got != "ring | vành\n" {
 		t.Fatalf("did not match the word itself: %q", got)
 	}
 }
 
 func TestATermWithNoRenderingIsNotSent(t *testing.T) {
 	g := &glossary.Glossary{Terms: []glossary.Term{{EN: "field", ZH: "域"}}}
-	if got := GlossaryBlock(g, "vi", en); got != "" {
+	if got := GlossaryBlock(g, "en", "vi", en); got != "" {
 		t.Fatalf("sent a row with no Vietnamese in it: %q", got)
 	}
 }
