@@ -683,7 +683,7 @@ func belong(c []token) []token {
 // standing at or before it unless that one has a partner.
 //
 // The order is asked first and the height only where the order cannot answer.
-// Two runs of a cluster set at the same left edge and at opposite levels are the
+// Two runs of a cluster set one over the other and at opposite levels are the
 // two scripts of one base, and nothing in the order says which of them a run to
 // the right of both was written inside; anywhere else the order is the answer
 // and asking the height instead is worse than useless. The ∈ of Lie 7 to 9 is
@@ -709,8 +709,7 @@ func holder(c []token, i int) (int, bool) {
 	}
 	after := at
 	for k := 0; k < i; k++ {
-		if k == at || c[k].depth != up ||
-			c[k].left != c[at].left || c[k].level == c[at].level {
+		if k == at || c[k].depth != up || !partnered(c[k], c[at]) {
 			continue
 		}
 		if apartBy(c[k], c[i]) < apartBy(c[at], c[i]) {
@@ -719,6 +718,26 @@ func holder(c []token, i int) (int, bool) {
 	}
 	return at, at != after
 }
+
+// partnered reports whether two runs of a cluster are the two scripts of one
+// base, so that a run written to the right of both may belong to either.
+//
+// TeX sets the two of them at the same place, one over the other, and the same
+// place is the same left edge only where the base is upright. A slanted base
+// leans away from its index and into its exponent, so TeX moves the exponent
+// out by the italic correction of the glyph: the delta of page 223 of Topologie
+// algebrique carries its index at 329 and its exponent at 330, and the script L
+// of page 45 of Theories spectrales carries them at 495 and 498. Both are the
+// two scripts of one base and neither is set at one left edge, and the index of
+// the index was given to the exponent both times, which is how the page came to
+// say \mathscr{L}_L^{q'_{p'}}_{(X)} where it prints the script L with q' above
+// and L^{p'}(X) below.
+//
+// So what is asked is that the boxes lie one across the other rather than side
+// by side. Nothing else in a cluster does: the scripts of two different bases
+// have the base between them, and the pieces one script is written in are cut
+// apart by the other rather than laid over it.
+func partnered(a, b token) bool { return a.level != b.level && lap(a, b) > 0 }
 
 // apartBy is how far apart two runs are set, measured between the middles of their
 // boxes, which is where a glyph of one size and a glyph of another can be

@@ -1,6 +1,10 @@
 package extract
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/tamnd/bourbaki-solver/pdfsrc"
+)
 
 // Every fixture here is a line of Algebra VIII as pdftohtml reports it, cut to
 // the runs the line needs and no further. The boxes are the volume's own, since
@@ -771,6 +775,44 @@ func TestAScriptOfTheFarScriptIsReadByHowFarApartTheyAreSet(t *testing.T) {
 	// \mu later, so it stands here as the page draws it.
 	const want = `$µ(x^{w_i}_{s_{i,2}})$ et`
 	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
+// The two scripts of a slanted base are not set at one left edge. TeX moves the
+// exponent out by the italic correction of the glyph the scripts hang off, so
+// the index of the index of a base is drawn after both of them and the order
+// says nothing about which of the two it was written inside, exactly as it says
+// nothing where the two edges agree to the unit.
+//
+// This is page 223 of Topologie algébrique, which prints the inverse of delta
+// sub phi nought of j sub k. The delta carries phi at 329 and its exponent at
+// 330, one unit apart, and the nought at 338 went to the exponent: the page
+// said \delta_{\varphi}^{-_01}_{(j_k)}, which KaTeX refuses by name. The nought
+// is set 4 units from the middle of the phi and 12 from the middle of the
+// minus, so the height answers where the order cannot.
+func TestTheTwoScriptsOfASlantedBaseArePartners(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 223, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 682, Left: 290, Width: 7, Height: 15, Font: 1, Text: "j"},
+			{Top: 688, Left: 296, Width: 7, Height: 11, Font: 4, Text: "k"},
+			{Top: 678, Left: 304, Width: 6, Height: 21, Text: ")"},
+			{Top: 681, Left: 314, Width: 5, Height: 15, Font: 2, Text: "·"},
+			{Top: 682, Left: 322, Width: 7, Height: 15, Font: 1, Text: "δ"},
+			{Top: 691, Left: 329, Width: 8, Height: 11, Font: 4, Text: "ϕ"},
+			{Top: 678, Left: 330, Width: 10, Height: 11, Font: 13, Text: "−"},
+			{Top: 695, Left: 338, Width: 5, Height: 8, Font: 14, Text: "0"},
+			{Top: 679, Left: 340, Width: 6, Height: 11, Font: 3, Text: "1"},
+			{Top: 691, Left: 344, Width: 5, Height: 11, Font: 3, Text: "("},
+			{Top: 691, Left: 349, Width: 5, Height: 11, Font: 4, Text: "j"},
+			{Top: 695, Left: 354, Width: 6, Height: 8, Font: 15, Text: "k"},
+			{Top: 691, Left: 361, Width: 5, Height: 11, Font: 3, Text: ")"},
+			{Top: 681, Left: 370, Width: 5, Height: 15, Font: 2, Text: "·"},
+		},
+	}
+	const want = `$j_k)\cdot \delta_{\varphi_0(j_k)}^{-1}\cdot$`
+	if got := sole(t, frlay, p); got != want {
 		t.Errorf("Render:\n got %s\nwant %s", got, want)
 	}
 }

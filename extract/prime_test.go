@@ -212,3 +212,38 @@ func TestAPrimeInsideAnInverseImageLeavesItStanding(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
+
+// A prime deep inside a cluster goes to the letter it was drawn against.
+//
+// TeX runs out of script sizes at the second level, so a script of a script and
+// a script of the other script of the same base come back at one size and so at
+// one depth, and the depth is all that says what a run hangs off. Page 45 of
+// Théories spectrales prints the script L with p' above it and L^{p'}(X) below,
+// and the prime of the exponent inside the index went to the exponent above:
+// the page said \mathscr{L}_L^{p'_{p'}}_{(X)}, an index in two pieces with the
+// (X) written as a second index of the base, which KaTeX refuses by name.
+//
+// The page says which letter each prime marks by where it drew it, against the
+// right edge of the letter and above the middle of it. The first prime is set
+// at 505 where the p above ends at 504, the second at 509 where the p below
+// ends at 509, and each is 3 units above the letter it is drawn against.
+func TestAPrimeInsideAClusterMarksTheLetterItWasDrawnAgainst(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 45, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 674, Left: 383, Width: 91, Height: 14, Text: "appartient à"},
+			{Top: 670, Left: 481, Width: 14, Height: 21, Font: 6, Text: "L"},
+			{Top: 685, Left: 495, Width: 8, Height: 11, Font: 3, Text: "L"},
+			{Top: 669, Left: 498, Width: 6, Height: 11, Font: 4, Text: "p"},
+			{Top: 683, Left: 503, Width: 6, Height: 8, Font: 15, Text: "p"},
+			{Top: 666, Left: 505, Width: 3, Height: 8, Font: 16, Text: "′"},
+			{Top: 680, Left: 509, Width: 3, Height: 8, Font: 16, Text: "′"},
+			{Top: 685, Left: 514, Width: 19, Height: 11, Font: 3, Text: "(X)"},
+			{Top: 674, Left: 534, Width: 19, Height: 14, Text: "(Y"},
+		},
+	}
+	const want = `appartient à $\mathscr{L}_{L^{p'}(X)}^{p'}(Y$`
+	if got := sole(t, frlay, p); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
