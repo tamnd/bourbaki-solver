@@ -91,3 +91,53 @@ func TestTheOperatorNormKeepsItsThreeBars(t *testing.T) {
 		t.Errorf("the page draws six bars and reads %q", p.Body)
 	}
 }
+
+// Equation (28) of § 21 of Algebra VIII, the inner product of two class
+// functions written as an average over the group. TeX centres the bound under
+// the summation sign, and the bound is wider than the sign, so the g of "g in
+// G" is drawn one unit to the left of it.
+const limitLeftOfSignXML = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="427" position="absolute" top="0" left="0" height="999" width="658">
+<fontspec id="2" size="15" family="ABCDEF+LMRoman10" color="#000000"/>
+<fontspec id="3" size="15" family="ABCDEG+LMMathItalic10" color="#000000"/>
+<fontspec id="4" size="15" family="ABCDEH+LMMathSymbols10" color="#000000"/>
+<fontspec id="5" size="10" family="ABCDEI+LMMathSymbols7" color="#000000"/>
+<fontspec id="6" size="10" family="ABCDEJ+LMRoman7" color="#000000"/>
+<fontspec id="7" size="10" family="ABCDEK+LMMathItalic7" color="#000000"/>
+<fontspec id="9" size="15" family="ABCDEL+CMEX10" color="#000000"/>
+<text top="625" left="310" width="4" height="14" font="4"><i>|</i></text>
+<text top="626" left="314" width="12" height="13" font="2">G</text>
+<text top="625" left="326" width="4" height="14" font="4"><i>|</i></text>
+<text top="623" left="330" width="9" height="10" font="5"><i>−</i></text>
+<text top="623" left="340" width="6" height="9" font="6">1</text>
+<text top="647" left="349" width="6" height="9" font="7"><i>g</i></text>
+<text top="622" left="350" width="22" height="7" font="9">X</text>
+<text top="647" left="355" width="8" height="10" font="5"><i>∈</i></text>
+<text top="647" left="363" width="9" height="9" font="6">G</text>
+<text top="626" left="375" width="7" height="13" font="3"><i>f</i></text>
+</page>
+</pdf2xml>
+`
+
+// A limit drawn to the left of its sign is still a limit of that sign.
+//
+// A line is read left to right and TeX centres a limit under the sign it
+// belongs to, so a bound wider than the sign hangs out on both sides and its
+// first character comes before it. The g of the sum over g in G was read as an
+// index of the order of the group standing before the sign, and the display
+// shipped as "|G|^{-1}_g\sum_{\in G}": a subscript the page does not print, a
+// bound with its variable gone out of it, and a line KaTeX refuses.
+func TestALimitDrawnLeftOfItsSignBelongsToTheSign(t *testing.T) {
+	lay, err := pdfsrc.ParseXML(strings.NewReader(limitLeftOfSignXML))
+	if err != nil {
+		t.Fatalf("ParseXML: %v", err)
+	}
+	p := ReadPage(lay, lay.Pages[0])
+	if strings.Contains(p.Body, `_g\sum`) {
+		t.Errorf("the bound was read as an index of what stands before the sign: %q", p.Body)
+	}
+	if !strings.Contains(p.Body, `\sum_{g\in G}`) {
+		t.Errorf("the page reads %q, want the sum bounded by g in G", p.Body)
+	}
+}

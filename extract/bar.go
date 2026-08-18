@@ -103,6 +103,136 @@ func bars(lines []Line, rules []pdfsrc.Rule) {
 	}
 }
 
+// stackReach is how many lines a fraction may be scanned across. A fraction
+// built up in a display is a numerator, a rule and a denominator, and what can
+// come between them is the row the operators of the display sit on, which is
+// one line. Nothing legitimate is further apart than that, and a rule this has
+// mistaken for a fraction bar then joins two paragraphs.
+const stackReach = 2
+
+// builtUp joins the lines a built up fraction was scanned into.
+//
+// A fraction set in a display is taller than the type around it. TeX puts the
+// numerator well above the axis of the line and the denominator well below it,
+// far enough that the scan finds three bands where the page prints one line,
+// and neither half is a script: both are set at the size of the body, so the
+// tests that put a stray script back on its line refuse them, since what they
+// ask is that the stray be smaller than what it came off.
+//
+// The rule is the evidence, and it is the same evidence laden reads. A bar with
+// material above it and material below it is a fraction bar, so the line
+// holding what is above and the line holding what is below are one line of the
+// page and everything between them is on it too. Page 33 of Théories spectrales
+// I sets the Fekete inequality as lim sup of a_n over n, and the three bands
+// came out as a row of numerators, a row of operators with their bounds gone,
+// and a row of denominators mixed in with the bounds: the volume shipped
+// "lim sup $\leqslant$ inf $\leqslant$ lim inf." as a sentence, followed by
+// "_{n\rightarrow+\infty}n_{m\geqslant 1}m_n^{\rightarrow}_+^{\infty}n" as a
+// display, which is a double subscript KaTeX refuses and no fraction anywhere.
+func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
+	if len(lines) < 2 {
+		return lines
+	}
+	// reach[i] is the last line the line at i has to be read together with.
+	reach := make([]int, len(lines))
+	for i := range reach {
+		reach[i] = i
+	}
+	for _, r := range rules {
+		if !bar(r) {
+			continue
+		}
+		first, last := -1, -1
+		for i, l := range lines {
+			above, below := false, false
+			for _, run := range l.Runs {
+				if !halved(run, r) {
+					continue
+				}
+				// Measured against the rule and not against the band,
+				// for the reason laden gives: a display fraction sets
+				// both halves at full size and the levels say nothing.
+				switch {
+				case run.Bottom() <= r.Top && r.Top-run.Bottom() <= run.Height:
+					above = true
+				case run.Top >= r.Top && run.Top-r.Top <= run.Height:
+					below = true
+				}
+			}
+			if above {
+				first = i // the nearest line above, so the last one found
+			}
+			if below && last < 0 {
+				last = i // the nearest line below, so the first one found
+			}
+		}
+		if first < 0 || last < 0 || first >= last || last-first > stackReach {
+			continue
+		}
+		reach[first] = max(reach[first], last)
+	}
+	out := lines[:0:0]
+	for i := 0; i < len(lines); {
+		end := reach[i]
+		for j := i; j <= end && j < len(lines); j++ {
+			end = max(end, reach[j])
+		}
+		if end == i {
+			out = append(out, lines[i])
+			i++
+			continue
+		}
+		out = append(out, oneLine(lines[i:end+1]))
+		i = end + 1
+	}
+	return out
+}
+
+// halved reports whether a run could be one half of the fraction a rule is the
+// bar of, which is that the rule reaches across the whole of it.
+//
+// A fraction bar is drawn as long as the wider of the two halves, so neither
+// half stands outside it, and asking for that is what keeps the bar of a
+// conjugate from reading the prose above it as a numerator. Page 113 of
+// Théories spectrales draws the bar of the conjugate of f at 506 over ten
+// units, and the line above it opens with sixty units of French that lie
+// across those ten and end fourteen units higher up.
+func halved(run Run, r pdfsrc.Rule) bool {
+	return run.Left >= r.Left && run.Right() <= r.Right()
+}
+
+// oneLine reads a run of lines as the one line they are.
+//
+// The band is taken from whichever of them carries the most body type rather
+// than from the first, because the first is the numerator and the band is what
+// says whether a run arriving later is body type or something hanging off it.
+// The Fekete display puts three numerators on its first band and its lim sup,
+// its two inequality signs and its lim inf on the second.
+func oneLine(lines []Line) Line {
+	at, best := 0, -1
+	for i, l := range lines {
+		size, n := 0, 0
+		for _, r := range l.Runs {
+			if r.Spec.Size > size {
+				size, n = r.Spec.Size, 0
+			}
+			if r.Spec.Size == size {
+				n++
+			}
+		}
+		if n > best {
+			at, best = i, n
+		}
+	}
+	out := lines[at]
+	out.Runs = nil
+	for _, l := range lines {
+		out.Runs = append(out.Runs, l.Runs...)
+		out.Left, out.Right = min(out.Left, l.Left), max(out.Right, l.Right)
+	}
+	return out
+}
+
 // drawnOver reports whether a line sets type under a bar, across the width the
 // bar is drawn. That is what a bar is for, and a line with nothing under it did
 // not have this one drawn over it however near it stands.
