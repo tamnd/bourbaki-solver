@@ -91,7 +91,7 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 		s.Text = Unligature(s.Text)
 		runs = append(runs, Run{Span: s, Spec: spec, Class: Classify(spec, s)})
 	}
-	lines := rows(runs)
+	lines := rows(runs, p.Rules)
 	x, ok := gutter(lines)
 	if !ok {
 		bars(lines, p.Rules)
@@ -105,7 +105,7 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 			right = append(right, r)
 		}
 	}
-	lines = append(rows(left), rows(right)...)
+	lines = append(rows(left, p.Rules), rows(right, p.Rules)...)
 	bars(lines, p.Rules)
 	return lines, true
 }
@@ -214,7 +214,7 @@ func gutter(lines []Line) (int, bool) {
 }
 
 // rows gathers one column of runs into lines.
-func rows(runs []Run) []Line {
+func rows(runs []Run, rules []pdfsrc.Rule) []Line {
 	if len(runs) == 0 {
 		return nil
 	}
@@ -249,6 +249,10 @@ func rows(runs []Run) []Line {
 	}
 	lines = stand(lines, held)
 	lines = gather(lines)
+	// A fraction built up in a display is scanned as three bands where the
+	// page prints one line, and the rule the page drew is what says so. See
+	// builtUp in bar.go.
+	lines = builtUp(lines, rules)
 	for i := range lines {
 		finish(&lines[i])
 	}
