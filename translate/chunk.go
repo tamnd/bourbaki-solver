@@ -132,6 +132,12 @@ func spanCount(block string) int {
 	return n
 }
 
+// Blocks is the paragraphs of a body, by the same reckoning the chunker and the
+// audit use. It is exported for the French pass, which pairs the paragraphs of a
+// section with the paragraphs of its French printing and would pair them wrong
+// if it split the text its own way.
+func Blocks(body string) []string { return blocks(body) }
+
 // Join puts the answers back together in the order they were asked for.
 func Join(answers []string) string {
 	parts := make([]string, 0, len(answers))

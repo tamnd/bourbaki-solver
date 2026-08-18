@@ -197,6 +197,24 @@ func Glossary(language, note, terms string) string {
 // that carry the same hash were asked for the same thing in the same words.
 func GlossarySHA256() string { return SHA256(strings.TrimSpace(glossaryPrompt) + "\n") }
 
+//go:embed glossary_aligned.md
+var glossaryAlignedPrompt string
+
+// GlossaryAligned is the question asked of a paragraph that exists in both
+// printings.
+//
+// It is a different question from Glossary and a better one. Glossary asks what
+// the French for a term is, which is a thing a model knows or invents. This puts
+// the French paragraph in front of it and asks which words in that paragraph are
+// the term, so the answer is in the passage or it is refused. Half the series
+// was never translated into English and the other half was, and this is what the
+// half that was is worth.
+func GlossaryAligned(english, french, terms string) string {
+	text := strings.ReplaceAll(strings.TrimSpace(glossaryAlignedPrompt), "{{ENGLISH}}", strings.TrimSpace(english))
+	text = strings.ReplaceAll(text, "{{FRENCH}}", strings.TrimSpace(french))
+	return strings.ReplaceAll(text, "{{TERMS}}", strings.TrimSpace(terms)) + "\n"
+}
+
 //go:embed translate.md
 var translateCommon string
 
