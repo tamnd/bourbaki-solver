@@ -177,8 +177,17 @@ var glossaryPrompt string
 // The terms come in already numbered and one to a line, because the numbering
 // is what the answer is checked against and the checker has to be the thing
 // that wrote it.
-func Glossary(language, terms string) string {
+// note is anything true of this language and not of the other three, and it is
+// empty for most of them. It goes above the terms and below the rules, in the
+// place a reader meets last before the list.
+func Glossary(language, note, terms string) string {
+	if n := strings.TrimSpace(note); n != "" {
+		note = n + "\n"
+	} else {
+		note = ""
+	}
 	text := strings.ReplaceAll(strings.TrimSpace(glossaryPrompt), "{{LANGUAGE}}", language)
+	text = strings.ReplaceAll(text, "{{NOTE}}", note)
 	return strings.ReplaceAll(text, "{{TERMS}}", strings.TrimSpace(terms)) + "\n"
 }
 

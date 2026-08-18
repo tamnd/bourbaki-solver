@@ -31,7 +31,7 @@ is what extract and translate are for, and a set that adds is a typo that
 becomes a row nobody ever looks at again.
 
 flags:
-  -lang CODE     vi, zh or ja, required
+  -lang CODE     vi, zh, ja or fr, required
   -note TEXT     the same note on every row set here, which is where the reason
                  goes: a note is written for a person, never reaches a model,
                  and is what stops the next pass from undoing this by hand. A
@@ -48,7 +48,7 @@ counted, so running this twice is not a second version.
 func glossarySet(args []string) error {
 	fs := flag.NewFlagSet("glossary set", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, glossarySetUsage) }
-	lang := fs.String("lang", "", "vi, zh or ja")
+	lang := fs.String("lang", "", "vi, zh, ja or fr")
 	note := fs.String("note", "", "the note to put on every row set here")
 	dir := fs.String("corpus", "", "the checkout")
 	write := fs.Bool("write", false, "write the file")
@@ -57,7 +57,7 @@ func glossarySet(args []string) error {
 		return err
 	}
 	if !isLang(*lang) {
-		return fmt.Errorf("-lang must be one of %s", strings.Join(glossary.Langs, ", "))
+		return fmt.Errorf("-lang must be one of %s", strings.Join(append(append([]string{}, glossary.Langs...), glossary.Sources...), ", "))
 	}
 	if len(rest) == 0 {
 		fmt.Fprint(os.Stderr, glossarySetUsage)
@@ -157,11 +157,4 @@ func glossarySet(args []string) error {
 	return nil
 }
 
-func isLang(lang string) bool {
-	for _, value := range glossary.Langs {
-		if value == lang {
-			return true
-		}
-	}
-	return false
-}
+func isLang(lang string) bool { return glossary.Fillable(lang) }
