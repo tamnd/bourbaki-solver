@@ -140,7 +140,7 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 	}
 	across := typeArea(lines)
 	for _, r := range rules {
-		if !bar(r) || ruled(r, across) || overline(lines, r) {
+		if !bar(r) || ruled(r, across) || overline(lines, r) || held(lines, r) {
 			continue
 		}
 		first, last := -1, -1
@@ -187,6 +187,48 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 		i = end + 1
 	}
 	return out
+}
+
+// held reports whether one line of the page already holds both halves of the
+// fraction a rule is the bar of, in which case there is nothing to join and the
+// rule has no business being read across lines at all.
+//
+// A fraction set inside a paragraph is small. Its numerator is a script and its
+// denominator is a script, and both of them arrive in the line the paragraph was
+// scanned into. Nothing about that reaches builtUp, which asks only what stands
+// over the bar and what stands under it and takes the answers from whatever line
+// they were found on. Page 253 of Topologie algebrique I to IV prints "1 over
+// the norm of x" in the middle of a sentence, and the bold B of the sentence
+// above happens to stand across the same bar, thirteen units up. That was read
+// as the numerator, the two printed lines were joined, and the Exemple of III
+// paragraph 1 number 5 lost the heading the assembler needs to find a statement
+// there.
+//
+// The half over the bar is allowed to hang a little past it, since the box a
+// script is reported at is not the box its glyphs fill: pdftohtml leaves the
+// descender room of the font in it, and that 1 is reported ending two units
+// under the rule it stands on. The slack is only ever a reason to leave lines
+// alone, never a reason to join them, so a loose reading here cannot cost the
+// page anything it had.
+func held(lines []Line, r pdfsrc.Rule) bool {
+	for _, l := range lines {
+		above, below := false, false
+		for _, run := range l.Runs {
+			if !halved(run, r) {
+				continue
+			}
+			switch {
+			case r.Top-run.Bottom() <= run.Height && run.Bottom()-r.Top <= run.Height/4:
+				above = true
+			case run.Top >= r.Top && run.Top-r.Top <= run.Height:
+				below = true
+			}
+		}
+		if above && below {
+			return true
+		}
+	}
+	return false
 }
 
 // ruled reports whether a light rule is one of the lines a table is drawn with

@@ -253,3 +253,71 @@ func TestAnIntegralKeepsALimitDrawnAcrossTheSign(t *testing.T) {
 		t.Errorf("Render: %s, want the domain left on the integral", got)
 	}
 }
+
+// Two printed lines of page 253 of Topologie algebrique I to IV, the second of
+// which sets 1 over the norm of x in the middle of a sentence. The fraction is
+// set inline, so both halves are scripts and both arrive on the line the
+// sentence was scanned into, and the bar at 298 has nothing to join.
+//
+// The bold B of the line above stands across the same bar, thirteen units up.
+// It is the last thing over the bar and it was read as the numerator, so the
+// two lines were joined and the Exemple lost its heading.
+var inlineNorm = pdfsrc.Page{
+	Number: 253, Width: 659, Height: 999,
+	Spans: []pdfsrc.Span{
+		{Top: 271, Left: 81, Width: 60, Height: 14, Text: "Exemple"},
+		{Top: 266, Left: 141, Width: 64, Height: 21, Text: ". — Soit"},
+		{Top: 266, Left: 211, Width: 12, Height: 21, Text: "X"},
+		{Top: 266, Left: 229, Width: 255, Height: 21, Text: "le complémentaire de l’origine dans"},
+		{Top: 270, Left: 490, Width: 13, Height: 15, Text: "B"},
+		{Top: 276, Left: 504, Width: 8, Height: 11, Font: 4, Text: "n"},
+		{Top: 266, Left: 512, Width: 66, Height: 21, Text: ". L’appli-"},
+
+		{Top: 288, Left: 81, Width: 66, Height: 21, Text: "cation de"},
+		{Top: 288, Left: 153, Width: 12, Height: 21, Text: "X"},
+		{Top: 291, Left: 169, Width: 13, Height: 15, Font: 2, Text: "×"},
+		{Top: 292, Left: 185, Width: 7, Height: 15, Text: "I"},
+		{Top: 288, Left: 198, Width: 33, Height: 21, Text: "dans"},
+		{Top: 288, Left: 237, Width: 12, Height: 21, Text: "X"},
+		{Top: 288, Left: 255, Width: 79, Height: 21, Text: "donnée par"},
+		{Top: 288, Left: 340, Width: 6, Height: 21, Text: "("},
+		{Top: 292, Left: 347, Width: 23, Height: 15, Font: 1, Text: "x, t"},
+		{Top: 288, Left: 369, Width: 6, Height: 21, Text: ")"},
+		{Top: 291, Left: 381, Width: 16, Height: 15, Font: 2, Text: "7→"},
+		{Top: 288, Left: 402, Width: 21, Height: 21, Text: "((1"},
+		{Top: 291, Left: 427, Width: 13, Height: 15, Font: 2, Text: "−"},
+		{Top: 292, Left: 444, Width: 6, Height: 15, Font: 1, Text: "t"},
+		{Top: 288, Left: 449, Width: 23, Height: 21, Text: ") +"},
+		{Top: 292, Left: 476, Width: 6, Height: 15, Font: 1, Text: "t"},
+		{Top: 300, Left: 484, Width: 6, Height: 11, Font: 13, Text: "k"},
+		{Top: 301, Left: 490, Width: 7, Height: 11, Font: 4, Text: "x"},
+		{Top: 289, Left: 491, Width: 6, Height: 11, Font: 3, Text: "1"},
+		{Top: 300, Left: 497, Width: 6, Height: 11, Font: 13, Text: "k"},
+		{Top: 288, Left: 506, Width: 6, Height: 21, Text: ")"},
+		{Top: 292, Left: 512, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 288, Left: 527, Width: 51, Height: 21, Text: "est une"},
+	},
+	Rules: []pdfsrc.Rule{
+		{Top: 298, Left: 483, Width: 20, Thickness: 0.397, Length: 13.22, Size: 4.1},
+	},
+}
+
+// A fraction set inline does not join the line above it to its own.
+//
+// Both halves are scripts and both are on the one line already, so the bar has
+// nothing to join, whatever else on the page happens to stand across it.
+func TestAFractionSetInlineLeavesTheLineAboveAlone(t *testing.T) {
+	lines := Lines(frlay, inlineNorm)
+	if len(lines) != 2 {
+		for i, one := range lines {
+			t.Logf("line %d: %s", i, Render(one))
+		}
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	if got := Render(lines[0]); !strings.HasPrefix(got, "Exemple") || !strings.HasSuffix(got, "L’appli-") {
+		t.Errorf("Render: %s, want the whole of the first printed line and no more", got)
+	}
+	if got := Render(lines[1]); !strings.HasPrefix(got, "cation de") || !strings.Contains(got, `\frac{1}{`) {
+		t.Errorf("Render: %s, want the second printed line with its fraction", got)
+	}
+}
