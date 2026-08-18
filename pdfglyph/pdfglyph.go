@@ -163,6 +163,30 @@ var cmexNames = map[string]string{
 	"bracelefttp": "uniF8F1", "braceleftmid": "uniF8F2", "braceleftbt": "uniF8F3",
 	"bracerighttp": "uniF8FC", "bracerightmid": "uniF8FD", "bracerightbt": "uniF8FE",
 	"braceex": "uniF8F4", "arrowvertex": "uniF8F5", "arrowvertexdbl": "uniF8FF",
+
+	// The two ends of a vertical arrow, which go where its shaft goes. Lie
+	// chapters 7 to 9 draws 18 of them, six on the diagram of page 119 that
+	// puts Aut(g, h) over Aut_0(g, h) and twelve more on the diagrams of pages
+	// 375 and 376, and every one of them was an empty run.
+	//
+	// U+23D0 and not the up and down arrows, though an arrow of one row is
+	// drawn out of the head alone and really is one. An arrow of a diagram
+	// stands between two rows and is read on the row it was drawn beside, so
+	// the up arrow of page 375 lands in the middle of the term above it and the
+	// page reads Z C ↑ (G). What the reader needs off that page is not the
+	// arrowhead but the diagram flag, and extract raises it on this character:
+	// see arrowExtension, and the shaft this now agrees with.
+	//
+	// The radical of the extension font is the one TeX draws over a term too
+	// wide for the sign of the mathematics italic, and poppler was falling back
+	// on the code and printing an opening parenthesis for it. Lie chapter 9
+	// writes the orthonormal basis of the anti-invariant elements as J(lambda
+	// rho) over the root of w(G) and shipped it as "/(w(G)", and page 331 opens
+	// the section on the norms of the coefficients with the same parenthesis in
+	// front of the root of d(u). It is a surd here rather than a sqrt because
+	// the sign and what it covers are drawn apart and arrive apart: the bar is
+	// its own run and is already read as an overline.
+	"arrowtp": "uni23D0", "arrowbt": "uni23D0", "radicalbig": "uni221A",
 }
 
 // mathNames is every other mathematics font: the symbol font, the AMS fonts and
@@ -209,6 +233,24 @@ var mathNames = map[string]string{
 	"complement":     "uni2201",
 	"Rfractur":       "uni211C",
 	"Ifractur":       "uni2111",
+
+	// The four below came out of the dropped glyph flag rather than out of the
+	// report this package writes, which reads only the names texName matches
+	// and matches none of them. They are the relations of the symbol font and
+	// the AMS fonts whose codes are control characters, so poppler has nothing
+	// to fall back on either: it prints nothing and prints nothing quietly.
+	//
+	// Lie chapters 7 to 9 defines the canonical pairing on the dual of a
+	// compact group and writes it with the double angle brackets, so page 314
+	// printed "a bilinear form   ,   on" and the display under it "= 2 pi i
+	// a, b ." with the brackets gone. Page 370 states the domination relation
+	// between two positive functions on G and lost the sign 14 times in the
+	// paragraph that introduces it. Page 343 writes the Weyl integration
+	// formula and lost the corner off omega_G.
+	"lessmuch":        "uni226A",
+	"greatermuch":     "uni226B",
+	"precedesorcurly": "uni227C",
+	"rightanglesw":    "uni231E",
 }
 
 // codedNames are names this package does not replace and gives a CMap entry
@@ -227,13 +269,24 @@ var mathNames = map[string]string{
 //
 // The CMap is appended rather than rewritten, so nothing here has to fit
 // anywhere, and the name in the encoding is left as the printing wrote it.
-// The three are the variant Greek of the mathematics italic that the Adobe
-// list has no name for. Its theta1, phi1 and sigma1 are names of the symbol
-// font and poppler reads all three, which is why they are not here.
+// The first three are the variant Greek of the mathematics italic that the
+// Adobe list has no name for. Its theta1, phi1 and sigma1 are names of the
+// symbol font and poppler reads all three, which is why they are not here.
+//
+// The sharp is here for the same arithmetic. TeX draws the three musical signs
+// out of the mathematics italic and the Adobe list knows none of the three by
+// those names, so a natural becomes uni266E and a flat uni266D, both of which
+// fit. A sharp is five letters and uni266F is seven, and there is nothing
+// shorter that reads as one. The convolution of Lie chapter 9 is written s
+// sharp all through the section on the Weyl integration formula, at the size
+// the italic sets a superscript, and 31 of them over six pages arrived as an
+// empty run: page 350 alone says "Denote by s   the vector integral" twice in
+// two lines.
 var codedNames = map[string]rune{
 	"pi1":      'ϖ', // varpi
 	"rho1":     'ϱ', // varrho
 	"epsilon1": 'ϵ', // the lunate epsilon
+	"sharp":    '♯',
 }
 
 // texName is a glyph name that only a TeX font uses, so that a volume carrying
