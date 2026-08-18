@@ -137,3 +137,35 @@ func TestTheTablePrintsNoAddress(t *testing.T) {
 		t.Errorf("the wait is not on the table:\n%s", out)
 	}
 }
+
+// The host counts a cooldown down to "0m left" and holds it there for the last
+// seconds of it. That is a slot about to come back, and the fleet says so
+// rather than sleeping on another host for twenty minutes.
+func TestACooldownRunOutIsNotAWait(t *testing.T) {
+	board := ParseAccounts("server2", `  17  a@example.invalid  ✓  BANNED (until 10:33, 0m left)`)
+	if board.Soonest != 0 {
+		t.Errorf("first one back in %s, want none", board.Soonest)
+	}
+	boards := []Accounts{
+		{Host: "server3", Verified: 11, Banned: 11, Soonest: 23 * time.Minute},
+		board,
+	}
+	if got := Wait(boards); got != 0 {
+		t.Errorf("waiting %s, want none", got)
+	}
+}
+
+// A host with nothing ready and no time to read off any of its bans is a host
+// the fleet cannot put a number on, and it is not waited on either.
+func TestAHostWithNoTimeOnItIsNotWaitedOn(t *testing.T) {
+	board := ParseAccounts("server2", `  17  a@example.invalid  ✓  BANNED (until further notice)`)
+	if board.Soonest >= 0 {
+		t.Errorf("first one back in %s, want no reading at all", board.Soonest)
+	}
+	if got := Wait([]Accounts{board}); got != 0 {
+		t.Errorf("waiting %s, want none", got)
+	}
+	if table := AccountsTable([]Accounts{board}); !strings.Contains(table, "not for a while") {
+		t.Errorf("the table reads:\n%s", table)
+	}
+}

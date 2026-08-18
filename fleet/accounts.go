@@ -44,10 +44,19 @@ type Accounts struct {
 	// chatgpt-tool accounts --clean-stale is what gets it back.
 	Locked int
 	Stale  int
-	// Soonest is how long until the first banned slot returns, and zero when a
-	// slot is ready now. It is read off the "left" the host prints rather than
-	// off the wall clock time beside it, because these boxes do not keep the
-	// same clock as this one: server2 said 09:49 while it was 14:49 here.
+	// Soonest is how long until the first banned slot returns. Zero is a slot
+	// that is ready now or one whose cooldown has run out to the minute, and
+	// less than zero is a host with nothing ready and no time on it to read. It
+	// is read off the "left" the host prints rather than off the wall clock time
+	// beside it, because these boxes do not keep the same clock as this one:
+	// server2 said 09:49 while it was 14:49 here.
+	//
+	// The difference between zero and less than zero is worth the trouble. The
+	// host counts a cooldown down to "0m left" and holds it there for the last
+	// seconds of it, and a board that read that as no time at all sent the sweep
+	// to sleep on the other host instead: the log has server2 at 2m0s, a sleep
+	// of 120s, and then twenty minutes of waiting on server3 while server2 sat
+	// there with its cooldown run out.
 	Soonest time.Duration
 	Err     string
 }
@@ -95,7 +104,7 @@ func ParseAccounts(host, out string) Accounts {
 			board.Ready++
 		}
 	}
-	if board.Ready == 0 && soonest > 0 {
+	if board.Ready == 0 {
 		board.Soonest = soonest
 	}
 	return board
@@ -149,7 +158,7 @@ func Wait(boards []Accounts) time.Duration {
 		if board.Err != "" && board.Verified == 0 {
 			continue
 		}
-		if board.Ready > 0 {
+		if board.Ready > 0 || board.Soonest == 0 {
 			return 0
 		}
 		if board.Soonest > 0 && (soonest < 0 || board.Soonest < soonest) {
@@ -173,11 +182,14 @@ func AccountsTable(boards []Accounts) string {
 			continue
 		}
 		back := "now"
-		if board.Ready == 0 {
+		switch {
+		case board.Ready > 0:
+		case board.Soonest < 0:
 			back = "not for a while"
-			if board.Soonest > 0 {
-				back = board.Soonest.Round(time.Minute).String()
-			}
+		case board.Soonest > 0:
+			back = board.Soonest.Round(time.Minute).String()
+		default:
+			back = "any minute"
 		}
 		fmt.Fprintf(&out, "%-8s  %8d  %5d  %6d  %6d  %5d  %s\n",
 			board.Host, board.Verified, board.Ready, board.Banned, board.Locked, board.Stale, back)
