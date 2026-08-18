@@ -32,6 +32,12 @@ var frlay = &pdfsrc.Layout{Fonts: map[int]pdfsrc.FontSpec{
 	14: {ID: 14, Size: 9, Family: "LMRoman6"},
 	15: {ID: 15, Size: 9, Family: "LMMathItalic6"},
 	16: {ID: 16, Size: 9, Family: "LMMathSymbols6"},
+	17: {ID: 17, Size: 12, Family: "CMEX10"},
+	18: {ID: 18, Size: 9, Family: "LMRoman8"},
+	19: {ID: 19, Size: 9, Family: "LMMathSymbols8"},
+	20: {ID: 20, Size: 9, Family: "LMMathItalic8"},
+	21: {ID: 21, Size: 14, Family: "LMRoman12"},
+	22: {ID: 22, Size: 14, Family: "LMMathItalic12"},
 }}
 
 // enlay is what the English volumes declare. Algebra VIII is set in the Latin
@@ -49,6 +55,9 @@ var enlay = &pdfsrc.Layout{Fonts: map[int]pdfsrc.FontSpec{
 	8:  {ID: 8, Size: 15, Family: "CMEX10"},
 	9:  {ID: 9, Size: 10, Family: "EUFM7"},
 	10: {ID: 10, Size: 7, Family: "LMMathSymbols5"},
+	11: {ID: 11, Size: 15, Family: "LMMathItalic10"},
+	12: {ID: 12, Size: 10, Family: "LMMathSymbols7"},
+	13: {ID: 13, Size: 10, Family: "LMMathItalic7"},
 }}
 
 // sole renders the one line a fixture page holds.
