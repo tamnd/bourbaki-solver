@@ -194,7 +194,8 @@ func tokens(l Line) []token {
 			level, depth = Base, max(depth-1, 0)
 		}
 		toks = append(toks, token{text: text, class: r.Class, level: level, depth: depth,
-			left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(), math: r.Class.Math() || r.Level != Base})
+			left: r.Left, right: r.Right(), top: r.Top, bottom: r.Bottom(),
+			math: r.Class.Math() || r.Level != Base, sign: level == Base && wordOp(text)})
 	}
 	return place(toks, accents)
 }
