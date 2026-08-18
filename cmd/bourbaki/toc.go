@@ -212,10 +212,22 @@ func printTOC(r *toc.Result, verbose bool) {
 	fmt.Printf("%s  %s\n", r.Book, r.Grammar)
 	fmt.Printf("  %d chapters, %d §, %d no., %d exercise runs\n", ch, sec, sub, ex)
 	for _, c := range r.Chapters {
-		fmt.Printf("  chapter %-4s %-46s printed %d, pdf %d, %d §\n",
-			c.Numeral, trim(c.Title, 46), c.Page, c.PDFPage, len(c.Sections))
+		held := fmt.Sprintf("%d §", len(c.Sections))
+		if len(c.Subsections) > 0 {
+			held = fmt.Sprintf("no §, %d no.", len(c.Subsections))
+		}
+		fmt.Printf("  chapter %-4s %-46s printed %d, pdf %d, %s\n",
+			c.Numeral, trim(c.Title, 46), c.Page, c.PDFPage, held)
 		if !verbose {
 			continue
+		}
+		for _, sub := range c.Subsections {
+			fmt.Printf("    no. %-3d %-42s printed %d, pdf %d\n",
+				sub.Number, trim(sub.Title, 42), sub.Page, sub.PDFPage)
+		}
+		if len(c.Subsections) > 0 && c.Exercises != nil {
+			fmt.Printf("    exercises %40s printed %d, pdf %d\n",
+				"", c.Exercises.Page, c.Exercises.PDFPage)
 		}
 		for _, s := range c.Sections {
 			kind := "§"
@@ -285,6 +297,13 @@ func tocShow(args []string) error {
 
 func printChapter(c corpus.Chapter) {
 	fmt.Printf("chapter %s. %s  printed %d, pdf %d\n", c.Numeral, c.Title, c.Page, c.PDFPage)
+	for _, sub := range c.Subsections {
+		fmt.Printf("  %-5s %-52s printed %4d, pdf %4d\n",
+			fmt.Sprintf("no. %d", sub.Number), trim(sub.Title, 52), sub.Page, sub.PDFPage)
+	}
+	if len(c.Subsections) > 0 && c.Exercises != nil {
+		fmt.Printf("  exercises %52s printed %4d, pdf %4d\n", "", c.Exercises.Page, c.Exercises.PDFPage)
+	}
 	for _, s := range c.Sections {
 		head := fmt.Sprintf("§ %d", s.Number)
 		if s.Appendix {

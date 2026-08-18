@@ -90,6 +90,12 @@ func Verify(pages []string, b corpus.BookTOC) *Report {
 	r := &Report{Book: b.ID}
 	for _, c := range b.Chapters {
 		r.check(norm, Check{Chapter: c.Numeral, Kind: "chapter", Title: c.Title, PDFPage: c.PDFPage})
+		// The nos of a chapter that prints no § are checked the same way, and
+		// they carry no § number because there is none to carry.
+		for _, sub := range c.Subsections {
+			r.check(norm, Check{Chapter: c.Numeral, Kind: "no.",
+				Title: sub.Title, PDFPage: sub.PDFPage})
+		}
 		for _, s := range c.Sections {
 			kind := "§"
 			if s.Appendix {

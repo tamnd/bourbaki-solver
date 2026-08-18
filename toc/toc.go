@@ -669,16 +669,18 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			curSec, underNote = &cur.Sections[len(cur.Sections)-1], false
 		case kindSubsection:
 			if curSec == nil {
-				// A no. with no § over it is a no. nothing can hold, and a
-				// manifest that quietly leaves it out is a chapter the corpus
-				// says has no content. Chapter I of the English Integration is
-				// the one volume that does this on purpose: it prints three nos
-				// straight under the chapter heading and never opens a §.
-				if cur != nil && !underNote {
-					res.Problems = append(res.Problems, Problem{
-						Chapter: cur.Numeral,
-						Detail:  fmt.Sprintf("no. %d %q is listed before any §", e.number, e.title)})
+				// A no. with no § over it belongs to the chapter. Chapter I of
+				// the English Integration prints three nos straight under the
+				// chapter heading and never opens a §, and dropping them is a
+				// chapter the corpus says has no content. Whether this chapter
+				// is that one or a contents line misread is not decided here,
+				// because the § that would settle it is further down the page:
+				// validate refuses a chapter that ends up with both.
+				if cur == nil || underNote {
+					return
 				}
+				cur.Subsections = append(cur.Subsections, corpus.Subsection{
+					Number: e.number, Title: e.title, Page: t.page})
 				return
 			}
 			curSec.Subsections = append(curSec.Subsections, corpus.Subsection{
@@ -703,6 +705,14 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			}
 			if target != nil {
 				target.Exercises = &corpus.Locator{Page: t.page}
+				return
+			}
+			// A chapter with no § has nothing to hang a run on, and the volume
+			// names it for the chapter: Integration prints "Exercises for Ch. I"
+			// under the three nos of chapter I. It goes where the run of a
+			// chapter that gathers its exercises at the end goes.
+			if curSec == nil && len(cur.Sections) == 0 && !e.appendix && e.number == 0 {
+				cur.Exercises = &corpus.Locator{Page: t.page}
 			}
 		case kindHistorical:
 			if cur != nil {
@@ -1203,6 +1213,10 @@ func resolve(res *Result, pm *pagemap.Map) {
 	for i := range res.Chapters {
 		c := &res.Chapters[i]
 		c.PDFPage, _ = pm.PDFPageOf(c.Numeral, c.Page)
+		for j := range c.Subsections {
+			sub := &c.Subsections[j]
+			sub.PDFPage, _ = pm.PDFPageOf(c.Numeral, sub.Page)
+		}
 		for j := range c.Sections {
 			s := &c.Sections[j]
 			s.PDFPage, _ = pm.PDFPageOf(c.Numeral, s.Page)
@@ -1228,6 +1242,7 @@ func (r *Result) Counts() (chapters, sections, subsections, exercises int) {
 	chapters = len(r.Chapters)
 	for _, c := range r.Chapters {
 		sections += len(c.Sections)
+		subsections += len(c.Subsections)
 		if c.Exercises != nil {
 			exercises++
 		}

@@ -51,6 +51,45 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 			add(c.Numeral, 0, "no title")
 		}
 
+		// A chapter that owns a run of nos outright owns nothing else at that
+		// level. Chapter I of the English Integration prints three nos under
+		// the chapter heading and never a §, and every other chapter of the
+		// library opens a § first, so a chapter holding both is a contents line
+		// misread as a no. and not a printing anybody has to support.
+		if len(c.Subsections) > 0 && len(c.Sections) > 0 {
+			add(c.Numeral, 0, "lists %d no. before its first § and then %d §, so a § line was read as a no.",
+				len(c.Subsections), len(c.Sections))
+		}
+		// The chapter opens on its own no. 1, the way a § does, and for the same
+		// reason: the two numbers are read off two different lines, so a gap
+		// between them is the sharpest sign of a misread digit there is.
+		if len(c.Subsections) > 0 && c.Subsections[0].Page-c.Page != 0 && c.Subsections[0].Page-c.Page != 1 {
+			add(c.Numeral, 0, "no. 1 starts at printed page %d but the chapter starts at %d",
+				c.Subsections[0].Page, c.Page)
+		}
+		barelast := 0
+		for j, sub := range c.Subsections {
+			if sub.Number != j+1 {
+				add(c.Numeral, 0, "no. %d is listed %d%s, so a no. is missing or doubled",
+					sub.Number, j+1, ordinal(j+1))
+			}
+			if sub.Page < barelast {
+				add(c.Numeral, 0, "no. %d starts at printed page %d, before no. %d at %d",
+					sub.Number, sub.Page, j, barelast)
+			}
+			if !inChapter(sp, sub.Page) {
+				add(c.Numeral, 0, "no. %d starts at printed page %d, outside the chapter",
+					sub.Number, sub.Page)
+			}
+			if sub.PDFPage == 0 {
+				add(c.Numeral, 0, "no. %d printed page %d is on no pdf page", sub.Number, sub.Page)
+			}
+			if sub.Title == "" {
+				add(c.Numeral, 0, "no. %d has no title", sub.Number)
+			}
+			barelast = sub.Page
+		}
+
 		// § are counted on their own, because the appendices that close
 		// chapters II, III and VIII are listed among them and carry their own
 		// numbering, or none at all.
