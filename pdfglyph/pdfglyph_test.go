@@ -331,11 +331,16 @@ func TestEveryReplacementFits(t *testing.T) {
 // Two glyphs of one font landing on one code is a silent wrong reading, so the
 // tables have to be injective inside a font. The delimiter sizes are the
 // deliberate exception: four sizes of one bracket are one bracket in LaTeX.
+// So are the two ends of a vertical arrow, which are two ends of one arrow and
+// go where its shaft goes.
 func TestReplacementsDoNotCollide(t *testing.T) {
 	seen := map[string]string{}
 	for name, want := range cmexNames {
 		if strings.HasSuffix(name, "big") || strings.HasSuffix(name, "Big") ||
 			strings.HasSuffix(name, "bigg") || strings.HasSuffix(name, "Bigg") {
+			continue
+		}
+		if name == "arrowtp" || name == "arrowbt" {
 			continue
 		}
 		if old, ok := seen[want]; ok {
@@ -376,5 +381,170 @@ func TestTexNameLeavesTheAdobeListAlone(t *testing.T) {
 		if !texName.MatchString(name) {
 			t.Errorf("%s was not read as a TeX name", name)
 		}
+	}
+}
+
+// The double angle brackets of the pairing on the dual of a compact group.
+//
+// These sit at codes 0x1C and 0x1D of the symbol font, which are control
+// characters, so poppler has no name to read them by and no code to fall back
+// on either. Page 314 of Lie chapters 7 to 9 printed "a bilinear form   ,   on"
+// and the display under it "= 2 pi i a, b .", and nothing said so: texName
+// matches neither name, so the report this package writes never mentioned them,
+// and the run was empty rather than wrong so no rule of the audit could either.
+func TestRewriteNamesTheDoubleAngleBrackets(t *testing.T) {
+	out, res, err := Rewrite([]byte(lieVIIIX))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Names["lessmuch"] != 1 || res.Names["greatermuch"] != 1 {
+		t.Fatalf("replaced lessmuch %d and greatermuch %d times, want 1 each",
+			res.Names["lessmuch"], res.Names["greatermuch"])
+	}
+	if !strings.Contains(string(out), "/uni226A /uni226B    /asteriskmath") {
+		t.Error("the brackets did not land on U+226A and U+226B")
+	}
+}
+
+// The AMS symbol font of the same volume. The domination relation between two
+// positive functions on a compact group is drawn out of it, and so is the
+// corner the Weyl integration formula writes on a form induced from a subgroup.
+// Neither name is in the Adobe list: page 370 lost the relation 14 times in the
+// paragraph that introduces it, and page 343 wrote omega_G with the corner gone
+// off it.
+const lieVIIIXAMS = `%PDF-1.5
+61 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /DHHBJN+MSAM10
+/Encoding 62 0 R
+>>
+endobj
+62 0 obj
+<<
+/Type /Encoding
+/Differences [52/precedesorcurly 65/rightanglesw 123/complement]
+>>
+endobj
+`
+
+func TestRewriteNamesTheAMSRelations(t *testing.T) {
+	out, res, err := Rewrite([]byte(lieVIIIXAMS))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"precedesorcurly", "rightanglesw", "complement"} {
+		if res.Names[name] != 1 {
+			t.Errorf("replaced %s %d times, want 1", name, res.Names[name])
+		}
+	}
+	for _, want := range []string{"/uni227C", "/uni231E", "/uni2201"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("the encoding does not carry %s", want)
+		}
+	}
+}
+
+// The head of a vertical arrow of a commutative diagram goes where its shaft
+// goes, and not to an up arrow.
+//
+// An arrow of one row is drawn out of the head alone and really is one, so the
+// up arrow reads correctly and lands in the middle of the term the diagram
+// drew it beside: page 375 came out as Z C ↑ (G). What the page needs is the
+// diagram flag, and extract raises that on U+23D0.
+func TestRewriteNamesTheArrowheadsOfADiagram(t *testing.T) {
+	const cmex = `%PDF-1.5
+71 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /DGMCMP+CMEX10
+/Encoding 72 0 R
+>>
+endobj
+72 0 obj
+<<
+/Type /Encoding
+/Differences [1/arrowtp/arrowvertex/arrowbt/radicalbig]
+>>
+endobj
+`
+	out, res, err := Rewrite([]byte(cmex))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Names["arrowtp"] != 1 || res.Names["arrowbt"] != 1 {
+		t.Fatalf("replaced arrowtp %d and arrowbt %d times, want 1 each",
+			res.Names["arrowtp"], res.Names["arrowbt"])
+	}
+	if !strings.Contains(string(out), "/uni23D0/uniF8F5    /uni23D0/uni221A   ") {
+		t.Errorf("the ends of the arrow did not land on the shaft:\n%s", out)
+	}
+	if len(res.Unknown) != 0 {
+		t.Errorf("reported %v, and every name of this encoding is known", res.Unknown)
+	}
+}
+
+// The sharp of the convolution of Lie chapter 9, which no name poppler reads is
+// short enough to replace.
+//
+// TeX draws the three musical signs out of the mathematics italic. A natural
+// becomes uni266E and a flat uni266D, both of which fit where the printing
+// wrote the name; a sharp is five letters and uni266F is seven, so the code
+// goes in the CMap instead. 31 of them over six pages arrived as an empty run,
+// and page 350 alone says "Denote by s   the vector integral" twice in two
+// lines.
+func TestRewriteCodesTheSharp(t *testing.T) {
+	const cmmi = `%PDF-1.5
+81 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /DGLMOM+CMMI7
+/Encoding 82 0 R
+/ToUnicode 83 0 R
+>>
+endobj
+82 0 obj
+<<
+/Type /Encoding
+/Differences [21/natural 27/sharp]
+>>
+endobj
+83 0 obj
+<< /Length 150 >>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+1 begincodespacerange
+<00> <ff>
+endcodespacerange
+1 beginbfchar
+<15> <266E>
+endbfchar
+endcmap
+end end
+endstream
+endobj
+`
+	body := cmmi + "xref\n0 1\n0000000000 65535 f \ntrailer\n<</Size 84/Root 1 0 R>>\nstartxref\n" +
+		fmt.Sprint(len(cmmi)) + "\n%%EOF\n"
+	out, res, err := Rewrite([]byte(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Coded["sharp"] != 1 {
+		t.Fatalf("coded sharp %d times, want 1", res.Coded["sharp"])
+	}
+	// The natural is rewritten in place beside it, and the encoding is written
+	// back for that. The sharp is left as the printing wrote it either way.
+	if !strings.Contains(string(out), "/uni266E 27/sharp") {
+		t.Error("the natural did not land on U+266E with the sharp left beside it")
+	}
+	if res.Unicode != 1 {
+		t.Fatalf("patched %d CMaps, want 1", res.Unicode)
+	}
+	if !strings.Contains(string(out), "<1B> <266F>") {
+		t.Errorf("the CMap was not given the sharp:\n%s", out)
 	}
 }

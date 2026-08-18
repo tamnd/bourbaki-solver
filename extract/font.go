@@ -625,6 +625,11 @@ var unicodeMath = map[rune]string{
 	// volume that was here before them uses the sign at all, which is why it
 	// took until those two arrived to be missed.
 	'⋉': `\ltimes`, '⋊': `\rtimes`,
+	// The corner the Weyl integration formula of Lie chapter 9 writes on a form
+	// induced from a subgroup. It arrives only once the first AMS font has had
+	// its names rewritten, since the printing calls it rightanglesw and the
+	// Adobe list has never heard of that. See pdfglyph.
+	'⌞': `\llcorner`,
 	// The last two are the codepoints a typesetter reaches for that are not the
 	// letter they look like: U+2206 is the increment sign and U+2126 is the ohm,
 	// and the series means the capital Greek by both of them.
