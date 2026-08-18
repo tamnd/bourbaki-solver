@@ -326,7 +326,7 @@ func TestAnInterruptedChunkIsNotAskedTwice(t *testing.T) {
 	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "element", VI: "phần tử"}}}
 	asks := 0
 	_, _, bad := askChunk(ctx, t.TempDir(), ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false"},
-		g, "vi", j, j.chunks[0], false, chunkDeadline, func(format string, args ...any) { asks++ })
+		g, "en", "vi", "vi", j, j.chunks[0], false, chunkDeadline, func(format string, args ...any) { asks++ })
 	if asks != 1 {
 		t.Errorf("the chunk was asked %d times, want the one that was interrupted", asks)
 	}
@@ -418,7 +418,7 @@ func TestAProviderThatWillNotAnswerDoesNotKillTheChunks(t *testing.T) {
 	// the end of this loop.
 	for run := 1; run <= 4; run++ {
 		_, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, g,
-			"vi", "prompt-v1", j, false, false, false, chunkDeadline, func(string, ...any) {})
+			"en", "vi", "vi", "prompt-v1", j, false, false, false, chunkDeadline, func(string, ...any) {})
 		if len(problems) == 0 {
 			t.Fatalf("run %d: the section was written by a host that answers nothing", run)
 		}

@@ -151,6 +151,7 @@ func runTranslate(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, translateUsage) }
 	dir := fs.String("corpus", "", "the checkout")
 	lang := fs.String("lang", "", "vi, zh or ja")
+	from := fs.String("from", "en", "the language the passage is written in")
 	book := fs.String("book", "", "only this book")
 	chapter := fs.String("chapter", "", "only this chapter")
 	file := fs.String("file", "", "only this English file")
@@ -177,9 +178,29 @@ func runTranslate(args []string) error {
 	if *lang == "fr" {
 		return fmt.Errorf("french is a source language, not a target: content/fr is extracted from the French printing, not translated into")
 	}
+	// English is a target only from the French, and only for the volumes that
+	// have no English printing. Reading content/en into English would be asking a
+	// model to rewrite Springer's translation, which is not a thing this corpus
+	// has any business doing.
+	switch {
+	case *from != "en" && *from != "fr":
+		return fmt.Errorf("-from is %q, and the corpus is written in en and fr", *from)
+	case *lang == "en" && *from != "fr":
+		return fmt.Errorf("english is a target only from the french, so -lang en wants -from fr")
+	case *lang != "en" && *from == "fr":
+		return fmt.Errorf("-from fr reads the french only volumes into english, so it wants -lang en and not %q", *lang)
+	}
 	if !known(*lang) {
 		fs.Usage()
 		os.Exit(2)
+	}
+	// The machine English goes in a tree of its own. content/en is Springer's
+	// translation of Algebra, Theory of Sets and Lie, and this is a model's
+	// reading of volumes nobody translated. Putting the two in one tree would
+	// leave a reader no way to tell which is which.
+	tree := *lang
+	if *from == "fr" {
+		tree = "en-mt"
 	}
 	if *deadline <= 0 || *deadline > maxChunkDeadline {
 		return fmt.Errorf("-deadline is %s, and one ask of one chunk is held to between nothing and %s", *deadline, maxChunkDeadline)
@@ -195,17 +216,24 @@ func runTranslate(args []string) error {
 	if len(g.In(*lang)) == 0 {
 		return fmt.Errorf("the glossary has no %s in it, run bourbaki glossary translate -lang %s first", *lang, *lang)
 	}
+	// Reading the French wants the French side of the rows. Without it every
+	// term would go to the model unpinned, and the volumes that have no English
+	// printing are exactly the ones with nothing to check the vocabulary against
+	// afterwards, so an unpinned run is one nobody can correct.
+	if *from == "fr" && len(g.Keyed("fr")) == 0 {
+		return fmt.Errorf("the glossary has no french in it, so nothing would hold the reading to bourbaki's vocabulary")
+	}
 	// Before the run rather than after it. The pass that follows costs fleet
 	// time per section, and a term the last pass rendered three ways is a term
 	// this one will render three ways too unless the row is fixed first.
 	if *checkGlossary {
 		return checkGlossaryOnDisk(root, *lang, *book, *chapter, *file, *all)
 	}
-	promptHash, err := prompt.TranslateSHA256("en", *lang)
+	promptHash, err := prompt.TranslateSHA256(*from, *lang)
 	if err != nil {
 		return err
 	}
-	jobs, skipped, err := translateJobs(root, g, *lang, *book, *chapter, *file, promptHash, *force, *redoSmall)
+	jobs, skipped, err := translateJobs(root, g, *from, *lang, tree, *book, *chapter, *file, promptHash, *force, *redoSmall)
 	if err != nil {
 		return err
 	}
@@ -225,7 +253,7 @@ func runTranslate(args []string) error {
 		fmt.Printf("translate: %d files need %s, %d are current\n", len(jobs), *lang, skipped)
 	}
 	if *dry {
-		question, err := translateQuestion(g, *lang, jobs[0].chunks[0].Body)
+		question, err := translateQuestion(g, *from, *lang, jobs[0].chunks[0].Body)
 		if err != nil {
 			return err
 		}
@@ -258,10 +286,10 @@ func runTranslate(args []string) error {
 		logf("%d chunks came back from a run that did not finish", len(reaped))
 	}
 
-	run := runID(*lang, promptHash, jobs)
+	run := runID(tree, promptHash, jobs)
 	var written, refused int
 	for _, job := range jobs {
-		body, model, problems := translateFile(ctx, root, q, hosts, g, *lang, promptHash, job, *force, *redoSmall, *keep, *deadline, logf)
+		body, model, problems := translateFile(ctx, root, q, hosts, g, *from, *lang, tree, promptHash, job, *force, *redoSmall, *keep, *deadline, logf)
 		if len(problems) > 0 {
 			refused++
 			logf("%s: refused, nothing written", job.source)
@@ -270,7 +298,7 @@ func runTranslate(args []string) error {
 			}
 			continue
 		}
-		path, err := writeTranslation(root, *lang, run, promptHash, g.Version, job, body, model)
+		path, err := writeTranslation(root, *from, *lang, tree, run, promptHash, g.Version, job, body, model)
 		if err != nil {
 			return err
 		}
@@ -292,25 +320,27 @@ func runTranslate(args []string) error {
 // the file goes and which schema its head is written in, and an exercise takes
 // the hash of the English body rather than a hash copied out of the English
 // head, since an exercise records none.
-func writeTranslation(root, lang, run, promptHash string, version int, j job, body, model string) (string, error) {
+func writeTranslation(root, from, lang, tree, run, promptHash string, version int, j job, body, model string) (string, error) {
 	var path string
 	var file interface{ Write(string) error }
 	if j.ex != nil {
 		out := *j.ex
 		out.Lang = lang
 		out.TranslatedFrom = j.source
+		out.SourceLang, out.TranslationMethod = provenance(from)
 		out.SourceSHA256 = corpus.ContentSHA256(j.body)
 		out.TranslationModel = model
 		out.TranslationRun = run
 		out.GlossaryVersion = version
 		out.GlossaryTerms = j.terms
 		out.PromptSHA256 = promptHash
-		path = corpus.ExercisePath(root, lang, out)
+		path = corpus.ExercisePath(root, tree, out)
 		file = corpus.ExerciseFile{Meta: out, Body: body}
 	} else {
 		out := j.meta
 		out.Lang = lang
 		out.TranslatedFrom = j.source
+		out.SourceLang, out.TranslationMethod = provenance(from)
 		out.SourceSHA256 = j.meta.ContentSHA256
 		out.ContentSHA256 = corpus.ContentSHA256(body)
 		out.TranslationModel = model
@@ -318,7 +348,7 @@ func writeTranslation(root, lang, run, promptHash string, version int, j job, bo
 		out.GlossaryVersion = version
 		out.GlossaryTerms = j.terms
 		out.PromptSHA256 = promptHash
-		path = corpus.SectionPath(root, lang, out)
+		path = corpus.SectionPath(root, tree, out)
 		file = corpus.SectionFile{Meta: out, Body: body}
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -398,8 +428,8 @@ type job struct {
 // The walk is over content/en rather than over the sections manifest, because
 // the manifest records what the assembler produced and this has to translate
 // what is on disk. The two agree today and the file is the thing being read.
-func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only, promptHash string, force, redoSmall bool) ([]job, int, error) {
-	dir := filepath.Join(root, "content", "en")
+func translateJobs(root string, g *glossary.Glossary, from, lang, tree, book, chapter, only, promptHash string, force, redoSmall bool) ([]job, int, error) {
+	dir := filepath.Join(root, "content", from)
 	var paths []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -419,7 +449,7 @@ func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only,
 	var jobs []job
 	skipped := 0
 	for _, path := range paths {
-		j, ok, err := readJob(root, path)
+		j, ok, err := readJob(root, path, from)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -437,12 +467,12 @@ func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only,
 		// The glossary a file is held to is the one its own volume is
 		// translated against, since a row can be scoped to a book. See
 		// glossary.Glossary.For.
-		j.terms = translate.GlossaryDigest(g.For(j.meta.Book), lang, j.body)
+		j.terms = translate.GlossaryDigest(g.For(j.meta.Book), from, lang, j.body)
 		var fresh bool
 		if j.ex != nil {
-			fresh, j.why = currentExercise(root, lang, j.source, *j.ex, j.body, g.Version, promptHash, j.terms)
+			fresh, j.why = currentExercise(root, tree, j.source, *j.ex, j.body, g.Version, promptHash, j.terms)
 		} else {
-			fresh, j.why = current(root, lang, j.source, j.meta, g.Version, promptHash, j.terms)
+			fresh, j.why = current(root, tree, j.source, j.meta, g.Version, promptHash, j.terms)
 		}
 		if fresh && redoSmall {
 			// The file is the one this run would make, and it is still not the
@@ -452,7 +482,7 @@ func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only,
 			// hashes are right to call it current and L08 is what notices. A
 			// person who has read L08 and wants those answered again says so
 			// here.
-			if model := translatedBy(root, lang, j); quality.SmallModel(model) {
+			if model := translatedBy(root, tree, j); quality.SmallModel(model) {
 				fresh, j.why = false, "it was translated by "+model+", which is a cut down model"
 			}
 		}
@@ -482,18 +512,18 @@ func translateJobs(root string, g *glossary.Glossary, lang, book, chapter, only,
 // Book and Chapter are copied onto meta for an exercise as well, since the
 // -book and -chapter flags and the per volume glossary are asked for by those
 // two fields and both heads carry them.
-func readJob(root, path string) (job, bool, error) {
+func readJob(root, path, from string) (job, bool, error) {
 	source := rel(root, path)
 	if strings.Contains(filepath.ToSlash(source), "/exercises/") {
 		f, err := corpus.ReadFile[corpus.ExerciseFrontMatter](path)
-		if err != nil || f.Meta.Lang != "en" || f.Meta.Book == "" {
+		if err != nil || f.Meta.Lang != from || f.Meta.Book == "" {
 			return job{}, false, nil
 		}
 		meta := corpus.SectionFrontMatter{Book: f.Meta.Book, Chapter: f.Meta.Chapter}
 		return job{source: source, meta: meta, ex: &f.Meta, body: f.Body}, true, nil
 	}
 	f, err := corpus.ReadFile[corpus.SectionFrontMatter](path)
-	if err != nil || f.Meta.Lang != "en" || f.Meta.Book == "" {
+	if err != nil || f.Meta.Lang != from || f.Meta.Book == "" {
 		return job{}, false, nil
 	}
 	return job{source: source, meta: f.Meta, body: f.Body}, true, nil
@@ -647,7 +677,7 @@ func freshOnly(hosts []ocr.Host) map[string]func(queue.Job) bool {
 	return want
 }
 
-func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, lang, promptHash string, j job, force, redoSmall, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
+func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, from, lang, tree, promptHash string, j job, force, redoSmall, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force, redoSmall)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "queue", Msg: err.Error()}}
@@ -687,7 +717,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 						}
 						continue
 					}
-					text, model, bad := askChunk(ctx, root, host, g, lang, j, c, keep, deadline, logf)
+					text, model, bad := askChunk(ctx, root, host, g, from, lang, tree, j, c, keep, deadline, logf)
 					if len(bad) > 0 && ctx.Err() != nil {
 						// Somebody pressed Ctrl-C while this chunk was out. The
 						// model did not get it wrong, so the attempt is given
@@ -796,7 +826,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 
 // askChunk asks once, and asks again with the complaint if the first answer did
 // not pass.
-func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, lang string, j job, c translate.Chunk, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
+func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, from, lang, tree string, j job, c translate.Chunk, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	terms := g.For(j.meta.Book)
 	// A chunk with nothing in it to translate is not put to anybody. See
 	// translate.SelfTranslation: what comes back has to be what went out, so the
@@ -817,14 +847,14 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		logf("%s chunk %d of %d: %d of its %d characters are bibliography and stand as printed, so they are not asked for",
 			j.source, c.Index, c.Of, len(c.Body)-len(body), len(c.Body))
 	}
-	question, err := translateQuestion(terms, lang, body)
+	question, err := translateQuestion(terms, from, lang, body)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 	}
 	// What the answers already on disk for this chunk are refused for goes into
 	// the first ask, so a pass does not begin by making the mistake the pass
 	// before it ended on. See refusedBefore.
-	prior := refusedBefore(root, lang, terms, j, c, body)
+	prior := refusedBefore(root, tree, terms, j, c, body)
 	if len(prior) > 0 {
 		logf("%s chunk %d of %d: an earlier pass was refused for %d things, and the ask carries them",
 			j.source, c.Index, c.Of, len(prior))
@@ -833,7 +863,7 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 	for attempt := 1; attempt <= 2; attempt++ {
 		ask := question
 		if note := merge(prior, last); len(note) > 0 {
-			if ask, err = translateQuestionWithNote(terms, lang, body, retryNote(note)); err != nil {
+			if ask, err = translateQuestionWithNote(terms, from, lang, body, retryNote(note)); err != nil {
 				return "", "", []translate.Problem{{Rule: "prompt", Msg: err.Error()}}
 			}
 		}
@@ -1082,12 +1112,12 @@ var advice = map[string]string{
 		"thrown away.",
 }
 
-func translateQuestion(g *glossary.Glossary, lang, body string) (string, error) {
-	return translateQuestionWithNote(g, lang, body, "")
+func translateQuestion(g *glossary.Glossary, source, lang, body string) (string, error) {
+	return translateQuestionWithNote(g, source, lang, body, "")
 }
 
-func translateQuestionWithNote(g *glossary.Glossary, lang, body, note string) (string, error) {
-	return prompt.Translate("en", lang, translate.GlossaryBlock(g, lang, body), note, body)
+func translateQuestionWithNote(g *glossary.Glossary, source, lang, body, note string) (string, error) {
+	return prompt.Translate(source, lang, translate.GlossaryBlock(g, source, lang, body), note, body)
 }
 
 // modelsUsed is every model that answered a chunk of one section, in the order
@@ -1152,4 +1182,18 @@ func archiveChunk(root, lang, source string, c translate.Chunk, attempt int, que
 		text = "<!-- " + conversation + " -->\n\n" + answer
 	}
 	return os.WriteFile(stem+".answer.md", []byte(text), 0o644)
+}
+
+// provenance is what a translated file records about where it came from.
+//
+// A file read from the English is what this command has always written and it
+// says nothing extra, so the thousands of files already on disk keep the heads
+// they have. A file read from the French is the new thing and says so, because
+// it is a model's reading of a volume that has no English printing and it sits
+// beside translations that are not.
+func provenance(from string) (lang, method string) {
+	if from == "en" {
+		return "", ""
+	}
+	return from, "machine"
 }

@@ -163,27 +163,32 @@ func Join(answers []string) string {
 // answer to both would want a rendering of "ring" inside a phrase that has no
 // room for one. So the prompt is generous and the rule is strict, in that
 // order, and the difference is deliberate.
-func GlossaryBlock(g *glossary.Glossary, lang, body string) string {
+// source is the language the body is written in, and it is what the left column
+// is matched and printed in. For an English body that is the English headword,
+// which is every row this has ever built. A French body is matched on the French
+// the printing spells the term with, and the right column is still what to
+// write, so the block reads the same way in both directions.
+func GlossaryBlock(g *glossary.Glossary, source, lang, body string) string {
 	lower := strings.ToLower(body)
-	type row struct{ en, tr string }
+	type row struct{ from, tr string }
 	var rows []row
 	for _, t := range g.Terms {
-		tr := t.In(lang)
-		if tr == "" || !glossary.Mentions(lower, glossary.Key(t.EN)) {
+		from, tr := t.In(source), t.In(lang)
+		if from == "" || tr == "" || !glossary.Mentions(lower, glossary.Key(from)) {
 			continue
 		}
-		rows = append(rows, row{t.EN, tr})
+		rows = append(rows, row{from, tr})
 	}
-	// Longest English first, so a reader of the list meets the phrase before
-	// the word inside it.
+	// Longest first, so a reader of the list meets the phrase before the word
+	// inside it.
 	for i := 1; i < len(rows); i++ {
-		for j := i; j > 0 && len(rows[j].en) > len(rows[j-1].en); j-- {
+		for j := i; j > 0 && len(rows[j].from) > len(rows[j-1].from); j-- {
 			rows[j], rows[j-1] = rows[j-1], rows[j]
 		}
 	}
 	var b strings.Builder
 	for _, r := range rows {
-		b.WriteString(r.en)
+		b.WriteString(r.from)
 		b.WriteString(" | ")
 		b.WriteString(r.tr)
 		b.WriteString("\n")
@@ -210,7 +215,7 @@ func GlossaryBlock(g *glossary.Glossary, lang, body string) string {
 // what the prompt carried and the prompt is built from the English. It is the
 // whole section rather than a chunk, so that re-cutting a section into different
 // chunks does not restale it.
-func GlossaryDigest(g *glossary.Glossary, lang, body string) string {
-	sum := sha256.Sum256([]byte(GlossaryBlock(g, lang, body)))
+func GlossaryDigest(g *glossary.Glossary, source, lang, body string) string {
+	sum := sha256.Sum256([]byte(GlossaryBlock(g, source, lang, body)))
 	return hex.EncodeToString(sum[:])
 }

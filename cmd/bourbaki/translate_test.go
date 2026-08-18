@@ -155,17 +155,17 @@ func TestTheDigestIsTheRowsAndNotTheGlossary(t *testing.T) {
 		{EN: "ring", VI: "vành"},
 		{EN: "quaternion algebra", VI: "đại số quaternion"},
 	}}
-	a := translate.GlossaryDigest(g, "vi", "Let A be a ring.")
-	b := translate.GlossaryDigest(g, "vi", "Every ring has a unit.")
+	a := translate.GlossaryDigest(g, "en", "vi", "Let A be a ring.")
+	b := translate.GlossaryDigest(g, "en", "vi", "Every ring has a unit.")
 	if a != b {
 		t.Error("two sections shown the same rows carry different digests")
 	}
-	if c := translate.GlossaryDigest(g, "vi", "Let A be a quaternion algebra."); c == a {
+	if c := translate.GlossaryDigest(g, "en", "vi", "Let A be a quaternion algebra."); c == a {
 		t.Error("two sections shown different rows carry the same digest")
 	}
 	// A language with no rendering is shown nothing, which is where Chinese and
 	// Japanese are until the glossary is filled in for them.
-	if translate.GlossaryDigest(g, "zh", "Let A be a ring.") != translate.GlossaryDigest(g, "zh", "") {
+	if translate.GlossaryDigest(g, "en", "zh", "Let A be a ring.") != translate.GlossaryDigest(g, "en", "zh", "") {
 		t.Error("a language with no renderings was shown something")
 	}
 }
@@ -173,7 +173,7 @@ func TestTheDigestIsTheRowsAndNotTheGlossary(t *testing.T) {
 // stale is what a run would do, without asking anything.
 func stale(t *testing.T, root string, g *glossary.Glossary) []job {
 	t.Helper()
-	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash", false, false)
+	jobs, _, err := translateJobs(root, g, "en", "vi", "vi", "", "", "", "prompt-hash", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func writeVietnamese(t *testing.T, root string, g *glossary.Glossary, n int, eng
 	m.SourceSHA256 = corpus.ContentSHA256(english)
 	m.ContentSHA256 = corpus.ContentSHA256("Cho A là một vành.")
 	m.GlossaryVersion = g.Version
-	m.GlossaryTerms = translate.GlossaryDigest(g, "vi", english)
+	m.GlossaryTerms = translate.GlossaryDigest(g, "en", "vi", english)
 	m.PromptSHA256 = "prompt-hash"
 	writeSection(t, corpus.SectionPath(root, "vi", m), corpus.SectionFile{Meta: m, Body: "Cho A là một vành."})
 }
@@ -284,7 +284,7 @@ func TestAnExerciseIsWorkForThisCommandToo(t *testing.T) {
 	}
 	// The glossary reaches an exercise the same way it reaches a §, or the two
 	// halves of a volume are held to different terminology.
-	if j.terms != translate.GlossaryDigest(g, "vi", english) {
+	if j.terms != translate.GlossaryDigest(g, "en", "vi", english) {
 		t.Error("the exercise was not held to the rows its English mentions")
 	}
 }
@@ -299,7 +299,7 @@ func TestATranslatedExerciseIsCurrent(t *testing.T) {
 	writeEnglishExercise(t, root, 3, english)
 	j := stale(t, root, g)[0]
 
-	path, err := writeTranslation(root, "vi", "run-1", "prompt-hash", g.Version, j, "Chứng minh rằng mọi vành hữu hạn không có ước của không là một trường.", "gpt-5-6")
+	path, err := writeTranslation(root, "en", "vi", "vi", "run-1", "prompt-hash", g.Version, j, "Chứng minh rằng mọi vành hữu hạn không có ước của không là một trường.", "gpt-5-6")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,11 +343,11 @@ func TestAChangeOfInstructionsReachesAnExercise(t *testing.T) {
 	english := "Show that every finite ring with no divisor of zero is a field."
 	writeEnglishExercise(t, root, 3, english)
 	j := stale(t, root, g)[0]
-	if _, err := writeTranslation(root, "vi", "run-1", "prompt-hash", g.Version, j, "Chứng minh.", "gpt-5-6"); err != nil {
+	if _, err := writeTranslation(root, "en", "vi", "vi", "run-1", "prompt-hash", g.Version, j, "Chứng minh.", "gpt-5-6"); err != nil {
 		t.Fatal(err)
 	}
 
-	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash-2", false, false)
+	jobs, _, err := translateJobs(root, g, "en", "vi", "vi", "", "", "", "prompt-hash-2", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -378,7 +378,7 @@ func writeEnglishExercise(t *testing.T, root string, n int, body string) {
 // staleUnder is stale with -redo-small on.
 func staleUnder(t *testing.T, root string, g *glossary.Glossary, redoSmall bool) []job {
 	t.Helper()
-	jobs, _, err := translateJobs(root, g, "vi", "", "", "", "prompt-hash", false, redoSmall)
+	jobs, _, err := translateJobs(root, g, "en", "vi", "vi", "", "", "", "prompt-hash", false, redoSmall)
 	if err != nil {
 		t.Fatal(err)
 	}

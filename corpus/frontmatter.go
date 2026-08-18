@@ -59,8 +59,18 @@ type SectionFrontMatter struct {
 
 	// Set only on a translation. TranslatedFrom is the path of the English
 	// file and SourceSHA256 is its content_sha256 at the time of translation.
-	TranslatedFrom   string `yaml:"translated_from,omitempty"`
-	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
+	TranslatedFrom string `yaml:"translated_from,omitempty"`
+
+	// SourceLang is the language that file is written in, and TranslationMethod
+	// says how the reading was made. They are here for the volumes Bourbaki never
+	// published in English: those are read from the French by a model, they sit in
+	// a tree of their own, and a reader who has one of their files in hand has to
+	// be able to see that it is not Springer's translation without knowing which
+	// directory it came out of.
+	SourceLang        string `yaml:"source_lang,omitempty"`
+	TranslationMethod string `yaml:"translation_method,omitempty"`
+
+	SourceSHA256 string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
 	TranslationRun   string `yaml:"translation_run,omitempty"`
 	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
@@ -114,8 +124,18 @@ type ExerciseFrontMatter struct {
 	// exercise records no content_sha256 of its own, and adding one would mean
 	// rewriting all 239 English files of this book to record a number that can
 	// be computed from the body sitting under it.
-	TranslatedFrom   string `yaml:"translated_from,omitempty"`
-	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
+	TranslatedFrom string `yaml:"translated_from,omitempty"`
+
+	// SourceLang is the language that file is written in, and TranslationMethod
+	// says how the reading was made. They are here for the volumes Bourbaki never
+	// published in English: those are read from the French by a model, they sit in
+	// a tree of their own, and a reader who has one of their files in hand has to
+	// be able to see that it is not Springer's translation without knowing which
+	// directory it came out of.
+	SourceLang        string `yaml:"source_lang,omitempty"`
+	TranslationMethod string `yaml:"translation_method,omitempty"`
+
+	SourceSHA256 string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
 	TranslationRun   string `yaml:"translation_run,omitempty"`
 	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
