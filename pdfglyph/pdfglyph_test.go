@@ -343,6 +343,10 @@ func TestReplacementsDoNotCollide(t *testing.T) {
 		if name == "arrowtp" || name == "arrowbt" {
 			continue
 		}
+		// CMEX gives the square cup two names and a printing may use either.
+		if name == "unionsqtext" || name == "unionsqdisplay" {
+			continue
+		}
 		if old, ok := seen[want]; ok {
 			t.Errorf("%s and %s both go to /%s", old, name, want)
 		}
@@ -588,5 +592,69 @@ func TestRewriteNamesAnEncodingWrittenInsideItsFont(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "[0/zero        /one           80/P ") {
 		t.Errorf("the delimiters were not rewritten:\n%s", out)
+	}
+}
+
+// The extension font of the French printings, which is the Latin Modern
+// redrawing of Knuth's and is embedded under its own name.
+const latinModernExtension = `%PDF-1.5
+90 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /LMMathExtension10-Regular
+/Encoding 91 0 R
+>>
+endobj
+91 0 obj
+<<
+/Type /Encoding
+/Differences [80/summationtext/producttext 88/summationdisplay 98/hatwide]
+>>
+endobj
+`
+
+// A font is the extension font whatever the foundry called it.
+//
+// Looking for CMEX in the name is not a test, it is one printing's spelling.
+// Nothing is left alone for failing it: rewriteNames falls through to the
+// mathematics table, so the whole extension font of a volume is read as though
+// it were the symbol font. Topologie and Topologie algebrique were reporting
+// between 33 and 40 names with no replacement, and every one of them was a
+// delimiter, a sum or an integral that cmexNames has had all along.
+func TestRewriteNamesTheLatinModernExtensionFont(t *testing.T) {
+	out, res, err := Rewrite([]byte(latinModernExtension))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"summationtext", "producttext", "summationdisplay"} {
+		if res.Names[name] != 1 {
+			t.Errorf("replaced %s %d times, want 1", name, res.Names[name])
+		}
+	}
+	if len(res.Unknown) != 0 {
+		t.Errorf("reported %v, and every name of this encoding is known", res.Unknown)
+	}
+	// The accent is the one name of this encoding the mathematics table also
+	// carries, and it has to land where the extension font puts it.
+	if !strings.Contains(string(out), "98/b") {
+		t.Errorf("the accent was read as the symbol font's:\n%s", out)
+	}
+}
+
+// Which names count as the extension font, and which are left to the
+// mathematics table on purpose. Guessing wrong the other way is the worse
+// error: hatwide is an accent to draw over a letter in the extension font and a
+// glyph of its own in the AMS fonts.
+func TestTheExtensionFontIsKnownByAnyOfItsNames(t *testing.T) {
+	for _, name := range []string{"CMEX10", "CMEX9", "LMMathExtension10-Regular", "EUEX10"} {
+		if !extensionFont(name) {
+			t.Errorf("%s was not read as the extension font", name)
+		}
+	}
+	for _, name := range []string{"CMSY10", "MSAM10", "MSBM10", "CMMI7", "LMMathSymbols10-Regular", ""} {
+		if extensionFont(name) {
+			t.Errorf("%s was read as the extension font", name)
+		}
 	}
 }
