@@ -46,16 +46,28 @@ import "strings"
 // of it. A limit is no trouble either, since hoist has already moved the sign
 // in front of the limit it belongs to and the cluster is then set against it.
 //
-// A matrix whose entries carry scripts of their own is not read at all, and
-// running before overset is what leaves it unread. Page 73 of Théories
-// spectrales prints the matrix of alpha inverse, 0 over 0, 0, and the -1 of it
-// arrives a level further in than the entries, which is a depth this refuses.
-// overset takes that -1 for a script drawn over the 0 beside it and writes the
-// cluster back one level shallower, and read after that the page comes out as
-// the matrix of \overset{-1}{0}, which is a plausible matrix of the wrong
-// thing. Left where it is, it stays the double superscript it was and the audit
-// goes on counting it in M09, which is what should happen to a formula nothing
-// here can read.
+// The third is the same matrix with scripts on its entries, which neither of
+// the other two can read: they are written over the runs of one level and an
+// entry that carries a script is written over two. Page 73 of Théories
+// spectrales prints the matrix of alpha inverse less alpha nought inverse, 0
+// over 0, 0, and the -1 of it arrives a level further in than the entries do.
+// The entries are the runs at the level the matrix is set at and a run deeper
+// than that is written on the entry in front of it, which is the same rule the
+// rest of a line is read by. What is left is two rows of entries, and they are
+// cut into columns at the white that runs down the whole cluster rather than at
+// the white in either row alone, since a wide entry over a narrow one leaves no
+// gap where the row above it has one: the top row here is alpha inverse less
+// alpha nought inverse and the bottom row under it is a single 0.
+//
+// This is read only where an entry does carry a script, so that a cluster
+// either of the other two reads comes out of them and not out of this, and only
+// where the cluster hangs off nothing, which is the same guard the row shape is
+// read under and for the same reason.
+//
+// Running before overset is what makes it readable. overset takes that -1 for a
+// script drawn over the 0 beside it and writes the cluster back one level
+// shallower, and read after that the page comes out as the matrix of
+// \overset{-1}{0}, which is a plausible matrix of the wrong thing.
 
 // gridded reads a matrix set inline as a matrix.
 func gridded(toks []token) []token {
@@ -74,7 +86,9 @@ func gridded(toks []token) []token {
 		c := rest[:j]
 		cells, ok := byColumn(c)
 		if !ok && loose(out, c) {
-			cells, ok = byRow(c)
+			if cells, ok = byRow(c); !ok {
+				cells, ok = byInk(c)
+			}
 		}
 		if !ok {
 			out = append(out, c...)
@@ -158,9 +172,14 @@ func twoRows(c []token) (sup, sub []token, ok bool) {
 			return nil, nil, false
 		}
 	}
-	if len(sup) == 0 || len(sub) == 0 {
+	if len(sup) == 0 || len(sub) == 0 || !apart(sup, sub, c) {
 		return nil, nil, false
 	}
+	return sup, sub, true
+}
+
+// apart is the measurement that says two rows are the two rows of one matrix.
+func apart(sup, sub, c []token) bool {
 	// The top row is drawn above the bottom row and clear of it, which is what
 	// makes them two rows rather than one.
 	//
@@ -176,16 +195,13 @@ func twoRows(c []token) (sup, sub []token, ok bool) {
 	// the depth is the descent a glyph reserves under its baseline, and it
 	// takes both: 0 of 8 on the English page and 3 of 12 on the French.
 	if highestTop(sup) >= highestTop(sub) || lowest(sup)-highest(sub) > deep(c)/descent {
-		return nil, nil, false
+		return false
 	}
 	// The rows stand a script apart and not a line apart, which is what says
 	// they are the two rows of one matrix rather than two lines of a display
 	// that the line gathering ran together. It is the measurement stack.go
 	// makes for the same reason and refuses a stack on.
-	if highest(sub)-lowest(sup) > deep(c) {
-		return nil, nil, false
-	}
-	return sup, sub, true
+	return highest(sub)-lowest(sup) <= deep(c)
 }
 
 // byColumn gathers a cluster boxed by column into the cells of the matrix it is,
@@ -250,24 +266,255 @@ func byRow(c []token) ([][]string, bool) {
 	return [][]string{top, bottom}, true
 }
 
+// byInk gathers a cluster whose entries carry scripts of their own, and says so
+// when it is not one.
+//
+// The cluster is cut into entries first, since the runs of one entry are not the
+// runs of one column: the -1 of alpha inverse is drawn after the alpha and the
+// 0 of the row below is drawn between that and the next entry, so the runs of
+// the top row and the runs of the bottom row are interleaved on the page. An
+// entry is a run at the level the matrix is set at together with whatever was
+// written deeper on it, which is the rule the rest of a line is read by, and
+// what it leaves is two rows of entries that stand where their entries stand.
+func byInk(c []token) ([][]string, bool) {
+	sup, sub, ok := deepRows(c)
+	if !ok {
+		return nil, false
+	}
+	top, ok := entries(sup)
+	if !ok {
+		return nil, false
+	}
+	bottom, ok := entries(sub)
+	if !ok {
+		return nil, false
+	}
+	a, b := cut(top), cut(bottom)
+	if len(a) < 2 || len(a) != len(b) {
+		return nil, false
+	}
+	return [][]string{a, b}, true
+}
+
+// deepRows cuts a cluster into its entries and sorts them into the row drawn
+// above and the row drawn below.
+//
+// Which entry a deeper run belongs to is read off the page and not off the order
+// the runs arrive in, which is the one place this differs from the rest of the
+// extractor. Everywhere else the run before is the term a script hangs off, and
+// inside a matrix it is not: the page draws a line left to right across both
+// rows at once, so the second matrix of page 73 hands back the alpha, the minus
+// of its exponent, the 0 of its index, then the 0 of the row below, then the 1
+// of the exponent it began three runs ago. Read in order the 1 lands on the
+// entry underneath and the page says 0 to the 1.
+//
+// A row is a band of the page and a script is written inside the band of the row
+// it belongs to, so the band is asked instead. It answers here because the two
+// rows of a matrix stand clear of one another, which apart has already required,
+// and a script of an entry is set within the height of its own row rather than
+// out beyond it.
+//
+// Nothing deeper than one script is read: two levels inside a matrix is a shape
+// no printing here sets, and reading it by guess would be reading it wrong. A
+// cluster with no deep run at all is left to the other two readers, which are
+// written over exactly that case and have the six volumes behind them.
+func deepRows(c []token) (sup, sub [][]token, ok bool) {
+	var carried bool
+	var supAt, subAt []int
+	for i, t := range c {
+		switch {
+		case t.depth == 1 && t.level == Sup:
+			supAt = append(supAt, i)
+		case t.depth == 1 && t.level == Sub:
+			subAt = append(subAt, i)
+		case t.depth == 2:
+			carried = true
+		default:
+			return nil, nil, false
+		}
+	}
+	if !carried || len(supAt) == 0 || len(subAt) == 0 {
+		return nil, nil, false
+	}
+	// The rows are measured on the entries and not on what is written on them,
+	// since a script of an entry sits above or below the row it is written in
+	// and would put that row on both sides of the other.
+	if !apart(at(c, supAt), at(c, subAt), c) {
+		return nil, nil, false
+	}
+	owner := make([]int, len(c))
+	for i, t := range c {
+		if t.depth != 2 {
+			owner[i] = i
+			continue
+		}
+		row := supAt
+		near, far := offRow(t, at(c, supAt)), offRow(t, at(c, subAt))
+		switch {
+		case far < near:
+			row, near, far = subAt, far, near
+		case far == near:
+			// A script that stands as near one row as the other says nothing
+			// about which it belongs to, and a matrix read on a coin is worse
+			// than a formula left as it was.
+			return nil, nil, false
+		}
+		j := -1
+		for _, k := range row {
+			if c[k].left <= t.left {
+				j = k
+			}
+		}
+		if j < 0 {
+			return nil, nil, false
+		}
+		owner[i] = j
+	}
+	group := map[int][]token{}
+	for i, t := range c {
+		if i != owner[i] {
+			// The level a run was given is the level it stands at against the
+			// run before it, and the entry it belongs to is not always that run.
+			t.level = side(c[owner[i]], t)
+		}
+		group[owner[i]] = append(group[owner[i]], t)
+	}
+	for _, i := range supAt {
+		sup = append(sup, group[i])
+	}
+	for _, i := range subAt {
+		sub = append(sub, group[i])
+	}
+	return sup, sub, true
+}
+
+// offRow is how far a run stands from a row of entries, and 0 where it stands
+// within it.
+func offRow(t token, row []token) int {
+	top, bottom := highest(row), lowest(row)
+	mid := (t.top + t.bottom) / 2
+	switch {
+	case mid < top:
+		return top - mid
+	case mid > bottom:
+		return mid - bottom
+	}
+	return 0
+}
+
+// side is which side of an entry a script written on it stands, which is the
+// measurement the line was read by in the first place, made again against the
+// entry the page says it belongs to.
+func side(p, t token) Level {
+	if t.top < p.top+((p.bottom-p.top)-(t.bottom-t.top))/2 {
+		return Sup
+	}
+	return Sub
+}
+
+// at is the runs at these places in a cluster.
+func at(c []token, idx []int) []token {
+	out := make([]token, 0, len(idx))
+	for _, i := range idx {
+		out = append(out, c[i])
+	}
+	return out
+}
+
+// slot is an entry of the matrix, written out, standing across the whole of
+// what was drawn for it.
+type slot struct {
+	text        string
+	left, right int
+}
+
+// entries writes each entry of a row as the mathematics it says.
+//
+// The scripts of an entry are gathered by level rather than in the order they
+// were drawn, because the two are not the same order: alpha nought inverse
+// hands back the minus of the exponent, then the 0 of the index, then the 1 of
+// the exponent, since the page draws them left to right and the exponent is
+// wider than the index it stands over.
+func entries(rows [][]token) ([]slot, bool) {
+	out := make([]slot, 0, len(rows))
+	for _, g := range rows {
+		var sup, sub strings.Builder
+		for _, t := range g[1:] {
+			switch t.level {
+			case Sup:
+				abut(&sup, t.text)
+			case Sub:
+				abut(&sub, t.text)
+			default:
+				return nil, false
+			}
+		}
+		p := slot{text: strings.TrimSpace(g[0].text), left: g[0].left, right: g[0].right}
+		if p.text == "" {
+			return nil, false
+		}
+		p.text += script("_", sub.String()) + script("^", sup.String())
+		for _, t := range g {
+			p.left, p.right = min(p.left, t.left), max(p.right, t.right)
+		}
+		out = append(out, p)
+	}
+	return out, true
+}
+
+// script writes one script of an entry, and writes nothing where there is none.
+// A script of one character needs no braces, which is how emit writes them
+// everywhere else in the corpus.
+func script(mark, s string) string {
+	s = strings.TrimSpace(s)
+	switch {
+	case s == "":
+		return ""
+	case len([]rune(s)) == 1:
+		return mark + s
+	}
+	return mark + "{" + s + "}"
+}
+
+// cut puts one row of entries back together and cuts it into cells at the
+// spaces the page set, which is what cells does to the pieces of a row and is
+// the same measurement made on entries rather than on runs.
+//
+// An entry may reach over the one after it, and the two are still two entries.
+// cells refuses that, since two pieces of one row cannot overlap, and here it
+// is ordinary: the exponent of an entry is set beyond the width of the entry
+// and the next entry begins under it. Line 3 of page 73 sets alpha inverse and
+// then the minus of the difference, and the second alpha begins one unit inside
+// the box of that minus.
+//
+// A space inside an entry cuts it too, which is what reads the row a page boxed
+// whole. The matrix of page 70 arrives with its top row in two runs, u and 0,
+// and its bottom row as the single run "0 0", and the two rows come out two
+// cells each.
+func cut(row []slot) []string {
+	var b strings.Builder
+	for i, p := range row {
+		if i > 0 && p.left-row[i-1].right >= cellGap {
+			b.WriteByte(' ')
+		}
+		abut(&b, p.text)
+	}
+	return strings.Fields(b.String())
+}
+
 // cells puts one row back together out of the pieces it was drawn in and cuts
 // it at the spaces the page set.
 func cells(ts []token) ([]string, bool) {
-	var w strings.Builder
+	row := make([]slot, 0, len(ts))
 	for i, t := range ts {
-		if i > 0 {
-			// The pieces of a row stand in the order the row is read in and do
-			// not overlap, since they are pieces of one row.
-			if t.left < ts[i-1].right {
-				return nil, false
-			}
-			if t.left-ts[i-1].right >= cellGap {
-				w.WriteByte(' ')
-			}
+		// The pieces of a row stand in the order the row is read in and do not
+		// overlap, since they are pieces of one row.
+		if i > 0 && t.left < ts[i-1].right {
+			return nil, false
 		}
-		abut(&w, t.text)
+		row = append(row, slot{text: t.text, left: t.left, right: t.right})
 	}
-	return strings.Fields(w.String()), true
+	return cut(row), true
 }
 
 // cellGap is how far two pieces of a row have to stand apart before the white
