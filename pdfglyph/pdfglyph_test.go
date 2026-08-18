@@ -1,6 +1,7 @@
 package pdfglyph
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -173,6 +174,83 @@ func TestRewriteNamesTheDoubleBar(t *testing.T) {
 	}
 	if len(res.Unknown) != 0 {
 		t.Errorf("reported %v, and every name of this encoding is known", res.Unknown)
+	}
+}
+
+// The mathematics italic of the same volume, with the CMap that skips the one
+// code it could not name. varpi is code 0x17 and the CMap lists 0x16 and 0x18
+// on either side of it.
+const lieVIIIXMath = `%PDF-1.5
+51 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /DGLMMN+CMMI10
+/Encoding 52 0 R
+/ToUnicode 53 0 R
+>>
+endobj
+52 0 obj
+<<
+/Type /Encoding
+/Differences [1/lambda/rho/nu/gamma/alpha/beta/pi/phi1/psi/Omega/theta/sigma/tau/chi/epsilon/Lambda/Delta/Phi/delta/Sigma/iota/omega/pi1/Gamma/kappa/Pi/zeta/xi/eta/Psi/partialdiff/Theta/theta1 44/comma 181/mu]
+>>
+endobj
+53 0 obj
+<< /Length 260 >>
+stream
+/CIDInit /ProcSet findresource begin 12 dict begin begincmap
+/CMapName /AAAAAA+F9+0 def
+/CMapType 2 def
+1 begincodespacerange <01> <b5> endcodespacerange
+3 beginbfchar
+<16> <03C9>
+<18> <0393>
+<b5> <00B5>
+endbfchar
+endcmap CMapName currentdict /CMap defineresource pop end end
+endstream
+endobj
+`
+
+// lieMath is that font with a cross reference under it, which an incremental
+// update needs and the fixtures that append nothing do without.
+func lieMath() string {
+	return lieVIIIXMath + fmt.Sprintf(
+		"xref\n0 1\n0000000000 65535 f \ntrailer\n<</Size 54/Root 1 0 R>>\nstartxref\n%d\n%%%%EOF\n",
+		len(lieVIIIXMath))
+}
+
+// varpi has no name outside TeX and no replacement that fits in three bytes, so
+// the encoding is left alone and the CMap is told what the code means. Lie 7 to
+// 9 prints the fundamental weights with it, and Corollary 1 of § 7 no. 3 came
+// out as ( )_{alpha in B} with the letter gone.
+func TestRewriteCodesTheVariantPi(t *testing.T) {
+	out, res, err := Rewrite([]byte(lieMath()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Coded["pi1"] != 1 {
+		t.Fatalf("coded %v, want one pi1", res.Coded)
+	}
+	if res.Total() != 0 || res.Encodings != 0 {
+		t.Errorf("rewrote %d names in %d encodings, and this one is left alone", res.Total(), res.Encodings)
+	}
+	if !strings.Contains(string(out), "/omega/pi1/Gamma") {
+		t.Error("the encoding was rewritten")
+	}
+	if res.Unicode != 1 {
+		t.Fatalf("patched %d CMaps, want 1", res.Unicode)
+	}
+	// The codes the CMap already had are kept, since the CMap is the only good
+	// reading of every name that is in the Adobe list.
+	if !strings.Contains(string(out), "<17> <03D6>") {
+		t.Error("the CMap was not told what code 0x17 is")
+	}
+	for _, keep := range []string{"<16> <03C9>", "<18> <0393>"} {
+		if !strings.Contains(string(out), keep) {
+			t.Errorf("%s was lost out of the CMap", keep)
+		}
 	}
 }
 

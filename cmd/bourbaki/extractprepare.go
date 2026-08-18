@@ -81,6 +81,18 @@ func extractPrepare(args []string) error {
 	for _, n := range res.Sorted() {
 		fmt.Printf("  %4d  %s\n", res.Names[n], n)
 	}
+	if len(res.Coded) > 0 {
+		fmt.Printf("\nleft where they were and given a CMap entry, since no name poppler\n")
+		fmt.Printf("reads fits in the bytes the printing wrote:\n")
+		coded := make([]string, 0, len(res.Coded))
+		for k := range res.Coded {
+			coded = append(coded, k)
+		}
+		sort.Strings(coded)
+		for _, k := range coded {
+			fmt.Printf("  %4d  %s\n", res.Coded[k], k)
+		}
+	}
 	if len(res.Unknown) > 0 {
 		fmt.Printf("\n%d TeX names have no replacement. A name is in a font's encoding\n", len(res.Unknown))
 		fmt.Printf("whether or not any page draws it, so run this with -verify: a name\n")
