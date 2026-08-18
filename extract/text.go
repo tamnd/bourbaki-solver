@@ -49,6 +49,7 @@ func Render(l Line) string {
 	toks = gridded(toks)
 	toks = overset(toks)
 	toks = raised(toks)
+	toks = ticked(toks)
 	toks = restack(toks)
 	toks = marked(toks)
 	toks = extend(toks)

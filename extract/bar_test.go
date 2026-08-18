@@ -29,6 +29,9 @@ var frlay = &pdfsrc.Layout{Fonts: map[int]pdfsrc.FontSpec{
 	11: {ID: 11, Size: 10, Family: "LMMathItalic7"},
 	12: {ID: 12, Size: 7, Family: "LMMathItalic5"},
 	13: {ID: 13, Size: 12, Family: "LMMathSymbols8"},
+	14: {ID: 14, Size: 9, Family: "LMRoman6"},
+	15: {ID: 15, Size: 9, Family: "LMMathItalic6"},
+	16: {ID: 16, Size: 9, Family: "LMMathSymbols6"},
 }}
 
 // enlay is what the English volumes declare. Algebra VIII is set in the Latin
