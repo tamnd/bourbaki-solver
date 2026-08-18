@@ -658,3 +658,48 @@ func TestTheExtensionFontIsKnownByAnyOfItsNames(t *testing.T) {
 		}
 	}
 }
+
+// The extension font of Topologie generale, chapters 1 to 2. The volume draws
+// the bar of an absolute value and the two bars of a norm at the height of the
+// line, out of codes 12 and 13, and it names them without a size on the end.
+const tsIIIFrBars = `%PDF-1.5
+40 0 obj
+<<
+/Type /Font
+/Subtype /Type1
+/BaseFont /ABCDEF+CMEX10
+/Encoding 41 0 R
+>>
+endobj
+41 0 obj
+<<
+/Type /Encoding
+/Differences [12/vextendsingle 13/vextenddouble 16/parenleftbig]
+>>
+endobj
+`
+
+// The bars of an absolute value and of a norm are read.
+//
+// The four sizes of each were in the table from the start and the bare names
+// were not, and the bare names are the ones the volume uses: 116 single bars
+// and 24 double ones came out of chapters 1 to 2 as nothing at all, so the
+// pages printed "x" where the book reads "|x|". Nothing reported it either,
+// because texName wants a size or a piece on the end of a name before it will
+// call the name a TeX one and these carry neither.
+func TestRewriteNamesTheExtensibleBars(t *testing.T) {
+	out, res, err := Rewrite([]byte(tsIIIFrBars))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Names["vextendsingle"] != 1 || res.Names["vextenddouble"] != 1 {
+		t.Fatalf("replaced vextendsingle %d and vextenddouble %d times, want 1 each",
+			res.Names["vextendsingle"], res.Names["vextenddouble"])
+	}
+	if strings.Contains(string(out), "vextend") {
+		t.Error("a bar was left under a name poppler has no character for")
+	}
+	if !strings.Contains(string(out), "12/less") || !strings.Contains(string(out), "13/equal") {
+		t.Errorf("the bars did not land on the two rules: %s", out)
+	}
+}
