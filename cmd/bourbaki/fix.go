@@ -12,6 +12,7 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/extract"
+	"github.com/tamnd/bourbaki-solver/footnote"
 	"github.com/tamnd/bourbaki-solver/mathtex"
 	"github.com/tamnd/bourbaki-solver/pagemap"
 	"github.com/tamnd/bourbaki-solver/toc"
@@ -25,6 +26,12 @@ import (
 // until the next assemble and no longer, and the same repair written into a
 // page survives it. The order is fix, then assemble, then audit, and the last
 // of the three is what says whether the first worked.
+//
+// A translation is the exception, and footnote is the one repair that takes it.
+// No page makes content/vi and no assemble rewrites it, so a repair that stops
+// at pages/ leaves the Vietnamese carrying what the English has stopped
+// carrying, and the only other way to move it is to pay a model to do the
+// section again.
 //
 // extract does the same repair as it writes each page, so a volume read in
 // after this needs nothing done to it. This command is for the pages that were
@@ -40,6 +47,7 @@ commands:
   math      put the characters stranded outside their TeX back inside it
   folio     move the printed page number off the foot and into the front matter
   heading   set a numbered heading at the level the table of contents gives it
+  footnote  take the printed mark off a footnote that already has a reference
   seal      write content_sha256 over a section body that was edited by hand
 
 Run the first three in that order. Everything after an unclosed delimiter reads
@@ -196,6 +204,42 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixFootnoteUsage = `usage: bourbaki fix footnote [flags]
+
+Takes the mark a volume prints beside a footnote off the pages that kept it.
+
+The volumes mark their notes with symbols, restarting on every page: an asterisk
+for the first, a dagger for the second, two asterisks for the third. Markdown
+numbers its notes itself and prints the number it chose, so a page that keeps
+the printed symbol carries two marks for one note, "(*)[^1]" in the body and
+"[^1]: (*)" at the foot, and both of them reach the reader.
+
+The symbol is not thrown away. It is the only thing that says which note a
+reference belongs to, and the pages this exists for include the ones where the
+reading wrote the symbol and no reference at all. So the symbols are read off
+the definitions of the page first, and one standing on its own becomes the
+reference whose definition carries it. A symbol that two notes of the same file
+share, or one whose note is already pointed at from somewhere else, is left
+where it is and named: sending a reader to the wrong note is worse than leaving
+the printing's mark on the page.
+
+It runs over content/ as well as pages/, which no other repair here does. The
+English files are rewritten by the next assemble whatever this does, but a
+translation is not: it was made by a model, months of gateway time went into it,
+and re-translating fourteen sections over a printer's asterisk is not a trade
+anybody should make. A translation is repaired the same way, and its
+source_content_sha256 is moved on only when it recorded the English body as it
+stood before the repair. One that was already stale stays stale, so L05 still
+means what it says.
+
+Run bourbaki assemble afterwards. The pages are the source and the English
+sections are made from them, and the two say different things until it runs.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
 const fixSealUsage = `usage: bourbaki fix seal [flags]
 
 Writes content_sha256 over a section file whose body no longer hashes to it.
@@ -246,6 +290,8 @@ func runFix(args []string) error {
 		return fixFolio(args[1:])
 	case "heading":
 		return fixHeading(args[1:])
+	case "footnote":
+		return fixFootnote(args[1:])
 	case "seal":
 		return fixSeal(args[1:])
 	}
@@ -873,4 +919,217 @@ func eachSection(root, lang string, fn func(path string, f *corpus.File[corpus.S
 		}
 	}
 	return nil
+}
+
+func fixFootnote(args []string) error {
+	fs := flag.NewFlagSet("fix footnote", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFootnoteUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var left int
+	// took says how many marks a file gives up and prints the ones it will not.
+	// A mark left alone is the interesting half of the report: it is a place
+	// where the reading has to be looked at rather than repaired.
+	took := func(path string, moves []footnote.Move) int {
+		n := 0
+		for _, m := range moves {
+			if m.Kind == footnote.KindLeft {
+				left++
+				fmt.Fprintf(os.Stderr, "fix footnote: left alone, %s:%d prints %s and nothing there says which note it means\n",
+					rel(root, path), m.Line, m.Mark)
+				continue
+			}
+			n++
+			if *check {
+				fmt.Printf("%s  line %d  %s %s\n", rel(root, path), m.Line, m.Mark, m.Kind)
+			}
+		}
+		return n
+	}
+
+	var pages, repaired int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, moves := footnote.Normalize(f.Body)
+		if took(path, moves) == 0 {
+			return nil
+		}
+		repaired++
+		if *check {
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	// The English body each translation was made from, before and after, so
+	// that a translation recording the first can be moved on to the second.
+	// Keyed by the corpus-relative path the translation names.
+	moved := map[string][2]string{}
+	recordEnglish := func(path, before, after string) {
+		moved[filepath.ToSlash(rel(root, path))] = [2]string{
+			corpus.ContentSHA256(before), corpus.ContentSHA256(after)}
+	}
+	// follow moves a translation's record of its source on, and says whether it
+	// did. It is deliberately narrow: only a translation that recorded the
+	// English body as it stood before this repair, which is the only case where
+	// the two are the same translation of the same words.
+	follow := func(from, recorded string) (string, bool) {
+		pair, ok := moved[from]
+		if !ok || pair[0] != recorded || pair[0] == pair[1] {
+			return recorded, false
+		}
+		return pair[1], true
+	}
+
+	// The English is walked first and on its own, because a translation cannot
+	// be moved on until the body it was made from has been repaired and hashed
+	// twice. english says which of the two passes is running.
+	var english bool
+	var files, content, followed int
+	section := func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
+		if (f.Meta.Lang == "en") != english {
+			return nil
+		}
+		files++
+		body, moves := footnote.Normalize(f.Body)
+		n := took(path, moves)
+		if f.Meta.Lang == "en" {
+			recordEnglish(path, f.Body, body)
+		} else if now, ok := follow(f.Meta.TranslatedFrom, f.Meta.SourceSHA256); ok {
+			followed++
+			if !*check {
+				f.Meta.SourceSHA256 = now
+			}
+			n++
+		}
+		if n == 0 {
+			return nil
+		}
+		content++
+		if *check {
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	}
+	exercise := func(path string, f *corpus.File[corpus.ExerciseFrontMatter]) error {
+		if (f.Meta.Lang == "en") != english {
+			return nil
+		}
+		files++
+		body, moves := footnote.Normalize(f.Body)
+		n := took(path, moves)
+		if f.Meta.Lang == "en" {
+			recordEnglish(path, f.Body, body)
+		} else if now, ok := follow(f.Meta.TranslatedFrom, f.Meta.SourceSHA256); ok {
+			followed++
+			if !*check {
+				f.Meta.SourceSHA256 = now
+			}
+			n++
+		}
+		if n == 0 {
+			return nil
+		}
+		content++
+		if *check {
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	}
+	// The English first and on its own, because a translation cannot be moved
+	// on until the body it was made from has been repaired and hashed twice.
+	for _, english = range []bool{true, false} {
+		if err := eachSection(root, "", section); err != nil {
+			return err
+		}
+		if err := eachExercise(root, "", exercise); err != nil {
+			return err
+		}
+	}
+
+	verb, verbed := "took", "moved"
+	if *check {
+		verb, verbed = "would take", "would move"
+	}
+	fmt.Printf("fix footnote: %d pages read, %s the printed mark off %d of them, %d left alone\n",
+		pages, verb, repaired, left)
+	fmt.Printf("fix footnote: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	if repaired > 0 && !*check {
+		fmt.Println("fix footnote: run bourbaki assemble")
+	}
+	return nil
+}
+
+// eachExercise walks the committed exercise files of one language, or of every
+// language, in path order. It is eachSection for the tree eachSection skips.
+func eachExercise(root, lang string, fn func(path string, f *corpus.File[corpus.ExerciseFrontMatter]) error) error {
+	dir := filepath.Join(root, "content")
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, e iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if e.IsDir() {
+			if e.Name() == "solutions" {
+				return iofs.SkipDir
+			}
+			return nil
+		}
+		if filepath.Ext(path) != ".md" {
+			return nil
+		}
+		rest := filepath.ToSlash(mustRel(dir, path))
+		if !strings.Contains(rest, "/exercises/") {
+			return nil
+		}
+		if lang != "" {
+			if l, _, _ := strings.Cut(rest, "/"); l != lang {
+				return nil
+			}
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		f, err := corpus.ReadFile[corpus.ExerciseFrontMatter](path)
+		if err != nil {
+			return err
+		}
+		if err := fn(path, &f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// mustRel is filepath.Rel where the two paths are known to share a root,
+// because the walk produced the second from the first.
+func mustRel(base, path string) string {
+	rest, err := filepath.Rel(base, path)
+	if err != nil {
+		return path
+	}
+	return rest
 }
