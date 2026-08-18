@@ -52,7 +52,19 @@ const DefaultBatch = 40
 type Batch struct {
 	Lang  string
 	Terms []string
+
+	// EN and FR are one paragraph of a section in both printings, and they turn
+	// the question into a different one. Empty is the question this started as,
+	// which asks what a term is called in a language. Set is the aligned
+	// question, which puts the French Bourbaki printed in front of the model and
+	// asks which of those words the term is, and refuses an answer that is not
+	// in the passage. Only the French column can be asked this way, because it
+	// is the only one there is a printing of.
+	EN, FR string
 }
+
+// Aligned says whether this batch carries the passage a term is to be found in.
+func (b Batch) Aligned() bool { return b.FR != "" }
 
 // Batches cuts a list of terms into questions.
 func Batches(lang string, terms []string, size int) []Batch {
@@ -71,6 +83,9 @@ func (b Batch) Prompt() string {
 	var list strings.Builder
 	for i, term := range b.Terms {
 		fmt.Fprintf(&list, "%d | %s\n", i+1, term)
+	}
+	if b.Aligned() {
+		return prompt.GlossaryAligned(b.EN, b.FR, list.String())
 	}
 	return prompt.Glossary(Language(b.Lang), languageNote(b.Lang), list.String())
 }
@@ -188,6 +203,14 @@ func (b Batch) Audit(answer string) Reply {
 		if Key(english) != Key(term) {
 			reply.Rejects = append(reply.Rejects, Reject{EN: term, Line: line,
 				Reason: fmt.Sprintf("line %d answers %q, not %q", number, english, term)})
+			continue
+		}
+		// The passage is the ground the aligned question stands on. A phrase that
+		// is not in it is the model writing French rather than reading it, which
+		// is the failure this whole way of asking exists to rule out.
+		if b.Aligned() && !inPassage(b.FR, rendering) {
+			reply.Rejects = append(reply.Rejects, Reject{EN: term, Line: line,
+				Reason: fmt.Sprintf("%q is not in the French passage", rendering)})
 			continue
 		}
 		switch reason := badRendering(b.Lang, term, rendering); reason {
@@ -311,6 +334,37 @@ func badRendering(lang, term, tr string) string {
 		}
 	}
 	return ""
+}
+
+// inPassage asks whether a phrase is in the paragraph it was supposed to be
+// read out of.
+//
+// Loosely, and deliberately. The model is asked for the singular of a phrase the
+// passage may have in the plural, and French marks a plural with a letter on the
+// end, so the last word is matched from its front rather than whole: anneau
+// finds anneaux and morphisme finds morphismes. Case and the accents are left
+// alone, since a French term keeps them and a rendering that lost them is a
+// rendering somebody would have to repair.
+func inPassage(passage, phrase string) bool {
+	words := strings.Fields(strings.ToLower(strings.TrimSpace(phrase)))
+	if len(words) == 0 {
+		return false
+	}
+	text := strings.ToLower(passage)
+	stem := strings.Join(words, " ")
+	if strings.Contains(text, stem) {
+		return true
+	}
+	// The other direction. A passage in the singular answered in the plural is
+	// the same phrase with a letter on the end of the last word, so that letter
+	// comes off and the passage is searched again. The singular answered to a
+	// plural passage needs nothing: anneau is inside anneaux already.
+	last := words[len(words)-1]
+	if len(last) < 4 {
+		return false
+	}
+	words[len(words)-1] = last[:len(last)-1]
+	return strings.Contains(text, strings.Join(words, " "))
 }
 
 // mathParts is the inline formulas of a term.

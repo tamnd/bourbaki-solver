@@ -27,6 +27,8 @@ The terminology contract between English and the three translations.
 commands:
   extract     mine candidate terms out of the English corpus
   translate   ask the fleet for the rendering of the terms that have none
+  french      read the French of a term out of the French printing, for the
+              sections the corpus holds in both languages
   set         correct renderings that are already there, by hand
   drop        take out a row that is right about the word and wrong about
               these books
@@ -46,6 +48,8 @@ func runGlossary(args []string) error {
 		return glossaryExtract(args[1:])
 	case "translate":
 		return glossaryTranslate(args[1:])
+	case "french":
+		return glossaryFrench(args[1:])
 	case "set":
 		return glossarySet(args[1:])
 	case "drop":
