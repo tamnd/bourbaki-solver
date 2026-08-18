@@ -587,3 +587,45 @@ CHAPTER VIII SEMISIMPLE MODULES AND RINGS . . . . . . . . . . . . . 1
 		t.Errorf("§ 1 has %d no., want 2, so the verso was not read", got)
 	}
 }
+
+// A contents line the text layer sets on two lines, the number and the page on
+// one and the title on the next, is read as one line.
+//
+// The 2003 Functions of a Real Variable does this fifteen times. The title line
+// carries no page, so it was dropped, and the numbered line was dropped with it
+// for having no title. Chapter V lost five of the nos of its first two §§ and
+// three of the six of its appendix.
+func TestATitleTheTextLayerSetOnItsOwnLine(t *testing.T) {
+	lines := []string{
+		"     6.                                                         ......... 188",
+		"         Linear differential equations with constant coefficients",
+		"    7.   Linear equations of order ii   ............................... 192",
+	}
+	got := mend(lines, Grammar{Pilcrow, Bare})
+	text, tl, ok := splitTail(got[0], Bare)
+	if !ok || tl.page != 188 {
+		t.Fatalf("splitTail(%q) = %+v %v, want page 188", got[0], tl, ok)
+	}
+	want := entry{kind: kindSubsection, number: 6,
+		title: "Linear differential equations with constant coefficients"}
+	if e := classify(text, Pilcrow); e != want {
+		t.Errorf("classify(%q) = %+v, want %+v", text, e, want)
+	}
+	if strings.TrimSpace(got[1]) != "" {
+		t.Errorf("the title line was left behind as %q", got[1])
+	}
+	if got[2] != lines[2] {
+		t.Errorf("a whole line was rewritten to %q", got[2])
+	}
+}
+
+// And a line that carries a title of its own is not mended, whatever follows it.
+func TestALineWithATitleIsLeftAlone(t *testing.T) {
+	lines := []string{
+		"    5.   Adjoint equation ........................................           186",
+		"    6.   Linearity of the integrals ............................. 179",
+	}
+	if got := mend(lines, Grammar{Pilcrow, Bare}); got[0] != lines[0] || got[1] != lines[1] {
+		t.Errorf("mend rewrote a pair of complete lines to %q", got)
+	}
+}
