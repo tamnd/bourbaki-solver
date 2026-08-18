@@ -107,14 +107,25 @@ var (
 	// what the volume prints: the English Theory of Sets sets no. 6 of III § 7
 	// at page 204 and the scan reads it as "204-", which without this drops the
 	// entry and renumbers every no. after it.
+	//
+	// The g, the J and the dash inside the number are the 1995 General Topology
+	// scan, which reads 190 as "IgO", 198 as "Ig8", 219 as "2Ig", 169 as "J 69"
+	// and 225 as "22-5". Twelve contents lines of that volume end that way and
+	// every one of them was dropped or misread, taking two §§ of chapter III
+	// with it and putting § 1 of chapter II a hundred pages before the chapter.
+	// All three are allowed only after the leader dots, where nothing but a page
+	// is ever set, and not in the reader that works without them.
+	//
+	// The gap inside a split number is as wide as the scanner made it: the run
+	// of exercises for chapter II § 2 comes out "20   7" for 207.
 	bareTailRe = regexp.MustCompile(
-		leader + `\s*([0-9IlO|]{1,3}(?:\s[0-9IlO|]{1,3})?)\s*[.,\-\p{Pd}']?\s*$`)
+		leader + `\s*([0-9IlOgJ|]{1,3}(?:[\s\p{Pd}]+[0-9IlOgJ|]{1,3})?)\s*[.,\-\p{Pd}']?\s*$`)
 
 	// The 2003 scan splits and misreads the chapter numeral in the label as
 	// readily as it does in a running head: "V1. 10" for V.10, "v11.6" for
 	// VII.6, "V-9" for V.9.
 	labelTailRe = regexp.MustCompile(
-		leader + `\s*([A-Za-z1l|]{1,5})\s*[.\-,oO]\s*([0-9IlO|]{1,4})\s*\.?\s*$`)
+		leader + `\s*([A-Za-z1l|]{1,5})\s*[.\-,oO]\s*([0-9IlOg|]{1,4})\s*\.?\s*$`)
 
 	// The 2003 scan does not always read the word CHAPTER itself: the line
 	// that opens chapter IV comes out "CHAP-1 ER IV." So the word is matched
@@ -130,11 +141,17 @@ var (
 	// period is what makes the split safe to allow, so the form with a period
 	// is tried first and the form without one, which the 2003 scan also
 	// produces ("§ 1 Ordered groups"), only takes a single token.
-	pilcrowRe     = regexp.MustCompile(`^\s*§\s*([0-9IlO|](?:\s?[0-9IlO|])?)\s*[.,]\s*(.*)$`)
-	pilcrowBareRe = regexp.MustCompile(`^\s*§\s*([0-9IlO|]{1,2})\s+(.*)$`)
+	pilcrowRe     = regexp.MustCompile(`^\s*§\s*([0-9IlOJ|](?:\s?[0-9IlOJ|])?)\s*[.,·•]\s*(.*)$`)
+	pilcrowBareRe = regexp.MustCompile(`^\s*§\s*([0-9IlOJ|]{1,2})\s+(.*)$`)
 
 	// A no. line, and in the 2023 volume a § line too, told apart by indent.
-	numberRe = regexp.MustCompile(`^(\s*)([0-9IlO|](?:\s?[0-9IlO|])?)\s*[.,]\s*(.*)$`)
+	//
+	// The J and the middle dot are the 1995 General Topology scan again. It
+	// reads the lining figure 1 at the head of a no. line as "J", five times,
+	// and sets a middle dot after the number rather than a period: "9· Completion
+	// of subspaces". A no. line that is not read is not one entry lost, it
+	// renumbers every no. after it in the §, which is why both are here.
+	numberRe = regexp.MustCompile(`^(\s*)([0-9IlOJ|](?:\s?[0-9IlOJ|])?)\s*[.,·•]\s*(.*)$`)
 
 	// "Appendix", "Appendix 1.", "Appendix I - Polynomial maps", and the
 	// French "Appendice". Bourbaki closes chapters II, III and VIII with
@@ -167,12 +184,16 @@ var (
 // has to sit in the range the page map already fixed for its chapter, and has
 // to keep the contents in order, or it is published as a problem.
 var (
-	digitFixer = strings.NewReplacer("I", "1", "l", "1", "|", "1", "O", "0")
+	digitFixer = strings.NewReplacer("I", "1", "l", "1", "|", "1", "J", "1", "O", "0", "g", "9")
 	romanFixer = strings.NewReplacer("1", "I", "L", "I", "|", "I", "0", "O")
 )
 
+// dashes are what the 1995 scan puts inside a page number it split, "22-5" for
+// 225, and they go the way the space it puts there goes.
+var dashes = regexp.MustCompile(`[\p{Pd}]`)
+
 func readNumber(s string) (int, bool) {
-	s = strings.Join(strings.Fields(s), "")
+	s = strings.Join(strings.Fields(dashes.ReplaceAllString(s, " ")), "")
 	n, err := strconv.Atoi(digitFixer.Replace(s))
 	if err != nil || n <= 0 {
 		return 0, false
