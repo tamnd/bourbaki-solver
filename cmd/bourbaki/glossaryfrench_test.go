@@ -75,3 +75,59 @@ func writePair(t *testing.T, root, path, body string) {
 		t.Fatal(err)
 	}
 }
+
+func TestTheFrenchIsFoundByItsMathematicsAfterTheCountSlips(t *testing.T) {
+	// The French runs two paragraphs together early on, so from there down the
+	// same paragraph is one lower than where counting would put it.
+	en := []string{
+		"A ring $A$ is simple when $\\mathfrak{m} = 0$.",
+		"Let $E$ be a module over $A$.",
+		"Every submodule of $E$ is a direct factor.",
+		"The radical $\\mathfrak{r}(A)$ is nilpotent.",
+	}
+	fr := []string{
+		"Un anneau $A$ est simple lorsque $\\mathfrak{m} = 0$.",
+		"Soit $E$ un module sur $A$. Tout sous-module de $E$ est facteur direct.",
+		"Le radical $\\mathfrak{r}(A)$ est nilpotent.",
+	}
+	at := align(en, fr)
+	if at[0] != 0 {
+		t.Errorf("the first paragraph went to %d, want 0", at[0])
+	}
+	if at[3] != 2 {
+		t.Errorf("the paragraph after the slip went to %d, want 2", at[3])
+	}
+}
+
+func TestAParagraphWithNoMathematicsIsLeftAlone(t *testing.T) {
+	// Once the counts are far apart, a paragraph with no formula in it has
+	// nothing to be found by, and a guess would be a question spent on a
+	// passage that does not say what the English says.
+	en := []string{"There is a converse, proved in chapter three.",
+		"A second.", "A third.", "A fourth.", "A fifth.", "A sixth."}
+	fr := []string{"Il y a une reciproque, demontree au chapitre trois."}
+	if at := align(en, fr); at[0] != -1 {
+		t.Errorf("a paragraph with nothing to anchor on went to %d, want -1", at[0])
+	}
+}
+
+func TestOneBareLetterIsNotEnoughToAnchorOn(t *testing.T) {
+	// The counts are far enough apart that counting is not trusted, so a
+	// paragraph is placed by its mathematics or not at all. A single $n$ is in
+	// half the paragraphs of the book and settles nothing.
+	en := []string{"Let $n$ be an integer.", "Let $n$ be an integer again.",
+		"A third.", "A fourth.", "A fifth.", "A sixth."}
+	fr := []string{"Soit $n$ un entier."}
+	at := align(en, fr)
+	if at[0] != -1 || at[1] != -1 {
+		t.Errorf("a single letter anchored: %v, want both -1", at)
+	}
+}
+
+func TestCountingIsTrustedWhereTheTwoPrintingsAgreeOnTheCount(t *testing.T) {
+	en := []string{"There is a converse.", "It is proved in chapter three."}
+	fr := []string{"Il y a une reciproque.", "Elle est demontree au chapitre trois."}
+	if at := align(en, fr); at[1] != 1 {
+		t.Errorf("the second paragraph went to %d, want 1", at[1])
+	}
+}

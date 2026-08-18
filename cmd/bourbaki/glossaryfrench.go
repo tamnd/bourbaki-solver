@@ -273,6 +273,7 @@ func alignedBatches(g *glossary.Glossary, pairs []pair, size int) []glossary.Bat
 	var cand []mention
 	for _, p := range pairs {
 		en, fr := translate.Blocks(p.en), translate.Blocks(p.fr)
+		at := align(en, fr)
 		for i, block := range en {
 			lower := strings.ToLower(block)
 			var terms []string
@@ -282,10 +283,10 @@ func alignedBatches(g *glossary.Glossary, pairs []pair, size int) []glossary.Bat
 				}
 				terms = append(terms, t.EN)
 			}
-			if len(terms) == 0 {
+			if len(terms) == 0 || at[i] < 0 {
 				continue
 			}
-			cand = append(cand, mention{en: block, fr: window(fr, i), terms: terms})
+			cand = append(cand, mention{en: block, fr: window(fr, at[i]), terms: terms})
 		}
 	}
 	// The richest paragraph first. A term is asked about once and most of them
@@ -322,6 +323,105 @@ func alignedBatches(g *glossary.Glossary, pairs []pair, size int) []glossary.Bat
 type mention struct {
 	en, fr string
 	terms  []string
+}
+
+// align says, for each English paragraph, which French paragraph is the same
+// one, and -1 where it cannot tell.
+//
+// Counting from the top does not work. A footnote, a display or a paragraph the
+// other printing runs together moves the count, and the count stays moved:
+// across the 339 sections the corpus holds twice, 104 end with the two block
+// counts apart and the worst is off by fifteen. A question built by position out
+// of the far end of one of those carries the wrong French paragraph, and every
+// answer read out of it is refused for not being in a passage it was never in.
+//
+// So the mathematics is the anchor. It is the one part of a paragraph the
+// translation leaves alone, $\mathfrak{g}$ is $\mathfrak{g}$ in both books, and
+// a paragraph with formulas in it is found by them. The search is a band around
+// where the paragraph would be if nothing had slipped, wide enough for the drift
+// the two counts admit. A paragraph whose match is not clear enough is dropped
+// rather than guessed at: there are more paragraphs than terms, and one that is
+// certain is always there to ask instead.
+func align(en, fr []string) []int {
+	out := make([]int, len(en))
+	if len(fr) == 0 {
+		for i := range out {
+			out[i] = -1
+		}
+		return out
+	}
+	drift := len(en) - len(fr)
+	if drift < 0 {
+		drift = -drift
+	}
+	band := drift + 3
+	taken := map[int]bool{}
+	for i, block := range en {
+		// Where the two counts agree, or are one apart, counting is sound: the
+		// three paragraph window covers the whole of the slip there is room for.
+		// It is the long sections that have drifted away that need an anchor.
+		out[i] = -1
+		if drift <= 1 && i < len(fr) {
+			out[i] = i
+		}
+		want := formulas(block)
+		if len(want) == 0 {
+			continue
+		}
+		at := i * len(fr) / len(en)
+		best, score := -1, 0
+		for j := at - band; j <= at+band; j++ {
+			if j < 0 || j >= len(fr) || taken[j] {
+				continue
+			}
+			if n := shared(want, formulas(fr[j])); n > score {
+				best, score = j, n
+			}
+		}
+		// Two formulas in common, or one that is not a bare letter. A single
+		// $n$ is in half the paragraphs of the book and matches nothing.
+		if best >= 0 && (score > 1 || len(want) == 1 && len(want[0]) > 4) {
+			out[i] = best
+			taken[best] = true
+		}
+	}
+	return out
+}
+
+// formulas is the mathematics of a paragraph, in the order it is written.
+func formulas(block string) []string {
+	var out []string
+	for rest := block; ; {
+		i := strings.Index(rest, "$")
+		if i < 0 {
+			return out
+		}
+		rest = rest[i+1:]
+		j := strings.Index(rest, "$")
+		if j < 0 {
+			return out
+		}
+		if f := strings.Join(strings.Fields(rest[:j]), " "); f != "" {
+			out = append(out, f)
+		}
+		rest = rest[j+1:]
+	}
+}
+
+// shared counts the formulas two paragraphs have in common, each once.
+func shared(a, b []string) int {
+	have := map[string]int{}
+	for _, f := range b {
+		have[f]++
+	}
+	n := 0
+	for _, f := range a {
+		if have[f] > 0 {
+			have[f]--
+			n++
+		}
+	}
+	return n
 }
 
 // window is the French around the paragraph in the English's place.
