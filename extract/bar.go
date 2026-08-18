@@ -145,7 +145,8 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 		}
 		first, last := -1, -1
 		for i, l := range lines {
-			above, below := false, false
+			var over half
+			below := false
 			for _, run := range l.Runs {
 				if !halved(run, r) {
 					continue
@@ -155,12 +156,12 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 				// both halves at full size and the levels say nothing.
 				switch {
 				case run.Bottom() <= r.Top && r.Top-run.Bottom() <= run.Height:
-					above = true
+					over.add(run)
 				case run.Top >= r.Top && run.Top-r.Top <= run.Height:
 					below = true
 				}
 			}
-			if above {
+			if astraddle(over, r) {
 				first = i // the nearest line above, so the last one found
 			}
 			if below && last < 0 {
@@ -187,6 +188,63 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 		i = end + 1
 	}
 	return out
+}
+
+// half is how far the material over a bar reaches across the page.
+type half struct {
+	left, right int
+	set         bool
+}
+
+func (h *half) add(r Run) {
+	if !h.set || r.Left < h.left {
+		h.left = r.Left
+	}
+	if !h.set || r.Right() > h.right {
+		h.right = r.Right()
+	}
+	h.set = true
+}
+
+// astraddle reports whether the material read as the numerator stands across
+// the middle of the bar, which a numerator does and something that merely
+// happens to be drawn over the bar need not.
+//
+// TeX draws the bar as wide as the wider of the two halves and centres both of
+// them on it, so the middle of the bar falls inside both. Page 100 of Theories
+// spectrales I to II prints the conjugate of f*(1 tensor x), whose bar runs from
+// 370 to 437, and the f* of the sentence above it stands at 416 to 431: inside
+// the bar, and well to the right of the middle of it. Read as the numerator, it
+// made the two printed lines into one, and the Lemma of I paragraph 4 number 13
+// lost the heading that would have made it a statement.
+//
+// Standing across the middle and not centred on it. The reach is taken over
+// every run of the line the bar stands across, and a line of a display carries
+// more than one term, so it is wider than the numerator itself as often as not.
+// Where the middle falls is the part of that reading that survives the company.
+//
+// Asked of every line that has anything at all over the bar, and not of the
+// nearest one alone. Page 75 of Theories spectrales III to V sets the modulus of
+// u of y over the modulus of y, and a stray extension glyph of the sup that
+// starts the display sits on the bar between the two, nearer to it than the
+// numerator is. Taking the nearest line and then asking would refuse the bar and
+// leave a fraction the page had unbuilt. Asking first and taking the nearest
+// line that answers finds the numerator two lines up where it is.
+func astraddle(h half, r pdfsrc.Rule) bool {
+	if !h.set {
+		return false
+	}
+	// Or begins where the bar begins. What is read as the numerator is cut to
+	// the runs that lie inside the bar altogether, and that cuts a numerator
+	// short where the box a run is reported at overruns the glyphs in it. Page
+	// 294 of Theories spectrales III to V sets two pi epsilon y over the
+	// modulus of y; the bar was drawn to the width of that numerator and ends
+	// at 349, the pi epsilon y is reported ending at 350, and what is left of
+	// the numerator stands to the left of the middle. It still starts where
+	// the bar starts, which nothing that merely laps over a bar does.
+	const flush = 2
+	mid := r.Left + r.Width/2
+	return h.left <= mid && mid <= h.right || h.left <= r.Left+flush
 }
 
 // held reports whether one line of the page already holds both halves of the
