@@ -42,19 +42,29 @@ func TestASectionNumberWrittenInVietnameseIsPutBack(t *testing.T) {
 	}
 }
 
+// And it goes back the way the section it belongs to prints it. Theory of Sets
+// writes the number sign in lower case throughout, so a citation put back into
+// a translation of that volume in capitals would be a spelling the printed page
+// does not have.
+func TestTheNumberSignGoesBackTheWayTheEnglishPrintsIt(t *testing.T) {
+	const en = "in the sense of Example 2 of no. 4."
+	const tr = "theo nghĩa của Ví dụ 2 của số 4."
+	if got, want := Readdress("vi", en, tr), "theo nghĩa của Ví dụ 2 của no. 4."; got != want {
+		t.Errorf("got  %q\nwant %q", got, want)
+	}
+}
+
 // An answer that is missing nothing is left alone, however many of the words
 // are in it.
 //
-// Exercise 9 of chapter IV, § 2 is where this was measured. The English cites
-// "No. 4" once and writes "no. 4" twice more in running prose, which the rule
-// does not read, and the Vietnamese has the citation and writes the other two
-// as "số 4". A repair led by the words rewrote both of those and handed the rule
-// two citations where the English has one; a repair led by the rule leaves the
-// file exactly as it stands, and it is the only one of the 240 written files
-// that this was ever a question about.
+// Exercise 9 of chapter IV, § 2 is where this was measured. It cites "no. 4"
+// three times in one sentence, and a repair led by the words rewrites every
+// số in the Vietnamese, including the ones that are counting something. A
+// repair led by the rule counts what is missing, finds nothing, and leaves the
+// file exactly as it stands.
 func TestAnAnswerThatIsMissingNothingIsNotRepaired(t *testing.T) {
-	const en = "in the sense of Example 2 of No. 4, and no. 4 of section 1 again, and no. 4 once more."
-	const tr = "theo nghĩa của Ví dụ 2 của No. 4, và số 4 của mục 1, và số 4 lần nữa."
+	const en = "in the sense of Example 2 of no. 4, and no. 4 of section 1 again, and no. 4 once more, with 5 elements."
+	const tr = "theo nghĩa của Ví dụ 2 của no. 4, và no. 4 của mục 1, và no. 4 lần nữa, với số 5 phần tử."
 	if got := Readdress("vi", en, tr); got != tr {
 		t.Errorf("an answer with the citation already in it was rewritten to %q", got)
 	}

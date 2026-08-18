@@ -58,6 +58,9 @@ func Readdress(lang, en, tr string) string {
 		if !ok {
 			continue
 		}
+		if mark == "no." {
+			mark = spelledIn(en, number)
+		}
 		for _, w := range words {
 			if need <= 0 {
 				break
@@ -77,7 +80,7 @@ func Readdress(lang, en, tr string) string {
 // are cited in numerals the two languages share and no model has written either
 // of them in words.
 func split(address string) (mark, number string, ok bool) {
-	for _, mark := range []string{"p.", "No."} {
+	for _, mark := range []string{"p.", "no."} {
 		if !strings.HasPrefix(address, mark) {
 			continue
 		}
@@ -88,6 +91,24 @@ func split(address string) (mark, number string, ok bool) {
 		return mark, number, true
 	}
 	return "", "", false
+}
+
+// spelledIn is how the English writes the number sign in front of this number.
+//
+// The rule compares "No. 1" and "no. 1" equal, because which of the two is
+// printed is the volume's choice: Algebra writes the capital and Theory of Sets
+// does not. The repair has no such freedom. It is writing into the answer, and
+// what it writes there has to be what the section it is a translation of
+// prints, or the corpus would hold both spellings of a citation to one page.
+func spelledIn(en, number string) string {
+	re, err := regexp.Compile(`([Nn]o\.)\s*` + regexp.QuoteMeta(number) + `\b`)
+	if err != nil {
+		return "No."
+	}
+	if m := re.FindStringSubmatch(en); m != nil {
+		return m[1]
+	}
+	return "No."
 }
 
 // replaceUpTo rewrites at most n matches, and says how many are still wanted.
