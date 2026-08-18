@@ -511,3 +511,79 @@ func TestAWordIsNotAPageNumber(t *testing.T) {
 		t.Error("a line with no leaders yielded a page")
 	}
 }
+
+// The 1987 Topological Vector Spaces scan reads the 5 of a page label as an S
+// and the two I's of a chapter numeral as an N, and both are allowed only where
+// the label says a page is what follows.
+//
+// Five lines of that volume end in one of the two, and each of them is a no. of
+// chapter II or IV that the volume lists and the manifest did not have.
+func TestThePageLabelsThe1987ScanMisreads(t *testing.T) {
+	tests := []struct {
+		line    string
+		chapter string
+		page    int
+	}{
+		{"           6. Separately continuous bilinear mappings. . . . . . . . . ..     IV.lS", "IV", 15},
+		{"           5. Ordered vector spaces ................................ .        n.12", "II", 12},
+	}
+	for _, tt := range tests {
+		_, got, ok := splitTail(tt.line, Label)
+		if !ok || got.chapter != tt.chapter || got.page != tt.page {
+			t.Errorf("splitTail(%q) = %+v %v, want %s.%d", tt.line, got, ok, tt.chapter, tt.page)
+		}
+	}
+}
+
+// A running head with the folio in front of it is not a heading.
+//
+// It is set the way a chapter line is set, flush left and in capitals, and
+// reading it as one closes the chapter and throws away every entry on the page
+// it heads.
+func TestARunningHeadWithAFolioIsNotAHeading(t *testing.T) {
+	if isPart("360                       TOPOLOGICAL VECTOR SPACES") {
+		t.Error("a running head was read as a heading")
+	}
+	if !isPart("SUMMARY OF RESULTS") {
+		t.Error("a heading was not read as one")
+	}
+}
+
+// A contents printed at the back of the volume runs over several pages, and the
+// pages after the first carry the running head of the volume rather than the
+// word Contents. They belong to the same contents.
+//
+// Topological Vector Spaces is where this was measured. Its contents is at the
+// back, the scanner sets the versos "360 TOPOLOGICAL VECTOR SPACES", and
+// chapter II came out with one § where the volume prints eight.
+func TestAContentsThatRunsOverTheBackMatterKeepsItsVersos(t *testing.T) {
+	const recto = `                                    Contents
+
+CHAPTER VIII SEMISIMPLE MODULES AND RINGS . . . . . . . . . . . . . 1
+
+1. Simple Modules . . . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+   1. Simple Modules . . . . . . . . . . . . . . . . . . . . . . . . . . 1
+`
+	const verso = `18                    SEMISIMPLE MODULES AND RINGS
+
+   2. Simple Modules over a Ring . . . . . . . . . . . . . . . . . . . . 3
+2. Semisimple Modules . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+   1. Direct Sums . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+`
+	pages := make([]string, 22)
+	pages[19], pages[20] = recto, verso
+	res, err := Parse(pages, testMap(), Options{Book: "test", Chapters: []string{"VIII"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := res.Get("VIII")
+	if !ok {
+		t.Fatal("no chapter VIII")
+	}
+	if len(c.Sections) != 2 {
+		t.Fatalf("chapter VIII has %d §, want 2", len(c.Sections))
+	}
+	if got := len(c.Sections[0].Subsections); got != 2 {
+		t.Errorf("§ 1 has %d no., want 2, so the verso was not read", got)
+	}
+}

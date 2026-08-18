@@ -124,8 +124,12 @@ var (
 	// The 2003 scan splits and misreads the chapter numeral in the label as
 	// readily as it does in a running head: "V1. 10" for V.10, "v11.6" for
 	// VII.6, "V-9" for V.9.
+	// The S in the page is the 1987 Topological Vector Spaces scan, which reads
+	// IV.15 as "IV.lS". It is allowed here, where the chapter numeral and the
+	// separator in front of it say that a page is what follows, and nowhere
+	// else.
 	labelTailRe = regexp.MustCompile(
-		leader + `\s*([A-Za-z1l|]{1,5})\s*[.\-,oO]\s*([0-9IlOg|]{1,4})\s*\.?\s*$`)
+		leader + `\s*([A-Za-z1l|]{1,5})\s*[.\-,oO]\s*([0-9IlOgS|]{1,4})\s*\.?\s*$`)
 
 	// The 2003 scan does not always read the word CHAPTER itself: the line
 	// that opens chapter IV comes out "CHAP-1 ER IV." So the word is matched
@@ -184,8 +188,11 @@ var (
 // has to sit in the range the page map already fixed for its chapter, and has
 // to keep the contents in order, or it is published as a problem.
 var (
-	digitFixer = strings.NewReplacer("I", "1", "l", "1", "|", "1", "J", "1", "O", "0", "g", "9")
-	romanFixer = strings.NewReplacer("1", "I", "L", "I", "|", "I", "0", "O")
+	digitFixer = strings.NewReplacer("I", "1", "l", "1", "|", "1", "J", "1", "O", "0", "g", "9", "S", "5")
+	// The N is two I's the scanner ran together: the 1987 Topological Vector
+	// Spaces scan sets the label of chapter II page 12 as "n.12". No roman
+	// numeral has an N in it, so nothing legitimate is being rewritten.
+	romanFixer = strings.NewReplacer("1", "I", "L", "I", "|", "I", "0", "O", "N", "II")
 )
 
 // dashes are what the 1995 scan puts inside a page number it split, "22-5" for
@@ -369,6 +376,15 @@ func isPart(text string) bool {
 	if contentsHeadRe.MatchString(text) {
 		return false
 	}
+	// So is the running head that carries the folio instead of the word. The
+	// contents of Topological Vector Spaces is at the back and the scanner sets
+	// its versos "360 TOPOLOGICAL VECTOR SPACES", flush left and in capitals,
+	// which closed the chapter on the first line of every second page and threw
+	// away the seven §§ of chapter II that are listed there. No heading of these
+	// volumes opens with the number of the page it is printed on.
+	if folioHeadRe.MatchString(text) {
+		return false
+	}
 	upper, letters := letterCase(text)
 	return letters >= 4 && upper*5 >= letters*4
 }
@@ -458,7 +474,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	} else {
 		g = Detect(cand)
 	}
-	cand = contentsPages(cand, g)
+	cand = contentsRun(pages, pm, g)
 	if len(cand) == 0 {
 		return nil, fmt.Errorf("toc: %s has no page that looks like a table of contents", opt.Book)
 	}
@@ -718,6 +734,10 @@ func chapterOf(c *corpus.Chapter) string {
 // the French form and none is asked for.
 var contentsHeadRe = regexp.MustCompile(`(?i)(?:\bcontents|table\s+des\s+mati)`)
 
+// folioHeadRe is a running head with the page number in front of it, which is
+// how a verso is set.
+var folioHeadRe = regexp.MustCompile(`^[0-9]{1,4}\s+\S`)
+
 // announcesContents reports whether the page says at the top that it is the
 // table of contents. Only the head is read, so a body page that mentions the
 // contents in a sentence does not qualify.
@@ -769,14 +789,59 @@ const minEntries = 3
 func contentsPages(pages []string, g Grammar) []string {
 	var out []string
 	for _, pg := range pages {
-		n := 0
-		for _, line := range strings.Split(pg, "\n") {
-			text, _, ok := splitTail(line, g.Page)
-			if ok && classify(text, g.Mark).kind != kindNone {
-				n++
-			}
+		if readsAsContents(pg, g) {
+			out = append(out, pg)
 		}
-		if n >= minEntries {
+	}
+	return out
+}
+
+// readsAsContents reports whether the page carries enough complete contents
+// lines to be one.
+func readsAsContents(pg string, g Grammar) bool {
+	n := 0
+	for _, line := range strings.Split(pg, "\n") {
+		text, _, ok := splitTail(line, g.Page)
+		if ok && classify(text, g.Mark).kind != kindNone {
+			n++
+		}
+	}
+	return n >= minEntries
+}
+
+// contentsRun is the table of contents as the volume prints it, which is a run
+// of consecutive pages and not a set of pages that each announce themselves.
+//
+// A page opens the run if the two rules of candidatePages let it through and it
+// reads as contents. Every page after it that reads as contents belongs to the
+// same run, whatever its running head says and wherever the page map put it.
+//
+// Topological Vector Spaces needs the second half. Its contents is at the back
+// and runs over six pages, and the scanner set the running head of the versos
+// as "360 TOPOLOGICAL VECTOR SPACES" and of the rectos as "CONTENTS". Only the
+// rectos announce themselves, so the versos were dropped and chapter II came
+// out with one § where the volume prints eight, with no problem reported
+// because nothing tells the validator how many §§ a chapter should have.
+func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
+	keep := make([]bool, len(pages))
+	for i, pg := range pages {
+		if !readsAsContents(pg, g) {
+			continue
+		}
+		e, ok := pm.Lookup(i + 1)
+		keep[i] = !ok || e.Confidence == pagemap.Unknown || announcesContents(pg)
+	}
+	for i := range pages {
+		if !keep[i] {
+			continue
+		}
+		for j := i + 1; j < len(pages) && !keep[j] && readsAsContents(pages[j], g); j++ {
+			keep[j] = true
+		}
+	}
+	var out []string
+	for i, pg := range pages {
+		if keep[i] {
 			out = append(out, pg)
 		}
 	}
