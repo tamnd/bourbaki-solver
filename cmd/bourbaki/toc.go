@@ -5,10 +5,12 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/toc"
 )
 
@@ -89,6 +91,11 @@ func tocBuild(args []string) error {
 		if err != nil {
 			return err
 		}
+		read, err := contentsReadings(root, b.ID)
+		if err != nil {
+			return fmt.Errorf("%s: %w", b.ID, err)
+		}
+		pages = toc.Overlay(pages, read)
 		if pages, err = correctContents(pages, errata.ContentsErrata(b.ID)); err != nil {
 			return fmt.Errorf("%s: %w", b.ID, err)
 		}
@@ -129,6 +136,47 @@ func tocBuild(args []string) error {
 		return fmt.Errorf("%d volumes have contents problems and were not written", failed)
 	}
 	return nil
+}
+
+// contentsReadings is what the model read off the pages of the table of
+// contents, by pdf page.
+//
+// The pages of a volume are all in one directory and are read with two different
+// prompts, and what tells them apart is the hash the reading carries in its own
+// front matter. That is exact and it needs no second list to be kept in step: a
+// page read as a table of contents says so, and a page read as a page of the
+// body says something else. It also means that re-reading the contents under an
+// edited prompt takes the old readings out of this on its own, rather than
+// leaving a stale one in place with nothing to say it is stale.
+//
+// A volume with no such page has none of this happen to it.
+func contentsReadings(root, book string) (map[int]string, error) {
+	paths, err := filepath.Glob(filepath.Join(corpus.PagesDir(root, book), "*.md"))
+	if err != nil {
+		return nil, err
+	}
+	want := prompt.ContentsSHA256()
+	out := map[int]string{}
+	for _, path := range paths {
+		file, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if file.Meta.PromptSHA256 != want || file.Meta.PDFPage <= 0 {
+			continue
+		}
+		// The head goes back on the front of the body, because reading a page
+		// took it off. The contents reader wants it where the page printed it:
+		// it is what tells a page of the table of contents from a page of the
+		// index in a volume that prints its contents at the back, where the page
+		// map has already given those pages to the last chapter.
+		body := file.Body
+		if head := headOf(file.Meta); head != "" {
+			body = head + "\n\n" + body
+		}
+		out[file.Meta.PDFPage] = body
+	}
+	return out, nil
 }
 
 // correctContents puts the errata of a volume's own table of contents into the

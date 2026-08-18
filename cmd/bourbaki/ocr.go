@@ -44,6 +44,11 @@ flags for fill and run:
   -wait DUR      wait this long for a box with a spare core rather than fail
   -flagged       only the pages a native extraction could not read, which is the
                  one way a born-digital volume is read through a model
+  -contents      read the pages named by -f and -l as a table of contents, which
+                 is a different question: plain text with the indentation, the
+                 leader dots and the page numbers kept, because the page numbers
+                 are the whole content of a contents page. It needs a range, and
+                 it is for the volumes whose text layer drops that column
   -unread        only the pages with no reading committed, so that editing the
                  prompt does not send the pages already read back to the fleet
   -dry           say what would be read and stop
@@ -234,13 +239,19 @@ func checkText(file corpus.PageFile) string {
 	if file.Meta.Method != corpus.MethodNative {
 		return file.Body
 	}
-	head := strings.TrimSpace(strings.Join([]string{
-		file.Meta.PageLabel, file.Meta.RunningHead, locatorOf(file.Meta),
-	}, "  "))
+	head := headOf(file.Meta)
 	if head == "" {
 		return file.Body
 	}
 	return head + "\n\n" + file.Body
+}
+
+// headOf is the running head of a page put back into the one line it was
+// printed on, out of the parts the front matter holds it in.
+func headOf(meta corpus.PageFrontMatter) string {
+	return strings.TrimSpace(strings.Join([]string{
+		meta.PageLabel, meta.RunningHead, locatorOf(meta),
+	}, "  "))
 }
 
 func locatorOf(meta corpus.PageFrontMatter) string {

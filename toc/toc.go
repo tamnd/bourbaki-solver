@@ -1068,6 +1068,60 @@ func readsAsContents(pg string, g Grammar, min int) bool {
 	return n >= min
 }
 
+// Overlay puts a model's reading of a page in place of the text layer's,
+// wherever the reading carries more of the contents than the layer does.
+//
+// It is what lets a volume be read at all when the layer has no contents in it.
+// The scan of Espaces vectoriels topologiques prints all twenty two §§ of its
+// contents with their titles, their leader dots and no page numbers whatever,
+// because the column those numbers stand in was never captured; the scan of
+// Groupes et algebres de Lie chapitre 9 captures that column for the last few
+// lines of the page and drops it from the rest. Neither yields a chapter. What
+// the reading of the page image carries, they cannot.
+//
+// The two are compared rather than one preferred, and the count is of complete
+// contents lines, an entry with a page on the end of it. That is the measure
+// that matters here, and it is what makes this safe to run over a volume that
+// needs none of it: a page whose layer already reads is left alone, so a reading
+// that came back short or refused cannot take a working contents away.
+//
+// read is keyed by pdf page, counting from one.
+func Overlay(pages []string, read map[int]string) []string {
+	out := make([]string, len(pages))
+	copy(out, pages)
+	for i := range out {
+		text, ok := read[i+1]
+		if !ok {
+			continue
+		}
+		if contentsLines(text) > contentsLines(out[i]) {
+			out[i] = text
+		}
+	}
+	return out
+}
+
+// contentsLines counts the lines of a page that are a contents entry with a page
+// number on the end.
+//
+// Both page forms are tried and the mark is not, because this runs before the
+// grammar is detected and only has to compare one page against another reading
+// of the same page. A bare "1. Title" at the margin is a § in the 2023 volumes
+// and a no. everywhere else, and either way it is an entry and it counts.
+func contentsLines(pg string) int {
+	n := 0
+	for _, line := range strings.Split(pg, "\n") {
+		for _, form := range []PageForm{Bare, Label} {
+			text, _, ok := splitTail(line, form)
+			if ok && classify(text, Pilcrow).kind != kindNone {
+				n++
+				break
+			}
+		}
+	}
+	return n
+}
+
 // contentsRun is the table of contents as the volume prints it, which is a run
 // of consecutive pages and not a set of pages that each announce themselves.
 //
