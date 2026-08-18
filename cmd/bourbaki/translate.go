@@ -190,7 +190,12 @@ func runTranslate(args []string) error {
 	case *lang != "en" && *from == "fr":
 		return fmt.Errorf("-from fr reads the french only volumes into english, so it wants -lang en and not %q", *lang)
 	}
-	if !known(*lang) {
+	// known is the glossary's question, which is which columns a pass may fill,
+	// and English is not one of them: it is the headword the row hangs off. It
+	// is a target here all the same, for the French only volumes and for nothing
+	// else, and the switch above is what holds that to the one pair it is true
+	// for.
+	if !known(*lang) && *lang != "en" {
 		fs.Usage()
 		os.Exit(2)
 	}

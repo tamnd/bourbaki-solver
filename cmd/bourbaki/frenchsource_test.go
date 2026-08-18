@@ -15,3 +15,15 @@ func TestOnlyTheFrenchReadingRecordsItsProvenance(t *testing.T) {
 		t.Fatalf("french source recorded %q %q, want fr machine", lang, method)
 	}
 }
+
+// English is not a column a glossary pass may fill, and it is a target here all
+// the same, for the volumes that have no English printing. The first run of the
+// French direction was refused by the flag check for exactly that reason.
+func TestEnglishIsRefusedAsATargetOnlyWhenItIsNotFromTheFrench(t *testing.T) {
+	if err := runTranslate([]string{"-from", "fr", "-lang", "vi", "-dry"}); err == nil {
+		t.Error("reading the french into vietnamese was allowed, and it skips the english the glossary is built on")
+	}
+	if err := runTranslate([]string{"-lang", "en", "-dry"}); err == nil {
+		t.Error("reading the english into english was allowed, and that is rewriting Springer")
+	}
+}
