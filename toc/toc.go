@@ -549,7 +549,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		// A wrapped title never crosses a page break in these volumes, and
 		// letting one try is how a stray line picks up somebody else's page.
 		pend = nil
-		for _, line := range strings.Split(pg, "\n") {
+		for _, line := range mend(strings.Split(pg, "\n"), g) {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
@@ -771,6 +771,52 @@ func candidatePages(pages []string, pm *pagemap.Map) []string {
 		if !ok || e.Confidence == pagemap.Unknown || announcesContents(pg) {
 			out = append(out, pg)
 		}
+	}
+	return out
+}
+
+// numberOnlyRe is a contents line whose text is nothing but the number of the
+// entry, the page having been read off the end of it already.
+var numberOnlyRe = regexp.MustCompile(`^(\s*)([0-9IlOJ|]{1,2})\s*[.,·•]?\s*$`)
+
+// mend puts back the title of a contents line the text layer set on two lines.
+//
+// The 2003 Functions of a Real Variable is where this shows. Fifteen of its
+// contents lines come out as the number, the leaders and the page with nothing
+// between them, and the title alone on the line below, "6.  ......... 188" and
+// then "Linear differential equations with constant coefficients". The title
+// line carries no page, so it was dropped, and the numbered line was dropped
+// with it for having no title. Chapter V lost five of the nos of § 1 and § 2
+// and three of the six of its appendix.
+//
+// A line whose text is a bare number is broken however it got that way, and the
+// line under it is its title as long as that line announces nothing of its own
+// and carries no page of its own.
+func mend(lines []string, g Grammar) []string {
+	var out []string
+	out = append(out, lines...)
+	for i, line := range out {
+		text, _, ok := splitTail(line, g.Page)
+		if !ok {
+			continue
+		}
+		m := numberOnlyRe.FindStringSubmatch(text)
+		if m == nil {
+			continue
+		}
+		j := i + 1
+		for j < len(out) && strings.TrimSpace(out[j]) == "" {
+			j++
+		}
+		if j >= len(out) {
+			continue
+		}
+		title, _, hasPage := splitTail(out[j], g.Page)
+		if hasPage || strings.TrimSpace(title) == "" || classify(title, g.Mark).kind != kindNone {
+			continue
+		}
+		out[i] = m[1] + m[2] + ". " + strings.TrimSpace(title) + line[len(text):]
+		out[j] = ""
 	}
 	return out
 }

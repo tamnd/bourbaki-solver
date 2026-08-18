@@ -32,6 +32,7 @@ func tocBuild(args []string) error {
 	fs := flag.NewFlagSet("toc build", flag.ExitOnError)
 	book := fs.String("book", "", "book id, or empty for every book in the manifest")
 	dry := fs.Bool("n", false, "print the result without writing anything")
+	verbose := fs.Bool("v", false, "print every § and no. of every chapter")
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, "usage: bourbaki toc build [-book <id>] [flags]\n\nReads each volume's table of contents into manifests/toc.yaml.\n\n")
 		fs.PrintDefaults()
@@ -98,7 +99,7 @@ func tocBuild(args []string) error {
 			failed++
 			continue
 		}
-		printTOC(res)
+		printTOC(res, *verbose)
 		if len(res.Problems) > 0 {
 			// A contents with a problem in it is not written. What the parser
 			// reports as a problem is a chapter it lost, a § it doubled or a
@@ -158,13 +159,32 @@ func correctContents(pages []string, errata []corpus.Erratum) ([]string, error) 
 	return pages, nil
 }
 
-func printTOC(r *toc.Result) {
+func printTOC(r *toc.Result, verbose bool) {
 	ch, sec, sub, ex := r.Counts()
 	fmt.Printf("%s  %s\n", r.Book, r.Grammar)
 	fmt.Printf("  %d chapters, %d §, %d no., %d exercise runs\n", ch, sec, sub, ex)
 	for _, c := range r.Chapters {
 		fmt.Printf("  chapter %-4s %-46s printed %d, pdf %d, %d §\n",
 			c.Numeral, trim(c.Title, 46), c.Page, c.PDFPage, len(c.Sections))
+		if !verbose {
+			continue
+		}
+		for _, s := range c.Sections {
+			kind := "§"
+			if s.Appendix {
+				kind = "appendix"
+			}
+			fmt.Printf("    %s %-3d %-42s printed %d, pdf %d\n",
+				kind, s.Number, trim(s.Title, 42), s.Page, s.PDFPage)
+			for _, sub := range s.Subsections {
+				fmt.Printf("      no. %-3d %-40s printed %d, pdf %d\n",
+					sub.Number, trim(sub.Title, 40), sub.Page, sub.PDFPage)
+			}
+			if s.Exercises != nil {
+				fmt.Printf("      exercises %38s printed %d, pdf %d\n",
+					"", s.Exercises.Page, s.Exercises.PDFPage)
+			}
+		}
 	}
 	if n := len(r.Problems); n > 0 {
 		fmt.Printf("  %d problems:\n", n)
