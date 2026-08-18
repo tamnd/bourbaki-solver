@@ -113,6 +113,76 @@ func TestABarOverOneLetterDoesNotJoinTheLineAboveIt(t *testing.T) {
 	}
 }
 
+// The second half of formula (2) in the historical note of Théories spectrales
+// V, page 531, which sums the reciprocal of an eigenvalue times an integral.
+// The n of the eigenvalue stands five units to the left of the integral sign
+// after it, which is near enough for the walk that puts a sum in front of its
+// limit to take the n as a limit of the integral.
+var eigenSum = pdfsrc.Page{
+	Number: 531, Width: 659, Height: 999,
+	Spans: []pdfsrc.Span{
+		{Top: 406, Left: 79, Width: 21, Height: 14, Text: "(2)"},
+		{Top: 396, Left: 173, Width: 8, Height: 7, Font: 23, Text: "Z"},
+		{Top: 422, Left: 181, Width: 5, Height: 11, Font: 3, Text: "I"},
+		{Top: 406, Left: 189, Width: 19, Height: 14, Text: "K("},
+		{Top: 406, Left: 208, Width: 21, Height: 15, Font: 1, Text: "s, t"},
+		{Top: 406, Left: 229, Width: 6, Height: 14, Text: ")"},
+		{Top: 406, Left: 235, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 406, Left: 245, Width: 6, Height: 14, Text: "("},
+		{Top: 406, Left: 251, Width: 8, Height: 15, Font: 1, Text: "s"},
+		{Top: 406, Left: 259, Width: 6, Height: 14, Text: ")"},
+		{Top: 406, Left: 265, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 406, Left: 274, Width: 6, Height: 14, Text: "("},
+		{Top: 406, Left: 281, Width: 6, Height: 15, Font: 1, Text: "t"},
+		{Top: 406, Left: 287, Width: 6, Height: 14, Text: ")"},
+		{Top: 406, Left: 293, Width: 14, Height: 15, Font: 1, Text: "dt"},
+		{Top: 406, Left: 312, Width: 13, Height: 14, Text: "="},
+		{Top: 427, Left: 329, Width: 8, Height: 11, Font: 4, Text: "n"},
+		{Top: 402, Left: 331, Width: 22, Height: 7, Font: 23, Text: "X"},
+		{Top: 389, Left: 335, Width: 13, Height: 11, Font: 13, Text: "∞"},
+		{Top: 427, Left: 337, Width: 16, Height: 11, Font: 3, Text: "=1"},
+		{Top: 417, Left: 358, Width: 10, Height: 15, Font: 1, Text: "λ"},
+		{Top: 395, Left: 363, Width: 8, Height: 14, Text: "1"},
+		{Top: 422, Left: 367, Width: 8, Height: 11, Font: 4, Text: "n"},
+		{Top: 396, Left: 380, Width: 8, Height: 7, Font: 23, Text: "Z"},
+		{Top: 422, Left: 389, Width: 5, Height: 11, Font: 3, Text: "I"},
+		{Top: 406, Left: 397, Width: 11, Height: 15, Font: 1, Text: "φ"},
+		{Top: 411, Left: 407, Width: 8, Height: 11, Font: 4, Text: "n"},
+		{Top: 406, Left: 416, Width: 6, Height: 14, Text: "("},
+		{Top: 406, Left: 422, Width: 8, Height: 15, Font: 1, Text: "s"},
+		{Top: 406, Left: 430, Width: 6, Height: 14, Text: ")"},
+		{Top: 406, Left: 436, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 406, Left: 446, Width: 6, Height: 14, Text: "("},
+		{Top: 406, Left: 452, Width: 8, Height: 15, Font: 1, Text: "s"},
+		{Top: 406, Left: 460, Width: 6, Height: 14, Text: ")"},
+		{Top: 406, Left: 466, Width: 21, Height: 15, Font: 1, Text: "ds,"},
+	},
+	Rules: []pdfsrc.Rule{
+		{Top: 412, Left: 357, Width: 18, Thickness: 0.397, Length: 11.98, Size: 4.1},
+	},
+}
+
+// An integral sets its bounds beside the sign, so nothing to the left of one is
+// a limit of it.
+//
+// Taken as a limit, the index of the eigenvalue moved inside the integral. That
+// left the numerator and the denominator of the fraction with the integral sign
+// between them, which is not one stretch of the line, so the bar was refused and
+// the page printed "\lambda 1\int_{nI}" where it sets one over lambda sub n.
+func TestAnIntegralDoesNotTakeTheIndexBeforeItAsALimit(t *testing.T) {
+	lines := Lines(frlay, eigenSum)
+	if len(lines) != 1 {
+		for i, one := range lines {
+			t.Logf("line %d: %s", i, Render(one))
+		}
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	want := "(2) $\\int_IK(s, t)x(s)x(t)dt=\\sum_{n=1}^{\\infty}\\frac{1}{\\lambda_n}\\int_I\\varphi_n(s)x(s)ds$,"
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
+
 // The head of the table on page 124 of the English Algebra VIII, which draws
 // its rules the width of the type area. The one under the column heads is
 // light enough to pass for a fraction bar, and read as one it joined the heads
@@ -139,5 +209,47 @@ func TestATableRuleDoesNotJoinTheRowsItSeparates(t *testing.T) {
 			t.Logf("line %d: %s", i, Render(one))
 		}
 		t.Fatalf("got %d lines, want the head and the row kept apart", len(lines))
+	}
+}
+
+// The Fourier transform on page 230 of Théories spectrales V, which is printed
+// with the domain of the integral set over and under the sign. The upper R^n
+// begins six units to the left of the sign and the maps-to arrow in front of it
+// ends where that R begins, so the two touch across the page and are told apart
+// only by the band: the arrow is on the line and the limit is fifteen units
+// above it.
+var fourierLimits = pdfsrc.Page{
+	Number: 230, Width: 659, Height: 999,
+	Spans: []pdfsrc.Span{
+		{Top: 756, Left: 220, Width: 8, Height: 15, Font: 1, Text: "y"},
+		{Top: 756, Left: 233, Width: 16, Height: 15, Font: 2, Text: "7→"},
+		{Top: 730, Left: 248, Width: 11, Height: 11, Font: 3, Text: "R"},
+		{Top: 746, Left: 254, Width: 8, Height: 7, Font: 23, Text: "Z"},
+		{Top: 728, Left: 260, Width: 7, Height: 8, Font: 15, Text: "n"},
+		{Top: 773, Left: 262, Width: 11, Height: 11, Font: 3, Text: "R"},
+		{Top: 771, Left: 273, Width: 7, Height: 8, Font: 15, Text: "n"},
+		{Top: 756, Left: 284, Width: 11, Height: 15, Font: 1, Text: "φ"},
+		{Top: 757, Left: 295, Width: 6, Height: 14, Text: "("},
+		{Top: 756, Left: 301, Width: 9, Height: 15, Font: 1, Text: "x"},
+		{Top: 757, Left: 311, Width: 6, Height: 14, Text: ")"},
+	},
+}
+
+// An integral printed with its domain across the sign keeps it.
+//
+// The guard that stops an integral taking the index in front of it as a limit
+// has to leave this alone, and it does, because the R of the domain shares no
+// height with the arrow it touches.
+func TestAnIntegralKeepsALimitDrawnAcrossTheSign(t *testing.T) {
+	lines := Lines(frlay, fourierLimits)
+	if len(lines) != 1 {
+		for i, one := range lines {
+			t.Logf("line %d: %s", i, Render(one))
+		}
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	got := Render(lines[0])
+	if strings.Contains(got, `\mapsto^`) || !strings.Contains(got, `\int^`) {
+		t.Errorf("Render: %s, want the domain left on the integral", got)
 	}
 }
