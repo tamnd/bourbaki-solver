@@ -180,6 +180,13 @@ var mathNames = map[string]string{
 	"negationslash": "six",
 	// The angle brackets, codes 0x68 and 0x69 of the symbol font.
 	"angbracketleft": "h", "angbracketright": "i",
+	// The double bar TeX draws a norm with, code 0x6B of the symbol font, so
+	// "k", which is what extract's cmsy table reads back as \|. Page 360 of
+	// Lie 7 to 9 defines the Hilbert norm on L^2 of the dual of G and writes
+	// it with these; every one of them arrived as an empty run, so the page
+	// said A_u^2_2 where it prints the norm of A_u squared, and the norm the
+	// sentence names came through as nothing at all.
+	"bardbl": "k",
 	// These have no place in the symbol font's printable range, so they go to
 	// their own Unicode and extract's unicodeMath table renders them.
 	// The AMS symbol fonts carry the wide accents too, and this printing draws
