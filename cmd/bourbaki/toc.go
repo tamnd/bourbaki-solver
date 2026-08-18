@@ -35,8 +35,9 @@ func tocBuild(args []string) error {
 	book := fs.String("book", "", "book id, or empty for every book in the manifest")
 	dry := fs.Bool("n", false, "print the result without writing anything")
 	verbose := fs.Bool("v", false, "print every § and no. of every chapter")
+	retitle := fs.Bool("retitle", false, "take the titles the volume now reads, over the ones the manifest carries")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki toc build [-book <id>] [flags]\n\nReads each volume's table of contents into manifests/toc.yaml.\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki toc build [-book <id>] [flags]\n\nReads each volume's table of contents into manifests/toc.yaml.\n\nA title already in the manifest is kept, because for a scanned volume the\ncontents page is OCR and its titles get corrected against the printing by\nhand. Every one kept is printed with what the volume now reads beside it,\nand counted in the summary. -retitle takes the new readings instead.\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -105,6 +106,31 @@ func tocBuild(args []string) error {
 			fmt.Printf("%s  %v\n", b.ID, err)
 			failed++
 			continue
+		}
+		// The titles the manifest already carries go back before anything is
+		// printed, so what the table shows is what would be written. For a
+		// scanned volume the contents page is OCR and its titles get corrected
+		// against the printing by hand, and a rebuild used to put every one of
+		// those corrections back the way the scan had it without saying so.
+		if was, ok := man.Get(b.ID); ok {
+			chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters)
+			if !*retitle {
+				res.Chapters = chapters
+			}
+			for _, one := range kept {
+				what := "kept"
+				if *retitle {
+					what = "took"
+				}
+				fmt.Printf("  %s %s\n", what, one)
+			}
+			if len(kept) > 0 && !*retitle {
+				titles := "titles already in the manifest were kept"
+				if len(kept) == 1 {
+					titles = "title already in the manifest was kept"
+				}
+				fmt.Printf("  %d %s, pass -retitle to take the new readings\n", len(kept), titles)
+			}
 		}
 		printTOC(res, *verbose)
 		if len(res.Problems) > 0 {
