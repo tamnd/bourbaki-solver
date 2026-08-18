@@ -447,7 +447,16 @@ func stray(l, other Line) bool {
 	for _, r := range l.Runs {
 		em = max(em, r.Spec.Size)
 	}
-	if l.Bottom > other.Top && l.Top < other.Bottom && l.Left >= other.Left-em && l.Right <= other.Right+em {
+	// Touching counts as overlapping. A script drawn just clear of the band
+	// ends where the band starts, to the unit, and asking for a unit of overlap
+	// on top of that leaves it standing as a line of its own. Page 431 of
+	// Theories spectrales sets the exponent of its display at 735 to 746 over a
+	// line that opens at 746, and the integral sign of the same display came
+	// away with it: the display was printed as "$\int$ 2" on a line by itself,
+	// and the limits of that integral, which belong under a sign that was no
+	// longer there, were read on to the display under it as a second pair. That
+	// is where the \int^G_G^/_/^Z_Z of the corpus came from.
+	if l.Bottom >= other.Top && l.Top <= other.Bottom && l.Left >= other.Left-em && l.Right <= other.Right+em {
 		return true
 	}
 	return limit(l, other)

@@ -285,3 +285,73 @@ func TestAnIndexGoesToTheNearerLine(t *testing.T) {
 		}
 	}
 }
+
+// Page 431 of Théories spectrales V sets an integral over G/Z with the square
+// of the norm of f(g) before it. The exponent of the closing bar of that norm
+// stands at 735 and ends at 746, and the display it belongs to opens at 746, so
+// the two touch and do not overlap. Asking for a unit of overlap left the
+// exponent standing as a line of its own, and the sign of the integral, which
+// is drawn well above the band, came away with it: the page was printed with
+// the integral on a line by itself, and the G/Z written under a sign that was
+// no longer there was read on to the display below as a second pair of scripts.
+const touchingExponentPage = `<?xml version="1.0" encoding="UTF-8"?>
+<pdf2xml>
+<page number="431" position="absolute" top="0" left="0" height="999" width="659">
+<fontspec id="2" size="16" family="MJDJIW+LMMathSymbols10" color="#000000"/>
+<fontspec id="3" size="16" family="XAEWAV+LMMathItalic10" color="#000000"/>
+<fontspec id="4" size="16" family="CWSGRY+LMRoman10" color="#000000"/>
+<fontspec id="5" size="12" family="GORNHQ+LMRoman8" color="#000000"/>
+<fontspec id="6" size="16" family="DCOIDG+MSAM10" color="#000000"/>
+<fontspec id="7" size="15" family="ODOCWD+LMMathExtension10" color="#000000"/>
+<fontspec id="8" size="12" family="GFWRXJ+LMMathItalic8" color="#000000"/>
+<text top="745" left="153" width="5" height="15" font="2">|</text>
+<text top="746" left="157" width="8" height="15" font="3"><i>f</i></text>
+<text top="746" left="167" width="6" height="14" font="4">(</text>
+<text top="746" left="173" width="8" height="15" font="3"><i>g</i></text>
+<text top="746" left="182" width="6" height="14" font="4">)</text>
+<text top="745" left="188" width="5" height="15" font="2">|</text>
+<text top="742" left="193" width="6" height="11" font="5">2</text>
+<text top="746" left="204" width="13" height="17" font="6">&#10877;</text>
+<text top="736" left="230" width="8" height="7" font="7">Z</text>
+<text top="762" left="239" width="10" height="11" font="5">G</text>
+<text top="762" left="249" width="6" height="11" font="8"><i>/</i></text>
+<text top="762" left="255" width="8" height="11" font="5">Z</text>
+<text top="745" left="264" width="5" height="15" font="2">|</text>
+<text top="746" left="268" width="8" height="15" font="3"><i>f</i></text>
+<text top="751" left="276" width="6" height="11" font="5">1</text>
+<text top="745" left="283" width="5" height="15" font="2">|</text>
+<text top="742" left="288" width="6" height="11" font="5">1</text>
+<text top="742" left="294" width="6" height="11" font="8"><i>/</i></text>
+<text top="742" left="300" width="6" height="11" font="5">2</text>
+<text top="745" left="310" width="5" height="15" font="2">|</text>
+<text top="746" left="315" width="8" height="15" font="3"><i>f</i></text>
+<text top="751" left="323" width="6" height="11" font="5">3</text>
+<text top="745" left="330" width="15" height="15" font="2">| |</text>
+<text top="746" left="345" width="10" height="15" font="3"><i>&#947;</i></text>
+<text top="753" left="355" width="10" height="11" font="5">G</text>
+<text top="753" left="365" width="11" height="11" font="8"><i>,&#967;</i></text>
+<text top="746" left="377" width="6" height="14" font="4">(</text>
+<text top="746" left="384" width="8" height="15" font="3"><i>g</i></text>
+<text top="746" left="392" width="6" height="14" font="4">)</text>
+<text top="746" left="398" width="8" height="15" font="3"><i>f</i></text>
+<text top="751" left="406" width="6" height="11" font="5">2</text>
+<text top="745" left="414" width="5" height="15" font="2">|</text>
+<text top="746" left="421" width="17" height="15" font="3"><i>d&#957;</i></text>
+<text top="735" left="447" width="6" height="11" font="5">2</text>
+</page>
+</pdf2xml>
+`
+
+func TestAScriptThatTouchesTheBandIsPartOfTheLine(t *testing.T) {
+	lines := parse(t, touchingExponentPage)
+	if len(lines) != 1 {
+		for i, l := range lines {
+			t.Logf("line %d: %s", i, Render(l))
+		}
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	want := `$|f(g)|^2\leqslant \int_{G/Z}|f_1|^{1/2}|f_3| |\gamma_{G,\chi}(g)f_2|d\nu^2$`
+	if got := Render(lines[0]); got != want {
+		t.Errorf("Render:\n got %s\nwant %s", got, want)
+	}
+}
