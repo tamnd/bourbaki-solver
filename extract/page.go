@@ -115,6 +115,10 @@ type Page struct {
 	Minus     int
 	MinusLost int
 
+	// Pieces is how many repeats of an extensible bar were taken out of the
+	// runs, one bar having been drawn as a stack of them. See extbar.go.
+	Pieces int
+
 	// Lost is how many glyphs the page draws that poppler could not name. See
 	// Lost below.
 	Lost int
@@ -175,6 +179,10 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 	// the runs, so that the rest of extraction sees a page with its operators
 	// on it. See rule.go.
 	p, out.Minus, out.MinusLost = Minus(l, p)
+	// A bar built out of repeated pieces comes back to one bar before any of
+	// it is read, for the same reason: the runs the rest of extraction sees
+	// are meant to be what the page draws. See extbar.go.
+	p, out.Pieces = Extensible(l, p)
 	out.Lost = Lost(p)
 	if out.Lost > 0 {
 		out.flag(FlagDroppedGlyph)

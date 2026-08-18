@@ -148,6 +148,16 @@ var cmexNames = map[string]string{
 	"angbracketrightbig": "semicolon", "angbracketrightBig": "semicolon", "angbracketrightbigg": "semicolon", "angbracketrightBigg": "semicolon",
 	"vextendsinglebig": "less", "vextendsingleBig": "less", "vextendsinglebigg": "less", "vextendsingleBigg": "less",
 	"vextenddoublebig": "equal", "vextenddoubleBig": "equal", "vextenddoublebigg": "equal", "vextenddoubleBigg": "equal",
+
+	// The two bars again, under the names the printing uses when it draws one at
+	// the height of the line rather than at one of the four sizes above. They are
+	// the whole of what Topologie had left: 116 single bars and 24 double ones in
+	// chapters 1 to 2 and 200 more in chapters 3 to 5, which is the absolute
+	// value of a real number and the norm of a vector, and the volumes were
+	// printing "x" where the page reads "|x|". Neither name is one texName
+	// matches, since it wants a size or a piece on the end of a name and these
+	// carry neither, so neither was ever reported.
+	"vextendsingle": "less", "vextenddouble": "equal",
 	"slashbig": "greater", "slashBig": "greater", "slashbigg": "greater", "slashBigg": "greater",
 	"backslashbig": "question", "backslashBig": "question", "backslashbigg": "question", "backslashBigg": "question",
 
@@ -918,7 +928,7 @@ func tableSum() string {
 	// The rewrite itself is versioned along with the tables, since a prepared
 	// copy is only as good as what made it and a change in what this package
 	// does to a file has to invalidate the copies as surely as a new name does.
-	b.WriteString("v5 extension fonts;")
+	b.WriteString("v6 extensible bars;")
 	for _, t := range []map[string]string{cmexNames, mathNames} {
 		keys := make([]string, 0, len(t))
 		for k := range t {
