@@ -112,3 +112,32 @@ func TestABarOverOneLetterDoesNotJoinTheLineAboveIt(t *testing.T) {
 		}
 	}
 }
+
+// The head of the table on page 124 of the English Algebra VIII, which draws
+// its rules the width of the type area. The one under the column heads is
+// light enough to pass for a fraction bar, and read as one it joined the heads
+// to the first row and ran the two columns into each other.
+var tableHead = pdfsrc.Page{
+	Number: 124, Width: 659, Height: 999,
+	Spans: []pdfsrc.Span{
+		{Top: 90, Left: 100, Width: 120, Height: 14, Text: "Submodules of M"},
+		{Top: 90, Left: 340, Width: 140, Height: 14, Text: "Ordered set D(M)"},
+
+		{Top: 120, Left: 100, Width: 120, Height: 14, Text: "Zero submodule"},
+		{Top: 120, Left: 340, Width: 190, Height: 14, Text: "Smallest element of D(M)"},
+	},
+	Rules: []pdfsrc.Rule{
+		{Top: 83, Left: 85, Width: 487, Thickness: 0.796, Length: 324.58, Size: 8.2},
+		{Top: 112, Left: 85, Width: 487, Thickness: 0.497, Length: 324.58, Size: 5.1},
+	},
+}
+
+func TestATableRuleDoesNotJoinTheRowsItSeparates(t *testing.T) {
+	lines := Lines(frlay, tableHead)
+	if len(lines) != 2 {
+		for i, one := range lines {
+			t.Logf("line %d: %s", i, Render(one))
+		}
+		t.Fatalf("got %d lines, want the head and the row kept apart", len(lines))
+	}
+}

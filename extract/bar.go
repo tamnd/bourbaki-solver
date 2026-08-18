@@ -138,8 +138,9 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 	for i := range reach {
 		reach[i] = i
 	}
+	across := typeArea(lines)
 	for _, r := range rules {
-		if !bar(r) || overline(lines, r) {
+		if !bar(r) || ruled(r, across) || overline(lines, r) {
 			continue
 		}
 		first, last := -1, -1
@@ -186,6 +187,39 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 		i = end + 1
 	}
 	return out
+}
+
+// ruled reports whether a light rule is one of the lines a table is drawn with
+// rather than the bar of a fraction.
+//
+// Weight does not answer this. A table on page 124 of the English Algebra VIII
+// draws its head and its foot at 0.796 points, which is heavy enough to be
+// taken for the set difference sign and thrown out, and the line under its
+// column heads at 0.497, which is light enough to be taken for a fraction bar.
+// Read as one, it joined the head of the table to the first row and the two
+// columns ran into each other.
+//
+// Length answers it. A fraction bar is as long as the wider of its two halves,
+// and sampled over four volumes the light rules that really are bars run from
+// six units to seventy six. A table rule runs the width of the type area, 487
+// units on the same page. A third of the measure is nowhere near either of them.
+func ruled(r pdfsrc.Rule, across int) bool { return across > 0 && r.Width*3 >= across }
+
+// typeArea is how wide the type of the page runs, taken from the lines
+// themselves because a rule knows nothing about the page it is drawn on. It is
+// not measure in page.go, which is the width one block was set to and is zero
+// for a block too short to have a filled line.
+func typeArea(lines []Line) int {
+	lo, hi := 0, 0
+	for i, l := range lines {
+		if i == 0 || l.Left < lo {
+			lo = l.Left
+		}
+		if l.Right > hi {
+			hi = l.Right
+		}
+	}
+	return hi - lo
 }
 
 // overline reports whether a rule is drawn over one thing rather than between
