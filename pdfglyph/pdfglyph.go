@@ -67,6 +67,9 @@ type Result struct {
 	// Unicode is how many /ToUnicode CMaps were given codes they were missing,
 	// each one a CMap that would otherwise have kept the old reading.
 	Unicode int
+	// Coded counts the names that were left where they were and given a CMap
+	// entry, by name.
+	Coded map[string]int
 	// Unknown counts the names that look like TeX and have no replacement,
 	// so that a volume with a glyph this package has never seen says so
 	// rather than dropping it quietly.
@@ -208,6 +211,31 @@ var mathNames = map[string]string{
 	"Ifractur":       "uni2111",
 }
 
+// codedNames are names this package does not replace and gives a CMap entry
+// instead.
+//
+// A replacement has to fit in the bytes the old name took, since the rewrite is
+// made in place, and there is no name three letters long that poppler reads as
+// a variant Greek. pi1 is the one that matters: the printing of Lie chapters 7
+// to 9 names code 0x17 of its mathematics italic pi1, which is what dvips calls
+// varpi, and the Adobe list calls that character omega1 and has never heard of
+// pi1. The /ToUnicode CMap of the font lists every other code of the encoding
+// and skips this one, so poppler had nothing to read it by and handed back an
+// empty run: Corollary 1 of § 7, no. 3 names the family of fundamental weights
+// and the page printed "( )_{alpha in B}" with the letter gone out of it, and
+// the same corollary lost the weight itself twice more in the proof below.
+//
+// The CMap is appended rather than rewritten, so nothing here has to fit
+// anywhere, and the name in the encoding is left as the printing wrote it.
+// The three are the variant Greek of the mathematics italic that the Adobe
+// list has no name for. Its theta1, phi1 and sigma1 are names of the symbol
+// font and poppler reads all three, which is why they are not here.
+var codedNames = map[string]rune{
+	"pi1":      'ϖ', // varpi
+	"rho1":     'ϱ', // varrho
+	"epsilon1": 'ϵ', // the lunate epsilon
+}
+
 // texName is a glyph name that only a TeX font uses, so that a volume carrying
 // one this package has no replacement for is reported rather than left to be
 // found by a reader.
@@ -225,7 +253,7 @@ var texName = regexp.MustCompile(`^(?:[a-z]+(?:text|display|wide|wider|widest|bi
 // every byte after it and rewriting the cross reference table, and every name
 // this package replaces is shorter than the TeX name it stands for.
 func Rewrite(pdf []byte) ([]byte, Result, error) {
-	res := Result{Names: map[string]int{}, Unknown: map[string]int{}}
+	res := Result{Names: map[string]int{}, Coded: map[string]int{}, Unknown: map[string]int{}}
 	out := make([]byte, len(pdf))
 	copy(out, pdf)
 	srcs, err := sources(out)
@@ -270,6 +298,7 @@ func rewriteNames(src *source, fonts map[int]string, rewritten map[int]map[int]r
 			table = mathNames
 		}
 		codes := map[int]rune{}
+		named := false
 		code := 0
 		for _, m := range codeNameRe.FindAllSubmatchIndex(buf[s:e], -1) {
 			if m[2] >= 0 {
@@ -285,11 +314,17 @@ func rewriteNames(src *source, fonts map[int]string, rewritten map[int]map[int]r
 			name := string(buf[s+m[4] : s+m[5]])
 			want, ok := table[name]
 			if !ok {
+				if r, ok := codedNames[name]; ok {
+					codes[at] = r
+					res.Coded[name]++
+					continue
+				}
 				if texName.MatchString(name) && font != "" {
 					res.Unknown[font+" "+name]++
 				}
 				continue
 			}
+			named = true
 			if len(want) > m[5]-m[4] {
 				return fmt.Errorf("/%s does not fit where /%s was", want, name)
 			}
@@ -305,8 +340,14 @@ func rewriteNames(src *source, fonts map[int]string, rewritten map[int]map[int]r
 			codes[at] = r
 		}
 		if len(codes) > 0 {
-			res.Encodings++
 			rewritten[o.num] = codes
+		}
+		// An encoding only a coded name was found in still reads as it did, and
+		// the object it lives in is written back untouched. What that name
+		// needed was the CMap entry above it, and the encoding is here to say
+		// which code to put it at.
+		if named {
+			res.Encodings++
 			src.edited(o.num)
 		}
 	}
@@ -776,6 +817,17 @@ func tableSum() string {
 			b.WriteString(t[k])
 			b.WriteString(";")
 		}
+	}
+	coded := make([]string, 0, len(codedNames))
+	for k := range codedNames {
+		coded = append(coded, k)
+	}
+	sort.Strings(coded)
+	for _, k := range coded {
+		b.WriteString(k)
+		b.WriteString("=")
+		b.WriteRune(codedNames[k])
+		b.WriteString(";")
 	}
 	sum := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(sum[:])[:6]
