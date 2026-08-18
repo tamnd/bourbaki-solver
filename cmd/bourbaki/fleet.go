@@ -18,6 +18,7 @@ const fleetUsage = `usage: bourbaki fleet <command> [flags]
 
 commands:
   probe    ask every host what it has installed and how much of it is free
+  accounts count the signed in profiles on each host and say how many can work
   ask      put one question to one host and print what came back
   up       start the ssh tunnels and wait for each to answer
   down     stop the tunnels
@@ -83,6 +84,8 @@ func runFleet(args []string) error {
 	switch args[0] {
 	case "probe":
 		return runFleetProbe(args[1:])
+	case "accounts":
+		return runFleetAccounts(args[1:])
 	case "ask":
 		return runFleetAsk(args[1:])
 	case "up":
@@ -157,6 +160,65 @@ func runFleetProbe(args []string) error {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "wrote %s\n", path)
+	return nil
+}
+
+// sshTargets is every route that names a box to log into. A route with no host
+// is a plain HTTP endpoint and there is nothing on the far side to ask.
+func sshTargets(registry route.Registry) []fleet.Target {
+	targets := make([]fleet.Target, 0, len(registry.Routes))
+	for _, value := range registry.Enabled() {
+		if value.Host == "" {
+			continue
+		}
+		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+	}
+	return targets
+}
+
+// runFleetAccounts prints the ban board, and with -sleep prints the seconds a
+// caller should wait before asking again.
+//
+// The board is the thing to look at before starting anything long. A browser
+// profile that has read enough pages is rate limited for eight hours, and with
+// every profile on a host sitting out, an OCR run does not fail fast: it sends
+// its batch, waits for a composer that never appears, and gives up nineteen
+// minutes later having read nothing. The sweep did that twice in a row. One
+// ssh round trip says the same thing and says when to come back.
+//
+// Nothing here prints an account. The parser keeps counts and a duration and
+// drops the addresses the host prints beside them, so a log tail from this can
+// go into an issue as it stands.
+func runFleetAccounts(args []string) error {
+	var flags fleetFlags
+	fs := flag.NewFlagSet("fleet accounts", flag.ExitOnError)
+	flags.bind(fs)
+	timeout := fs.Duration("timeout", 60*time.Second, "per host timeout")
+	sleep := fs.Bool("sleep", false, "print the seconds to wait for the first slot back, and nothing else")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	registry, source, err := flags.registry()
+	if err != nil {
+		return err
+	}
+	targets := sshTargets(registry)
+	if len(targets) == 0 {
+		return fmt.Errorf("no enabled route in %s names an ssh host", source)
+	}
+
+	ctx, cancel := signalContext()
+	defer cancel()
+	boards := fleet.BoardAll(ctx, fleet.SSH{Timeout: *timeout}, targets)
+	if *sleep {
+		fmt.Println(int(fleet.Wait(boards).Seconds()))
+		return nil
+	}
+	fmt.Print(fleet.AccountsTable(boards))
+	if wait := fleet.Wait(boards); wait > 0 {
+		fmt.Fprintf(os.Stderr, "every signed in profile is sitting out a cooldown, the first is back in %s\n",
+			wait.Round(time.Minute))
+	}
 	return nil
 }
 
