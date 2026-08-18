@@ -449,3 +449,65 @@ func TestMergeChaptersKeepsTheFullerListing(t *testing.T) {
 		t.Errorf("exercises = %+v, want the summary's page 13", got[0].Exercises)
 	}
 }
+
+// The 1995 General Topology scan reads a page number four ways the reader had
+// no name for, and every one of them is a contents line thrown away.
+//
+// The volume prints 190, 191, 197, 198, 219, 169, 225 and 207, and the text
+// layer gives IgO, IgI, Ig7, Ig8, 2Ig, "J 69", "22-5" and "20   7". Ten lines
+// end that way. Two of them are §§ of chapter III, which came out with five §§
+// where the book has seven, and one is § 1 of chapter II, which came out at
+// printed page 69, a hundred pages before the chapter starts.
+func TestThePageNumbersThe1995ScanMisreads(t *testing.T) {
+	tests := []struct {
+		line string
+		want int
+	}{
+		{"           6. Extension of uniformly continuous functions . . . . . . . . .        IgO", 190},
+		{"           7. The completion of a uniform space ................        IgI", 191},
+		{"          I. Uniformity of compact spaces. . . . . . . . . . . . . . . . . . . .        Ig8", 198},
+		{"    § I. Topologies on groups. . . . . . . . . . . . . . . . . . . . . . . . . . . . . . ..          2Ig", 219},
+		{"     § I. Uniform spaces .....................................        J 69", 169},
+		{"            homogeneous spaces, product groups .............          22-5", 225},
+		{"    Exercises for § 2                                                     20   7", 207},
+	}
+	for _, tt := range tests {
+		_, got, ok := splitTail(tt.line, Bare)
+		if !ok || got.page != tt.want {
+			t.Errorf("splitTail(%q) = %+v %v, want page %d", tt.line, got, ok, tt.want)
+		}
+	}
+}
+
+// The same scan reads the lining figure 1 at the head of a no. line as J, and
+// sets a middle dot after the number where the volume prints a period.
+//
+// A no. line that is not read is not one entry lost. The no. after it takes its
+// place, so § 3 of chapter I came out starting at page 37, which is where its
+// no. 2 is, and every no. of the § was reported as the wrong one.
+func TestTheNumbersThe1995ScanMisreadsAtTheHeadOfALine(t *testing.T) {
+	tests := []struct {
+		line string
+		want entry
+	}{
+		{"          J. Subspaces of a topological space",
+			entry{kind: kindSubsection, number: 1, title: "Subspaces of a topological space"}},
+		{"          J. Hausdorff spaces",
+			entry{kind: kindSubsection, number: 1, title: "Hausdorff spaces"}},
+		{"           9· Completion of subspaces and product spaces",
+			entry{kind: kindSubsection, number: 9, title: "Completion of subspaces and product spaces"}},
+	}
+	for _, tt := range tests {
+		if got := classify(tt.line, Pilcrow); got != tt.want {
+			t.Errorf("classify(%q) = %+v, want %+v", tt.line, got, tt.want)
+		}
+	}
+}
+
+// And a title that ends in a letter of that class is still a title, because
+// nothing but the leader dots lets a page be read at all.
+func TestAWordIsNotAPageNumber(t *testing.T) {
+	if _, _, ok := splitTail("4. Ultrafilters", Bare); ok {
+		t.Error("a line with no leaders yielded a page")
+	}
+}
