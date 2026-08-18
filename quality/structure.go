@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/footnote"
 	"github.com/tamnd/bourbaki-solver/pagemap"
 )
 
@@ -46,6 +47,8 @@ func init() {
 		Check{ID: "S09", Group: Structure, Hard: true,
 			Title: "assembly is deterministic and what is committed is what it writes",
 			Run:   s09, Need: needAssembly},
+		Check{ID: "S10", Group: Structure, Hard: true,
+			Title: "no footnote carries the mark the printing gave it", Run: s10},
 	)
 }
 
@@ -683,4 +686,56 @@ func relPath(root, path string) string {
 		return filepath.ToSlash(r)
 	}
 	return filepath.ToSlash(path)
+}
+
+// S10. No footnote carries the mark the printing gave it.
+//
+// The volumes mark their notes with symbols and restart on every page, and
+// Markdown numbers its notes itself and prints the number. A file that keeps
+// both hands the reader two marks for one note, "(*)[^1]" in the body and
+// "[^1]: (*)" at the foot, and the second of them is a symbol that means
+// nothing once the notes have been renumbered across a whole §.
+//
+// The rule is package footnote asked what it would do, so the audit and the
+// repair cannot disagree about the same file: what this reports is exactly what
+// bourbaki fix footnote takes out. A mark that package leaves alone is not
+// reported, because leaving it is the right answer and not a defect. Chapter I
+// § 1 has one, "cf. note (*), § 3, no. 1, p. 28", which is a reference to a
+// note on another page in the words of the book and belongs to the prose.
+//
+// It reads pages and content both. The pages are where a repair belongs and the
+// content is what a reader sees, and the two go out of step for as long as it
+// takes to run assemble.
+func s10(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	report := func(path string, line func(int) int, body string) {
+		_, moves := footnote.Normalize(body)
+		for _, m := range moves {
+			if m.Kind == footnote.KindLeft {
+				continue
+			}
+			var msg string
+			switch m.Kind {
+			case footnote.KindDefinition:
+				msg = fmt.Sprintf("the definition of note %s opens with the printed mark %s, which the note is named by already",
+					m.Label, m.Mark)
+			case footnote.KindBeside:
+				msg = fmt.Sprintf("prints %s beside [^%s], so the reader is given two marks for one note",
+					m.Mark, m.Label)
+			case footnote.KindAlone:
+				msg = fmt.Sprintf("prints %s where the reference to note %s belongs, so nothing in the text reaches the note",
+					m.Mark, m.Label)
+			}
+			out = append(out, Finding{File: path, Line: line(m.Line), Msg: msg})
+		}
+	}
+	for _, b := range c.Books.Books {
+		for i, p := range c.Pages[b.ID] {
+			report(c.PagePaths[b.ID][i], func(n int) int { return n }, p.Body)
+		}
+	}
+	for _, d := range c.Docs {
+		report(d.Path, d.BodyLine, d.Body)
+	}
+	return out, nil
 }

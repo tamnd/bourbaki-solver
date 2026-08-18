@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/footnote"
 	"github.com/tamnd/bourbaki-solver/queue"
 	"github.com/tamnd/bourbaki-solver/textguard"
 )
@@ -989,6 +990,12 @@ func (r *Runner) reject(value task, out *outcome, rules []Rule, reason string) {
 // write puts an accepted page in the corpus.
 func (r *Runner) write(value task, text string) (changes []FaceChange, err error) {
 	head, body := SplitHead(text)
+	// The mark the volume prints beside a footnote is furniture of that page's
+	// typesetting, and the reference Markdown prints is the corpus's own. A
+	// reading that keeps both hands the reader two marks for one note, so the
+	// printed one comes out here rather than in a repair pass later. See
+	// package footnote for what is taken and what is left.
+	body, _ = footnote.Normalize(body)
 	meta := corpus.PageFrontMatter{
 		Book: r.Book, PDFPage: value.page, Method: corpus.MethodOCR, Model: r.Model,
 		PageLabel: head.Label, RunningHead: head.Title, Locator: head.Locator,
