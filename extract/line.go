@@ -526,7 +526,7 @@ func limit(l, other Line) bool {
 	signs := append(append([]Run{}, other.Runs...), l.Runs...)
 	n := 0
 	for _, r := range signs {
-		if tall(r) {
+		if operator(r) {
 			n++
 		}
 	}
@@ -602,7 +602,7 @@ func reach(l, other Line) (int, bool) {
 		if _, ok := Accent(r.Spec, r.Text); ok {
 			continue
 		}
-		if tall(r) {
+		if operator(r) {
 			signs = append(signs, r)
 		}
 	}
@@ -637,7 +637,7 @@ func reach(l, other Line) (int, bool) {
 func under(r Run, runs []Run) bool {
 	slack := 2 * r.Spec.Size
 	for _, s := range runs {
-		if tall(s) && r.Left <= s.Right()+slack && r.Right() >= s.Left-slack {
+		if operator(s) && r.Left <= s.Right()+slack && r.Right() >= s.Left-slack {
 			return true
 		}
 	}
@@ -706,6 +706,39 @@ func bandSize(r Run) int {
 // delimiter spanning several lines. pdftohtml reports a height of 7 for all of
 // them whatever their real size, so they are recognised by their font.
 func tall(r Run) bool { return Extension(r.Spec) }
+
+// wordOps are the operators printed as words. They take a limit under them the
+// way a sum does, which is the only thing this list is used for, so det and ker
+// and the rest of the words set in roman are not in it.
+var wordOps = map[string]bool{"sup": true, "inf": true, "lim": true, "max": true, "min": true}
+
+// operator reports whether a run is something a limit can hang under: a large
+// operator out of CMEX, or one of the operators printed as a word.
+//
+// TeX sets sup, inf and lim out of a roman font rather than out of CMEX, so
+// nothing about the glyph says they are operators, and a limit written under
+// one of them was weighed against nothing. Page 113 of Theories spectrales
+// writes sup at 478 with x in X under it at 494, two units below the band, and
+// the prose of the next line opens at 505: with the word not counted neither
+// line set a sign, the nearer band took the limit, and the page came out
+// reading the limit of that sup as an exponent of the first word of a French
+// sentence.
+//
+// A word only counts at the end of its run. The limit is set smaller than the
+// operator, so poppler ends the run at the operator and opens another one for
+// the limit, and a run that goes on after the word is prose that happens to
+// contain it. That is what keeps supposons and limite out of this.
+func operator(r Run) bool { return tall(r) || wordOp(r.Text) }
+
+// wordOp reports whether a piece of type ends with an operator printed as a
+// word. A word only counts at the end. The limit is set smaller than the
+// operator, so poppler ends the run at the operator and opens another one for
+// the limit, and type that goes on after the word is prose that happens to
+// contain it. That is what keeps supposons and limite out of this.
+func wordOp(s string) bool {
+	f := strings.Fields(s)
+	return len(f) > 0 && wordOps[f[len(f)-1]]
+}
 
 // sign reports whether a run is a large operator, which is the one kind of
 // glyph a line can write a limit across rather than beside. A wide tilde and a

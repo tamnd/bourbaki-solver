@@ -72,14 +72,23 @@ func bars(lines []Line, rules []pdfsrc.Rule) {
 		if !bar(r) {
 			continue
 		}
-		best, dist := -1, 0
+		best, dist, bestOver := -1, 0, false
 		for i, l := range lines {
 			if r.Right() <= l.Left || r.Left >= l.Right {
 				continue
 			}
-			d := off(r.Top, l)
-			if best < 0 || d < dist {
-				best, dist = i, d
+			d, o := off(r.Top, l), drawnOver(r, l)
+			// Two lines can both hold the bar inside their extent, and then the
+			// one with type under the bar is the one the bar was drawn over. A
+			// line that took a script off the line under it reaches down to the
+			// top of that line, so the bar over the first letter of the next
+			// line lies inside both of them, and the line above is offered
+			// first. Page 113 of Theories spectrales sets sup with x in X under
+			// it at 494, and the bar of the conjugate of f on the line at 505
+			// went up to the sup, which has nothing under it to bar, and the
+			// page came out reading f maps to f.
+			if best < 0 || d < dist || (d == dist && o && !bestOver) {
+				best, dist, bestOver = i, d, o
 			}
 		}
 		// barReach is how far a bar may stand outside the extent of the line
@@ -92,6 +101,18 @@ func bars(lines []Line, rules []pdfsrc.Rule) {
 		}
 		lines[best].Rules = append(lines[best].Rules, r)
 	}
+}
+
+// drawnOver reports whether a line sets type under a bar, across the width the
+// bar is drawn. That is what a bar is for, and a line with nothing under it did
+// not have this one drawn over it however near it stands.
+func drawnOver(r pdfsrc.Rule, l Line) bool {
+	for _, run := range l.Runs {
+		if run.Left < r.Right() && r.Left < run.Right() && run.Top >= r.Top {
+			return true
+		}
+	}
+	return false
 }
 
 // off is how far a height stands outside the extent of a line's runs, and zero
