@@ -71,9 +71,30 @@ type Book struct {
 	// A volume with a restart prints two of most of its page numbers, and there
 	// is nothing to be done about that: it really does have two page 50s.
 	Restarts []int `yaml:"restarts,omitempty"`
+	// Transposed are pairs of PDF pages the file carries the wrong way round,
+	// because the leaves were bound out of order and the scan followed them.
+	// Algebre chapitres 4 a 7 in French is one: its pdf 274 heads A V.169 and
+	// ends the exercises of chapter V, and its pdf 273 opens the note
+	// historique at printed 170 and runs straight into pdf 275 at printed 171.
+	Transposed []Transposition `yaml:"transposed,omitempty"`
 	// Introduction is the Book's own introduction, where it has one, and is
 	// empty where it has not.
 	Introduction *Introduction `yaml:"introduction,omitempty"`
+}
+
+// Transposition is two PDF pages a file carries the wrong way round.
+//
+// It is written by hand, like the errata and like first_page, because the file
+// gives no sign of it: two leaves in the wrong order are two pages that read
+// perfectly and follow each other in the wrong sequence, and telling that from
+// a fit that has slipped is a matter of reading the text across the join.
+type Transposition struct {
+	// Pages is the two PDF pages, and there are two of them.
+	Pages []int `yaml:"pages"`
+	// Why is what says the pages are the wrong way round, in the words of
+	// whoever read the join. It is not machine readable and it is not optional:
+	// a swap nobody explained is one nobody can check.
+	Why string `yaml:"why"`
 }
 
 // Introduction is the pages of a Book's introduction.

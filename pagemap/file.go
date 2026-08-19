@@ -48,8 +48,16 @@ func (m *Map) Save(root string) error {
 		}
 		restarts = " restarts=" + strings.Join(pages, ",")
 	}
-	fmt.Fprintf(&b, "# book=%s grammar=%s pagination=%s%s%s%s pdf_pages=%d\n",
-		m.Book, m.Grammar, m.Pagination, prefix, first, restarts, m.PDFPages)
+	transposed := ""
+	if len(m.Transposed) > 0 {
+		var swaps []string
+		for _, s := range m.Transposed {
+			swaps = append(swaps, fmt.Sprintf("%d-%d", s[0], s[1]))
+		}
+		transposed = " transposed=" + strings.Join(swaps, ",")
+	}
+	fmt.Fprintf(&b, "# book=%s grammar=%s pagination=%s%s%s%s%s pdf_pages=%d\n",
+		m.Book, m.Grammar, m.Pagination, prefix, first, restarts, transposed, m.PDFPages)
 	fmt.Fprintln(&b, tsvHeader)
 	for _, e := range m.Entries {
 		page := ""
@@ -76,6 +84,7 @@ type Report struct {
 	Prefix      string         `json:"prefix,omitempty"`
 	FirstPage   int            `json:"first_page,omitempty"`
 	Restarts    []int          `json:"restarts,omitempty"`
+	Transposed  [][2]int       `json:"transposed,omitempty"`
 	PDFPages    int            `json:"pdf_pages"`
 	BodyPages   int            `json:"body_pages"`
 	FrontMatter int            `json:"front_matter_pages"`
@@ -102,7 +111,7 @@ func (m *Map) Report() Report {
 	body := m.BodyPages()
 	r := Report{
 		Book: m.Book, Grammar: m.Grammar, Pagination: m.Pagination,
-		FirstPage: m.FirstPage, Restarts: m.Restarts,
+		FirstPage: m.FirstPage, Restarts: m.Restarts, Transposed: m.Transposed,
 		PDFPages: m.PDFPages, BodyPages: body, FrontMatter: m.PDFPages - body,
 		Counts: counts, Chapters: m.Chapters, Steps: m.Steps,
 		Conflicts: m.Conflicts, Gaps: m.Gaps,
@@ -159,6 +168,22 @@ func Load(root, book string) (*Map, error) {
 						}
 						m.Restarts = append(m.Restarts, n)
 					}
+				case "transposed":
+					for _, s := range strings.Split(v, ",") {
+						a, b, ok := strings.Cut(s, "-")
+						if !ok {
+							return nil, fmt.Errorf("%s: bad transposed in %q", Path(root, book), line)
+						}
+						first, err := strconv.Atoi(a)
+						if err != nil {
+							return nil, fmt.Errorf("%s: bad transposed in %q", Path(root, book), line)
+						}
+						second, err := strconv.Atoi(b)
+						if err != nil {
+							return nil, fmt.Errorf("%s: bad transposed in %q", Path(root, book), line)
+						}
+						m.Transposed = append(m.Transposed, [2]int{first, second})
+					}
 				}
 			}
 			continue
@@ -193,7 +218,11 @@ func Load(root, book string) (*Map, error) {
 	}
 	m.PDFPages = len(m.Entries)
 	m.Gaps = findGaps(m.Entries)
-	m.Steps = stepsOf(m.Entries)
+	order, err := printingOrder(len(m.Entries), m.Transposed)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", Path(root, book), err)
+	}
+	m.Steps = stepsOf(m.Entries, order)
 	return m, nil
 }
 
@@ -209,10 +238,10 @@ func Load(root, book string) (*Map, error) {
 // A step is not a second source of truth here. The rows already say where the
 // printed number jumps, so this reads it off them rather than trusting anything
 // the builder wrote down and a later hand edit could have left behind.
-func stepsOf(entries []Entry) []Step {
+func stepsOf(entries []Entry, order []int) []Step {
 	var out []Step
-	for i := 1; i < len(entries); i++ {
-		prev, cur := entries[i-1], entries[i]
+	for i := 1; i < len(order); i++ {
+		prev, cur := entries[order[i-1]-1], entries[order[i]-1]
 		if prev.Page == 0 || cur.Page == 0 || prev.Chapter != cur.Chapter {
 			continue
 		}

@@ -182,3 +182,53 @@ func TestTheHeaderCarriesWhereTheNumberingStartsOver(t *testing.T) {
 		t.Error("a volume numbered once through wrote a restart anyway")
 	}
 }
+
+// The transpositions have to survive the round trip too. Without them a loaded
+// map reads its two out of order leaves as a pair of unexplained jumps, and the
+// structure audit reports a volume that is right as a volume that is wrong.
+func TestTheHeaderCarriesTheLeavesBoundTheWrongWayRound(t *testing.T) {
+	root := t.TempDir()
+	m, err := Build(perChapterVolume(), Options{Book: "mini", Chapters: []string{"IV"},
+		Transposed: [][2]int{{11, 12}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(Path(root, "mini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "transposed=11-12") {
+		t.Errorf("the header does not say which leaves are out of order:\n%s",
+			strings.SplitN(string(b), "\n", 3)[1])
+	}
+	back, err := Load(root, "mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Transposed) != 1 || back.Transposed[0] != [2]int{11, 12} {
+		t.Fatalf("the transpositions came back as %v, want [[11 12]]", back.Transposed)
+	}
+	// The step over the leaf the printing drops is still read off the rows, and
+	// it is read in the order the volume prints.
+	if len(back.Steps) != len(m.Steps) {
+		t.Errorf("the loaded map has %d steps, the built one %d", len(back.Steps), len(m.Steps))
+	}
+	// A volume bound the right way round writes nothing.
+	plain, err := Build(perChapterVolume(), Options{Book: "plain", Chapters: []string{"IV"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plain.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(Path(root, "plain"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "transposed") {
+		t.Error("a volume bound the right way round wrote a transposition anyway")
+	}
+}
