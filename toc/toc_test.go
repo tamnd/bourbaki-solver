@@ -958,3 +958,38 @@ func TestAReadingThatCarriesLessThanTheLayerIsDropped(t *testing.T) {
 		t.Fatalf("a reading with no pages in it replaced one that had them:\n%s", out[0])
 	}
 }
+
+// A scan that lost the last two words of the running head over the table of
+// contents still has a table of contents. Groupes et algebres de Lie chapitres
+// 4 a 6 in French and Integration chapitre 5 in French both come out of the
+// text layer with "TABLE" and the folio and nothing else over every page of the
+// contents at the back, and both were reported as volumes with no contents at
+// all: one because every one of its pages carries a printed number and so the
+// map leaves none out, the other because no page read as contents.
+//
+// What is not taken is a head that says what else it is the table of. The
+// French Integration prints a TABLE DE CONCORDANCE between the two editions
+// right after its contents, and that is a different thing with a different
+// shape.
+func TestAHeadThatIsNothingButTheWordTableAnnouncesTheContents(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		head string
+		want bool
+	}{
+		{"recto", "                    TABLE                    287", true},
+		{"verso", "286                                 TABLE", true},
+		{"in full", "                    TABLE DES MATIÈRES", true},
+		{"english", "                    CONTENTS", true},
+		{"the concordance", "                    TABLE DE CONCORDANCE", false},
+		{"the concordance on a verso", "154              TABLE DE CONCORDANCE", false},
+		{"a table in the body", "  TABLE 1. The exceptional root systems", false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pg := c.head + "\n\n§ 1. Hyperplans, chambres et facettes . . . 61\n"
+			if got := announcesContents(pg); got != c.want {
+				t.Errorf("announcesContents(%q) = %v, want %v", c.head, got, c.want)
+			}
+		})
+	}
+}
