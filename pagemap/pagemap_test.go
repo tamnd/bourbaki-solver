@@ -103,21 +103,50 @@ func TestReadHeadNumber(t *testing.T) {
 		line    string
 		chapter string
 		page    int
+		alt     int
 		ok      bool
 	}{
-		{"§13.             CLASSICAL SPLITTABLE SIMPLE LIE ALGEBRAS                    189", "", 189, true},
-		{"190                        SPLIT SEMI-SIMPLE LIE ALGEBRAS               Ch. VIII", "VIII", 190, true},
-		{"192                           SPLIT SEMI-SIMPLE LIE ALGEBRAS                         Ch. VIII", "VIII", 192, true},
+		{"§13.             CLASSICAL SPLITTABLE SIMPLE LIE ALGEBRAS                    189", "", 189, 0, true},
+		{"190                        SPLIT SEMI-SIMPLE LIE ALGEBRAS               Ch. VIII", "VIII", 190, 0, true},
+		{"192                           SPLIT SEMI-SIMPLE LIE ALGEBRAS                         Ch. VIII", "VIII", 192, 0, true},
 		// A chapter opener and a section opener carry no number, as in every
 		// other volume.
-		{"CHAPTER VIII", "", 0, false},
-		{"§ 2.   THE STRUCTURE OF MODULES OF FINITE", "", 0, false},
+		{"CHAPTER VIII", "", 0, 0, false},
+		{"§ 2.   THE STRUCTURE OF MODULES OF FINITE", "", 0, 0, false},
+		// The French printings write the locator every way but the one this
+		// used to recognise, and the scan splits the numeral as often as not.
+		{"10                MESURES SUR LES ESPACES TOPOLOGIQUES SEPARES       Ch. IX, § 1", "IX", 10, 0, true},
+		{"74                    ALGEBRE COMMUTATIVE               chap. I I , § 2", "II", 74, 0, true},
+		{"32     INTEGRATION DES MESURES            Chap. V , $ 1", "V", 32, 0, true},
+		// A verso names its chapter at the outer edge and prints its page at
+		// the inner one, so the number after the § is never the page. The scan
+		// of page 10 gives "1O", which is not a number at all, and reading the
+		// § instead is how three separate pages came to be page 1.
+		{"1O                MESURES SUR LES ESPACES TOPOLOGIQUES SEPARES       Ch. IX, § 1", "", 0, 0, false},
+		// The verso of Lie chapitres 4, 5 et 6 puts the § one space clear of the
+		// title where the page number stands twelve clear of it, and the scanner
+		// read the mark as a digit here too. The chapter is what says the trailing
+		// 6 is a section and not a page.
+		{"122                 GROUPES ENGENDRÉS PAR DES RÉFLEXIONS                   Ch. v,     6", "V", 122, 0, true},
+		// A recto of the same volume whose § 3 the scan ran together as 83. Both
+		// edges are then equally well formed and nothing on the line says which
+		// is the page, so both come back and the fit decides. It is 129.
+		{" 83                                                   EXERCICES                                   129", "", 83, 129, true},
+		{"94                                           EXERCICES                                              133", "", 94, 133, true},
+		// Prose is not a running head. Every one of these was read as a page.
+		{"Reimpression inchangee de l'edition originale de 1959", "", 0, 0, false},
+		{"(no 7). Lorsque @ est bilineaire, Q, est l'image reciproque de 5", "", 0, 0, false},
+		{"5 2. Relevement des ideaux premiers.", "", 0, 0, false},
+		// The history volume heads its index in mixed case, so what says this
+		// is a head is the gap and not the capitals.
+		{"298     Index", "", 298, 0, true},
+		{"                          Index     301", "", 301, 0, true},
 	}
 	for _, tt := range tests {
-		ch, p, ok := readHeadNumber(tt.line)
-		if ok != tt.ok || ch != tt.chapter || p != tt.page {
-			t.Errorf("readHeadNumber(%q) = %q, %d, %v; want %q, %d, %v",
-				tt.line, ch, p, ok, tt.chapter, tt.page, tt.ok)
+		ch, p, alt, ok := readHeadNumber(tt.line)
+		if ok != tt.ok || ch != tt.chapter || p != tt.page || alt != tt.alt {
+			t.Errorf("readHeadNumber(%q) = %q, %d, %d, %v; want %q, %d, %d, %v",
+				tt.line, ch, p, alt, ok, tt.chapter, tt.page, tt.alt, tt.ok)
 		}
 	}
 }
@@ -328,6 +357,99 @@ func TestBuildContinuous(t *testing.T) {
 	}
 	if e, _ := m.Lookup(1); e.Confidence != Unknown {
 		t.Errorf("front matter should not be mapped, got %+v", e)
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("validate found %d problems: %v", len(probs), probs)
+	}
+}
+
+// A French volume of the head-number grammar, with the running head naming its
+// chapter the way Integration and Lie do. The two pages between the last head
+// of chapter I and the opener of chapter II are the end of chapter I: its last
+// exercises and the blank leaf after them, neither of which carries a head.
+func frenchHeadVolume(firstOpener, secondOpener string) []string {
+	return []string{
+		head("TABLE DES MATIÈRES"),                                     // 1
+		head(firstOpener),                                              // 2, printed 1
+		head("2      MESURES SUR LES ESPACES SÉPARÉS     Ch. I, § 1"),  // 3
+		head("3      MESURES SUR LES ESPACES SÉPARÉS     Ch. I, § 1"),  // 4
+		head("la fin des exercices"),                                   // 5, printed 4
+		head("une page laissée blanche"),                               // 6, printed 5
+		head(secondOpener),                                             // 7, printed 6
+		head("7      INTÉGRATION DES MESURES             Ch. II, § 1"), // 8
+		head("8      INTÉGRATION DES MESURES             Ch. II, § 1"), // 9
+	}
+}
+
+// An opener says where a chapter begins and a head only bounds it from above,
+// so the openers are used whenever there is one for every chapter. Reading the
+// heads instead moved chapter VIII of Lie 7 to 9 back two pages, onto the last
+// exercises of chapter VII.
+func TestOpenersBeatHeadsWhenThereIsOneForEveryChapter(t *testing.T) {
+	pages := frenchHeadVolume("CHAPITRE I", "CHAPITRE II")
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"I", "II"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Grammar != HeadNumber {
+		t.Fatalf("detected %s", m.Grammar)
+	}
+	if len(m.Chapters) != 2 {
+		t.Fatalf("got %d chapters, want 2: %+v", len(m.Chapters), m.Chapters)
+	}
+	if c := m.Chapters[1]; c.Chapter != "II" || c.FirstPDF != 7 || c.FirstPage != 6 {
+		t.Errorf("chapter II = %+v, want pdf 7 printed 6", c)
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("validate found %d problems: %v", len(probs), probs)
+	}
+}
+
+// Where the scan mangled the openers the heads are all there is, and they are
+// worth having: a French head names its chapter as plainly as "INT IX.10" does.
+// Without this, Lie chapitres 7 et 8 came out as one unnamed run.
+func TestHeadsNameTheChaptersWhenNoOpenerWasRead(t *testing.T) {
+	pages := frenchHeadVolume("le début du premier chapitre", "le début du deuxième")
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"I", "II"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Chapters) != 2 {
+		t.Fatalf("got %d chapters, want 2: %+v", len(m.Chapters), m.Chapters)
+	}
+	// The head bounds the chapter from above and nothing else does, so chapter
+	// II reaches back over the pages that carry no head at all.
+	if c := m.Chapters[1]; c.Chapter != "II" || c.FirstPDF != 5 {
+		t.Errorf("chapter II = %+v, want pdf 5", c)
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("validate found %d problems: %v", len(probs), probs)
+	}
+}
+
+// A recto of Lie chapitres 4, 5 et 6 sets the § one space clear of the title
+// and the page number twelve clear of it, and the scan of "§ 3" came out as
+// "83". Both edges then read as page numbers and nothing on the line says
+// which, so the fit picks the one that keeps the offset and the head counts as
+// read rather than as a page in conflict with itself.
+func TestTheOtherNumberOnTheLineSettlesAMangledHead(t *testing.T) {
+	pages := []string{
+		head("CHAPTER I"),
+		head("2                        EXERCICES"),
+		head("3                        EXERCICES"),
+		head("83                   EXERCICES                    4"),
+		head("5                        EXERCICES"),
+	}
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"I"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := m.Lookup(4)
+	if !ok || e.Page != 4 || e.Confidence != FromHead {
+		t.Errorf("pdf 4 = %+v, want printed 4 read off the head", e)
+	}
+	if len(m.Conflicts) != 0 {
+		t.Errorf("conflicts = %+v, want none", m.Conflicts)
 	}
 	if probs := m.Validate(); len(probs) != 0 {
 		t.Errorf("validate found %d problems: %v", len(probs), probs)
