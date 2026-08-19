@@ -65,6 +65,36 @@ func TestSaveWritesTheGapReport(t *testing.T) {
 	}
 }
 
+// The gap report is the published audit of a map, and the Book prefix is part
+// of what the map says: a volume that prints A.IV.7 has a page number of IV.7
+// in Book A, and a report that gives the number without the Book leaves the
+// reader to guess which volume of Algebra it came from. The TSV header has
+// carried it all along and the report quietly dropped it.
+func TestTheGapReportCarriesTheBookPrefix(t *testing.T) {
+	root := t.TempDir()
+	m, err := Build(perChapterVolume(), Options{Book: "mini", Chapters: []string{"IV"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Prefix != "A" {
+		t.Fatalf("the fit read the prefix as %q, want A", m.Prefix)
+	}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(GapsPath(root, "mini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r Report
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	if r.Prefix != "A" {
+		t.Errorf("the report says the prefix is %q, want A", r.Prefix)
+	}
+}
+
 func TestSaveWritesAGeneratedHeader(t *testing.T) {
 	root := t.TempDir()
 	m, err := Build(perChapterVolume(), Options{Book: "mini", Chapters: []string{"IV"}})
