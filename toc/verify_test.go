@@ -50,6 +50,51 @@ func TestExercisesOn(t *testing.T) {
 	}
 }
 
+// The pages either side of a miss, which is a harder question than the page
+// the contents named. Every line here is what the scan of the 1998 Lie volume
+// and the 2003 Topology volume actually hand back.
+func TestExercisesStart(t *testing.T) {
+	pages := []string{
+		// 1: the head names § 1, which is the only shape that says anything.
+		"~ 1.                                  EXERCISES\n\n10) Let o h<' th<' highest root\n",
+		// 2: the head lost its § to the scan, and a footnote opens with a 2.
+		"                    EXERCISES                    23!)\n\n<') Let p be a pri111P\n\n" +
+			"2   This exercise, hitherto unpuhlislwcl. was com1111111icated to us\n",
+		// 3: a verso in the middle of a run heads the chapter, not the run.
+		"240                               HOOT SYSTEi\\IS                           Ch. VI\n\n(iii) (p, -y*) = 1.\n",
+		// 4: the head names § 3.
+		"s3.                                      EXERCISES                                      241\n\np - n E X.\n",
+		// 5: the 2003 Topology volume heads the word alone, naming no §.
+		"                                   EXER.CISES\n\n5) Show that the set is closed.\n",
+	}
+	tests := []struct {
+		page, section int
+		head, ok      bool
+	}{
+		// The head of page 1 names § 1 and page 1 comes before the miss.
+		{1, 1, true, true},
+		// The same head, read from a page after the miss, says nothing: that is
+		// what the second page of a correctly placed run looks like.
+		{1, 1, false, false},
+		// A footnote opening with a 2 is not a head naming § 2.
+		{2, 2, true, false},
+		// A verso heads the chapter, and a head naming no § is no evidence.
+		{3, 2, true, false},
+		{5, 4, true, false},
+		// A head that names a different § is not this run.
+		{4, 2, true, false},
+		{4, 3, true, true},
+		{9, 1, true, false},
+	}
+	for _, tt := range tests {
+		got := exercisesStart(pages, tt.page, tt.section, false, tt.head)
+		if got != tt.ok {
+			t.Errorf("exercisesStart(page %d, § %d, head %v) = %v, want %v",
+				tt.page, tt.section, tt.head, got, tt.ok)
+		}
+	}
+}
+
 func TestVerify(t *testing.T) {
 	pages := []string{
 		"CHAPTER VIII\n\nSEMISIMPLE MODULES AND RINGS\n",
