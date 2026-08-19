@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -19,7 +20,7 @@ import (
 // the § before it and the § after it, with its exercises numbered the way they
 // are printed.
 //
-// All nine are scoped to what has been extracted. A chapter with no content
+// All of them are scoped to what has been extracted. A chapter with no content
 // file is not a failure of these rules, it is work not yet done, and reporting
 // sixty-two absent sections of chapters that nobody has read yet would bury the
 // one section that really did go missing. What has been built and what has not
@@ -49,6 +50,8 @@ func init() {
 			Run:   s09, Need: needAssembly},
 		Check{ID: "S10", Group: Structure, Hard: true,
 			Title: "no footnote carries the mark the printing gave it", Run: s10},
+		Check{ID: "S11", Group: Structure, Hard: true,
+			Title: "the printings of a § hold the same exercises", Run: s11},
 	)
 }
 
@@ -754,4 +757,129 @@ func s10(c *Corpus) ([]Finding, error) {
 		report(d.Path, d.BodyLine, d.Body)
 	}
 	return out, nil
+}
+
+// S11. The printings of a § hold the same exercises.
+//
+// S07 asks whether the numbers of one printing run from 1 without a gap, which
+// catches an exercise dropped out of the middle. It cannot catch one dropped off
+// the end, because 1 to 19 is what 1 to 19 looks like whether the book stops
+// there or not. The other printing is what says so: chapter VIII § 2 is
+// nineteen exercises in the French and twenty in the English, and the twentieth
+// is either an exercise the later printing added or the last page of the French
+// § going unread, and those two want telling apart.
+//
+// A printing here is a volume, not a tree. content/en-mt is English a model
+// wrote out of the French, so it holds the French printing's exercises and
+// comparing it against content/fr would only ask whether the translator dropped
+// a file. SourceLangs is the languages the library is printed in and is what
+// scopes this.
+//
+// The scope is a § both printings have extracted. A § with exercises in one
+// volume and none at all in the other is work not yet done, and the whole of
+// Théories spectrales would otherwise read as a French book the English is
+// missing, which it is, and which bourbaki report coverage is for.
+//
+// What is left after that is a real disagreement between two books, and it is
+// answered by reading the pages. When the reading says both printings are right
+// it goes in manifests/editions.yaml and stops being reported, and when it says
+// a page went unread the page gets read.
+func s11(c *Corpus) ([]Finding, error) {
+	printings := c.SourceLangs()
+	// The exercise numbers of each §, by printing, and where the files of that §
+	// and printing are, for a finding to point at.
+	have := map[string]map[string]map[int]bool{}
+	where := map[string]map[string]string{}
+	note := func(d Doc) {
+		key := fmt.Sprintf("%s/%s/%s", d.Exercise.Book, d.Exercise.Chapter,
+			corpus.ExerciseDir(d.Exercise.Section, d.Exercise.Appendix))
+		if have[key] == nil {
+			have[key] = map[string]map[int]bool{}
+			where[key] = map[string]string{}
+		}
+		if have[key][d.Lang] == nil {
+			have[key][d.Lang] = map[int]bool{}
+		}
+		have[key][d.Lang][d.Exercise.Exercise] = true
+		where[key][d.Lang] = filepath.ToSlash(filepath.Dir(d.Path))
+	}
+	// Sources are the printings this run was not asked to audit, and they are
+	// read for exactly this: bourbaki audit -lang fr still has to be able to see
+	// the English to know what the French is missing.
+	for _, d := range append(append([]Doc(nil), c.Docs...), c.Sources...) {
+		if d.Kind == KindExercise && d.Exercise != nil && printings[d.Lang] {
+			note(d)
+		}
+	}
+	var out []Finding
+	for _, key := range sortedStrings(have) {
+		langs := sortedStrings(have[key])
+		if len(langs) < 2 {
+			continue
+		}
+		for _, l := range langs {
+			for _, n := range missingFrom(have[key], l) {
+				want := c.Editions.Printings(fmt.Sprintf("%s/%d", key, n))
+				if sameSet(want, printingsWith(have[key], n)) {
+					continue
+				}
+				out = append(out, Finding{File: where[key][l],
+					Msg: fmt.Sprintf("exercise %d is in %s and not here, and editions.yaml does not say the printings differ",
+						n, strings.Join(printingNames(have[key], n), " and "))})
+			}
+		}
+	}
+	return out, nil
+}
+
+// missingFrom are the exercise numbers some printing of a § has and lang does
+// not, in order.
+func missingFrom(byLang map[string]map[int]bool, lang string) []int {
+	var out []int
+	for _, l := range sortedStrings(byLang) {
+		if l == lang {
+			continue
+		}
+		for n := range byLang[l] {
+			if !byLang[lang][n] && !slices.Contains(out, n) {
+				out = append(out, n)
+			}
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// printingsWith are the printings of a § that have exercise n.
+func printingsWith(byLang map[string]map[int]bool, n int) map[string]bool {
+	out := map[string]bool{}
+	for l, ns := range byLang {
+		if ns[n] {
+			out[l] = true
+		}
+	}
+	return out
+}
+
+func printingNames(byLang map[string]map[int]bool, n int) []string {
+	var out []string
+	for l := range printingsWith(byLang, n) {
+		out = append(out, l)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// sameSet is whether the manifest accounts for what the corpus has. A nil want
+// is a manifest that says nothing, which no set of printings matches.
+func sameSet(want, have map[string]bool) bool {
+	if want == nil || len(want) != len(have) {
+		return false
+	}
+	for l := range have {
+		if !want[l] {
+			return false
+		}
+	}
+	return true
 }

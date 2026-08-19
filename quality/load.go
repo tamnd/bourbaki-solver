@@ -91,6 +91,7 @@ type Corpus struct {
 	TOC       *corpus.TOCManifest
 	Sections  *corpus.SectionsManifest
 	Exercises *corpus.ExercisesManifest
+	Editions  *corpus.EditionsManifest
 
 	Tags  *tags.Set
 	Items map[string][]tags.Item // per language, in the order tags are handed out
@@ -157,6 +158,9 @@ func Load(opt Options) (*Corpus, error) {
 		return nil, err
 	}
 	if c.Exercises, err = corpus.LoadExercises(c.Root); err != nil {
+		return nil, err
+	}
+	if c.Editions, err = corpus.LoadEditions(c.Root); err != nil {
 		return nil, err
 	}
 	if c.Tags, err = tags.Load(c.Root); err != nil {
