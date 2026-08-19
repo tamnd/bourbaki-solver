@@ -52,6 +52,12 @@ type scorecard struct {
 		Total    int `json:"total"`
 		Verified int `json:"verified"`
 	} `json:"parts"`
+	// HandRead is how many solutions a person has read against their exercise,
+	// and Disputed is how many of those readings found something the status does
+	// not say. Believed counts what the judges decided; these two are the only
+	// numbers on this card that somebody checked.
+	HandRead    int            `json:"hand_read"`
+	Disputed    int            `json:"disputed"`
 	Corrections map[int]int    `json:"corrections"`
 	Models      map[string]int `json:"models"`
 	Sections    []sectionScore `json:"sections,omitempty"`
@@ -137,6 +143,12 @@ func score(exercises []string, held map[string]solve.Solution, lang string) scor
 			card.Believed++
 		}
 		if have {
+			if sol.Meta.HandRead != "" {
+				card.HandRead++
+				if len(sol.Meta.Found) > 0 {
+					card.Disputed++
+				}
+			}
 			card.Corrections[sol.Meta.Corrections]++
 			for _, model := range strings.Split(sol.Meta.Model, ", ") {
 				if model = strings.TrimSpace(model); model != "" {
@@ -185,6 +197,15 @@ func printScorecard(card scorecard, sections bool) {
 	if card.Parts.Total > 0 {
 		fmt.Printf("parts        %5d  %5.1f %% of them verified\n",
 			card.Parts.Total, percent(card.Parts.Verified, card.Parts.Total))
+	}
+	// Under believed, because that is what it qualifies. Believed is the judges
+	// on their own work; this is how much of it anybody has checked, and how
+	// much of what was checked came back disagreeing.
+	fmt.Printf("hand read    %5d  %5.1f %% of what is answered\n",
+		card.HandRead, percent(card.HandRead, card.Answered))
+	if card.HandRead > 0 {
+		fmt.Printf("  disputed   %5d  %5.1f %% of the readings found something the "+
+			"status does not say\n", card.Disputed, percent(card.Disputed, card.HandRead))
 	}
 
 	if len(card.Corrections) > 0 {

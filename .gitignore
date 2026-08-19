@@ -8,6 +8,10 @@ dist/
 coverage.out
 *.test
 
+# The rendered site. It is bourbaki site build run over the corpus, so every
+# byte of it can be made again from Markdown that is already committed.
+site/
+
 # Local config, route files, credentials
 routes.json
 config.toml
