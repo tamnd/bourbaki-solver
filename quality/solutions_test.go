@@ -212,3 +212,52 @@ func TestX05IsSilentOnOrdinaryProse(t *testing.T) {
 		t.Errorf("ordinary prose was reported: %v", got)
 	}
 }
+
+func TestX06FindsASolutionWrittenOnTheFreeGateway(t *testing.T) {
+	d := solution(corpus.SolutionFrontMatter{Label: "alg-viii-s1-ex-1",
+		Status: corpus.StatusVerified, TruthJudge: "pass", AuditJudge: "pass",
+		Model: "nemotron-3-ultra-free"}, proof)
+	got := run(t, x06, d)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, "nemotron-3-ultra-free") {
+		t.Errorf("the finding does not name the model: %s", got[0].Msg)
+	}
+	if !strings.Contains(got[0].Msg, "no printed page behind it") {
+		t.Errorf("the finding does not say why a solution is the worse case: %s", got[0].Msg)
+	}
+}
+
+// A judge verdict of pass does not excuse the route. solve eval has not been
+// run against the benchmark yet, so what a pass is worth is unmeasured, and a
+// rule that let a self-declared pass silence it would be reporting the
+// pipeline's opinion of itself.
+func TestX06IsNotSilencedByAPassingJudge(t *testing.T) {
+	d := solution(corpus.SolutionFrontMatter{Label: "alg-viii-s1-ex-1",
+		Status: corpus.StatusVerified, TruthJudge: "pass", AuditJudge: "pass",
+		Model: "laguna-s-2.1-free"}, proof)
+	if got := run(t, x06, d); len(got) != 1 {
+		t.Fatalf("a passing judge should not silence the route: %v", got)
+	}
+}
+
+// One gateway answer anywhere in the file is a file worth asking for again,
+// which is how L15 reads a translation written on two routes.
+func TestX06FindsTheGatewayAmongSeveralModels(t *testing.T) {
+	d := solution(corpus.SolutionFrontMatter{Label: "alg-viii-s1-ex-1",
+		Status: corpus.StatusVerified, TruthJudge: "pass", AuditJudge: "pass",
+		Model: "gpt-5-6-mini, hy3-free"}, proof)
+	if got := run(t, x06, d); len(got) != 1 {
+		t.Fatalf("want the gateway found among the models, got %v", got)
+	}
+}
+
+func TestX06IsSilentOnASubscriptionModel(t *testing.T) {
+	d := solution(corpus.SolutionFrontMatter{Label: "alg-viii-s1-ex-1",
+		Status: corpus.StatusVerified, TruthJudge: "pass", AuditJudge: "pass",
+		Model: "gpt-5-6-mini, gpt-5-6"}, proof)
+	if got := run(t, x06, d); len(got) != 0 {
+		t.Errorf("a subscription model was reported: %v", got)
+	}
+}

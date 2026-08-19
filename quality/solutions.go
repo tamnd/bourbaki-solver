@@ -32,6 +32,8 @@ func init() {
 			Title: "no provider leakage and no meta-commentary", Run: x04, Need: needSolutions},
 		Check{ID: "X05", Group: Solutions, Hard: false,
 			Title: "a solution writes its mathematics in TeX", Run: x05, Need: needSolutions},
+		Check{ID: "X06", Group: Solutions, Hard: false,
+			Title: "no solution was written on the free gateway", Run: x06, Need: needSolutions},
 	)
 }
 
@@ -332,6 +334,49 @@ func x05(c *Corpus) ([]Finding, error) {
 		out = append(out, Finding{File: d.Path, Line: d.BodyLine(first),
 			Msg: fmt.Sprintf("%d characters of mathematics stand outside any math span, as %s, "+
 				"so the solution was written in symbols rather than in TeX", count, string(glyphs))})
+	}
+	return out, nil
+}
+
+// X06. No solution was written on the free gateway.
+//
+// L15 asks this of a translation and nothing asked it of a solution, which is
+// the larger hole of the two: 39 of the 44 solutions in the corpus were written
+// on the gateway, and the audit said nothing about any of them.
+//
+// The reason it matters is stronger here than for a translation. A translation
+// has an English source sitting beside it that a reader can check a sentence
+// against, and a wrong rendering is usually visible as bad Vietnamese. A
+// solution has nothing beside it. It is the only text in the corpus that is not
+// a reading of a printed page, so there is no original to hold it to, and a
+// wrong proof written fluently reads exactly like a right one. The judges are
+// the only thing standing between a wrong answer and a reader who trusts it,
+// and solve eval, which is what says what a judge verdict is worth, has not
+// been run against the benchmark yet.
+//
+// So a gateway solution is a claim with no page behind it, checked by judges of
+// unmeasured accuracy, from the route the pipeline falls back to when the good
+// ones are out of allowance. Three of them are already flagged by X05 for
+// writing their mathematics in Unicode instead of TeX, and all three failed
+// both judges and were hand read as unintelligible. That is what the class
+// looks like.
+//
+// Soft, for L15's reason. The answer may well be right and the corpus should
+// not go red because the good routes had no allowance on the day. What it
+// should do is name them, so a later pass with allowance asks for these first
+// rather than finding them by reading.
+func x06(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		if d.Kind != KindSolution || d.Solution == nil {
+			continue
+		}
+		if !FreeGatewayModel(d.Solution.Model) {
+			continue
+		}
+		out = append(out, Finding{File: d.Path, Line: 1, Msg: fmt.Sprintf(
+			"was written by %s, which is a free gateway model, and a solution has no printed page behind it, so it is worth asking for again",
+			d.Solution.Model)})
 	}
 	return out, nil
 }
