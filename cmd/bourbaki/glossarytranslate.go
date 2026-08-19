@@ -308,7 +308,9 @@ func askOneBatch(ctx context.Context, root string, host ocr.Host, batch glossary
 	question := batch.Prompt()
 	call := ocr.NewAsk(host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
 		question, batchID(batch.Lang, index, question), keep)
-	answer, err := call.Do(ctx)
+	answer, err := ocr.Recorded{Asker: call, Stage: "glossary " + batch.Lang, Host: host.Name,
+		Target: fmt.Sprintf("batch %d, %d terms", index, len(batch.Terms)),
+		Chars:  len(question), Note: noteAsks(root, nil)}.Do(ctx)
 	if err != nil {
 		return nil, err
 	}

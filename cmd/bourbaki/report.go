@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -17,24 +18,33 @@ import (
 
 const reportUsage = `usage: bourbaki report usage [flags]
 
-Reads reports/ocr-usage.jsonl, which every OCR run appends to and nothing ever
-replaces, and says what the fleet did: batches, pages sent, pages that came
-back, wall clock, and the cost of a page that worked.
+Reads the two run logs, which every run appends to and nothing ever replaces,
+and says what the fleet did.
 
-The second table is why batches lost pages, counted once per batch. It is read
-out of the remote log, so it names the failures the site does not report as
-errors: an account with no image uploads left, a slot that is signed out, a
-pool that paused itself against an address block.
+reports/ocr-usage.jsonl is the pages: batches, pages sent, pages that came back,
+wall clock, and the cost of a page that worked. The table under it is why
+batches lost pages, counted once per batch. It is read out of the remote log, so
+it names the failures the site does not report as errors: an account with no
+image uploads left, a slot that is signed out, a pool that paused itself against
+an address block.
+
+reports/ask-usage.jsonl is everything else that asks: translating a §, solving
+an exercise, putting the glossary to a model. The unit there is one question,
+because that is what those stages have, and the failures are counted with the
+answers. A question that was refused leaves nothing in the archive, so this is
+the only place a run that asked four hundred and got three hundred can be told
+from a run that asked three hundred.
 
 flags:
-  -book NAME     only this book
+  -book NAME     only this book, for the pages
+  -stage NAME    only this stage, for the questions, as translate or translate vi
   -since DUR     only the last 24h, 7d and so on
   -json          print the summary as JSON
 `
 
 const reportHelp = `usage: bourbaki report <what>
 
-  usage        what the fleet did: pages, wall clock, and why batches failed
+  usage        what the fleet did: pages, questions, wall clock, and what failed
   coverage     what the corpus holds against what the table of contents says
   printings    where the two printings of a chapter disagree
   translation  what each language holds, what is stale, and which terms it misses
@@ -338,6 +348,7 @@ func reportUsageCmd(args []string) error {
 	fs := flag.NewFlagSet("report usage", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, reportUsage) }
 	book := fs.String("book", "", "only this book")
+	stage := fs.String("stage", "", "only this stage")
 	since := fs.Duration("since", 0, "only batches this recent")
 	asJSON := fs.Bool("json", false, "print the summary as JSON")
 	if _, err := parseFlags(fs, args); err != nil {
@@ -348,6 +359,11 @@ func reportUsageCmd(args []string) error {
 	if err != nil {
 		return err
 	}
+	var from time.Time
+	if *since > 0 {
+		from = time.Now().Add(-*since)
+	}
+
 	path := filepath.Join(root, "reports", "ocr-usage.jsonl")
 	file, err := os.Open(path)
 	if err != nil {
@@ -362,15 +378,18 @@ func reportUsageCmd(args []string) error {
 	if bad > 0 {
 		fmt.Fprintf(os.Stderr, "%d line(s) in %s did not parse and were skipped\n", bad, path)
 	}
-
-	var from time.Time
-	if *since > 0 {
-		from = time.Now().Add(-*since)
-	}
 	summary := report.Summarise(lines, *book, from)
 
+	asked, err := readAsks(root, *stage, from)
+	if err != nil {
+		return err
+	}
+
 	if *asJSON {
-		raw, err := json.MarshalIndent(summary, "", "  ")
+		raw, err := json.MarshalIndent(struct {
+			Pages     report.Summary `json:"pages"`
+			Questions report.Asked   `json:"questions"`
+		}{summary, asked}, "", "  ")
 		if err != nil {
 			return err
 		}
@@ -378,5 +397,34 @@ func reportUsageCmd(args []string) error {
 		return nil
 	}
 	fmt.Print(summary.Table())
+	// The ask log arrived after the OCR one and a corpus that predates it has
+	// none. That is a corpus with nothing to say here, not an error.
+	if asked.Total.Asks > 0 {
+		fmt.Println()
+		fmt.Print(asked.Table())
+	}
 	return nil
+}
+
+// readAsks reads reports/ask-usage.jsonl, and treats a missing file as an empty
+// one.
+func readAsks(root, stage string, from time.Time) (report.Asked, error) {
+	path := filepath.Join(root, "reports", "ask-usage.jsonl")
+	file, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return report.Asked{}, nil
+	}
+	if err != nil {
+		return report.Asked{}, err
+	}
+	defer file.Close()
+
+	asks, bad, err := report.ReadAsks(file)
+	if err != nil {
+		return report.Asked{}, err
+	}
+	if bad > 0 {
+		fmt.Fprintf(os.Stderr, "%d line(s) in %s did not parse and were skipped\n", bad, path)
+	}
+	return report.SummariseAsks(asks, stage, from), nil
 }

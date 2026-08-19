@@ -245,7 +245,7 @@ func reviewOne(ctx context.Context, c *solve.Corpus, store solve.Store, root str
 	}
 	started := time.Now()
 	engine := solve.Engine{
-		Ask:     fleetAsker{host: host, keep: f.keep},
+		Ask:     fleetAsker{host: host, keep: f.keep, note: noteAsks(root, logf)},
 		Limit:   f.ask,
 		Archive: solveArchive(root, "review", f.lang, label),
 		Logf:    logf,

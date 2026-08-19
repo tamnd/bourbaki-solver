@@ -339,7 +339,7 @@ func solveOne(ctx context.Context, c *solve.Corpus, store solve.Store, root stri
 	}
 	started := time.Now()
 	engine := solve.Engine{
-		Ask:         fleetAsker{host: host, keep: f.keep},
+		Ask:         fleetAsker{host: host, keep: f.keep, note: noteAsks(root, logf)},
 		Candidates:  f.candidates,
 		Corrections: f.fixes,
 		Limit:       f.ask,
@@ -379,11 +379,16 @@ func solveOne(ctx context.Context, c *solve.Corpus, store solve.Store, root stri
 type fleetAsker struct {
 	host ocr.Host
 	keep bool
+	// note records the question in reports/ask-usage.jsonl. Nil is a run that
+	// keeps no record, which is what the tests are.
+	note func(ocr.Note)
 }
 
 func (a fleetAsker) Ask(ctx context.Context, id, question string) (solve.Answer, error) {
-	answer, err := ocr.NewAsk(a.host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
-		question, "solve-"+strings.ReplaceAll(id, "/", "_"), a.keep).Do(ctx)
+	call := ocr.NewAsk(a.host, fleet.SSH{Timeout: 2 * time.Minute}, ocr.Rsync{Timeout: 5 * time.Minute},
+		question, "solve-"+strings.ReplaceAll(id, "/", "_"), a.keep)
+	answer, err := ocr.Recorded{Asker: call, Stage: "solve", Host: a.host.Name,
+		Target: id, Chars: len(question), Note: a.note}.Do(ctx)
 	if err != nil {
 		return solve.Answer{}, err
 	}
