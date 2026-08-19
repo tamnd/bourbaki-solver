@@ -442,8 +442,10 @@ func m06(c *Corpus) ([]Finding, error) {
 // section 2 on a chunk of seventy-two characters. What the shapes have in common
 // is not where the bracket sits, it is that the prose of the line is holding a
 // bracket open where the span starts, and that is what mathtex now tests. On the
-// pages as they stand it is 3161 spans in 1201 of 3398 pages, and fix parens
-// repairs them without reading a printed page, because nothing but a delimiter
+// pages as they stand it is 3234 spans in 1217 of 3398 pages, and another 788
+// files under content/, which no page repair reaches: a translation was written
+// by a model copying mathematics that already had the fault. fix parens repairs
+// all of them without reading a printed page, because nothing but a delimiter
 // moves and the body with the delimiters taken out has to come back unchanged.
 //
 // Three are left over from the narrow rule and they are all in one exercise,

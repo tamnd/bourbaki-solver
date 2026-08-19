@@ -132,6 +132,14 @@ moves delimiters and never a character of prose or of mathematics.
 
 Run bourbaki assemble afterwards, or the section files still hold the old text.
 
+It runs over content/ as well as pages/. A translation has no page under it and
+holds the fault all the same, having been written by a model copying the
+mathematics of a source that had it, and the fleet answers too few sections an
+hour for re-asking one over a bracket to be a trade worth making. A translation
+is repaired the same way, and its source_content_sha256 is moved on only when it
+recorded the source body as it stood before this repair. One that was already
+stale stays stale, so L05 still means what it says.
+
 flags:
   -book ID   only this volume, default every volume that has pages
   -check     say what would change and change nothing
@@ -461,11 +469,127 @@ func fixParens(args []string) error {
 	if *check {
 		verb = "would repair"
 	}
+	files, content, followed, err := parensContent(root, *check)
+	if err != nil {
+		return err
+	}
+
 	fmt.Printf("fix parens: %d pages read, %s %d spans in %d of them\n", pages, verb, spans, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix parens: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
 	if changed > 0 && !*check {
 		fmt.Println("fix parens: run bourbaki fix math, then bourbaki assemble")
 	}
 	return nil
+}
+
+// parensContent repairs the same fault in content/, which the pages pass cannot
+// reach on its own.
+//
+// English and French are assembled from their pages, so repairing a page and
+// assembling again carries the repair into the section. A translation has no
+// page under it. It was written by a model copying the mathematics of a source
+// that held the fault, so it holds the fault too, and the only way to it is to
+// edit the file. Waiting for the section to be asked for again would work and it
+// is not free: the fleet answers a few sections an hour on a good day, and there
+// are seven hundred sections with no translation at all waiting behind them.
+//
+// This is fix footnote's arrangement and it is here for fix footnote's reason. A
+// translation whose source is repaired goes stale by its hash, and re-asking it
+// over a bracket that moved by a rule neither side had a choice about is not a
+// trade anybody should make. So a source is walked first, its body hashed before
+// and after, and a translation that recorded the first is moved on to the second.
+// Only that translation: one that was already stale stays stale, so L05 still
+// means what it says.
+//
+// A source here is a file that was not translated from anything, which is the
+// English and the French alike, and it is not a test on the language. content/en-mt
+// is English and it is a translation of the French, and moving it on with the
+// French it was made from is the whole point of having the rule at all.
+func parensContent(root string, check bool) (files, changed, followed int, err error) {
+	// The source body each translation was made from, before and after, keyed by
+	// the corpus-relative path the translation names.
+	moved := map[string][2]string{}
+	record := func(path, before, after string) {
+		moved[filepath.ToSlash(rel(root, path))] = [2]string{
+			corpus.ContentSHA256(before), corpus.ContentSHA256(after)}
+	}
+	follow := func(from, recorded string) (string, bool) {
+		pair, ok := moved[from]
+		if !ok || pair[0] != recorded || pair[0] == pair[1] {
+			return recorded, false
+		}
+		return pair[1], true
+	}
+
+	var sources bool
+	section := func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
+		if (f.Meta.TranslatedFrom == "") != sources {
+			return nil
+		}
+		files++
+		body, n := mathtex.Unstraddle(f.Body)
+		if sources {
+			record(path, f.Body, body)
+		} else if now, ok := follow(f.Meta.TranslatedFrom, f.Meta.SourceSHA256); ok {
+			followed++
+			if !check {
+				f.Meta.SourceSHA256 = now
+			}
+			n++
+		}
+		if n == 0 {
+			return nil
+		}
+		changed++
+		if check {
+			fmt.Printf("%s  %d spans\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path) // Write hashes the body again, so the seal follows
+	}
+	exercise := func(path string, f *corpus.File[corpus.ExerciseFrontMatter]) error {
+		if (f.Meta.TranslatedFrom == "") != sources {
+			return nil
+		}
+		files++
+		body, n := mathtex.Unstraddle(f.Body)
+		if sources {
+			record(path, f.Body, body)
+		} else if now, ok := follow(f.Meta.TranslatedFrom, f.Meta.SourceSHA256); ok {
+			followed++
+			if !check {
+				f.Meta.SourceSHA256 = now
+			}
+			n++
+		}
+		if n == 0 {
+			return nil
+		}
+		changed++
+		if check {
+			fmt.Printf("%s  %d spans\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	}
+	// The sources first and on their own, because a translation cannot be moved
+	// on until the body it was made from has been repaired and hashed twice.
+	for _, sources = range []bool{true, false} {
+		if err := eachSection(root, "", section); err != nil {
+			return files, changed, followed, err
+		}
+		if err := eachExercise(root, "", exercise); err != nil {
+			return files, changed, followed, err
+		}
+	}
+	return files, changed, followed, nil
 }
 
 func fixFolio(args []string) error {
