@@ -944,9 +944,11 @@ var noteRE = regexp.MustCompile(`^\[\^([0-9a-zA-Z]+)\]:\s`)
 // Three things are put back here that a page cannot put back on its own. A
 // paragraph broken by the end of a page is joined up, on the word of the page
 // that follows: see the continues field, which extraction fills in from the
-// indent of the first line. A word broken across the break is joined with it. A
-// footnote is renumbered, because the book numbers them from one on each page
-// and § 2 of chapter VIII has two notes both called 1, on pages 48 and 53.
+// indent of the first line, and mends, which reads the text either side of the
+// break where the indent did not carry. A word broken across the break is
+// joined with it. A footnote is renumbered, because the book numbers them from
+// one on each page and § 2 of chapter VIII has two notes both called 1, on
+// pages 48 and 53.
 //
 // The definitions come back as a slice rather than as text at the foot of the
 // piece, because the piece is not one file: the exercises are split off into
@@ -967,7 +969,8 @@ func join(parts []part, pr printing) ([]block, []note) {
 		if len(bs) == 0 {
 			continue
 		}
-		if p.continues && len(blocks) > 0 && joinable(blocks[len(blocks)-1].text, bs[0], pr) {
+		if len(blocks) > 0 && (p.continues || mends(blocks[len(blocks)-1].text, bs[0])) &&
+			joinable(blocks[len(blocks)-1].text, bs[0], pr) {
 			blocks[len(blocks)-1].text = glue(blocks[len(blocks)-1].text, bs[0])
 			blocks[len(blocks)-1].last = p.page
 			bs = bs[1:]
@@ -1158,6 +1161,85 @@ func joinable(prev, next string, pr printing) bool {
 	}
 	return true
 }
+
+// mends says whether the text either side of a page break is one sentence cut
+// in half, for a break the indent said was a paragraph boundary.
+//
+// The indent is the only thing extraction has to go on and it is not always
+// there to be read. A page whose first line is a display, or is set flush left
+// because the line before it ended full, or whose first line the reader took a
+// running head off, comes out continues: false with a sentence running straight
+// through it. Measured over the seven assembled books there are 2957 page
+// junctions and 104 of them are of this kind, which is 3.5 %, and the text says
+// what the indent did not.
+//
+// Two things have to hold at once and neither is enough alone. The page before
+// has to end on no full stop, which for prose set by Bourbaki is already
+// unusual: a paragraph ends on one. And the page after has to open on nothing
+// that starts something of its own, which rules out the lettered parts of an
+// exercise, a dash opening a list, a line of capitals such as TABLE 2, and any
+// word beginning with a capital.
+//
+// The capital is the part that costs something and it is kept anyway. Eight of
+// the fifteen junctions it turns down are sentences broken at a word set as
+// mathematics, "be the relations of the form" carrying on into "$S_{i_1}$", and
+// leaving them broken is a real loss. The other seven are the tail of the
+// Springer imprint, a row of a table read out of order, and a citation whose
+// full stop is inside the emphasis: joining any of those runs two unrelated
+// things together in the middle of a paragraph, where nothing downstream can
+// see it and no rule can catch it. A junction left broken is visible to a
+// reader and repairable later; a junction wrongly joined is not.
+//
+// What is left after this is 19 junctions of the 2957, which is 0.6 %.
+func mends(prev, next string) bool { return unstopped(prev) && !opener(next) }
+
+// unstopped says the text ends on no full stop.
+//
+// Emphasis and the closing halves of brackets and quotes are taken off first,
+// since the stop of "*uniquely determined by this condition.*" is inside the
+// emphasis and the stop of "(VIII, p. 267, exerc. 11)" is inside the brackets.
+// A display is stopped whatever it ends on, because a display is a paragraph.
+func unstopped(s string) bool {
+	s = strings.TrimRight(s, ` *_)]}"'”’`)
+	if s == "" || strings.HasSuffix(s, "$$") {
+		return false
+	}
+	r := []rune(s)
+	return !strings.ContainsRune(".?!:;", r[len(r)-1])
+}
+
+// opener says the text begins something of its own rather than carrying a
+// sentence on.
+//
+// joinable already turns down a heading, a statement, a numbered exercise, a
+// display and a footnote. What is left to this are the three shapes that open
+// something without being any of those: the lettered part of an exercise, a) or
+// b), which the volumes set the same way they set the numbers; a dash opening
+// an item of a list; and a line of capitals, which in these volumes is the head
+// of a table.
+//
+// A capital letter is the fourth, and is only read this way where the indent
+// has already said the paragraph is new. Inside a paragraph a capital after a
+// full stop is the next sentence and says nothing at all.
+func opener(s string) bool {
+	if lettered.MatchString(s) || capitals.MatchString(s) {
+		return true
+	}
+	for _, r := range s {
+		if unicode.IsLetter(r) {
+			return unicode.IsUpper(r)
+		}
+	}
+	return false
+}
+
+// lettered is the a) of an exercise, the (i) of a case, or the dash of a list,
+// at the head of the text, emphasis and all.
+var lettered = regexp.MustCompile(`^(\*{0,2}[a-z]\)|\(\s*[ivx]+\s*\)|[-–—•]\s)`)
+
+// capitals is a line opening on a run of them, which is how these volumes head
+// a table.
+var capitals = regexp.MustCompile(`^[A-Z][A-Z ]{3,}`)
 
 // glue joins two halves of a paragraph.
 //
