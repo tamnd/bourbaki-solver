@@ -48,6 +48,16 @@ type Book struct {
 	// and records what it found rather than asking anyone to remember.
 	Grammar    string `yaml:"grammar,omitempty"`
 	Pagination string `yaml:"pagination,omitempty"`
+	// FirstPage is the printed page the PDF's first page carries, for a scan
+	// that does not begin at the beginning of the volume, and is empty for one
+	// that does. Fonctions d'une variable reelle in French opens on the half
+	// title with FVR I.3 on it: the two leaves before it were never scanned.
+	// A per-chapter volume numbers each chapter from 1 and a chapter that does
+	// not is normally a fit that has slipped, so the page map refuses one, and
+	// this is how a volume says which of the two it is. It is written by hand
+	// after reading the printing, not detected, because a missing leaf and a
+	// wrong offset look the same in the file.
+	FirstPage int `yaml:"first_page,omitempty"`
 	// Introduction is the Book's own introduction, where it has one, and is
 	// empty where it has not.
 	Introduction *Introduction `yaml:"introduction,omitempty"`

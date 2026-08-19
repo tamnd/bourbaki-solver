@@ -181,7 +181,10 @@ type Map struct {
 	// Prefix is the Book prefix this volume prints in its page labels, "A" in
 	// Algebra and "INT" in Integration, read off the volume and empty for the
 	// grammars that print no label at all.
-	Prefix    string
+	Prefix string
+	// FirstPage is the printed page the file opens on, where the scan does not
+	// start at the beginning of the volume. See Options.FirstPage.
+	FirstPage int
 	PDFPages  int
 	Entries   []Entry // one per PDF page, Entries[i].PDFPage == i+1
 	Chapters  []Span
@@ -200,6 +203,18 @@ type Options struct {
 	// before the fitter believes the printing stepped rather than the OCR
 	// slipped. Zero means DefaultMinRun.
 	MinRun int
+	// FirstPage is the printed page the file's first page carries, for a scan
+	// that does not begin at the beginning of the volume. Zero means it does.
+	//
+	// A per-chapter volume numbers each chapter from 1, and a chapter that does
+	// not start at 1 is normally a fit that has slipped, which is what Validate
+	// says. The front of a volume is also where a leaf goes missing, and the
+	// scan of Fonctions d'une variable reelle in French opens on the half title
+	// with FVR I.3 fitted to it, because the two leaves before it were never
+	// scanned. Saying so here is what tells the two apart, and the volume has
+	// to say it: nothing in the file distinguishes a missing leaf from a wrong
+	// offset.
+	FirstPage int
 }
 
 // DefaultMinRun is the run length that separates a step in the printing from a
@@ -955,7 +970,7 @@ func Build(pages []string, opt Options) (*Map, error) {
 		}
 	}
 	m := &Map{Book: opt.Book, Grammar: opt.Grammar, Pagination: opt.Pagination,
-		Prefix: prefix, PDFPages: len(pages)}
+		Prefix: prefix, FirstPage: opt.FirstPage, PDFPages: len(pages)}
 
 	var covers []cover
 	switch opt.Pagination {

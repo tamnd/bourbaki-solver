@@ -88,6 +88,7 @@ func pagemapBuild(args []string) error {
 			Grammar:    pagemap.Grammar(*grammar),
 			Pagination: pagemap.Pagination(*pagination),
 			MinRun:     *minRun,
+			FirstPage:  b.FirstPage,
 		})
 		if err != nil {
 			return err

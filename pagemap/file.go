@@ -36,8 +36,12 @@ func (m *Map) Save(root string) error {
 	if m.Prefix != "" {
 		prefix = " prefix=" + m.Prefix
 	}
-	fmt.Fprintf(&b, "# book=%s grammar=%s pagination=%s%s pdf_pages=%d\n",
-		m.Book, m.Grammar, m.Pagination, prefix, m.PDFPages)
+	first := ""
+	if m.FirstPage != 0 {
+		first = " first_page=" + strconv.Itoa(m.FirstPage)
+	}
+	fmt.Fprintf(&b, "# book=%s grammar=%s pagination=%s%s%s pdf_pages=%d\n",
+		m.Book, m.Grammar, m.Pagination, prefix, first, m.PDFPages)
 	fmt.Fprintln(&b, tsvHeader)
 	for _, e := range m.Entries {
 		page := ""
@@ -132,6 +136,10 @@ func Load(root, book string) (*Map, error) {
 					m.Pagination = Pagination(v)
 				case "prefix":
 					m.Prefix = v
+				case "first_page":
+					if m.FirstPage, err = strconv.Atoi(v); err != nil {
+						return nil, fmt.Errorf("%s: bad first_page in %q", Path(root, book), line)
+					}
 				}
 			}
 			continue
