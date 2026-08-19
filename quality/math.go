@@ -251,18 +251,22 @@ func needTeX(c *Corpus) string {
 // other side.
 //
 // KaTeX itself is now P04, which came with the site: it runs in-process with
-// nothing to install, which was the objection to wiring it here. Measured over
-// the corpus as committed, M04 is at zero and P04 finds 135 spans, so KaTeX is
-// strictly the stronger reading of the two today and this rule is not what
-// finds a broken formula.
+// nothing to install, which was the objection to wiring it here. Both are at
+// zero over the corpus as committed, and P04 is the stronger reading of the
+// two, so this rule is not what finds a broken formula.
 //
 // It is kept anyway. The structural rule is the cheap one and the one that says
 // which shape is wrong rather than where a parser stopped, and a corpus that is
 // at zero on a rule is the corpus that notices the day it stops being.
 //
-// It stays behind -validate-tex, as the spec puts it, because it is the rule
-// most likely to want tightening and the one whose false positives would cost
-// the most.
+// The first time it was run over the whole corpus rather than over Algebra VIII
+// it reported 358 hard findings and every one of them was a formula that is
+// right: it read the control space, a backslash and a space, as a command name
+// that had been lost. P04 took all 358 spans, and that is what said which of
+// the two rules was wrong. The flag it stayed behind is the reason a rule that
+// would have failed every build for weeks did not, and the reason the flag was
+// there is exactly this, that a structural parser written by hand has false
+// positives and they cost more than the faults do.
 func m04(c *Corpus) ([]Finding, error) {
 	var out []Finding
 	for _, d := range c.Docs {
@@ -295,6 +299,21 @@ func parseTeX(s string) string {
 				for i+1 < len(rs) && unicode.IsLetter(rs[i+1]) {
 					i++
 				}
+				continue
+			}
+			// A backslash and a space is the control space, which is a command
+			// in its own right and the ordinary way to put a thin gap between
+			// two things in a formula. The corpus sets 448 of them, "R_1,\ R_2,
+			// \ \ldots,\ R_n", and reading them as a lost command name is what
+			// kept this rule at 358 hard findings, every one of them a formula
+			// that is right. P04 parses the same spans with KaTeX and takes all
+			// of them, which is what said which of the two was wrong.
+			//
+			// A backslash and a newline or a tab is still a lost command name.
+			// Nothing sets those on purpose and a line break inside a formula
+			// is how an extraction loses the word after it.
+			if rs[i+1] == ' ' {
+				i++
 				continue
 			}
 			if unicode.IsSpace(rs[i+1]) {
