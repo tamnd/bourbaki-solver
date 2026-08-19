@@ -367,3 +367,34 @@ func SHA256(text string) string {
 
 // OCRSHA256 is the hash of the OCR prompt as embedded.
 func OCRSHA256() string { return SHA256(OCR()) }
+
+//go:embed roundtrip_back.md
+var roundtripBackPrompt string
+
+//go:embed roundtrip_judge.md
+var roundtripJudgePrompt string
+
+// RoundTripBack asks for a translation to be put back into English.
+//
+// The passage goes over on its own. The English it was made from is not in this
+// question and must never be put in it: a model shown both would be copying
+// rather than translating, and the whole measurement rests on the return trip
+// being made by somebody who has not seen the outbound one.
+func RoundTripBack(lang, body string) string {
+	text := strings.ReplaceAll(strings.TrimSpace(roundtripBackPrompt), "{{LANGUAGE}}", Language(lang))
+	return strings.ReplaceAll(text, "{{BODY}}", strings.TrimSpace(body)) + "\n"
+}
+
+// RoundTripJudge asks whether the English that came back says the same
+// mathematics as the English that went out.
+func RoundTripJudge(english, back string) string {
+	text := strings.ReplaceAll(strings.TrimSpace(roundtripJudgePrompt), "{{ENGLISH}}", strings.TrimSpace(english))
+	return strings.ReplaceAll(text, "{{BACK}}", strings.TrimSpace(back)) + "\n"
+}
+
+// RoundTripSHA256 is the hash of both halves of the loop, so that editing
+// either marks the verdicts made under the old wording as made under the old
+// wording.
+func RoundTripSHA256() string {
+	return SHA256(strings.TrimSpace(roundtripBackPrompt) + "\n" + strings.TrimSpace(roundtripJudgePrompt) + "\n")
+}
