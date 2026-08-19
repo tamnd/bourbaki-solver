@@ -950,6 +950,22 @@ func chapterOf(c *corpus.Chapter) string {
 // the French form and none is asked for.
 var contentsHeadRe = regexp.MustCompile(`(?i)(?:\bcontents|table\s+des\s+mati)`)
 
+// bareTableHeadRe is a running head that is the word TABLE and the folio and
+// nothing else.
+//
+// Groupes et algebres de Lie chapitres 4 a 6 in French is why it is here. Its
+// table of contents runs from pdf 279 to pdf 282 at the back of the volume and
+// the head over every one of those pages comes out of the scan as "TABLE", with
+// the rest of "TABLE DES MATIÈRES" lost off the right of the line: pdf 281
+// reads "TABLE 287" and pdf 280 reads "286 TABLE".
+//
+// It is asked to be the whole head rather than to appear in it, because half a
+// word is weak evidence and a page whose head is nothing but that word is not
+// something the body of a Bourbaki volume prints. The heads over the body are
+// the chapter title or the volume title, and the tables of notation and the
+// indexes say what they are the table of.
+var bareTableHeadRe = regexp.MustCompile(`(?i)^\s*(?:[0-9]{1,4}\s+)?table\s*(?:\s[0-9]{1,4})?\s*$`)
+
 // folioHeadRe is a running head with the page number in front of it, which is
 // how a verso is set.
 var folioHeadRe = regexp.MustCompile(`^[0-9]{1,4}\s+\S`)
@@ -963,7 +979,7 @@ func announcesContents(pg string) bool {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		if contentsHeadRe.MatchString(line) {
+		if contentsHeadRe.MatchString(line) || bareTableHeadRe.MatchString(line) {
 			return true
 		}
 		if seen++; seen >= 2 {
