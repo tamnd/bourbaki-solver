@@ -6,13 +6,21 @@ import (
 	"strings"
 )
 
-// A run is one merge: the tags that became permanent together.
+// A run is one reading: a volume gone through from the top with a tag handed
+// out to each statement in turn.
 //
-// The allocator walks the tag space from the bottom and hands out what nothing
-// has taken, so the tags of one merge are the next block of the space and the
-// block begins where the run before it left off. That makes a run a boundary
-// and nothing more, and tags/runs records the boundaries rather than the five
-// thousand lines they cut.
+// It is tempting to say a run is one merge, since the allocator walks the tag
+// space from the bottom and hands out what nothing has taken, so the tags of
+// one merge are the next block of the space and the block begins where the run
+// before it left off. The corpus says otherwise. Five of its eight merges
+// carried more than one reading, because a volume assigned from the top and
+// then gone over again for what the first pass left is two readings and one
+// commit. Recording those merges as one run each is what put 123 of T10's 140
+// findings there.
+//
+// So a run is a boundary and nothing more, and tags/runs records the
+// boundaries rather than the five thousand lines they cut, but the boundary to
+// record is the reading and not the commit.
 //
 // The reason to keep them at all is T10. A file's tags climb on the run that
 // assigned them, because the run reads the file from the top. They do not climb
@@ -57,9 +65,17 @@ func RunAt(runs []Run, t Tag) int {
 }
 
 // Open records a boundary. It is called by merge with the lowest tag of what it
-// made permanent, and a merge whose tags fall inside a run already recorded is
-// not a new run: that is a second merge of the same reading, and the two of them
-// assigned one file from the top once.
+// made permanent, and it takes a tag inside a run already recorded, because a
+// merge that goes over a volume the run before it already read is a second
+// reading and wants a boundary of its own. What it will not take is the same
+// tag twice, which is the one case that really is one reading recorded again.
+//
+// A boundary can also be written by hand, and the ones the corpus carries
+// inside its early merges were: they were found by looking for where at least
+// three files each took a tag above one they were already carrying, which is
+// what a reading coming around again looks like from inside the files. One or
+// two statements out of order is not a reading and gets no line here, since
+// that is the thing T10 is for.
 func (s *Set) Open(first Tag, date, note string) {
 	// The file is comma separated and the note is prose somebody types, so a
 	// comma in it is taken out rather than written and read back as a field

@@ -47,6 +47,25 @@ func TestTheSameBoundaryIsNotRecordedTwice(t *testing.T) {
 	}
 }
 
+// A boundary inside a run already recorded is a second reading and gets a line.
+// This is how the corpus is: five of its eight merges went over a volume from
+// the top and then went over it again, and until both readings were written
+// down here T10 read the two of them as one file whose tags do not climb.
+func TestAReadingInsideARecordedRunIsARunOfItsOwn(t *testing.T) {
+	s := &Set{}
+	s.Open("03G1", "2026-08-16", "Theory of Sets chapters I to III")
+	s.Open("03V4", "2026-08-16", "Theory of Sets chapter IV")
+	s.Open("03P6", "2026-08-16", "Theory of Sets read from the top a second time")
+	if len(s.Runs) != 3 || s.Runs[1].First != "03P6" {
+		t.Fatalf("the runs are %v, want the second reading between the two merges", s.Runs)
+	}
+	// The two sides of the new boundary answer differently, which is the whole
+	// of what recording it buys.
+	if RunAt(s.Runs, "03P0") == RunAt(s.Runs, "03PG") {
+		t.Error("a tag either side of the second reading still reads as one run")
+	}
+}
+
 // The file is comma separated and a note is prose somebody types, so a comma in
 // it would take the line apart on the way back in.
 func TestACommaInANoteDoesNotSplitTheLine(t *testing.T) {
