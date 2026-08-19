@@ -32,6 +32,7 @@ func pagemapBuild(args []string) error {
 	fs := flag.NewFlagSet("pagemap build", flag.ExitOnError)
 	book := fs.String("book", "", "book id, or empty for every book in the manifest")
 	grammar := fs.String("grammar", "", "override the detected grammar: head-label, head-number or foot-number")
+	pagination := fs.String("pagination", "", "override the detected pagination: per-chapter or continuous")
 	minRun := fs.Int("min-run", 0, "how many anchors must agree before a change of offset is believed, 0 for per volume")
 	dry := fs.Bool("n", false, "print the result without writing anything")
 	fs.Usage = func() {
@@ -87,7 +88,7 @@ func pagemapBuild(args []string) error {
 			Book:       b.ID,
 			Chapters:   b.Chapters,
 			Grammar:    pagemap.Grammar(*grammar),
-			Pagination: pagemap.Pagination(b.Pagination),
+			Pagination: pagemap.Pagination(*pagination),
 			MinRun:     run,
 		})
 		if err != nil {

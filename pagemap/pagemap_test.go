@@ -602,6 +602,20 @@ func TestPaginationIsDetectedNotAssumed(t *testing.T) {
 	if got := detectPagination([]anchor{{chapter: "VIII", page: 4}}); got != PerChapter {
 		t.Errorf("detectPagination = %q, want %q", got, PerChapter)
 	}
+	// Topologie generale sets the heads of the first pages of chapters III and
+	// IV in a way this reader gets nothing out of, so the lowest number it sees
+	// in those chapters is 5 and 8 rather than 1. The question is not whether a
+	// chapter starts at 1, it is whether it starts below where the chapter
+	// before it ended, and these four chapters plainly do.
+	scanned := []anchor{
+		{chapter: "I", page: 2}, {chapter: "I", page: 127},
+		{chapter: "II", page: 2}, {chapter: "II", page: 44},
+		{chapter: "III", page: 5}, {chapter: "III", page: 88},
+		{chapter: "IV", page: 8}, {chapter: "IV", page: 81},
+	}
+	if got := detectPagination(scanned); got != PerChapter {
+		t.Errorf("detectPagination = %q, want %q", got, PerChapter)
+	}
 }
 
 // Where a volume prints the chapter on every page, that is where the chapter
