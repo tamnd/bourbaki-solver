@@ -142,7 +142,7 @@ func (r *Report) exercises(pages []string, c Check, appendix bool) {
 		return
 	}
 	for p := c.PDFPage - near; p <= c.PDFPage+near; p++ {
-		if p != c.PDFPage && exercisesOn(pages, p, c.Section, appendix) {
+		if p != c.PDFPage && exercisesStart(pages, p, c.Section, appendix, p < c.PDFPage) {
 			c.Found = append(c.Found, p)
 		}
 	}
@@ -176,6 +176,88 @@ func exercisesOn(pages []string, page, section int, appendix bool) bool {
 	}
 	return false
 }
+
+// exercisesStart is the same question asked of a page the contents did not
+// name, and it is a harder question than exercisesOn answers.
+//
+// The word EXERCISES is printed in the running head of every page of a run and
+// not only the first, so a page three along from the one the contents named
+// carries it too, and taking that for evidence says the run starts on four
+// consecutive pages. That is what the search either side of a miss was doing:
+// all six of the misses in the library were reported as printed on another
+// page, and every one of the pages offered was the middle of the same run,
+// found on the head alone. The marker the contents named is not on another
+// page in any of the six. It was eaten by the scan, which is a damaged page
+// and not a wrong page, and only the second is a defect in the corpus.
+//
+// So a running head counts here only where it names a §, which the 1998 and
+// 2003 printings set to the left of the word: a head reading § 3 EXERCISES on
+// the page before the one the contents gave for § 3 does say the corpus has
+// the page wrong. Where the head names no § there is nothing to go on, and a
+// bare word is not offered as a place the run might have started.
+//
+// Only a page before the named one is heard on its head. A head naming § 3 on
+// the page after is what a run that starts exactly where the contents says it
+// does looks like on its second page, so offering it as somewhere else the run
+// might have started says nothing: page 256 of the Lie volume heads § 4 and
+// page 255 is where § 4 begins.
+//
+// The run mark is heard on either side, since a bare § on a line of its own is
+// where a run starts and nowhere else.
+func exercisesStart(pages []string, page, section int, appendix, head bool) bool {
+	if page < 1 || page > len(pages) {
+		return false
+	}
+	for _, l := range strings.Split(pages[page-1], "\n") {
+		l = strings.TrimSpace(l)
+		if appendix && appendixMarkRe.MatchString(l) {
+			return true
+		}
+		if m := runMarkRe.FindStringSubmatch(l); m != nil {
+			if n, ok := readNumber(runFixer.Replace(m[1])); ok && n == section {
+				return true
+			}
+		}
+	}
+	if !head {
+		return false
+	}
+	n, ok := headSection(firstLine(pages[page-1]))
+	return ok && n == section
+}
+
+// firstLine is the running head, where a page has one.
+func firstLine(page string) string {
+	for _, l := range strings.Split(page, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			return l
+		}
+	}
+	return ""
+}
+
+// headSection reads the § a running head names out of whatever the printing
+// set to the left of the word, which is where all three of the grammars put
+// it. The § sign itself is not looked for: the 2003 scan of the Lie volume
+// hands its heads back as "~ 1." and "s3.", so the sign is whatever the scan
+// made of it and the digit beside it is the only part worth reading.
+//
+// The head and not the page. Page 252 of the Lie volume carries a footnote
+// opening "2 This exercise, hitherto unpublished", and read anywhere on the
+// page that line says the page heads the exercises for § 2, which it does not.
+func headSection(line string) (int, bool) {
+	i := strings.Index(strings.ToLower(line), "exerci")
+	if i < 0 {
+		return 0, false
+	}
+	m := headNumRe.FindString(line[:i])
+	if m == "" {
+		return 0, false
+	}
+	return readNumber(m)
+}
+
+var headNumRe = regexp.MustCompile(`[0-9]{1,2}`)
 
 // runMarkRe is a line that carries a § and nothing else, which is how the
 // gathered exercises are cut into runs. The 2003 scan reads the marker that
