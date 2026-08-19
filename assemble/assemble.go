@@ -29,6 +29,7 @@ import (
 	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/mathtex"
 )
 
 // Piece is one assembled file: the opening of a chapter, one § or appendix, or
@@ -191,7 +192,7 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 				m.Label = p.Exercises[i].Ref().Label()
 				body, left := takeNotes(corpus.NormalizeBody(p.Exercises[i].Body),
 					p.Exercises[i].Pages, notes)
-				p.Exercises[i].Body, notes = corpus.NormalizeBody(body), left
+				p.Exercises[i].Body, notes = unstraddle(body), left
 			}
 			blocks = cutExercises(blocks, p.Number, p.Appendix, pr)
 		}
@@ -202,13 +203,38 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 			return nil, fmt.Errorf("chapter %s %s: pdf page %d defines the footnote %s and nothing marks it",
 				ch.Numeral, p.Name(), left[0].page, first(left[0].def, 40))
 		}
-		p.Body = corpus.NormalizeBody(body)
+		p.Body = unstraddle(body)
 		if err := p.Verify(); err != nil {
 			return nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
 		}
 		out[i] = p
 	}
 	return out, nil
+}
+
+// unstraddle normalises a joined body and moves back the brackets the printing
+// swept into the mathematics: "Card(W$\varpi_1)$", where the bracket the
+// sentence opened closes inside a span and the span then says something the page
+// does not.
+//
+// It belongs here and not only in fix parens because this side of the join is
+// where some of them are first visible. Extraction reads one page and stops at
+// the edge of it, so a sentence that opens a bracket at the foot of one page and
+// closes it at the head of the next holds nothing open as far as either page can
+// see, and the repair that reads pages cannot make it. Conclude by induction on
+// n.) at the end of A VIII § 1 Exercise 15 is one of ten across the corpus that
+// only the assembled section shows.
+//
+// The other reason is that assembly is what writes these files. A repair made to
+// an assembled section by anything else is thrown away the next time the book is
+// assembled, and assemble -check would report it as drift for as long as it sat
+// there. So the section comes out of the join already repaired and the two
+// agree.
+func unstraddle(body string) string {
+	out, _ := mathtex.Unstraddle(body)
+	// After, because the repair moves the space at the head of what is left of a
+	// span outside the delimiter, and that space can land at the end of a line.
+	return corpus.NormalizeBody(out)
 }
 
 // span is one run of pages a piece is made of: where it begins, and which piece
