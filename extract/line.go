@@ -57,6 +57,14 @@ type Line struct {
 	// bar.go.
 	Rules []pdfsrc.Rule
 
+	// Words are the same text the runs carry, read again one word at a time.
+	// A run of prose holds a dozen words in one box, so this is the only
+	// thing that says where inside such a run a given word stands, which is
+	// what a bar drawn over one letter of a sentence needs. Filled in from
+	// the page and empty on a page that was read without them. See sunder in
+	// bar.go.
+	Words []pdfsrc.Word
+
 	// band is the font size the band was taken from. It is what says whether
 	// the next run to arrive is body type or something hanging off it.
 	band int
@@ -95,6 +103,7 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 	x, ok := gutter(lines)
 	if !ok {
 		bars(lines, p.Rules)
+		spread(lines, p.Words)
 		return lines, false
 	}
 	var left, right []Run
@@ -107,6 +116,7 @@ func LinesColumns(l *pdfsrc.Layout, p pdfsrc.Page) ([]Line, bool) {
 	}
 	lines = append(rows(left, p.Rules), rows(right, p.Rules)...)
 	bars(lines, p.Rules)
+	spread(lines, p.Words)
 	return lines, true
 }
 

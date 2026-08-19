@@ -74,6 +74,12 @@ type Page struct {
 	// font. pdftohtml never reports them, so they are filled in by WithRules
 	// from a second pass and are empty on a layout that did not ask for one.
 	Rules []Rule
+	// Words are the same text the spans carry, read again one word at a time.
+	// pdftohtml reports a run and a run of prose holds a dozen words, so this
+	// is the only thing on the page that says where inside such a run a given
+	// word stands. Filled in by WithWords from a second pass and empty on a
+	// layout that did not ask for one. See word.go.
+	Words []Word
 }
 
 // Layout is a whole document, or the page range that was asked for.
