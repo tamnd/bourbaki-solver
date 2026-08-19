@@ -261,7 +261,7 @@ func evalOne(ctx context.Context, c *solve.Corpus, root string, host ocr.Host,
 	}
 	started := time.Now()
 	engine := solve.Engine{
-		Ask:   fleetAsker{host: host, keep: f.keep},
+		Ask:   fleetAsker{host: host, keep: f.keep, note: noteAsks(root, logf)},
 		Limit: f.ask,
 		// Filed under the case and not under the exercise, because two answers to
 		// one exercise are two runs and the second would otherwise overwrite the
