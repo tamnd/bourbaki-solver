@@ -15,7 +15,7 @@ import (
 // tag goes when the statement it named leaves the corpus, and it is what stops
 // the allocator from ever handing that tag out again. aliases says that a label
 // was renamed, so that the tag follows the statement instead of being spent
-// twice on it. runs says where one merge stopped and the next began, which is
+// twice on it. runs says where one reading stopped and the next began, which is
 // what T10 needs to tell a file whose tags do not climb from a file two runs
 // wrote.
 const (
@@ -39,9 +39,11 @@ var headers = map[string]string{
 	InactiveFile: "# Retired tags: TAG,full_label,reason,date\n# These tags are burned and must never be reassigned.\n",
 	AliasesFile:  "# Label renames: OLD_LABEL,NEW_LABEL\n# The tag follows the label.\n",
 	RunsFile: `# Assignment runs: FIRST_TAG,DATE,what the run read
-# One line per merge. The run holds every tag from FIRST_TAG up to the
+# One line per reading. The run holds every tag from FIRST_TAG up to the
 # FIRST_TAG of the line under it, which is the block the allocator handed
-# out that day. T10 reads a file's tags against the run that assigned them.
+# out for that reading. T10 reads a file's tags against the run that
+# assigned them. A merge that goes over a volume an earlier merge already
+# read is a second reading and wants a line of its own.
 `,
 }
 
