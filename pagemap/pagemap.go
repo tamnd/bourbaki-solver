@@ -212,6 +212,14 @@ func SplitPages(text string) []string {
 	return pages
 }
 
+// headGapMin is how many spaces stand between the page number and the title in
+// a running head, at least. Two is enough to tell a head from prose, since
+// prose puts one space between its words, and it is as low as it can go: the
+// recto heads of Integration set the number three spaces clear of the title and
+// the section mark one space clear of it, which is what tells the two apart on
+// the pages whose section mark the scan turned into a digit.
+const headGapMin = "2"
+
 var (
 	// The opener prints the words on a line of their own. The table of contents
 	// prints "CHAPTER I. ALGEBRAIC STRUCTURES ..... 1" on one line, so
@@ -220,7 +228,14 @@ var (
 	// The French volumes print "CHAPITRE II", and the 2015 Theories spectrales
 	// prints it in lower case as "chapitre ii", so the match is case insensitive
 	// and the numeral is upper cased afterwards.
-	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s+([ivxlcdm]+)\s*$`)
+	//
+	// The numeral admits the spaces and the letter for digit swaps the scanners
+	// put inside it, as headLabelRe and headChapterRe do. Algebre chapitre 9
+	// opens with "CHAPITRE I X" letter spaced across the page, which a numeral
+	// read as an unbroken run of Roman letters does not match at all, and that
+	// one line is the whole chapter structure of the volume: the map came out
+	// with 211 pages and no chapter on any of them.
+	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s+([ivxlcdm1|][ivxlcdm1| ]*?)\s*$`)
 
 	// The 1998 scan reads the digit 1 as a capital I or a lower case l often
 	// enough to matter: page 111 comes out "Ill", 251 comes out "25I" and 616
@@ -255,18 +270,60 @@ var (
 	headLabelRe = regexp.MustCompile(
 		`(?:^|\s)(?P<book>[A-Z]{1,3})\s*[.\s]\s*(?P<ch>[IVXLCDM1l|][IVXLCDM1l|\s]{0,4})[.,]\s*(?P<p>\d[\d\s]{0,4})[.,]?(?:\s|$)`)
 
-	// headNumberRe reads a bare page number at the outer edge of a running head,
-	// which is where the English Functions of a Real Variable prints it. The
-	// number is at the start of the line on a verso and at the end on a recto,
-	// and nothing else on the line is a bare integer, so anchoring both ends is
-	// what keeps a section locator or a formula out.
-	headNumberRe = regexp.MustCompile(`^\s*(?P<lead>\d{1,4})\s|\s(?P<trail>\d{1,4})\s*$`)
+	// headLeadRe and headTrailRe read a bare page number at either edge of a
+	// running head, which is where the English Functions of a Real Variable
+	// prints it. The number is at the start of the line on a verso and at the
+	// end on a recto, so both edges have to be looked at and anchoring them is
+	// what keeps a formula in the middle of the line out.
+	//
+	// They were one pattern with an alternation in it, which meant the lead won
+	// wherever both edges carried a number and the trail was never even read.
+	// That is the wrong way round on a recto whose section mark the scan turned
+	// into a digit, and the French printings are full of them: "§ 1  EXERCICES
+	// 69" arrives as "5 1  EXERCICES  69" and the page shipped as 5.
+	// The number has to stand clear of the rest of the line, which is what makes
+	// it a page number rather than a word of prose that happens to be a numeral.
+	// Something has to say which lines are running heads at all, and for this
+	// grammar nothing did: the reader took the first non-blank line of the page
+	// and looked for an integer at either edge, which is a description of most
+	// lines of French mathematical prose. "Reimpression inchangee de l'edition
+	// originale de 1959" was read as page 1959, "(no 7). Lorsque @ est
+	// bilineaire, Q, est l'image reciproque de 5" as page 5, and "§ 2.
+	// Relevement des ideaux premiers." as page 5.
+	//
+	// The gap is what a typesetter puts there and prose does not: Bourbaki sets
+	// the page number at the outer edge of the measure and the title in the
+	// middle of it, so pdftotext -layout hands back "298     Index" and "8
+	// SOUS-ALGEBRES DE CARTAN. ELEMENTS REGULIERS   Ch. VII, § 1" with runs of
+	// spaces in them, where a line of prose has one space between its words.
+	// Setting the title in capitals would have been the other way to ask, and it
+	// is the wrong one: the Elements of the History of Mathematics heads its
+	// index "Index" and its bibliography "BIBLIOGRAPHY", and four pages of that
+	// volume have a page number nothing else in the file can supply.
+	headLeadRe  = regexp.MustCompile(`^\s*(\d{1,4})\s{` + headGapMin + `,}`)
+	headTrailRe = regexp.MustCompile(`\s{` + headGapMin + `,}(\d{1,4})\s*$`)
 
-	// headChapterRe reads the chapter numeral a head prints in words, "Ch. I".
-	// Only Functions of a Real Variable does this, on its verso pages, and it is
-	// worth reading because a continuously paginated volume otherwise has to
-	// infer its chapter boundaries from the openers alone.
-	headChapterRe = regexp.MustCompile(`\bCh\.?\s*([IVXLCDM]+)\b`)
+	// headChapterRe reads the chapter numeral a head prints in words. The English
+	// Functions of a Real Variable prints "Ch. I" and this was written for that
+	// alone, which left every French volume of the same grammar with no chapter
+	// on any page: Integration prints "Chap. V" and "chap. VII", Lie prints
+	// "Ch. II" with the numeral scanned as "11", and the first of those three
+	// forms is the only one an anchored capital Ch with a Roman numeral straight
+	// after it matches.
+	//
+	// The period is required rather than optional, and the numeral has to be
+	// followed by a comma or by the end of the line. Without both of those the
+	// pattern reads the ch of any French word that happens to be followed by
+	// something the Roman class admits, and the head of a page is exactly where
+	// such a word turns up: this is a running head, not a citation, so there is
+	// nothing to gain by being loose and a whole chapter to lose by being wrong.
+	//
+	// The numeral admits the spaces the scanners put inside it, as headLabelRe
+	// does. Algebre commutative prints "chap. II" and its text layer gives
+	// "chap. I I", so a numeral read up to the first space is chapter I on every
+	// page of chapter II, which is 43 pages of that volume claiming to be in a
+	// chapter that ended sixty pages earlier.
+	headChapterRe = regexp.MustCompile(`(?i)\bch(?:ap)?\.\s*([ivxlcdm1|][ivxlcdm1| ]{0,4}?)\s*(?:[,.;]|$)`)
 )
 
 // romanFixer undoes the substitutions the scanners make on a chapter numeral.
@@ -314,25 +371,43 @@ func readHeadLabel(line string) (prefix, chapter string, page int, ok bool) {
 
 // readHeadNumber finds a bare page number at either edge of a running head, and
 // the chapter numeral if the head prints one.
-func readHeadNumber(line string) (chapter string, page int, ok bool) {
+// readHeadNumber returns the number at the edge the line most likely prints the
+// page at, and, where both edges carry one, the other as an alternative for the
+// fit to choose between.
+func readHeadNumber(line string) (chapter string, page, alt int, ok bool) {
 	if c := headChapterRe.FindStringSubmatch(line); c != nil {
-		chapter = strings.ToUpper(c[1])
+		ch := strings.ToUpper(romanFixer.Replace(strings.Join(strings.Fields(c[1]), "")))
+		if _, err := corpus.RomanOrder(ch); err == nil {
+			chapter = ch
+		}
 	}
-	m := headNumberRe.FindStringSubmatch(line)
-	if m == nil {
-		return "", 0, false
+	lead, hasLead := 0, false
+	if m := headLeadRe.FindStringSubmatch(line); m != nil {
+		lead, hasLead = readNumber(m[1])
 	}
-	// The alternation means exactly one of the two groups is set, and which one
-	// says whether this is a verso or a recto, which nothing downstream needs.
-	raw := m[1]
-	if raw == "" {
-		raw = m[2]
+	trail, hasTrail := 0, false
+	if m := headTrailRe.FindStringSubmatch(line); m != nil {
+		trail, hasTrail = readNumber(m[1])
 	}
-	p, ok := readNumber(raw)
-	if !ok {
-		return "", 0, false
+	// A head that names its chapter is a verso, and a verso prints the page at
+	// the inner edge and the locator at the outer one: "10  MESURES SUR LES
+	// ESPACES TOPOLOGIQUES SEPARES  Ch. IX, § 1". The number at the end of such
+	// a line is the § and never the page, and reading it as the page is how
+	// Integration chapitre 9 came to say three separate pages were printed IX.1.
+	// It happens on the pages the scan mangles: 10 arrives as "1O", which is not
+	// a lead number, and the reader then took what it could find.
+	if chapter != "" {
+		hasTrail = false
 	}
-	return chapter, p, true
+	switch {
+	case hasLead && hasTrail:
+		return chapter, lead, trail, true
+	case hasLead:
+		return chapter, lead, 0, true
+	case hasTrail:
+		return chapter, trail, 0, true
+	}
+	return "", 0, 0, false
 }
 
 // headLines returns the first n non-blank lines of a page.
@@ -369,9 +444,16 @@ type anchor struct {
 	pdfPage int
 	chapter string // empty when the grammar does not print one on the page
 	page    int
-	src     Confidence
-	raw     string
-	prefix  string // the Book prefix on the label, empty for the bare-number grammars
+	// alt is the other number on the line, where the line carries one at each
+	// edge and nothing on the line says which of them is the page. It is zero
+	// everywhere else. The fit decides between the two, which is the only thing
+	// in the volume that can: on a recto whose section mark the scan turned into
+	// a digit both readings are equally well formed, and the one that continues
+	// the offset the rest of the chapter runs on is the page number.
+	alt    int
+	src    Confidence
+	raw    string
+	prefix string // the Book prefix on the label, empty for the bare-number grammars
 }
 
 // readAnchors pulls one candidate page number per page. chapters restricts
@@ -419,14 +501,14 @@ func readAnchorsPrefix(pages []string, g Grammar, chapters []string) ([]anchor, 
 			if len(hl) == 0 {
 				continue
 			}
-			ch, p, ok := readHeadNumber(hl[0])
+			ch, p, alt, ok := readHeadNumber(hl[0])
 			if !ok {
 				continue
 			}
 			if ch != "" && !want[ch] {
 				ch = ""
 			}
-			as = append(as, anchor{pdfPage: n, chapter: ch, page: p,
+			as = append(as, anchor{pdfPage: n, chapter: ch, page: p, alt: alt,
 				src: FromHead, raw: strings.TrimSpace(hl[0])})
 		case FootNumber:
 			l := footLine(pg)
@@ -482,7 +564,7 @@ func readChapterStarts(pages []string, chapters []string) map[int]string {
 			if m == nil {
 				continue
 			}
-			c := strings.ToUpper(m[1])
+			c := strings.ToUpper(romanFixer.Replace(strings.Join(strings.Fields(m[1]), "")))
 			// A chapter opens once. If the words turn up again they belong to
 			// a cross-reference, not to a new chapter.
 			if !want[c] || seen[c] {
@@ -606,6 +688,17 @@ func chapterStartsFromAnchors(as []anchor) map[int]string {
 	return starts
 }
 
+// anchorsNameChapters reports whether the pages of this volume say which
+// chapter they are in.
+func anchorsNameChapters(as []anchor) bool {
+	for _, a := range as {
+		if a.chapter != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // segment is a stretch of anchors that agree on one offset.
 type segment struct {
 	first, last int // indices into the anchor slice
@@ -709,7 +802,23 @@ func Build(pages []string, opt Options) (*Map, error) {
 		// they are a fallback because a volume whose opener is set in a way the
 		// pattern does not match comes out as one unnamed chapter.
 		starts := readChapterStarts(pages, opt.Chapters)
-		if opt.Grammar == HeadLabel {
+		// An opener is where the chapter begins and a head is only a bound on
+		// it, so the openers are used whenever they account for every chapter
+		// the volume has. What the heads give is the page after the last page
+		// of the chapter before, and the pages in between are the opener, its
+		// blank verso and whatever else carries no running head: Lie 7 to 9
+		// puts chapter VIII at printed 69 and the heads put it at 67, and
+		// Functions of a Real Variable is out by two at the front and by
+		// thirty four in the middle.
+		//
+		// Where the openers fall short the heads are all there is, and they are
+		// worth having. A French head reads "10 MESURES SUR LES ESPACES
+		// TOPOLOGIQUES SEPARES Ch. IX, § 1" and names its chapter as plainly as
+		// "INT IX.10" does, and on the scans whose opener line the OCR mangled
+		// that is the difference between a volume with chapters and a volume
+		// that is one unnamed run: Lie chapitres 7 et 8 found no opener at all.
+		if opt.Grammar == HeadLabel ||
+			(len(starts) < len(opt.Chapters) && anchorsNameChapters(as)) {
 			starts = chapterStartsFromAnchors(as)
 		}
 		covers = coverContinuous(as, len(pages), starts, opt)
@@ -735,10 +844,24 @@ func Build(pages []string, opt Options) (*Map, error) {
 				// numeral and lands the page in the wrong chapter with the
 				// right number, which is a disagreement even though the number
 				// matches.
-				if a.page == e.Page && (a.chapter == "" || a.chapter == e.Chapter) {
+				//
+				// The chapter counts as agreeing where the fit has none. A
+				// continuously paginated volume takes its chapter from the
+				// openers, and where no opener was recognised the fit knows no
+				// chapter at all; a head that names one is then adding to the
+				// fit rather than contradicting it, and calling that a conflict
+				// cost Lie chapitres 7 et 8 every one of its twenty readings.
+				agrees := func(read int) bool {
+					return read == e.Page && (a.chapter == "" || e.Chapter == "" || a.chapter == e.Chapter)
+				}
+				switch {
+				case agrees(a.page):
 					e.Confidence = a.src
 					e.Raw = a.raw
-				} else {
+				case a.alt != 0 && agrees(a.alt):
+					e.Confidence = a.src
+					e.Raw = a.raw
+				default:
 					m.Conflicts = append(m.Conflicts, Conflict{
 						PDFPage: n, ReadChapter: a.chapter, Read: a.page,
 						Chapter: e.Chapter, Fitted: e.Page, Raw: a.raw})
