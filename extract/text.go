@@ -45,7 +45,7 @@ type token struct {
 func Render(l Line) string {
 	toks := tokens(l)
 	toks = hoist(toks, l.Top, l.Bottom)
-	toks = barred(toks, l.Rules)
+	toks = barred(toks, l.Rules, l.Words)
 	toks = gridded(toks)
 	toks = overset(toks)
 	toks = raised(toks)

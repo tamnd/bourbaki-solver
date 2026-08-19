@@ -313,3 +313,112 @@ func TestWeightTellsABarFromASign(t *testing.T) {
 		}
 	}
 }
+
+// A bar drawn over one letter of a sentence lines up with no run, because the
+// layer reports a run of prose as the whole stretch of one font. The words of
+// the page are the finer reading that puts it back. This is page 177 of Algebra
+// VIII, which sets a projective module P and its image P bar in the quotient,
+// and which shipped for months reading that a module is zero if and only if it
+// is zero.
+func TestBarOverOneLetterOfARunOfProse(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 177, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 734, Left: 110, Width: 339, Height: 13, Text: "Let P be a projective A-module, and let P be the"},
+		},
+		Rules: []pdfsrc.Rule{{Top: 731, Left: 389, Width: 10, Thickness: 0.397, Length: 6.67, Size: 4.1}},
+		Words: []pdfsrc.Word{
+			{Top: 734, Left: 110, Width: 22, Height: 13, Text: "Let"},
+			{Top: 734, Left: 138, Width: 11, Height: 13, Text: "P"},
+			{Top: 734, Left: 155, Width: 15, Height: 13, Text: "be"},
+			{Top: 734, Left: 177, Width: 7, Height: 13, Text: "a"},
+			{Top: 734, Left: 190, Width: 65, Height: 13, Text: "projective"},
+			{Top: 734, Left: 261, Width: 69, Height: 13, Text: "A-module,"},
+			{Top: 734, Left: 336, Width: 25, Height: 13, Text: "and"},
+			{Top: 734, Left: 367, Width: 17, Height: 13, Text: "let"},
+			{Top: 734, Left: 390, Width: 10, Height: 13, Text: "P"},
+			{Top: 734, Left: 406, Width: 16, Height: 13, Text: "be"},
+			{Top: 734, Left: 428, Width: 21, Height: 13, Text: "the"},
+		},
+	}
+	want := `Let P be a projective A-module, and let $\overline{P}$ be the`
+	if got := sole(t, frlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// The same page read without the words, which is what a caller that did not ask
+// for them gets. The bar has nothing to line up with and is refused, and the
+// line comes out as the sentence it was before rather than as a guess.
+func TestBarOverOneLetterWithoutTheWords(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 177, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 734, Left: 110, Width: 339, Height: 13, Text: "Let P be a projective A-module, and let P be the"},
+		},
+		Rules: []pdfsrc.Rule{{Top: 731, Left: 389, Width: 10, Thickness: 0.397, Length: 6.67, Size: 4.1}},
+	}
+	want := `Let P be a projective A-module, and let P be the`
+	if got := sole(t, frlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// A bar over a word of the sentence is not a bar over notation, and the cut is
+// no reason to take it. Nothing in these volumes draws a line over an English
+// word, so a rule that comes out covering one was read wrong somewhere earlier.
+func TestBarOverAWordOfTheSentenceIsStillRefused(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 177, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 734, Left: 110, Width: 339, Height: 13, Text: "Let P be a projective A-module, and let P be the"},
+		},
+		Rules: []pdfsrc.Rule{{Top: 731, Left: 189, Width: 67, Thickness: 0.397, Length: 44.7, Size: 4.1}},
+		Words: []pdfsrc.Word{
+			{Top: 734, Left: 110, Width: 22, Height: 13, Text: "Let"},
+			{Top: 734, Left: 138, Width: 11, Height: 13, Text: "P"},
+			{Top: 734, Left: 155, Width: 15, Height: 13, Text: "be"},
+			{Top: 734, Left: 177, Width: 7, Height: 13, Text: "a"},
+			{Top: 734, Left: 190, Width: 65, Height: 13, Text: "projective"},
+			{Top: 734, Left: 261, Width: 69, Height: 13, Text: "A-module,"},
+			{Top: 734, Left: 336, Width: 25, Height: 13, Text: "and"},
+			{Top: 734, Left: 367, Width: 17, Height: 13, Text: "let"},
+			{Top: 734, Left: 390, Width: 10, Height: 13, Text: "P"},
+			{Top: 734, Left: 406, Width: 16, Height: 13, Text: "be"},
+			{Top: 734, Left: 428, Width: 21, Height: 13, Text: "the"},
+		},
+	}
+	want := `Let P be a projective A-module, and let P be the`
+	if got := sole(t, frlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// Words that do not spell what the run says are words of somewhere else on the
+// page, and a cut made on them would be a cut in the wrong place. Here the
+// second P is missing from the word reading, so the run is left whole.
+func TestWordsThatDoNotSpellTheRunAreNotUsed(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 177, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 734, Left: 110, Width: 339, Height: 13, Text: "Let P be a projective A-module, and let P be the"},
+		},
+		Rules: []pdfsrc.Rule{{Top: 731, Left: 389, Width: 10, Thickness: 0.397, Length: 6.67, Size: 4.1}},
+		Words: []pdfsrc.Word{
+			{Top: 734, Left: 110, Width: 22, Height: 13, Text: "Let"},
+			{Top: 734, Left: 138, Width: 11, Height: 13, Text: "P"},
+			{Top: 734, Left: 155, Width: 15, Height: 13, Text: "be"},
+			{Top: 734, Left: 177, Width: 7, Height: 13, Text: "a"},
+			{Top: 734, Left: 190, Width: 65, Height: 13, Text: "projective"},
+			{Top: 734, Left: 261, Width: 69, Height: 13, Text: "A-module,"},
+			{Top: 734, Left: 336, Width: 25, Height: 13, Text: "and"},
+			{Top: 734, Left: 367, Width: 17, Height: 13, Text: "let"},
+			{Top: 734, Left: 406, Width: 16, Height: 13, Text: "be"},
+			{Top: 734, Left: 428, Width: 21, Height: 13, Text: "the"},
+		},
+	}
+	want := `Let P be a projective A-module, and let P be the`
+	if got := sole(t, frlay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}

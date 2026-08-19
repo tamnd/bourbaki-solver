@@ -216,6 +216,13 @@ func extractRun(args []string) error {
 	if err := src.WithRules(context.Background(), lay); err != nil {
 		return err
 	}
+	// The words are a third pass, and are the same text read one word at a
+	// time rather than one run at a time. A bar drawn over one letter of a
+	// sentence has nothing in the run reading to line up with: see pdfsrc/
+	// word.go.
+	if err := src.WithWords(context.Background(), lay); err != nil {
+		return err
+	}
 	// The page map is what turns a PDF page into the label the volume prints.
 	// It is not required: a volume can be read before it has been mapped, and
 	// the running head carries the label on most pages anyway.
@@ -436,6 +443,13 @@ func extractPage(args []string) error {
 	if err := src.WithRules(context.Background(), lay); err != nil {
 		return err
 	}
+	// The words are a third pass, and are the same text read one word at a
+	// time rather than one run at a time. A bar drawn over one letter of a
+	// sentence has nothing in the run reading to line up with: see pdfsrc/
+	// word.go.
+	if err := src.WithWords(context.Background(), lay); err != nil {
+		return err
+	}
 	// The rules are the part of a page that is drawn rather than set, so they
 	// are in none of the other views here and are the only evidence for a
 	// fraction, an overline or a set difference sign. Weight and length are
@@ -539,6 +553,13 @@ func extractDrift(args []string) error {
 		return err
 	}
 	if err := src.WithRules(context.Background(), lay); err != nil {
+		return err
+	}
+	// The words are a third pass, and are the same text read one word at a
+	// time rather than one run at a time. A bar drawn over one letter of a
+	// sentence has nothing in the run reading to line up with: see pdfsrc/
+	// word.go.
+	if err := src.WithWords(context.Background(), lay); err != nil {
 		return err
 	}
 	// The same two passes extract run makes, because a page read on its own is

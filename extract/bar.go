@@ -526,17 +526,22 @@ func off(top int, l Line) int {
 // another bar covers is written before the one that covers it and the outer bar
 // then finds it as a single token. The mean of a conjugate is set that way and
 // so is a fraction whose numerator carries a closure.
-func barred(toks []token, rules []pdfsrc.Rule) []token {
+func barred(toks []token, rules []pdfsrc.Rule, words []pdfsrc.Word) []token {
 	if len(rules) == 0 {
 		return toks
 	}
 	rs := append([]pdfsrc.Rule(nil), rules...)
 	sort.SliceStable(rs, func(i, j int) bool { return rs[i].Width < rs[j].Width })
 	for _, r := range rs {
-		if t, at, end, ok := laden(toks, r); ok {
-			out := append([]token(nil), toks[:at]...)
+		// The cut is only kept where the bar is then placed. A cut that leads
+		// nowhere still moves the edges of the pieces it made, and the edges
+		// are where the reading takes its spaces from, so a line that came out
+		// right before would come out a space short for nothing.
+		cut := sunder(toks, r, words)
+		if t, at, end, ok := laden(cut, r); ok {
+			out := append([]token(nil), cut[:at]...)
 			out = append(out, t)
-			toks = append(out, toks[end:]...)
+			toks = append(out, cut[end:]...)
 		}
 	}
 	return toks
@@ -881,3 +886,220 @@ func parted(a, b token) bool {
 // of a fraction are written off the line, so every token under a bar has it
 // set and it would say the exp ad of page 346 is a symbol.
 func symbolic(t token) bool { return t.class.Math() }
+
+// sunder cuts a token in two or three where a bar is drawn over part of it, and
+// is what puts the closures of a page of prose back.
+//
+// A bar has to line up with the tokens of the line before laden can say what it
+// covers, and a token comes from a run, and pdftohtml reports a run of prose as
+// the whole stretch of one font. So a bar over one letter of a sentence lines up
+// with nothing. Page 177 of Algebra VIII is the case that sent this to be
+// written: the layer hands back "Let P be a projective A-module, and let P be
+// the A" as one box from 110 to 466, the bar over the second P runs 389 to 399,
+// and laden has nothing to give it. Measured over the six volumes with a text
+// layer, 1374 bars are lost this way against 2273 that are placed.
+//
+// The words of the page are the finer reading. pdftotext -bbox reports the same
+// text one word at a time with a box on each, so the second P of that run is at
+// 390 to 400 and the bar sits on it.
+//
+// The cut is only made where the two readings agree exactly. The words that fall
+// inside the token's own box are joined back up, and unless what that spells is
+// what the token says, this leaves the token alone and the bar is refused the way
+// it was before. That is the whole of the safety here: the two programs read the
+// same file and where they disagree about the text there is no reason to trust
+// either about the geometry.
+//
+// What the cut does not do is reach inside a word. A bar over one letter of a
+// word the page sets as a word would still be lost, and the measurement says
+// that is not the case that matters: the letters these bars cover are set as
+// words of their own, since a single letter standing for a module is a word to
+// anything that reads by white space.
+func sunder(toks []token, r pdfsrc.Rule, words []pdfsrc.Word) []token {
+	if len(words) == 0 {
+		return toks
+	}
+	span := [2]int{r.Left, r.Right()}
+	at := -1
+	for i, t := range toks {
+		if within([2]int{t.left, t.right}, span) {
+			// Something already lines up with the bar, so there is nothing
+			// here to cut and laden can read it as it stands.
+			return toks
+		}
+		if t.left <= r.Left && t.right >= r.Right() {
+			if at >= 0 {
+				// Two tokens both hold the bar, which means they are drawn one
+				// over the other rather than side by side, and which of them
+				// the bar belongs to is not a question white space answers.
+				return toks
+			}
+			at = i
+		}
+	}
+	if at < 0 {
+		return toks
+	}
+	held, head, tail, ok := spelt(toks[at], words)
+	if !ok {
+		return toks
+	}
+	first, last := -1, -1
+	for i, w := range held {
+		if !within([2]int{w.Left, w.Right()}, span) {
+			continue
+		}
+		if first < 0 {
+			first = i
+		}
+		last = i
+	}
+	if first < 0 {
+		return toks
+	}
+	// A piece the words do not reach the edge of is a piece with no edge to
+	// give, and the edges are what the reading puts the spaces back from: two
+	// pieces whose boxes meet are written with nothing between them. So a run
+	// that begins or ends inside a word of the page is only cut where the
+	// straddling part is on the far side of a word from the bar.
+	if (first == 0 && head != "") || (last == len(held)-1 && tail != "") {
+		return toks
+	}
+	ends, opens := held[first].Left, held[last].Right()
+	if first > 0 {
+		ends = held[first-1].Right()
+	}
+	if last+1 < len(held) {
+		opens = held[last+1].Left
+	}
+	cut := []token{
+		lump(toks[at], head, held[:first], toks[at].left, ends),
+		lump(toks[at], "", held[first:last+1], held[first].Left, held[last].Right()),
+		lump(toks[at], tail, held[last+1:], opens, toks[at].right),
+	}
+	var out []token
+	for _, c := range cut {
+		if c.text != "" {
+			out = append(out, c)
+		}
+	}
+	if len(out) < 2 {
+		return toks
+	}
+	return append(append(append([]token(nil), toks[:at]...), out...), toks[at+1:]...)
+}
+
+// spelt is the words of the page that stand inside a token and spell what it
+// says, with whatever of the token they leave over at each end.
+//
+// Two things have to hold. The words have to be the ones drawn where the token
+// is, which is a box test up and down as well as across, since a script hanging
+// off the line is a word of the page like any other and is not part of the run
+// the base was set in. And the words joined by the single space that stands
+// between them have to spell a stretch of the token, on its word boundaries.
+// The second is what makes the first safe: a word gathered in by mistake breaks
+// the spelling and the whole thing is dropped.
+//
+// A stretch and not the whole, because a word of the page can straddle two runs.
+// The line of page 177 of Algebra VIII that reads "and let P be the A/a-module"
+// changes font in the middle of "A/a-module", so pdftotext calls the whole of it
+// one word and pdftohtml ends the run after the A. The words wholly inside that
+// run then spell it up to but not including the A, which is still enough to say
+// where the second P of the run stands, and the A is carried along on the end of
+// whatever piece it falls in.
+func spelt(t token, words []pdfsrc.Word) ([]pdfsrc.Word, string, string, bool) {
+	// wordSlack is how far a word may stand outside the box of the run it
+	// belongs to. Both programs round a box to whole pixels and they round
+	// different numbers, so the edges land a unit either way.
+	const wordSlack = 2
+	var held []pdfsrc.Word
+	for _, w := range words {
+		if w.Left < t.left-wordSlack || w.Right() > t.right+wordSlack {
+			continue
+		}
+		if w.Bottom() <= t.top+wordSlack || w.Top >= t.bottom-wordSlack {
+			continue
+		}
+		held = append(held, w)
+	}
+	if len(held) == 0 {
+		return nil, "", "", false
+	}
+	sort.SliceStable(held, func(i, j int) bool { return held[i].Left < held[j].Left })
+	var b strings.Builder
+	for i, w := range held {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(Unligature(w.Text))
+	}
+	join, txt := b.String(), strings.TrimRight(t.text, " ")
+	at := strings.Index(txt, join)
+	if at < 0 {
+		return nil, "", "", false
+	}
+	if strings.Contains(txt[at+1:], join) {
+		// The same words twice over in the one run, so which of the two the
+		// boxes belong to is not something the spelling says.
+		return nil, "", "", false
+	}
+	end := at + len(join)
+	if (at > 0 && txt[at-1] != ' ') || (end < len(txt) && txt[end] != ' ') {
+		return nil, "", "", false
+	}
+	return held, strings.TrimRight(txt[:at], " "), strings.TrimLeft(txt[end:], " "), true
+}
+
+// lump is the part of a token a stretch of its words makes up, with whatever of
+// the token was left over at that end written in beside them.
+//
+// Everything but the text and the two edges is carried over. The class, the
+// level and the depth are properties of the run the token came from and cutting
+// the run does not change any of them, and the band up and down is the band of
+// the line the run was set on rather than of the letters that happen to be in
+// this part of it.
+func lump(t token, over string, words []pdfsrc.Word, left, right int) token {
+	var parts []string
+	if over != "" && left == t.left {
+		parts = append(parts, over)
+	}
+	for _, w := range words {
+		parts = append(parts, Unligature(w.Text))
+	}
+	if over != "" && left != t.left {
+		parts = append(parts, over)
+	}
+	t.text = strings.Join(parts, " ")
+	t.left, t.right = left, right
+	return t
+}
+
+// spread gives each line the words of the page that were drawn on it.
+//
+// A word goes to the line whose band it overlaps, which is the same test rows
+// uses to gather the runs, and to only one line: two lines that overlap are two
+// halves of a display and a word belongs to whichever of them holds the type it
+// was set in. Where a word overlaps more than one, the line whose band holds
+// most of it takes it, since a script hanging off the line above reaches down
+// into this one and is a word of the line it hangs off.
+func spread(lines []Line, words []pdfsrc.Word) {
+	if len(words) == 0 {
+		return
+	}
+	for _, w := range words {
+		best, most := -1, 0
+		for i, l := range lines {
+			if w.Right() <= l.Left || w.Left >= l.Right {
+				continue
+			}
+			n := min(w.Bottom(), l.Bottom) - max(w.Top, l.Top)
+			if n > most {
+				best, most = i, n
+			}
+		}
+		if best < 0 {
+			continue
+		}
+		lines[best].Words = append(lines[best].Words, w)
+	}
+}
