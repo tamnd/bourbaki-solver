@@ -109,9 +109,10 @@ func (m *Map) Validate() []Problem {
 			before.Page == c.Fitted-1 && after.Page == c.Fitted+1 &&
 			before.Chapter == c.Chapter && after.Chapter == c.Chapter
 		if !ok {
+			read, fitted := c.Pages()
 			probs = append(probs, Problem{PDFPage: c.PDFPage,
-				Detail: fmt.Sprintf("reading %d was overruled by %d without both neighbours confirming it",
-					c.Read, c.Fitted)})
+				Detail: fmt.Sprintf("reading %s was overruled by %s without both neighbours confirming it",
+					read, fitted)})
 		}
 	}
 	return probs

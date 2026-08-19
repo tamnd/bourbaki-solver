@@ -220,3 +220,86 @@ func TestAContentsErratumThatWouldGoUnreadIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// A running head is corrected against the PDF page it is printed on, because a
+// mangled head is not unique in a volume the way a contents line is.
+func TestTheRunningHeadsOfAVolumeAreCorrectedByPage(t *testing.T) {
+	root := writeErrata(t, `heads:
+    - book: alg-iv-vii-fr
+      errata:
+        - pdf_page: 370
+          says: A V I . 37
+          read: A VII.37
+          why: the scan lost a stroke off the numeral
+`)
+	m, err := LoadErrata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := m.HeadErrata("alg-iv-vii-fr")
+	if len(got) != 1 || got[0].PDFPage != 370 || got[0].Read != "A VII.37" {
+		t.Fatalf("the head errata of alg-iv-vii-fr are %+v", got)
+	}
+	if len(m.HeadErrata("alg-i-iii-fr")) != 0 {
+		t.Error("a volume with no head errata got some")
+	}
+}
+
+// The same failure mode again: written down, never applied.
+func TestAHeadErratumThatWouldGoUnreadIsRefused(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"no book", `heads:
+    - errata:
+        - {pdf_page: 1, says: a, read: b, why: c}
+`, "no book"},
+		{"nothing to correct", `heads:
+    - book: alg-x-fr
+      errata: []
+`, "list no errata"},
+		{"no page", `heads:
+    - book: alg-x-fr
+      errata:
+        - {says: a, read: b, why: c}
+`, "which pdf page"},
+		{"page twice", `heads:
+    - book: alg-x-fr
+      errata:
+        - {pdf_page: 7, says: a, read: b, why: c}
+        - {pdf_page: 7, says: d, read: e, why: f}
+`, "entered twice"},
+		{"nothing said", `heads:
+    - book: alg-x-fr
+      errata:
+        - {pdf_page: 7, read: b, why: c}
+`, "what the head says"},
+		{"reads the same", `heads:
+    - book: alg-x-fr
+      errata:
+        - {pdf_page: 7, says: a, read: a, why: c}
+`, "what the head says"},
+		{"no reason", `heads:
+    - book: alg-x-fr
+      errata:
+        - {pdf_page: 7, says: a, read: b}
+`, "no reason"},
+		{"book twice", `heads:
+    - book: alg-x-fr
+      errata:
+        - {pdf_page: 7, says: a, read: b, why: c}
+    - book: alg-x-fr
+      errata:
+        - {pdf_page: 8, says: d, read: e, why: f}
+`, "entered twice"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := LoadErrata(writeErrata(t, c.body))
+			if err == nil {
+				t.Fatal("no error")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("the error does not say %q: %v", c.want, err)
+			}
+		})
+	}
+}
