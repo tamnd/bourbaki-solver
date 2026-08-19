@@ -432,8 +432,23 @@ func m06(c *Corpus) ([]Finding, error) {
 // copy, compare, or translate. It was 138 spans in 66 pages of chapter VIII
 // when it was found, and bourbaki fix parens repaired every one it could reach.
 //
-// Three are left and they are all in one exercise, VIII, A2, Exercise 4, and
-// they are not this fault so much as the shadow of another one. The page they
+// The rule read one shape then, the bracket standing against the delimiter with
+// nothing between them, and it was reading a fraction of the fault. The name
+// commonly takes an argument of its own, so the bracket that comes through as
+// prose is the outer one and something stands between it and the delimiter:
+// Card(I$_L)$, (resp. de $\widehat{G})$, (cf. INT, VIII, §2, n$^o6)$, (PF$_1)$.
+// Across the whole corpus 2832 English and 1732 French spans close a bracket
+// they never opened, and it was the shape that stopped the translation of A VIII
+// section 2 on a chunk of seventy-two characters. What the shapes have in common
+// is not where the bracket sits, it is that the prose of the line is holding a
+// bracket open where the span starts, and that is what mathtex now tests. On the
+// pages as they stand it is 3161 spans in 1201 of 3398 pages, and fix parens
+// repairs them without reading a printed page, because nothing but a delimiter
+// moves and the body with the delimiters taken out has to come back unchanged.
+//
+// Three are left over from the narrow rule and they are all in one exercise,
+// VIII, A2, Exercise 4, and they are not this fault so much as the shadow of
+// another one. The page they
 // come from is p. 477, where a display arrived from the text layer without its
 // opening delimiter, so from line 7 to the foot of the page there is one span
 // that never closes and the repair cannot see where any of the mathematics
