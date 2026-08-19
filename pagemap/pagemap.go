@@ -300,8 +300,16 @@ var (
 	// is the wrong one: the Elements of the History of Mathematics heads its
 	// index "Index" and its bibliography "BIBLIOGRAPHY", and four pages of that
 	// volume have a page number nothing else in the file can supply.
-	headLeadRe  = regexp.MustCompile(`^\s*(\d{1,4})\s{` + headGapMin + `,}`)
-	headTrailRe = regexp.MustCompile(`\s{` + headGapMin + `,}(\d{1,4})\s*$`)
+	//
+	// Both edges admit the spaces the scan puts inside the number, as
+	// headLabelRe does, and it is the gap that keeps that from swallowing the
+	// rest of the line: the digits have to run out before the two spaces begin.
+	// The exercise heads of the French printings are where this matters. They
+	// set the section at the inner edge and the page at the outer one, and the
+	// outer one is the one the scan breaks: "54    EXERCICES    24 1" is page
+	// 241 and was read as page 54, because 24 1 is not a number and 54 is.
+	headLeadRe  = regexp.MustCompile(`^\s*(\d[\d ]{0,5}?)\s{` + headGapMin + `,}`)
+	headTrailRe = regexp.MustCompile(`\s{` + headGapMin + `,}(\d[\d ]{0,5}?)\s*$`)
 
 	// headChapterRe reads the chapter numeral a head prints in words. The English
 	// Functions of a Real Variable prints "Ch. I" and this was written for that
@@ -369,11 +377,24 @@ func readHeadLabel(line string) (prefix, chapter string, page int, ok bool) {
 	return m[1], chapter, p, true
 }
 
-// readHeadNumber finds a bare page number at either edge of a running head, and
-// the chapter numeral if the head prints one.
+// readEdgeNumber reads the number at one edge of a running head. No volume in
+// the library runs past four digits, and the edge patterns admit the spaces the
+// scan puts inside a number, so the count is checked here rather than left to
+// the pattern.
+func readEdgeNumber(m []string) (int, bool) {
+	if m == nil {
+		return 0, false
+	}
+	s := strings.Join(strings.Fields(m[1]), "")
+	if len(s) > 4 {
+		return 0, false
+	}
+	return readNumber(s)
+}
+
 // readHeadNumber returns the number at the edge the line most likely prints the
-// page at, and, where both edges carry one, the other as an alternative for the
-// fit to choose between.
+// page at, the chapter numeral if the head prints one, and, where both edges
+// carry a number, the other as an alternative for the fit to choose between.
 func readHeadNumber(line string) (chapter string, page, alt int, ok bool) {
 	if c := headChapterRe.FindStringSubmatch(line); c != nil {
 		ch := strings.ToUpper(romanFixer.Replace(strings.Join(strings.Fields(c[1]), "")))
@@ -381,14 +402,8 @@ func readHeadNumber(line string) (chapter string, page, alt int, ok bool) {
 			chapter = ch
 		}
 	}
-	lead, hasLead := 0, false
-	if m := headLeadRe.FindStringSubmatch(line); m != nil {
-		lead, hasLead = readNumber(m[1])
-	}
-	trail, hasTrail := 0, false
-	if m := headTrailRe.FindStringSubmatch(line); m != nil {
-		trail, hasTrail = readNumber(m[1])
-	}
+	lead, hasLead := readEdgeNumber(headLeadRe.FindStringSubmatch(line))
+	trail, hasTrail := readEdgeNumber(headTrailRe.FindStringSubmatch(line))
 	// A head that names its chapter is a verso, and a verso prints the page at
 	// the inner edge and the locator at the outer one: "10  MESURES SUR LES
 	// ESPACES TOPOLOGIQUES SEPARES  Ch. IX, § 1". The number at the end of such

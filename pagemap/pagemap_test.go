@@ -133,6 +133,15 @@ func TestReadHeadNumber(t *testing.T) {
 		// is the page, so both come back and the fit decides. It is 129.
 		{" 83                                                   EXERCICES                                   129", "", 83, 129, true},
 		{"94                                           EXERCICES                                              133", "", 94, 133, true},
+		// The exercise heads of the French printings set the section at the inner
+		// edge and the page at the outer one, and the outer one is the one the
+		// scan breaks. Page 109 of Integration chapitre 9 shipped as page 85 for
+		// as long as the number had to be an unbroken run of digits.
+		{" 85                                         EXERCICES                                            1 09", "", 85, 109, true},
+		{"54                               EXERCICES                                24 1", "", 54, 241, true},
+		// Four digits is as far as any volume in the library goes, and the spaces
+		// the scan inserts are not a way round that.
+		{"12 345                          EXERCICES", "", 0, 0, false},
 		// Prose is not a running head. Every one of these was read as a page.
 		{"Reimpression inchangee de l'edition originale de 1959", "", 0, 0, false},
 		{"(no 7). Lorsque @ est bilineaire, Q, est l'image reciproque de 5", "", 0, 0, false},
