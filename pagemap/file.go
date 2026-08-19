@@ -40,8 +40,16 @@ func (m *Map) Save(root string) error {
 	if m.FirstPage != 0 {
 		first = " first_page=" + strconv.Itoa(m.FirstPage)
 	}
-	fmt.Fprintf(&b, "# book=%s grammar=%s pagination=%s%s%s pdf_pages=%d\n",
-		m.Book, m.Grammar, m.Pagination, prefix, first, m.PDFPages)
+	restarts := ""
+	if len(m.Restarts) > 0 {
+		var pages []string
+		for _, r := range m.Restarts {
+			pages = append(pages, strconv.Itoa(r))
+		}
+		restarts = " restarts=" + strings.Join(pages, ",")
+	}
+	fmt.Fprintf(&b, "# book=%s grammar=%s pagination=%s%s%s%s pdf_pages=%d\n",
+		m.Book, m.Grammar, m.Pagination, prefix, first, restarts, m.PDFPages)
 	fmt.Fprintln(&b, tsvHeader)
 	for _, e := range m.Entries {
 		page := ""
@@ -66,6 +74,8 @@ type Report struct {
 	Grammar     Grammar        `json:"grammar"`
 	Pagination  Pagination     `json:"pagination"`
 	Prefix      string         `json:"prefix,omitempty"`
+	FirstPage   int            `json:"first_page,omitempty"`
+	Restarts    []int          `json:"restarts,omitempty"`
 	PDFPages    int            `json:"pdf_pages"`
 	BodyPages   int            `json:"body_pages"`
 	FrontMatter int            `json:"front_matter_pages"`
@@ -92,6 +102,7 @@ func (m *Map) Report() Report {
 	body := m.BodyPages()
 	r := Report{
 		Book: m.Book, Grammar: m.Grammar, Pagination: m.Pagination,
+		FirstPage: m.FirstPage, Restarts: m.Restarts,
 		PDFPages: m.PDFPages, BodyPages: body, FrontMatter: m.PDFPages - body,
 		Counts: counts, Chapters: m.Chapters, Steps: m.Steps,
 		Conflicts: m.Conflicts, Gaps: m.Gaps,
@@ -139,6 +150,14 @@ func Load(root, book string) (*Map, error) {
 				case "first_page":
 					if m.FirstPage, err = strconv.Atoi(v); err != nil {
 						return nil, fmt.Errorf("%s: bad first_page in %q", Path(root, book), line)
+					}
+				case "restarts":
+					for _, p := range strings.Split(v, ",") {
+						n, err := strconv.Atoi(p)
+						if err != nil {
+							return nil, fmt.Errorf("%s: bad restarts in %q", Path(root, book), line)
+						}
+						m.Restarts = append(m.Restarts, n)
 					}
 				}
 			}

@@ -58,6 +58,19 @@ type Book struct {
 	// after reading the printing, not detected, because a missing leaf and a
 	// wrong offset look the same in the file.
 	FirstPage int `yaml:"first_page,omitempty"`
+	// Restarts are the PDF pages where the printed numbering starts over,
+	// because the file holds more than one separately paginated fascicule.
+	// Varietes differentielles et analytiques is two of them bound together,
+	// paragraphes 1 a 7 and paragraphes 8 a 15, and its pdf page 96 carries the
+	// divider for the second and is printed page 6 of it, right after pdf 95
+	// which is printed 98 of the first. A printed number that goes backwards is
+	// otherwise a fit that has slipped, so the page map refuses one unless the
+	// volume says here that it is a restart, and it has to be said by hand for
+	// the same reason first_page is.
+	//
+	// A volume with a restart prints two of most of its page numbers, and there
+	// is nothing to be done about that: it really does have two page 50s.
+	Restarts []int `yaml:"restarts,omitempty"`
 	// Introduction is the Book's own introduction, where it has one, and is
 	// empty where it has not.
 	Introduction *Introduction `yaml:"introduction,omitempty"`

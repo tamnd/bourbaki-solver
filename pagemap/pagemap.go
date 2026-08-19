@@ -30,6 +30,7 @@ package pagemap
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -185,7 +186,10 @@ type Map struct {
 	// FirstPage is the printed page the file opens on, where the scan does not
 	// start at the beginning of the volume. See Options.FirstPage.
 	FirstPage int
-	PDFPages  int
+	// Restarts are the PDF pages where the printed numbering starts over. See
+	// Options.Restarts.
+	Restarts []int
+	PDFPages int
 	Entries   []Entry // one per PDF page, Entries[i].PDFPage == i+1
 	Chapters  []Span
 	Steps     []Step
@@ -215,6 +219,17 @@ type Options struct {
 	// to say it: nothing in the file distinguishes a missing leaf from a wrong
 	// offset.
 	FirstPage int
+	// Restarts are the PDF pages where the printed numbering starts over,
+	// because the file holds more than one separately paginated fascicule.
+	//
+	// The fitter finds the change of offset on its own, since a fascicule that
+	// starts over is a long stretch of pages agreeing on a new one, but it
+	// cannot tell where the new fascicule begins: the pages between the last
+	// number of the old and the first of the new carry no head, and the divider
+	// and the front matter behind it are exactly those pages. Nor can anything
+	// downstream tell a restart from a fit that slipped, which is the same
+	// backwards jump. Both are what the page named here settles.
+	Restarts []int
 }
 
 // DefaultMinRun is the run length that separates a step in the printing from a
@@ -970,7 +985,8 @@ func Build(pages []string, opt Options) (*Map, error) {
 		}
 	}
 	m := &Map{Book: opt.Book, Grammar: opt.Grammar, Pagination: opt.Pagination,
-		Prefix: prefix, FirstPage: opt.FirstPage, PDFPages: len(pages)}
+		Prefix: prefix, FirstPage: opt.FirstPage, Restarts: opt.Restarts,
+		PDFPages: len(pages)}
 
 	var covers []cover
 	switch opt.Pagination {
@@ -1057,14 +1073,14 @@ func Build(pages []string, opt Options) (*Map, error) {
 		m.Entries[i] = e
 	}
 	m.Chapters = chapterSpans(m.Entries, opt.Chapters)
-	m.Steps = findSteps(covers)
+	m.Steps = findSteps(covers, opt.Restarts)
 	m.Gaps = findGaps(m.Entries)
 	return m, nil
 }
 
 // findSteps reports where the offset changes between two touching stretches,
 // and which printed page numbers fall in the crack.
-func findSteps(covers []cover) []Step {
+func findSteps(covers []cover, restarts []int) []Step {
 	var steps []Step
 	for i := 1; i < len(covers); i++ {
 		prev, next := covers[i-1], covers[i]
@@ -1074,6 +1090,13 @@ func findSteps(covers []cover) []Step {
 		// A chapter boundary is not a step: per-chapter numbering restarts, so
 		// the offset is expected to change there.
 		if prev.chapter != next.chapter {
+			continue
+		}
+		// Neither is the start of a new fascicule, for the same reason. A step
+		// is the printing carrying a leaf the file does not, and reading one
+		// off a restart would put every page of the fascicule that ended into
+		// the missing list.
+		if slices.Contains(restarts, next.from) {
 			continue
 		}
 		s := Step{AtPDFPage: next.from, Chapter: next.chapter,
@@ -1194,7 +1217,32 @@ func coverContinuous(as []anchor, pdfPages int, starts map[int]string, opt Optio
 			covers = append(covers, cover{from: c, to: end, offset: s.offset, chapter: chapterAt(c)})
 		}
 	}
-	return closeCracks(openersGoRight(covers, startPages))
+	return closeCracks(restartsGoRight(openersGoRight(covers, startPages), opt.Restarts))
+}
+
+// restartsGoRight hands the front matter of a new fascicule to the fascicule it
+// belongs to.
+//
+// The pages between the last numbered page of one fascicule and the first of
+// the next are its divider, its half title and its notations, and none of them
+// carries a running head. Left to closeCracks they would all go to the left,
+// which is the rule for a crack where the offset rises and is right when the
+// rise is unnumbered leaves at the end of a chapter. It is wrong here: those
+// pages are printed pages 6 and 7 of the fascicule beginning, not 99 and 100 of
+// the one that ended. Varietes differentielles et analytiques puts its
+// DEUXIEME PARTIE divider on pdf 96 and the first head of the second fascicule
+// on pdf 98, and the volume names 96.
+func restartsGoRight(covers []cover, restarts []int) []cover {
+	for i := 0; i+1 < len(covers); i++ {
+		cur, next := &covers[i], &covers[i+1]
+		for _, r := range restarts {
+			if r > cur.to && r < next.from {
+				next.from = r
+				break
+			}
+		}
+	}
+	return covers
 }
 
 // openersGoRight hands a chapter opener that fell between two fitted stretches

@@ -89,6 +89,7 @@ func pagemapBuild(args []string) error {
 			Pagination: pagemap.Pagination(*pagination),
 			MinRun:     *minRun,
 			FirstPage:  b.FirstPage,
+			Restarts:   b.Restarts,
 		})
 		if err != nil {
 			return err
@@ -178,6 +179,14 @@ func printPagemap(pm *pagemap.Map) {
 	for _, s := range r.Steps {
 		fmt.Printf("  offset steps at pdf %d, printed page %v is not in the file\n",
 			s.AtPDFPage, s.MissingPages)
+	}
+	for _, p := range r.Restarts {
+		e, ok := pm.Lookup(p)
+		if !ok {
+			fmt.Printf("  the numbering restarts at pdf %d, which is not in the file\n", p)
+			continue
+		}
+		fmt.Printf("  the numbering restarts at pdf %d, printed page %d\n", p, e.Page)
 	}
 	if n := len(r.Conflicts); n > 0 {
 		fmt.Printf("  %d readings disagree with the fit, first few:\n", n)

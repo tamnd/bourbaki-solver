@@ -137,3 +137,48 @@ func TestTheHeaderCarriesWhereTheScanBegins(t *testing.T) {
 		t.Error("a scan that starts at the beginning wrote a first page anyway")
 	}
 }
+
+// The restarts have to survive the round trip for the same reason the first
+// page does: Validate runs against a map loaded from disk, and without them the
+// one place the numbering is allowed to go backwards reads as the fit slipping.
+func TestTheHeaderCarriesWhereTheNumberingStartsOver(t *testing.T) {
+	root := t.TempDir()
+	m, err := Build(perChapterVolume(), Options{Book: "mini", Chapters: []string{"IV"},
+		Restarts: []int{3, 5}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(Path(root, "mini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "restarts=3,5") {
+		t.Errorf("the header does not say where the numbering starts over:\n%s",
+			strings.SplitN(string(b), "\n", 3)[1])
+	}
+	back, err := Load(root, "mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(back.Restarts) != 2 || back.Restarts[0] != 3 || back.Restarts[1] != 5 {
+		t.Errorf("the restarts came back as %v, want [3 5]", back.Restarts)
+	}
+	// A volume that numbers itself once through writes nothing.
+	plain, err := Build(perChapterVolume(), Options{Book: "plain", Chapters: []string{"IV"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plain.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(Path(root, "plain"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "restarts") {
+		t.Error("a volume numbered once through wrote a restart anyway")
+	}
+}
