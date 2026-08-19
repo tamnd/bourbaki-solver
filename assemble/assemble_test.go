@@ -527,7 +527,7 @@ func TestMends(t *testing.T) {
 		prev, next string
 		want       bool
 	}{
-		// The 89 junctions this places are all of this shape: the page before
+		// The 88 junctions this places are all of this shape: the page before
 		// stops in the middle of a sentence and the page after picks it up.
 		{"for example undetermined letters. To", "simplify the exposition it is", true},
 		{"then $S_1$ is weakly compa-", "tible in $z$ and $t$", true},
@@ -536,8 +536,14 @@ func TestMends(t *testing.T) {
 		{"determined by this condition.*", "the next thing", false},
 		{"(VIII, p. 267, exerc. 11).", "the next thing", false},
 		{"$$x = y$$", "the next thing", false},
-		// A capital is where this stops, and it costs eight sentences broken at
-		// a word set as mathematics to keep seven junctions from being run
+		// A stop set as mathematics is still a stop. Exercise 11 of § 7 of Lie
+		// VIII ends its page on a colon inside the dollars and the page after
+		// opens on the sum the colon introduces, and the dollar on the end hid
+		// the one thing that said not to join them.
+		{"with coefficients in $\\mathbf{Q}[\\Delta ]$)$:$", "$$P = \\sum a_i$$", false},
+		{"in a variable T$:$", "the next thing", false},
+		// A capital is where this stops, and it costs seven sentences broken at
+		// a word set as mathematics to keep fourteen junctions from being run
 		// together. See the note on mends.
 		{"be the relations of the form", "$S_{i_1}$ and $S_{i_2}$", false},
 		{"We have a commutative diagram", "ZL$^2(G)$", false},

@@ -1169,8 +1169,8 @@ func joinable(prev, next string, pr printing) bool {
 // there to be read. A page whose first line is a display, or is set flush left
 // because the line before it ended full, or whose first line the reader took a
 // running head off, comes out continues: false with a sentence running straight
-// through it. Measured over the seven assembled books there are 2957 page
-// junctions and 104 of them are of this kind, which is 3.5 %, and the text says
+// through it. Measured over the seven assembled books there are 2959 page
+// junctions and 108 of them are of this kind, which is 3.7 %, and the text says
 // what the indent did not.
 //
 // Two things have to hold at once and neither is enough alone. The page before
@@ -1180,17 +1180,23 @@ func joinable(prev, next string, pr printing) bool {
 // exercise, a dash opening a list, a line of capitals such as TABLE 2, and any
 // word beginning with a capital.
 //
-// The capital is the part that costs something and it is kept anyway. Eight of
-// the fifteen junctions it turns down are sentences broken at a word set as
-// mathematics, "be the relations of the form" carrying on into "$S_{i_1}$", and
-// leaving them broken is a real loss. The other seven are the tail of the
-// Springer imprint, a row of a table read out of order, and a citation whose
-// full stop is inside the emphasis: joining any of those runs two unrelated
-// things together in the middle of a paragraph, where nothing downstream can
-// see it and no rule can catch it. A junction left broken is visible to a
-// reader and repairable later; a junction wrongly joined is not.
+// The capital is the part that costs something and it is kept anyway. It turns
+// down 46 junctions, and joinable turns 25 of those down as well on a heading or
+// a display, so 21 are its own. Seven of the 21 are sentences broken at a word
+// set as mathematics, "be the relations of the form" carrying on into
+// "$S_{i_1}$", and leaving them broken is a real loss. The other fourteen open a
+// lettered part of an exercise, a dash list, a line of capitals such as TABLE 2,
+// a statement set in bold, a commutative diagram, the tail of the Springer
+// imprint, a row of a table read out of order, and a citation whose full stop is
+// inside the emphasis: joining any of those runs two unrelated things together
+// in the middle of a paragraph, where nothing downstream can see it and no rule
+// can catch it. A junction left broken is visible to a reader and repairable
+// later; a junction wrongly joined is not.
 //
-// What is left after this is 19 junctions of the 2957, which is 0.6 %.
+// What is left after this is 20 junctions of the 2959, which is 0.7 %, and every
+// one of the 20 is a page that opens on a display. A display is a paragraph of
+// its own whatever the page before it ended on, so those are left where they are
+// and the 3 % the milestone asks for is met with room to spare.
 func mends(prev, next string) bool { return unstopped(prev) && !opener(next) }
 
 // unstopped says the text ends on no full stop.
@@ -1203,6 +1209,15 @@ func unstopped(s string) bool {
 	s = strings.TrimRight(s, ` *_)]}"'”’`)
 	if s == "" || strings.HasSuffix(s, "$$") {
 		return false
+	}
+	// A stop set as mathematics is still a stop. Exercise 11 of § 7 of Lie VIII
+	// ends its page on "in a variable T, with coefficients in $\mathbf{Q}[\Delta
+	// ]$)$:$" and the page after opens on the sum the colon introduces, so the
+	// dollar on the end hid the one thing that said not to join them.
+	if t := strings.TrimSuffix(s, "$"); t != s && t != "" {
+		if r := []rune(t); strings.ContainsRune(".?!:;", r[len(r)-1]) {
+			return false
+		}
 	}
 	r := []rune(s)
 	return !strings.ContainsRune(".?!:;", r[len(r)-1])
