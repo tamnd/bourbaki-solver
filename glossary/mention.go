@@ -80,6 +80,16 @@ func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) 
 // not contain. Longest first and then out of the running is what a reader does:
 // the phrase is met as a phrase, and the word inside it is not a second term.
 //
+// A term claims every free occurrence it has and not merely its first. Stopping
+// at the first was enough to put the term in the list, which is all the caller
+// asks for, and it left the phrase's later occurrences unmasked for the word
+// inside them to claim. Exercise 9 of § 2 of Theory of Sets III is one sentence
+// long and says "well-ordered" twice and "ordered" never; the phrase claimed the
+// first, "ordered" claimed the second, and a Vietnamese rendering that says "được
+// sắp tốt" twice and is right was reported for not saying "có thứ tự". The
+// masking is the point of this function, so it has to be finished rather than
+// abandoned as soon as the answer is known.
+//
 // text must already be lower case, and it should be prose with the mathematics
 // taken out, because a term that only appears inside a formula is a term the
 // translator was told to copy rather than to render.
@@ -91,6 +101,7 @@ func (g Glossary) Mentioned(lang, text string) []Term {
 			continue
 		}
 		key := Key(t.EN)
+		mentions := false
 		for i := 0; i >= 0; {
 			j := FindMention(text, key, i)
 			if j < 0 {
@@ -98,10 +109,12 @@ func (g Glossary) Mentioned(lang, text string) []Term {
 			}
 			if free(masked, j, j+len(key)) {
 				claim(masked, j, j+len(key))
-				out = append(out, t)
-				break
+				mentions = true
 			}
 			i = j + 1
+		}
+		if mentions {
+			out = append(out, t)
 		}
 	}
 	return out

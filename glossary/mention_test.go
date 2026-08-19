@@ -59,6 +59,25 @@ func TestThePhraseClaimsTheWordInsideIt(t *testing.T) {
 	}
 }
 
+// The masking has to be finished. A phrase that appears twice used to claim the
+// first occurrence and stop, because that was already enough to put it in the
+// list, and the word inside the second occurrence was then free to claim it.
+//
+// Exercise 9 of § 2 of Theory of Sets III is where this was found. The whole
+// exercise is one sentence, it says "well-ordered" twice and "ordered" never,
+// and the Vietnamese says "được sắp tốt" twice and is right. The audit reported
+// it for not saying "có thứ tự".
+func TestAPhraseClaimsEveryOccurrenceOfItself(t *testing.T) {
+	g := Glossary{Terms: []Term{
+		{EN: "ordered", VI: "có thứ tự"},
+		{EN: "well-ordered", VI: "được sắp tốt"},
+	}}
+	got := g.Mentioned("vi", "the sum is well-ordered if and only if each term is well-ordered")
+	if len(got) != 1 || got[0].EN != "well-ordered" {
+		t.Errorf("got %v, want well-ordered alone", names(got))
+	}
+}
+
 // A term with no rendering in this language is not a term this language is held
 // to. The Vietnamese pass runs first, so most of the glossary is in exactly
 // that state for as long as Chinese and Japanese are unstarted.
