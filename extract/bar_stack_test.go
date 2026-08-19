@@ -406,3 +406,45 @@ func TestAnOverlineDoesNotJoinTheLineAboveIt(t *testing.T) {
 		t.Errorf("Render: %s, want the second printed line whole", got)
 	}
 }
+
+// footnoted carries the foot of page 10 of Lie 7 to 9: the last line of a
+// Proposition, the rule TeX draws to hang a note off it, and the first line of
+// the note. The rule is 0.398 points thick and 85 units wide, which puts it
+// inside the range that a fraction bar occupies on both counts, and prose stands
+// across the middle of it with the note under it. What says it is not a bar is
+// that it starts at the left margin of the type area, where the volumes never
+// set a display.
+var footnoted = pdfsrc.Page{
+	Number: 20, Width: 659, Height: 999,
+	Spans: []pdfsrc.Span{
+		{Top: 812, Left: 83, Width: 66, Height: 13, Font: 3, Text: "conditions"},
+		{Top: 812, Left: 155, Width: 19, Height: 13, Font: 3, Text: "(1)"},
+		{Top: 812, Left: 179, Width: 24, Height: 13, Font: 3, Text: "and"},
+		{Top: 812, Left: 208, Width: 19, Height: 13, Font: 3, Text: "(2)"},
+		{Top: 812, Left: 232, Width: 78, Height: 13, Font: 3, Text: "of Lemma 2"},
+		{Top: 812, Left: 315, Width: 255, Height: 13, Font: 3, Text: "; it is reductive."},
+		{Top: 838, Left: 83, Width: 5, Height: 10, Font: 2, Text: "1"},
+		{Top: 841, Left: 94, Width: 70, Height: 12, Font: 1, Text: "By Chap. I,"},
+		{Top: 841, Left: 169, Width: 76, Height: 12, Font: 1, Text: "6, no. 3, Th. 3,"},
+		{Top: 841, Left: 250, Width: 320, Height: 12, Font: 1, Text: "every element has a semi-simple part."},
+	},
+	Rules: []pdfsrc.Rule{
+		{Top: 834, Left: 83, Width: 85, Thickness: 0.398, Length: 56.60, Size: 4.1},
+	},
+}
+
+func TestAFootnoteRuleIsNotAFractionBar(t *testing.T) {
+	lines := Lines(enlay, footnoted)
+	if len(lines) != 2 {
+		for i, one := range lines {
+			t.Logf("line %d: %s", i, Render(one))
+		}
+		t.Fatalf("got %d lines, want 2", len(lines))
+	}
+	if got := Render(lines[0]); !strings.HasPrefix(got, "conditions") || !strings.HasSuffix(got, "it is reductive.") {
+		t.Errorf("Render: %s, want the last line of the Proposition and no more", got)
+	}
+	if got := Render(lines[1]); !strings.Contains(got, "By Chap. I,") {
+		t.Errorf("Render: %s, want the note whole", got)
+	}
+}

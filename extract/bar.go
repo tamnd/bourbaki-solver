@@ -140,7 +140,7 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 	}
 	across := typeArea(lines)
 	for _, r := range rules {
-		if !bar(r) || ruled(r, across) || overline(lines, r) || held(lines, r) {
+		if !bar(r) || ruled(r, across) || footed(r, lines) || overline(lines, r) || held(lines, r) {
 			continue
 		}
 		first, last := -1, -1
@@ -154,8 +154,22 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 				// Measured against the rule and not against the band,
 				// for the reason laden gives: a display fraction sets
 				// both halves at full size and the levels say nothing.
+				//
+				// The numerator has to sit close under the rule, and
+				// half the height of its own type is as far as it may
+				// be. TeX leaves a couple of units there and no more:
+				// the halves of the one half on page 200 of Lie VII to
+				// IX clear their bar by three units of thirteen, and so
+				// does the modulus of y under its bar on page 116 of
+				// Theories spectrales III to V. A whole line height is
+				// enough room for the line above to reach the bar, and
+				// that is what a closure bar drawn a unit or two over
+				// the top of the box it covers then reads as. Page 381
+				// draws the closure of D(G_beta) that way, took the
+				// sentence above it as a numerator, and folded three
+				// printed lines of Lemma 1 into one.
 				switch {
-				case run.Bottom() <= r.Top && r.Top-run.Bottom() <= run.Height:
+				case run.Bottom() <= r.Top && 2*(r.Top-run.Bottom()) <= run.Height:
 					over.add(run)
 				case run.Top >= r.Top && run.Top-r.Top <= run.Height:
 					below = true
@@ -304,6 +318,43 @@ func held(lines []Line, r pdfsrc.Rule) bool {
 // six units to seventy six. A table rule runs the width of the type area, 487
 // units on the same page. A third of the measure is nowhere near either of them.
 func ruled(r pdfsrc.Rule, across int) bool { return across > 0 && r.Width*3 >= across }
+
+// footed reports whether a light rule is the one that separates a footnote from
+// the page it hangs off rather than the bar of a fraction.
+//
+// Where it stands answers this and nothing else does. TeX sets the footnote rule
+// flush with the left edge of the type area, and a fraction bar is never there:
+// a fraction in prose stands wherever the words put it, and a fraction in a
+// display stands in a display, which these volumes indent. Sampled over the six
+// volumes with a text layer, no light rule within two units of the left margin
+// is the bar of anything.
+//
+// Page 10 of Lie VII to IX is the case. The footnote rule is drawn eighty five
+// units wide at the left margin, under the last line of Proposition 11 and over
+// the note that line carries the mark of. It is thin enough to pass bar and
+// short enough to pass ruled, the prose above it stands across the middle of it
+// and the note stands under it, so it was read as a fraction and the note was
+// folded into the middle of the sentence. Ten pages of the volume read that way.
+//
+// The sizes cannot be asked instead, which is the obvious alternative. Both
+// halves of a fraction come out at one size in TeX and a note is set smaller
+// than the page it hangs off, so the step in size looks like the test to make,
+// but the volumes print fractions whose halves are reported at two sizes: page
+// 116 of Theories spectrales III to V sets 2k over n with the numerator at full
+// size and the denominator at the size of a script. Refusing those costs seventy
+// seven fractions across the five volumes that had them right.
+func footed(r pdfsrc.Rule, lines []Line) bool {
+	// flush is how far off the margin the rule may be reported and still be
+	// the rule TeX set flush to it.
+	const flush = 2
+	left := 0
+	for i, l := range lines {
+		if i == 0 || l.Left < left {
+			left = l.Left
+		}
+	}
+	return len(lines) > 0 && r.Left <= left+flush
+}
 
 // typeArea is how wide the type of the page runs, taken from the lines
 // themselves because a rule knows nothing about the page it is drawn on. It is
