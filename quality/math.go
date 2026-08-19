@@ -448,17 +448,15 @@ func m06(c *Corpus) ([]Finding, error) {
 // all of them without reading a printed page, because nothing but a delimiter
 // moves and the body with the delimiters taken out has to come back unchanged.
 //
-// Three are left over from the narrow rule and they are all in one exercise,
-// VIII, A2, Exercise 4, and they are not this fault so much as the shadow of
-// another one. The page they
-// come from is p. 477, where a display arrived from the text layer without its
-// opening delimiter, so from line 7 to the foot of the page there is one span
-// that never closes and the repair cannot see where any of the mathematics
-// ends. The page is already one of M01's five. Assembling it cuts the page at
-// the exercise markers, which closes the run, and the straddles inside it
-// become visible in the section files where they were invisible in the page.
-// Repairing them means repairing p. 477 against the printed image, which is the
-// OCR repair pass and not a table.
+// Ten of them are in no page at all. A sentence that opens a bracket at the
+// foot of one page and closes it at the head of the next holds nothing open as
+// far as either page can see, and extraction reads one page and stops at the
+// edge of it, so the repair that reads pages has nothing to go on. The
+// assembled section is the first place the two halves stand on one line, so
+// assembly runs the repair over the body it has just joined. That is also what
+// keeps the corpus at a fixed point: assembly writes these files, so a repair
+// made to one by anything else is thrown away the next time the book is
+// assembled.
 //
 // The other case this will report is the one the repair refuses: a span closing
 // more brackets than its line has open. Moving those out would leave the line

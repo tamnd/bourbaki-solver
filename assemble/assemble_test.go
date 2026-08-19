@@ -117,6 +117,34 @@ func TestASectionOpeningOnAnUnnumberedPageStillHasItsPages(t *testing.T) {
 	}
 }
 
+// A sentence opens a bracket at the foot of one page and closes it at the head
+// of the next, and the closing bracket comes back from the text layer inside the
+// mathematics. Neither page holds the fault on its own: the first closes nothing
+// and the second opens nothing, so a repair that reads one page at a time has
+// nothing to go on and the assembled section is the first place it can be seen.
+// Ten spans across the corpus are this, among them the end of A VIII § 1
+// Exercise 15.
+func TestABracketTheJoinPutsBackComesOutOfTheMathematics(t *testing.T) {
+	ch, pages := smallChapter()
+	first := pages[18]
+	first.Body = strings.Replace(first.Body,
+		"2) Let M be an A-module with an infinite family of submodules. Then M is neither Artinian nor",
+		"2) Let M be an A-module with an infinite family of submodules. (Reduce to the case when M is", 1)
+	pages[18] = first
+	second := pages[19]
+	second.Body = strings.Replace(second.Body,
+		"Noetherian.", `faithful and conclude by induction on $n.)$`, 1)
+	pages[19] = second
+
+	got, err := Chapter("alg", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `by induction on $n.$)`; !strings.Contains(got[1].Body, want) {
+		t.Errorf("§ 1 does not read %q:\n%s", want, got[1].Body)
+	}
+}
+
 func TestChapter(t *testing.T) {
 	ch, pages := smallChapter()
 	got, err := Chapter("alg", "en", ch, pages)
