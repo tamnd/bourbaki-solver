@@ -974,3 +974,70 @@ func TestATranspositionThatCannotBeAppliedIsRefused(t *testing.T) {
 		})
 	}
 }
+
+// A reading with nothing around it to agree with is not the same thing as a
+// misread, and the arithmetic says which it is. These are the anchors of the
+// planches of Groupes et algebres de Lie chapitres 4 a 6: pdf 247 heads 248,
+// then eleven pages print no number at all, pdf 259 heads 262 and pdf 261 heads
+// 265.
+func TestALoneAnchorInsideAStepIsBelieved(t *testing.T) {
+	as := []anchor{
+		{pdfPage: 245, page: 246}, {pdfPage: 247, page: 248},
+		{pdfPage: 259, page: 262},
+		{pdfPage: 261, page: 265}, {pdfPage: 262, page: 266},
+	}
+	segs, outliers := fitOffsets(as, DefaultMinRun)
+	if len(outliers) != 0 {
+		t.Errorf("anchors %v were thrown away", outliers)
+	}
+	want := []int{-1, -3, -4}
+	if len(segs) != len(want) {
+		t.Fatalf("fit gave %v, want three stretches at %v", segs, want)
+	}
+	for i, off := range want {
+		if segs[i].offset != off {
+			t.Errorf("stretch %d is at offset %d, want %d", i, segs[i].offset, off)
+		}
+	}
+}
+
+// The rule is narrow on purpose. A reading that does not land inside a step the
+// fit already has is a misread and stays one.
+func TestALoneAnchorOutsideAStepIsStillAMisread(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		lone anchor
+	}{
+		// The 2003 scan of Algebra reads A.V.102 as "A. V. 3 02". Nothing
+		// steps around it and 302 is not between 101 and 103.
+		{"nothing steps here", anchor{pdfPage: 259, page: 302}},
+		// A reading past the far side of the step is not inside it.
+		{"past the step", anchor{pdfPage: 259, page: 267}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			as := []anchor{
+				{pdfPage: 245, page: 246}, {pdfPage: 247, page: 248},
+				c.lone,
+				{pdfPage: 261, page: 265}, {pdfPage: 262, page: 266},
+			}
+			_, outliers := fitOffsets(as, DefaultMinRun)
+			if len(outliers) != 1 || outliers[0] != 2 {
+				t.Errorf("outliers are %v, want the lone reading thrown away", outliers)
+			}
+		})
+	}
+}
+
+// Two readings in the same gap disagree with each other, since two that agreed
+// would have made a stretch of their own, and neither is taken.
+func TestTwoLoneAnchorsInTheSameGapAreBothMisreads(t *testing.T) {
+	as := []anchor{
+		{pdfPage: 245, page: 246}, {pdfPage: 247, page: 248},
+		{pdfPage: 253, page: 255}, {pdfPage: 259, page: 262},
+		{pdfPage: 261, page: 265}, {pdfPage: 262, page: 266},
+	}
+	_, outliers := fitOffsets(as, DefaultMinRun)
+	if len(outliers) != 2 {
+		t.Errorf("outliers are %v, want both readings thrown away", outliers)
+	}
+}

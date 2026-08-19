@@ -939,7 +939,82 @@ func fitOffsets(as []anchor, minRun int) (segs []segment, outliers []int) {
 		}
 		segs = append(segs, seg)
 	}
-	return segs, outliers
+	return believeLoneAnchors(as, segs, outliers)
+}
+
+// believeLoneAnchors takes back the outliers that are not misreads.
+//
+// The run rule is about misreads, and a misread is a page whose number came out
+// wrong while the pages around it came out right. It is not the only way an
+// anchor ends up alone. A stretch of pages that print no number at all, with
+// one that does in the middle of it, gives a reading with nothing to agree with
+// it however good the reading is, and throwing it away throws away the only
+// evidence there is about that part of the volume.
+//
+// What tells the two apart is arithmetic. The fit already has an offset before
+// the anchor and an offset after it, and between them the printing carries
+// pages the file does not. A reading that lands strictly inside that step is
+// consistent with everything the fit knows: it says the missing pages are not
+// all in one place, which is what a step of three pages across twelve normally
+// means. A misread lands anywhere, and the odds of it landing inside the step
+// and nowhere else are what makes this worth doing.
+//
+// Groupes et algebres de Lie chapitres 4 a 6 is the volume it is here for. Its
+// planches run from pdf 248 to pdf 270 and print a number on one page in
+// eleven: pdf 247 heads 248, pdf 259 heads 262 and pdf 261 heads 265. The fit
+// put the whole step of three at pdf 248, overruled the reading on 259 and
+// refused the volume. Two pages of the printing are missing before pdf 259 and
+// one after it, and the reading on 259 is what says so.
+//
+// Two outliers between the same pair of segments are two readings that disagree
+// with each other, since two that agreed would have made a segment of their
+// own, and neither is taken.
+func believeLoneAnchors(as []anchor, segs []segment, outliers []int) ([]segment, []int) {
+	var kept []int
+	var lone []segment
+	for n, i := range outliers {
+		if (n > 0 && between(segs, outliers[n-1]) == between(segs, i)) ||
+			(n+1 < len(outliers) && between(segs, outliers[n+1]) == between(segs, i)) {
+			kept = append(kept, i)
+			continue
+		}
+		b := between(segs, i)
+		if b < 0 {
+			kept = append(kept, i)
+			continue
+		}
+		lo, hi := segs[b].offset, segs[b+1].offset
+		off, ok := 0, false
+		for _, cand := range as[i].offsets() {
+			if (cand-lo)*(hi-cand) > 0 {
+				off, ok = cand, true
+				break
+			}
+		}
+		if !ok {
+			kept = append(kept, i)
+			continue
+		}
+		lone = append(lone, segment{first: i, last: i, offset: off})
+	}
+	if len(lone) == 0 {
+		return segs, outliers
+	}
+	segs = append(segs, lone...)
+	sort.Slice(segs, func(i, j int) bool { return segs[i].first < segs[j].first })
+	return segs, kept
+}
+
+// between is the index of the segment that ends before anchor i, where the one
+// that begins after it is the very next segment. It is -1 where the anchor is
+// in front of every segment, behind every segment, or inside one.
+func between(segs []segment, i int) int {
+	for k := 0; k+1 < len(segs); k++ {
+		if segs[k].last < i && i < segs[k+1].first {
+			return k
+		}
+	}
+	return -1
 }
 
 // runAgrees reports whether an offset has enough support at i to be believed as
