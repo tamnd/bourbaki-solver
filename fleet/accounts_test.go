@@ -67,13 +67,36 @@ func TestASlotFreeNowMeansNoWait(t *testing.T) {
 // the two are worth telling apart: one comes back on its own and the other one
 // comes back when --clean-stale is run.
 func TestALockedSlotIsNotABannedOne(t *testing.T) {
-	const table = `  10    a@example.invalid   ✓  locked pid=4471
+	// LOCKED is how the host writes it and stale-lock is how the host writes
+	// that, on the same table. This test read the first of them in lower case
+	// for as long as it has existed, which is why nothing here failed while the
+	// fleet was counting every locked slot as a slot ready for work.
+	const table = `  10    a@example.invalid   ✓  LOCKED pid=4471
   11    b@example.invalid   ✓  stale-lock pid=223643 (dead)`
 
 	board := ParseAccounts("server2", table)
-	if board.Locked != 1 || board.Stale != 1 || board.Banned != 0 {
-		t.Errorf("%d locked, %d stale, %d banned, want 1, 1, 0",
-			board.Locked, board.Stale, board.Banned)
+	if board.Locked != 1 || board.Stale != 1 || board.Banned != 0 || board.Ready != 0 {
+		t.Errorf("%d locked, %d stale, %d banned, %d ready, want 1, 1, 0, 0",
+			board.Locked, board.Stale, board.Banned, board.Ready)
+	}
+}
+
+// A host whose only slot that is not banned is held by another process has
+// nothing for the sweep, and what it costs to get that wrong is the whole
+// point of the board: Wait sleeps on no host that reads ready, so one slot
+// miscounted keeps the loop sending batches nobody can answer.
+func TestAHostHoldingItsLastSlotIsNotReady(t *testing.T) {
+	const table = `  10    a@example.invalid   ✓  BANNED (until 15:47, 0h7m left)
+  11    b@example.invalid   ✓  BANNED (until 17:33, 1h52m left)
+  18    c@example.invalid   ✓  LOCKED pid=185675`
+
+	board := ParseAccounts("server3", table)
+	if board.Verified != 3 || board.Ready != 0 || board.Locked != 1 || board.Banned != 2 {
+		t.Errorf("%d verified, %d ready, %d locked, %d banned, want 3, 0, 1, 2",
+			board.Verified, board.Ready, board.Locked, board.Banned)
+	}
+	if got := Wait([]Accounts{board}); got != 7*time.Minute {
+		t.Errorf("waiting %s, want 7m", got)
 	}
 }
 
