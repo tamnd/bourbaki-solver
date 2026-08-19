@@ -119,14 +119,48 @@ var metas = []string{
 // for saying it costs three reads at 151 seconds each and then lands in the
 // failures report as a defect that is not one.
 
-// prompts are the model handing back its instructions rather than the page.
-// This one is specific to how we ask, so it is kept apart from the general
+// prompts are the model handing back its instructions rather than the answer.
+// These are specific to how we ask, so they are kept apart from the general
 // narration above.
+//
+// The second group is the solve side. It cost six files: two solutions of the
+// Theory of Sets went into the corpus containing the repair prompt read back,
+// its headings, its rules and its placeholder tag line, and nothing else. They
+// came out unverified with "solution unintelligible" against every part, which
+// is the pipeline saying an answer failed where there was no answer to fail.
+// Every phrase here is a line of prompt/solve_correct.md or a heading it sets,
+// and none of them is a sentence the register of the book has room for.
 var prompts = []string{
 	"transcribe the complete text",
 	"render all mathematical expressions as latex",
 	"output only the raw transcribed content",
 	"do not summarize, paraphrase",
+
+	"the solution as it stands",
+	"what the judges said",
+	"do not write a list of changes",
+	"a note about what you fixed",
+	"uses: xxxx",
+	"xxxx and yyyy",
+}
+
+// thinking is the model handing back its reasoning rather than its answer.
+//
+// It is not narration and it is not a refusal. The model works out what it has
+// been asked, in the first person and in numbered steps, and stops before it
+// writes the thing it was working out. There is no answer under it at all,
+// which is what separates it from a meta line with a transcription following.
+//
+// The opener is the whole of what is looked for. A model that thinks out loud
+// says so at the top and then goes on for pages, and every line after the first
+// is ordinary English about the problem, which is also what a solution is made
+// of. Bourbaki does not open a proof by announcing a thinking process.
+var thinking = []string{
+	"here's a thinking process",
+	"here is a thinking process",
+	"here's my thinking process",
+	"here is my thinking process",
+	"let me think through this step by step",
 }
 
 // markup is the provider's own formatting, wrapped around an answer that is
@@ -190,6 +224,7 @@ func Check(text string) []Leak {
 		{"refusal", refusals},
 		{"no-image", noImage},
 		{"prompt", prompts},
+		{"thinking", thinking},
 		{"meta", metas},
 	}
 	for i, line := range strings.Split(text, "\n") {
