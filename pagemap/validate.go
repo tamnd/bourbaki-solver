@@ -28,6 +28,19 @@ func (p Problem) String() string {
 func (m *Map) Validate() []Problem {
 	var probs []Problem
 
+	// A fit that put every page of a volume in the front matter found nothing.
+	// It is worth saying because of how it comes out otherwise: none of the
+	// checks below has an entry to fail on, so an empty map passes them all and
+	// gets written, and from then on the volume counts as mapped. Nothing
+	// downstream then treats it as work still to do. The Algebre commutative
+	// chapitre 10 scan does exactly this, 222 pages of which 57 have been read
+	// and none carry a number the fitter could use.
+	if m.BodyPages() == 0 && len(m.Entries) > 0 {
+		probs = append(probs, Problem{
+			Detail: fmt.Sprintf("none of the %d pages was mapped, so the fit found nothing",
+				len(m.Entries))})
+	}
+
 	stepAt := map[int]Step{}
 	for _, s := range m.Steps {
 		stepAt[s.AtPDFPage] = s
