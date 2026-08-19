@@ -900,3 +900,77 @@ func TestTheFrontMatterOfTheSecondFasciculeGoesWithIt(t *testing.T) {
 		t.Errorf("validate found %v", probs)
 	}
 }
+
+// A scan whose leaves were bound the wrong way round is read in the order the
+// volume prints, and comes back in the order the file is in. Algebre chapitres
+// 4 a 7 in French is the case in hand: pdf 274 ends the exercices of chapter V
+// at printed 169 and pdf 273 opens the note historique at printed 170.
+func TestTwoLeavesBoundTheWrongWayRoundAreReadInPrintedOrder(t *testing.T) {
+	pages := []string{
+		head("CHAPTER V"),                  // 1, printed V.1
+		head("A.V.2   COMMUTATIVE FIELDS"), // 2
+		head("A.V.3   EXERCISES"),          // 3
+		head("A.V.5   EXERCISES"),          // 4, printed V.5, bound before V.4
+		head("HISTORICAL NOTE"),            // 5, printed V.4, no head on an opener
+		head("A.V.6   HISTORICAL NOTE"),    // 6
+		head("A.V.7   HISTORICAL NOTE"),    // 7
+	}
+	// Read in the file's own order the run breaks in the middle: two pages at
+	// one offset either side of two at another, and neither run long enough to
+	// carry the fit.
+	plain, err := Build(pages, Options{Book: "mini", Chapters: []string{"V"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probs := plain.Validate(); len(probs) == 0 {
+		t.Error("validate found nothing on a volume read in the wrong order")
+	}
+
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"V"},
+		Transposed: [][2]int{{4, 5}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		pdf, page  int
+		confidence Confidence
+	}{
+		{3, 3, FromHead}, {4, 5, FromHead}, {5, 4, Interpolated}, {6, 6, FromHead},
+	} {
+		e, ok := m.Lookup(c.pdf)
+		if !ok || e.Page != c.page || e.Confidence != c.confidence {
+			t.Errorf("pdf %d is printed %d %s, want %d %s",
+				c.pdf, e.Page, e.Confidence, c.page, c.confidence)
+		}
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("validate found %v", probs)
+	}
+	// The chapter is still one run of PDF pages: what moved is which printed
+	// number is on two of them.
+	if len(m.Chapters) != 1 || m.Chapters[0].LastPage != 7 || m.Chapters[0].LastPDF != 7 {
+		t.Errorf("the chapter came out as %v", m.Chapters)
+	}
+}
+
+func TestATranspositionThatCannotBeAppliedIsRefused(t *testing.T) {
+	for _, c := range []struct {
+		name, want string
+		swaps      [][2]int
+	}{
+		{"past the end", "outside the 5 pages", [][2]int{{4, 9}}},
+		{"before the beginning", "outside the 5 pages", [][2]int{{0, 2}}},
+		{"twice", "transposed twice", [][2]int{{2, 3}, {3, 4}}},
+		{"with itself", "with itself", [][2]int{{2, 2}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := printingOrder(5, c.swaps)
+			if err == nil {
+				t.Fatal("no error")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error is %q, want it to mention %q", err, c.want)
+			}
+		})
+	}
+}

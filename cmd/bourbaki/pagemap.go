@@ -82,6 +82,10 @@ func pagemapBuild(args []string) error {
 		if err := correctHeads(pages, errata.HeadErrata(b.ID)); err != nil {
 			return fmt.Errorf("%s: %w", b.ID, err)
 		}
+		swaps, err := transpositions(b)
+		if err != nil {
+			return err
+		}
 		pm, err := pagemap.Build(pages, pagemap.Options{
 			Book:       b.ID,
 			Chapters:   b.Chapters,
@@ -90,6 +94,7 @@ func pagemapBuild(args []string) error {
 			MinRun:     *minRun,
 			FirstPage:  b.FirstPage,
 			Restarts:   b.Restarts,
+			Transposed: swaps,
 		})
 		if err != nil {
 			return err
@@ -159,6 +164,24 @@ func correctHeads(pages []string, errata []corpus.PageErratum) error {
 	return nil
 }
 
+// transpositions is a volume's out of order leaves, checked here rather than in
+// the fitter because what the manifest can get wrong is the shape of the entry
+// and what the fitter can get wrong is the pages.
+func transpositions(b corpus.Book) ([][2]int, error) {
+	var out [][2]int
+	for _, t := range b.Transposed {
+		if len(t.Pages) != 2 {
+			return nil, fmt.Errorf("%s: a transposition names %d pdf pages, want 2", b.ID, len(t.Pages))
+		}
+		if strings.TrimSpace(t.Why) == "" {
+			return nil, fmt.Errorf("%s: the transposition of pdf %d and %d says no reason",
+				b.ID, t.Pages[0], t.Pages[1])
+		}
+		out = append(out, [2]int{t.Pages[0], t.Pages[1]})
+	}
+	return out, nil
+}
+
 func printPagemap(pm *pagemap.Map) {
 	r := pm.Report()
 	fmt.Printf("%s  %s  %s  %d pdf pages\n", pm.Book, pm.Grammar, pm.Pagination, pm.PDFPages)
@@ -179,6 +202,10 @@ func printPagemap(pm *pagemap.Map) {
 	for _, s := range r.Steps {
 		fmt.Printf("  offset steps at pdf %d, printed page %v is not in the file\n",
 			s.AtPDFPage, s.MissingPages)
+	}
+	for _, s := range r.Transposed {
+		fmt.Printf("  pdf %d and %d are bound the wrong way round and are read in that order\n",
+			s[0], s[1])
 	}
 	for _, p := range r.Restarts {
 		e, ok := pm.Lookup(p)

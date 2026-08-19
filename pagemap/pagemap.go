@@ -189,7 +189,10 @@ type Map struct {
 	// Restarts are the PDF pages where the printed numbering starts over. See
 	// Options.Restarts.
 	Restarts []int
-	PDFPages int
+	// Transposed are pairs of PDF pages the file carries the wrong way round.
+	// See Options.Transposed.
+	Transposed [][2]int
+	PDFPages   int
 	Entries   []Entry // one per PDF page, Entries[i].PDFPage == i+1
 	Chapters  []Span
 	Steps     []Step
@@ -230,6 +233,13 @@ type Options struct {
 	// downstream tell a restart from a fit that slipped, which is the same
 	// backwards jump. Both are what the page named here settles.
 	Restarts []int
+	// Transposed are pairs of PDF pages the file carries the wrong way round,
+	// because the leaves were bound out of order and the scan followed them.
+	//
+	// The pages are read in the order given here before anything else happens
+	// and put back in file order afterwards, so a map is still a thing you look
+	// a PDF page up in. See printingOrder for the volume this is here for.
+	Transposed [][2]int
 }
 
 // DefaultMinRun is the run length that separates a step in the printing from a
@@ -967,6 +977,35 @@ func Build(pages []string, opt Options) (*Map, error) {
 	if len(pages) == 0 {
 		return nil, fmt.Errorf("pagemap: no pages")
 	}
+	// Everything from here to the end of the fit works in printing order, the
+	// order the volume reads in, which is the file's own order except in a scan
+	// whose leaves were bound the wrong way round. The offsets are what the fit
+	// is about and they only mean anything in that order. The entries, the
+	// steps and the conflicts are put back into file order at the end, because
+	// a map is a thing you look a PDF page up in.
+	order, err := printingOrder(len(pages), opt.Transposed)
+	if err != nil {
+		return nil, err
+	}
+	at := make([]int, len(pages)+1)
+	for i, p := range order {
+		at[p] = i + 1
+	}
+	read := make([]string, len(pages))
+	for i, p := range order {
+		read[i] = pages[p-1]
+	}
+	pages = read
+	declared := opt.Restarts
+	restarts := make([]int, 0, len(declared))
+	for _, r := range declared {
+		if r >= 1 && r < len(at) {
+			r = at[r]
+		}
+		restarts = append(restarts, r)
+	}
+	opt.Restarts = restarts
+
 	if opt.Grammar == "" {
 		opt.Grammar = Detect(pages, opt.Chapters)
 	}
@@ -985,8 +1024,8 @@ func Build(pages []string, opt Options) (*Map, error) {
 		}
 	}
 	m := &Map{Book: opt.Book, Grammar: opt.Grammar, Pagination: opt.Pagination,
-		Prefix: prefix, FirstPage: opt.FirstPage, Restarts: opt.Restarts,
-		PDFPages: len(pages)}
+		Prefix: prefix, FirstPage: opt.FirstPage, Restarts: declared,
+		Transposed: opt.Transposed, PDFPages: len(pages)}
 
 	var covers []cover
 	switch opt.Pagination {
@@ -1072,10 +1111,64 @@ func Build(pages []string, opt Options) (*Map, error) {
 		}
 		m.Entries[i] = e
 	}
-	m.Chapters = chapterSpans(m.Entries, opt.Chapters)
 	m.Steps = findSteps(covers, opt.Restarts)
+
+	// Back into file order. Every page keeps the number the fit gave it and
+	// goes to the row a reader will look it up in.
+	if len(opt.Transposed) > 0 {
+		inFile := make([]Entry, len(m.Entries))
+		for i, e := range m.Entries {
+			e.PDFPage = order[i]
+			inFile[order[i]-1] = e
+		}
+		m.Entries = inFile
+		for i, c := range m.Conflicts {
+			m.Conflicts[i].PDFPage = order[c.PDFPage-1]
+		}
+		for i, s := range m.Steps {
+			m.Steps[i].AtPDFPage = order[s.AtPDFPage-1]
+		}
+	}
+	m.Chapters = chapterSpans(m.Entries, opt.Chapters)
 	m.Gaps = findGaps(m.Entries)
 	return m, nil
+}
+
+// printingOrder is the PDF pages in the order the volume reads, so that the
+// page standing at printing position i is order[i-1].
+//
+// It is the identity for every volume but the ones a binder got wrong. The
+// French Algebre chapitres 4 a 7 is one: its pdf 274 heads A V.169 and carries
+// the end of the exercises of chapter V, and its pdf 273 is the opener of the
+// note historique, printed 170, whose text runs straight into pdf 275 at
+// printed 171. The two leaves are the wrong way round in the scan.
+//
+// Reading them in the wrong order costs more than the two pages. The fit sees
+// 167, 168, then 169 one page late and 171 one page early, so the run of the
+// exercises and the run of the note disagree by one over two pages and neither
+// is long enough to be believed; the whole volume was refused for it.
+func printingOrder(n int, swaps [][2]int) ([]int, error) {
+	order := make([]int, n)
+	for i := range order {
+		order[i] = i + 1
+	}
+	seen := map[int]bool{}
+	for _, s := range swaps {
+		if s[0] == s[1] {
+			return nil, fmt.Errorf("pagemap: pdf page %d is transposed with itself", s[0])
+		}
+		for _, p := range s {
+			if p < 1 || p > n {
+				return nil, fmt.Errorf("pagemap: pdf page %d is transposed, outside the %d pages of the volume", p, n)
+			}
+			if seen[p] {
+				return nil, fmt.Errorf("pagemap: pdf page %d is transposed twice", p)
+			}
+			seen[p] = true
+		}
+		order[s[0]-1], order[s[1]-1] = order[s[1]-1], order[s[0]-1]
+	}
+	return order, nil
 }
 
 // findSteps reports where the offset changes between two touching stretches,

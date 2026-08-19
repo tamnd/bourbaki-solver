@@ -134,3 +134,35 @@ func TestCorrectHeadsRefusesAnErratumItCannotPlace(t *testing.T) {
 		})
 	}
 }
+
+// A transposition the manifest got the shape of wrong is refused, because what
+// it would do otherwise is swap the wrong pages or none.
+func TestATranspositionTheManifestGotWrongIsRefused(t *testing.T) {
+	for _, c := range []struct {
+		name, want string
+		swap       corpus.Transposition
+	}{
+		{"one page", "names 1 pdf pages", corpus.Transposition{Pages: []int{273}, Why: "y"}},
+		{"three pages", "names 3 pdf pages", corpus.Transposition{Pages: []int{1, 2, 3}, Why: "y"}},
+		{"no reason", "says no reason", corpus.Transposition{Pages: []int{273, 274}, Why: "  "}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := transpositions(corpus.Book{ID: "mini", Transposed: []corpus.Transposition{c.swap}})
+			if err == nil {
+				t.Fatal("no error")
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Errorf("error is %q, want it to mention %q", err, c.want)
+			}
+		})
+	}
+	got, err := transpositions(corpus.Book{ID: "mini", Transposed: []corpus.Transposition{
+		{Pages: []int{273, 274}, Why: "the note historique opener is bound first"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != [2]int{273, 274} {
+		t.Errorf("transpositions gave %v, want [[273 274]]", got)
+	}
+}

@@ -1,6 +1,9 @@
 package pagemap
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // Problem is something Validate could not reconcile. A map that passes with no
 // problems is not proof that every number is right, but every one of these
@@ -69,10 +72,24 @@ func (m *Map) Validate() []Problem {
 			probs = append(probs, Problem{PDFPage: e.PDFPage,
 				Detail: "a mapped page carries no page number"})
 		}
+	}
+
+	// The printed numbers run in sequence in the order the volume reads, which
+	// is the file's order except where the binder got two leaves the wrong way
+	// round. A transposition the volume did not declare shows up here as two
+	// pages that swap places, which is what it is; one it declared and does not
+	// have shows up the same way, because the check is run over the pages as
+	// declared and the declaration is what put them out of sequence.
+	order, err := printingOrder(len(m.Entries), m.Transposed)
+	if err != nil {
+		return append(probs, Problem{Detail: strings.TrimPrefix(err.Error(), "pagemap: ")})
+	}
+	for i, p := range order {
+		e := m.Entries[p-1]
 		if i == 0 {
 			continue
 		}
-		prev := m.Entries[i-1]
+		prev := m.Entries[order[i-1]-1]
 		if prev.Page == 0 || e.Page == 0 || prev.Chapter != e.Chapter {
 			continue
 		}
@@ -133,9 +150,27 @@ func (m *Map) Validate() []Problem {
 	// A conflict is only safe to overrule when the pages on both sides were
 	// read cleanly and bracket the fitted number. Anything else means the
 	// fitter, not the scan, may be the one that is wrong.
+	//
+	// The pages on both sides are the ones the volume reads either side of it,
+	// which is not the file's own neighbours where two leaves are the wrong way
+	// round.
+	at := make([]int, len(m.Entries)+1)
+	for i, p := range order {
+		at[p] = i
+	}
+	nextTo := func(pdfPage, dir int) (Entry, bool) {
+		if pdfPage < 1 || pdfPage > len(m.Entries) {
+			return Entry{}, false
+		}
+		i := at[pdfPage] + dir
+		if i < 0 || i >= len(order) {
+			return Entry{}, false
+		}
+		return m.Entries[order[i]-1], true
+	}
 	for _, c := range m.Conflicts {
-		before, okB := m.Lookup(c.PDFPage - 1)
-		after, okA := m.Lookup(c.PDFPage + 1)
+		before, okB := nextTo(c.PDFPage, -1)
+		after, okA := nextTo(c.PDFPage, +1)
 		ok := okB && okA &&
 			before.Confidence.Printed() && after.Confidence.Printed() &&
 			before.Page == c.Fitted-1 && after.Page == c.Fitted+1 &&
