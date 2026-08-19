@@ -111,6 +111,7 @@ func (m *Map) Report() Report {
 	body := m.BodyPages()
 	r := Report{
 		Book: m.Book, Grammar: m.Grammar, Pagination: m.Pagination,
+		Prefix:    m.Prefix,
 		FirstPage: m.FirstPage, Restarts: m.Restarts, Transposed: m.Transposed,
 		PDFPages: m.PDFPages, BodyPages: body, FrontMatter: m.PDFPages - body,
 		Counts: counts, Chapters: m.Chapters, Steps: m.Steps,
