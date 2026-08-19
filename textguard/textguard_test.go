@@ -1,6 +1,7 @@
 package textguard
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -275,6 +276,59 @@ func TestADisplayWrittenWithBracketsIsTurnedRound(t *testing.T) {
 		`\begin{aligned}a&=b\\[2pt]c&=d\end{aligned}`} {
 		if got := Normalise(keep); got != keep {
 			t.Errorf("Normalise(%q) = %q", keep, got)
+		}
+	}
+}
+
+// A solve call that hands back its own reasoning instead of a solution. Two of
+// these reached content/solutions and were filed unverified with "solution
+// unintelligible" against every part, which reads as an answer that failed
+// rather than as no answer at all.
+func TestAThinkingTranscriptIsCaught(t *testing.T) {
+	text := "Here's a thinking process:\n\n" +
+		"1.  **Analyze the Request:**\n" +
+		"    *   **Goal:** Repair a failing solution to a Bourbaki exercise.\n" +
+		"    *   Output the whole repaired solution from first line to last.\n" +
+		"    *   End with `USES: XXXX, YYYY` updated to the tags actually used.\n"
+	var kinds []string
+	for _, l := range Check(text) {
+		kinds = append(kinds, l.Kind)
+	}
+	if !slices.Contains(kinds, "thinking") {
+		t.Errorf("the thinking opener was not caught: %v", Check(text))
+	}
+	if !slices.Contains(kinds, "prompt") {
+		t.Errorf("the placeholder tag line was not caught: %v", Check(text))
+	}
+}
+
+// The repair prompt's own headings, read back as though they were the answer.
+func TestTheRepairPromptComingBackIsCaught(t *testing.T) {
+	for _, text := range []string{
+		"## The solution as it stands\n",
+		"## What the judges said\n",
+		"Do not write a list of changes, a note about what you fixed, or a diff.\n",
+	} {
+		if got := Check(text); len(got) == 0 {
+			t.Errorf("Check(%q) found nothing", text)
+		}
+	}
+}
+
+// The four solutions of the Theory of Sets that were written out properly and
+// only used the wrong notation for their mathematics. None of these is the
+// model talking, and a rule that took them would cost four good solutions.
+func TestASolutionThatIsActuallyASolutionPassesClean(t *testing.T) {
+	for _, text := range []string{
+		"Let $E$ be an ordered set; denote its order relation by $\\le$. We verify " +
+			"the three conditions of no. 1 for $R$.\n",
+		"The proof stands as it is, since the hypothesis of Proposition 3 holds.\n",
+		"We now deduce the required properties from (a), and the argument uses " +
+			"Theorem 2 of no. 4.\n",
+		"USES: 03JW, 03QM\n",
+	} {
+		if got := Check(text); len(got) > 0 {
+			t.Errorf("Check(%q) = %v, want nothing", text, got)
 		}
 	}
 }
