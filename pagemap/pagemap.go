@@ -237,6 +237,13 @@ var (
 	// with 211 pages and no chapter on any of them.
 	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s+([ivxlcdm1|][ivxlcdm1| ]*?)\s*$`)
 
+	// A French volume whose first chapter is its own book writes the numeral
+	// out: Groupes et algebres de Lie chapitre 1, Theories spectrales and
+	// Topologie algebrique all open CHAPITRE PREMIER and none of them opens
+	// CHAPITRE I. Without this the numeral pattern finds no opener anywhere in
+	// those volumes and the map comes out with no chapter on any page.
+	firstOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s+premier\s*$`)
+
 	// The 1998 scan reads the digit 1 as a capital I or a lower case l often
 	// enough to matter: page 111 comes out "Ill", 251 comes out "25I" and 616
 	// comes out "6I6". The foot of a page in that volume is never a Roman
@@ -332,7 +339,67 @@ var (
 	// page of chapter II, which is 43 pages of that volume claiming to be in a
 	// chapter that ended sixty pages earlier.
 	headChapterRe = regexp.MustCompile(`(?i)\bch(?:ap)?\.\s*([ivxlcdm1|][ivxlcdm1| ]{0,4}?)\s*(?:[,.;]|$)`)
+
+	// leaderRe is the row of dots a table of contents runs between a heading and
+	// the page it is on. It is the one thing in a volume that looks more like a
+	// running head than a running head does: a title at one edge, a number at
+	// the other, and the wide gap between them that tells the two apart from
+	// prose.
+	//
+	// A volume's own table of contents sits in the back of the book in the
+	// French printings, past the last page the volume numbers, so a number read
+	// off one of its lines is a reference to somewhere else entirely. Groupes
+	// et algebres de Lie chapitre 1 prints its table on pdf 141 and 142, and
+	// the first line of 142 ends in 58, which was read as page 58 arriving
+	// directly after page 143.
+	//
+	// entryRe is a whole contents entry, a leader with the page it points at on
+	// the end of it, and is what counts a page as a table of contents. leaderRe
+	// is just the dots, and is what disqualifies a line on a page already known
+	// to be one. The two differ because the scans lose most of a leader often
+	// enough that the strict form alone would miss the line that matters: that
+	// first line of pdf 142 has two dots where the four under it have twenty.
+	// Asking the loose question of every page in the volume is what is wrong,
+	// since a badly scanned proof is full of dots, and it cost four pages of
+	// Lie chapters 4 to 6 their running heads.
+	leaderRe = regexp.MustCompile(`\.\s*\.`)
+	entryRe  = regexp.MustCompile(`\.\s*\.\s*\.\s*\.[\s.]*\s\s*\d[\d ]*$`)
 )
+
+// isContents reports whether a page is part of a volume's table of contents.
+// Three entries on one page is a contents and one is a displayed formula that
+// happens to end in a numeral.
+func isContents(page string) bool {
+	n := 0
+	for _, l := range strings.Split(page, "\n") {
+		if entryRe.MatchString(l) {
+			n++
+			if n == 3 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// headLineOf returns the line a page prints its running head on, and reports
+// whether there is one to read.
+//
+// It is the first non-blank line, except on a table of contents, where the
+// lines under the head are entries pointing at other pages and any of them can
+// come first once the scan has eaten the leader. Integration chapitre 9 heads
+// its own contents "TABLE DES MATIERES    133", which is a real running head on
+// a real page and is kept.
+func headLineOf(page string) (string, bool) {
+	contents := isContents(page)
+	for _, l := range headLines(page, 4) {
+		if contents && leaderRe.MatchString(l) {
+			continue
+		}
+		return l, true
+	}
+	return "", false
+}
 
 // romanFixer undoes the substitutions the scanners make on a chapter numeral.
 // It is the mirror of digitFixer: in a page number a Roman I is really the digit
@@ -396,6 +463,9 @@ func readEdgeNumber(m []string) (int, bool) {
 // page at, the chapter numeral if the head prints one, and, where both edges
 // carry a number, the other as an alternative for the fit to choose between.
 func readHeadNumber(line string) (chapter string, page, alt int, ok bool) {
+	if leaderRe.MatchString(line) {
+		return "", 0, 0, false
+	}
 	if c := headChapterRe.FindStringSubmatch(line); c != nil {
 		ch := strings.ToUpper(romanFixer.Replace(strings.Join(strings.Fields(c[1]), "")))
 		if _, err := corpus.RomanOrder(ch); err == nil {
@@ -471,6 +541,33 @@ type anchor struct {
 	prefix string // the Book prefix on the label, empty for the bare-number grammars
 }
 
+// offsets is the offsets between PDF page and printed page this anchor allows,
+// the reading at the edge the line most likely prints the page at first.
+func (a anchor) offsets() []int {
+	if a.alt == 0 {
+		return []int{a.pdfPage - a.page}
+	}
+	return []int{a.pdfPage - a.page, a.pdfPage - a.alt}
+}
+
+// fits reports whether either reading of this anchor sits at the given offset.
+//
+// The fit is where a two-edged head is decided, and it has to be decided during
+// the fit and not after it. Algebre commutative chapitres 5 a 7 sets its section
+// mark at the inner edge of a recto and its page at the outer one, and the scan
+// reads the mark as a 5, so page 305 comes back as "54  EXERCICES  305" with
+// two well formed numbers on it and nothing on the line saying which is which.
+// Fitting on the first reading alone put a step in the printing there that the
+// printing does not have, and carried the whole back of the volume one page out.
+func (a anchor) fits(off int) bool {
+	for _, o := range a.offsets() {
+		if o == off {
+			return true
+		}
+	}
+	return false
+}
+
 // readAnchors pulls one candidate page number per page. chapters restricts
 // which Roman numerals count, so that a cross-reference to another volume in a
 // running head does not become an anchor.
@@ -512,11 +609,11 @@ func readAnchorsPrefix(pages []string, g Grammar, chapters []string) ([]anchor, 
 				break
 			}
 		case HeadNumber:
-			hl := headLines(pg, 1)
-			if len(hl) == 0 {
+			hl, ok := headLineOf(pg)
+			if !ok {
 				continue
 			}
-			ch, p, alt, ok := readHeadNumber(hl[0])
+			ch, p, alt, ok := readHeadNumber(hl)
 			if !ok {
 				continue
 			}
@@ -524,7 +621,7 @@ func readAnchorsPrefix(pages []string, g Grammar, chapters []string) ([]anchor, 
 				ch = ""
 			}
 			as = append(as, anchor{pdfPage: n, chapter: ch, page: p, alt: alt,
-				src: FromHead, raw: strings.TrimSpace(hl[0])})
+				src: FromHead, raw: strings.TrimSpace(hl)})
 		case FootNumber:
 			l := footLine(pg)
 			m := bareNumberRe.FindStringSubmatch(l)
@@ -575,11 +672,15 @@ func readChapterStarts(pages []string, chapters []string) map[int]string {
 	seen := map[string]bool{}
 	for i, pg := range pages {
 		for _, l := range headLines(pg, 3) {
-			m := chapterOpenerRe.FindStringSubmatch(l)
-			if m == nil {
+			c := ""
+			switch m := chapterOpenerRe.FindStringSubmatch(l); {
+			case m != nil:
+				c = strings.ToUpper(romanFixer.Replace(strings.Join(strings.Fields(m[1]), "")))
+			case firstOpenerRe.MatchString(l):
+				c = "I"
+			default:
 				continue
 			}
-			c := strings.ToUpper(romanFixer.Replace(strings.Join(strings.Fields(m[1]), "")))
 			// A chapter opens once. If the words turn up again they belong to
 			// a cross-reference, not to a new chapter.
 			if !want[c] || seen[c] {
@@ -744,20 +845,33 @@ func fitOffsets(as []anchor, minRun int) (segs []segment, outliers []int) {
 	}
 	i := 0
 	for i < len(as) {
-		off := as[i].pdfPage - as[i].page
-		if !runAgrees(as, i, minRun, off) {
+		off, ok := 0, false
+		for _, cand := range as[i].offsets() {
+			if runAgrees(as, i, minRun, cand) {
+				off, ok = cand, true
+				break
+			}
+		}
+		if !ok {
 			outliers = append(outliers, i)
 			i++
 			continue
 		}
 		seg := segment{first: i, last: i, offset: off}
 		for i < len(as) {
-			if as[i].pdfPage-as[i].page == off {
+			if as[i].fits(off) {
 				seg.last = i
 				i++
 				continue
 			}
-			if runAgrees(as, i, minRun, as[i].pdfPage-as[i].page) {
+			stepped := false
+			for _, cand := range as[i].offsets() {
+				if runAgrees(as, i, minRun, cand) {
+					stepped = true
+					break
+				}
+			}
+			if stepped {
 				break // the printing really did step here
 			}
 			outliers = append(outliers, i)
@@ -784,7 +898,7 @@ func runAgrees(as []anchor, i, n, off int) bool {
 	end := min(i+2*n, len(as))
 	agree := 0
 	for j := i; j < end; j++ {
-		if as[j].pdfPage-as[j].page == off {
+		if as[j].fits(off) {
 			agree++
 		}
 	}

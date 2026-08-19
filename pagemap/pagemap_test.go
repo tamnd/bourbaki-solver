@@ -251,6 +251,48 @@ func TestFitOffsetsAcceptsAShortRunAtTheEnd(t *testing.T) {
 	}
 }
 
+func TestTheFitDecidesWhichEdgeOfTheHeadIsThePage(t *testing.T) {
+	// Algebre commutative chapitres 5 a 7 sets the section mark at the inner
+	// edge of a recto and the page at the outer one, and the scan reads the
+	// mark as a 5, so page 305 comes back as "54  EXERCICES  305" with two
+	// well formed numbers on it. Fitting on the first reading alone put a step
+	// in the printing that the printing does not have.
+	as := []anchor{
+		{pdfPage: 1, page: 1}, {pdfPage: 2, page: 2},
+		{pdfPage: 3, page: 54, alt: 3},
+		{pdfPage: 4, page: 4}, {pdfPage: 5, page: 5},
+	}
+	segs, outliers := fitOffsets(as, DefaultMinRun)
+	if len(segs) != 1 || len(outliers) != 0 {
+		t.Fatalf("got %d segments and %d outliers, want 1 and 0", len(segs), len(outliers))
+	}
+	if segs[0].offset != 0 || segs[0].first != 0 || segs[0].last != 4 {
+		t.Errorf("segment = %+v, want offset 0 over all five anchors", segs[0])
+	}
+}
+
+func TestTheTableOfContentsIsNotReadForARunningHead(t *testing.T) {
+	// The French printings put the volume's own table of contents in the back
+	// of the book, past the last page the volume numbers, so a number read off
+	// one of its lines is a reference to somewhere else. Groupes et algebres de
+	// Lie chapitre 1 has this page at pdf 142 and it was read as page 58
+	// arriving directly after page 143.
+	contents := "      3 . Le plus grand idéal de nilpotence d'une représentation . .          58\n" +
+		"      4. Le plus grand idéal nilpotent d'une algèbre de Lie . . . . . .        60\n" +
+		"      5. Extension du corps de base . . . . . . . . . . . . . . . . . . .      61\n" +
+		"§ 5. Algèbres de Lie résolubles . . . . . . . . . . . . . . . . . . . . . .    61\n"
+	if !isContents(contents) {
+		t.Error("a page of the table of contents was not recognised as one")
+	}
+	// A displayed formula and an ellipsis in a proof both leave dots on a line,
+	// and neither makes the page a table of contents.
+	body := head("42                    ALGÈBRES DE LIE                    Ch. I") +
+		"\n	x1 . . . xn = 0\net donc a1, . . . , an engendrent g.\n"
+	if isContents(body) {
+		t.Error("a page of ordinary text was taken for a table of contents")
+	}
+}
+
 // head builds a page whose first line is the running head.
 func head(line string) string { return line + "\n\nsome body text\n" }
 
@@ -477,6 +519,25 @@ func TestChapterOpenerIgnoresTheTableOfContents(t *testing.T) {
 	starts := readChapterStarts(pages, []string{"I", "II"})
 	if len(starts) != 1 || starts[2] != "I" {
 		t.Errorf("chapter starts = %v, want only pdf 2 opening chapter I", starts)
+	}
+}
+
+func TestTheFirstChapterOfAFrenchVolumeWritesItsNumeralOut(t *testing.T) {
+	// Groupes et algebres de Lie chapitre 1 opens CHAPITRE PREMIER and never
+	// writes CHAPITRE I anywhere, so the numeral pattern found no opener in it
+	// at all and its map came out with 144 pages and no chapter on any of them.
+	pages := []string{
+		head("TABLE DES MATIÈRES"),
+		head("CHAPITRE PREMIER"),
+		head("6                  ALGÈBRES DE LIE                  Ch. I"),
+	}
+	starts := readChapterStarts(pages, []string{"I"})
+	if len(starts) != 1 || starts[2] != "I" {
+		t.Errorf("chapter starts = %v, want only pdf 2 opening chapter I", starts)
+	}
+	// A volume that does not contain chapter I is not opened by those words.
+	if starts := readChapterStarts(pages, []string{"IV", "V"}); len(starts) != 0 {
+		t.Errorf("chapter starts = %v, want none", starts)
 	}
 }
 
