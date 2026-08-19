@@ -85,6 +85,14 @@ about a fifth of the words.
                  20m, for a day the boxes are answering slowly
   -queue PATH    the work list, default $BOURBAKI_WORK/queue
 
+There is one subcommand, bourbaki translate roundtrip, which takes a sample of
+the translations already written, has each one put back into English by a model
+that has not seen the original, and asks a judge whether the two English texts
+say the same mathematics. Everything the run itself checks proves the answer is
+the same text, and a fluent sentence that says the opposite of the English
+passes all of it, so the round trip is the only thing here that reads for
+meaning.
+
 A file is skipped when its translation is there, its source_content_sha256 is
 the English it was made from, its glossary_terms_sha256 is the digest of the
 glossary rows that English mentions today, and its prompt_sha256 is this
@@ -147,6 +155,16 @@ reason, and a file nobody has translated is still untranslated.
 `
 
 func runTranslate(args []string) error {
+	// One subcommand, and the rest of the command stays flags.
+	//
+	// Every other invocation of translate is bourbaki translate -lang vi and has
+	// been since it was written, so a dispatch on args[0] that made the run a
+	// subcommand too would break every script and every note that mentions it.
+	// The round trip is a different job with its own flags rather than another
+	// mode of the run, which is what makes it worth a word of its own.
+	if len(args) > 0 && args[0] == "roundtrip" {
+		return runTranslateRoundTrip(args[1:])
+	}
 	fs := flag.NewFlagSet("translate", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, translateUsage) }
 	dir := fs.String("corpus", "", "the checkout")
