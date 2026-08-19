@@ -268,3 +268,42 @@ func TestM09(t *testing.T) {
 		t.Errorf("got %d findings for two faults on one line, want 2: %v", len(got), got)
 	}
 }
+
+// The control space is a command and not a lost one. This is what M04 was
+// measured against: run over the corpus with -validate-tex it reported 358 hard
+// findings, every one of them a formula that is right, and 448 control spaces
+// between them. P04 parses the same spans with KaTeX and takes all of them,
+// which is what said which of the two rules was wrong.
+func TestM04TakesTheControlSpace(t *testing.T) {
+	for _, span := range []string{
+		`R_1,\ R_2,\ \ldots,\ R_n`,
+		`(T_1|a_1)(T_2|a_2) \ \ldots \ (T_h|a_h)A_i`,
+		`(\forall x)(\forall y)\ \mathrm{Coll}_z(x)`,
+	} {
+		if why := parseTeX(span); why != "" {
+			t.Errorf("%s was refused: %s", span, why)
+		}
+	}
+}
+
+// A newline or a tab after a backslash is still a lost command name. Nothing
+// sets those on purpose, and a line break inside a formula is how an extraction
+// loses the word after it.
+func TestM04StillRefusesALostCommand(t *testing.T) {
+	for _, span := range []string{"a \\\n b", "a \\\t b", `x + \`} {
+		if parseTeX(span) == "" {
+			t.Errorf("%q was taken", span)
+		}
+	}
+}
+
+func TestM04ReadsTheCorpusSpans(t *testing.T) {
+	// One file with a control space, which is right, and one with a brace left
+	// open, which is not.
+	good := doc("good.md", "the relations $R_1,\\ R_2,\\ \\ldots,\\ R_n$ are equivalent")
+	bad := doc("bad.md", "the field $\\mathbf{Q$ is prime")
+	got := run(t, m04, good, bad)
+	if len(got) != 1 || got[0].File != "bad.md" {
+		t.Errorf("findings %v", got)
+	}
+}
