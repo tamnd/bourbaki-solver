@@ -69,6 +69,15 @@ type Volume struct {
 	// rules being skipped is worth saying next to the number they would have
 	// changed.
 	NoPageMap bool
+	// NoManifest says there was no render manifest for this volume when the
+	// count was taken. The manifest is what says a page is blank or nearly
+	// blank, and the short rule is relaxed on a page it says is sparse, so the
+	// same page files accept differently depending on whether the machine has
+	// rendered the PDF. images/ is not in git, so a clean checkout has no
+	// manifest for any volume and reads its own corpus as slightly worse than
+	// the machine that extracted it does. That is a real difference and it is
+	// counted rather than left for somebody to find twice.
+	NoManifest bool
 }
 
 // Unread is the pages of the PDF that have no page file at all.
@@ -150,6 +159,15 @@ func (e Extraction) Part() int {
 }
 func (e Extraction) Untouched() int { return e.count(func(v Volume) bool { return v.Read == 0 }) }
 
+// Manifested and Read are how many volumes with pages on disk had a render
+// manifest to check them against, and how many there are in all. The two being
+// equal is the machine that did the extraction; the first being zero is a clean
+// checkout, where images/ does not exist.
+func (e Extraction) Manifested() int {
+	return e.count(func(v Volume) bool { return v.Read > 0 && !v.NoManifest })
+}
+func (e Extraction) Started() int { return e.count(func(v Volume) bool { return v.Read > 0 }) }
+
 func (e Extraction) count(is func(Volume) bool) int {
 	var n int
 	for _, row := range e.Rows {
@@ -220,6 +238,9 @@ func (e Extraction) Doc() string {
 	b.WriteString("Every number here is counted off the page files in `pages/` and the volumes in `manifests/books.yaml`, so it is what the corpus holds today and not what anybody hopes it holds. A volume with no row in the coverage table has no page file at all.\n\n")
 	b.WriteString("Read is how many pages of the PDF have a page file, blanks included, since a blank page that has been looked at is a page that is done. Checked is the pages the validation rules ran over, which is the read pages that are not blank, and accepted is how many of those pass every rule that ran. The rules are the same ones the extraction itself accepts a page on, so this is that decision re-run against what is on disk.\n\n")
 	b.WriteString("Passing the rules is not the same as being right. A page can balance its dollars, carry a plausible running head and still read an interval as a set, which is what `ocr audit` is for. A rejected page is a place to look and most of them are one character.\n\n")
+
+	fmt.Fprintf(&b, "The acceptance column is not quite reproducible and it is worth knowing why before the numbers are quoted. A render manifest under `images/` is what says a page is blank or nearly blank, and the short rule is relaxed on a page it calls sparse. `images/` is not in git, so a clean checkout has no manifest for any volume and counts a handful of sparse pages as too short where the machine that did the extraction does not. The run that wrote this file had a manifest for %d of the %d volumes that have pages on disk. Render the PDFs and the figure goes up by a tenth of a point or so; it does not move any other column.\n\n",
+		e.Manifested(), e.Started())
 
 	b.WriteString("## Coverage, worst first\n\n")
 	b.WriteString("| Volume | Lang | Text layer | PDF pages | Read | Unread | Coverage | Checked | Accepted |\n")

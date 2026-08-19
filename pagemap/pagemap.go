@@ -193,11 +193,11 @@ type Map struct {
 	// See Options.Transposed.
 	Transposed [][2]int
 	PDFPages   int
-	Entries   []Entry // one per PDF page, Entries[i].PDFPage == i+1
-	Chapters  []Span
-	Steps     []Step
-	Conflicts []Conflict
-	Gaps      []Gap
+	Entries    []Entry // one per PDF page, Entries[i].PDFPage == i+1
+	Chapters   []Span
+	Steps      []Step
+	Conflicts  []Conflict
+	Gaps       []Gap
 }
 
 // Options configure a build.

@@ -70,7 +70,7 @@ type SectionFrontMatter struct {
 	SourceLang        string `yaml:"source_lang,omitempty"`
 	TranslationMethod string `yaml:"translation_method,omitempty"`
 
-	SourceSHA256 string `yaml:"source_content_sha256,omitempty"`
+	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
 	TranslationRun   string `yaml:"translation_run,omitempty"`
 	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
@@ -135,7 +135,7 @@ type ExerciseFrontMatter struct {
 	SourceLang        string `yaml:"source_lang,omitempty"`
 	TranslationMethod string `yaml:"translation_method,omitempty"`
 
-	SourceSHA256 string `yaml:"source_content_sha256,omitempty"`
+	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
 	TranslationRun   string `yaml:"translation_run,omitempty"`
 	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`

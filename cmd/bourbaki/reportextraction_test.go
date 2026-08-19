@@ -72,6 +72,32 @@ func TestExtractionOfCountsWhatIsOnDisk(t *testing.T) {
 	if !got.NoPageMap {
 		t.Error("a volume with no page map did not say so")
 	}
+	if got.NoManifest {
+		t.Error("the manifest this corpus was set up with was not found")
+	}
+}
+
+// images/ is not in git, so the ordinary state of a clean checkout is no
+// manifest at all, and the short rule is relaxed on a page the manifest calls
+// sparse. Not finding one is not an error and it does change the acceptance
+// figure, so it is recorded.
+func TestExtractionOfNotesAMissingRenderManifest(t *testing.T) {
+	book := corpus.Book{ID: "alg-x-fr", Lang: "fr", Pages: 222}
+	root := setupCorpus(t, book, render.Manifest{Book: book.ID}, nil)
+	writePage(t, root, book.ID, 1, "a page of prose long enough that the rules have something to run over\n")
+	if err := os.RemoveAll(filepath.Dir(render.ManifestPath(root, book.ID))); err != nil {
+		t.Fatal(err)
+	}
+	got, err := extractionOf(root, book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.NoManifest {
+		t.Error("a corpus with no render manifest did not say so")
+	}
+	if got.Read != 1 {
+		t.Errorf("read %d, want 1: a missing manifest is not a missing page", got.Read)
+	}
 }
 
 // A volume in the manifest with no page files is the row that matters most, and

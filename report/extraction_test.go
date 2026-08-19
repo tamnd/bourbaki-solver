@@ -110,6 +110,26 @@ func TestExtractionDocNamesTheFailedPages(t *testing.T) {
 	}
 }
 
+// The acceptance figure moves between a machine that has rendered the PDFs and
+// one that has not, because the manifest that says a page is sparse lives under
+// images/ and images/ is not in git. It is a tenth of a point and it is the kind
+// of difference somebody spends an afternoon on twice, so the report counts the
+// manifests it found and says so next to the number they change.
+func TestExtractionDocSaysHowManyManifestsItHad(t *testing.T) {
+	rows := volumes()
+	rows[1].NoManifest = true
+	got := SummariseExtraction(rows)
+	// Two volumes have pages on disk and one of the two has a manifest. The
+	// third is unread and is not counted either way, because a volume with no
+	// pages has nothing for a manifest to say anything about.
+	if got.Started() != 2 || got.Manifested() != 1 {
+		t.Fatalf("started %d, manifested %d, want 2 and 1", got.Started(), got.Manifested())
+	}
+	if !strings.Contains(got.Doc(), "a manifest for 1 of the 2 volumes that have pages on disk") {
+		t.Error("the report does not say how many manifests it had")
+	}
+}
+
 func TestExtractionTableIsEmptyWhenNothingIsRead(t *testing.T) {
 	if got := SummariseExtraction(nil).Table(); !strings.Contains(got, "no volume") {
 		t.Errorf("got %q", got)
