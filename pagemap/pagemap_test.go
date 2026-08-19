@@ -1,6 +1,7 @@
 package pagemap
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -802,5 +803,100 @@ func TestAScanThatStartsPartWayIntoTheVolumeSaysSo(t *testing.T) {
 		Entry{PDFPage: 4, Chapter: "II", Page: 4, Confidence: FromHead})
 	if probs := m.Validate(); len(probs) != 1 || probs[0].Chapter != "II" {
 		t.Errorf("validate found %v, want the second chapter reported", probs)
+	}
+}
+
+// A file holding two separately paginated fascicules has a printed number that
+// goes backwards in the middle of it, which is a fit that slipped everywhere
+// else, so the volume has to name the page it happens on.
+func TestAVolumeBoundFromTwoFasciculesSaysWhereItStartsOver(t *testing.T) {
+	mini := func() *Map {
+		return &Map{
+			Book: "mini", Pagination: Continuous,
+			Entries: []Entry{
+				{PDFPage: 1, Page: 97, Confidence: FromHead},
+				{PDFPage: 2, Page: 98, Confidence: FromHead},
+				{PDFPage: 3, Page: 6, Confidence: Interpolated},
+				{PDFPage: 4, Page: 7, Confidence: FromHead},
+			},
+		}
+	}
+	m := mini()
+	probs := m.Validate()
+	if len(probs) != 1 || probs[0].PDFPage != 3 {
+		t.Fatalf("validate found %v, want the backwards jump reported", probs)
+	}
+	m.Restarts = []int{3}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("validate found %v, want none once the volume says it starts over", probs)
+	}
+
+	// A restart nobody could apply is worth as much as a page number nobody
+	// could read. It is on the wrong page, and the page it was meant for is
+	// still wrong.
+	for _, c := range []struct {
+		name    string
+		at      int
+		want    string
+		wantPDF int
+	}{
+		{"where the numbering runs on", 2, "does not start over", 2},
+		{"past the end", 9, "outside the 4 pages", 9},
+		{"on the first page", 1, "outside the 4 pages", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			m := mini()
+			m.Restarts = []int{c.at}
+			probs := m.Validate()
+			if len(probs) == 0 {
+				t.Fatal("validate found nothing")
+			}
+			if probs[0].PDFPage != c.wantPDF || !strings.Contains(probs[0].Detail, c.want) {
+				t.Errorf("validate found %v, want %q against pdf %d", probs, c.want, c.wantPDF)
+			}
+		})
+	}
+}
+
+// The pages between the last number of one fascicule and the first of the next
+// are the divider and the front matter of the one beginning, and they belong to
+// it. Nothing in them says so, which is why the volume names the page.
+func TestTheFrontMatterOfTheSecondFasciculeGoesWithIt(t *testing.T) {
+	pages := make([]string, 12)
+	for i := 1; i <= 5; i++ {
+		pages[i-1] = fmt.Sprintf("%d   PREMIERE PARTIE\n\nbody\n", 96+i)
+	}
+	// pdf 6 is the divider and pdf 7 its notations, neither with a head on it.
+	pages[5] = "DEUXIEME PARTIE\n\nParagraphes 8 a 15\n"
+	pages[6] = "NOTATIONS ET CONVENTIONS\n\nbody\n"
+	for i := 8; i <= 12; i++ {
+		pages[i-1] = fmt.Sprintf("%d   DEUXIEME PARTIE\n\nbody\n", i-4)
+	}
+	build := func(restarts []int) *Map {
+		m, err := Build(pages, Options{Book: "mini", Grammar: HeadNumber,
+			Pagination: Continuous, Restarts: restarts})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	// Without the restart the crack goes left, because a rising offset is
+	// normally unnumbered leaves at the end of what came before.
+	if e, _ := build(nil).Lookup(6); e.Page != 102 {
+		t.Errorf("pdf 6 fitted to printed %d, want 102 with nothing said", e.Page)
+	}
+	m := build([]int{6})
+	for _, c := range []struct{ pdf, page int }{{5, 101}, {6, 2}, {7, 3}, {8, 4}} {
+		e, ok := m.Lookup(c.pdf)
+		if !ok || e.Page != c.page {
+			t.Errorf("pdf %d fitted to printed %d, want %d", c.pdf, e.Page, c.page)
+		}
+	}
+	// The restart is not a leaf the file is missing, so it is not a step.
+	if len(m.Steps) != 0 {
+		t.Errorf("the restart was recorded as %v", m.Steps)
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("validate found %v", probs)
 	}
 }

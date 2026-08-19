@@ -45,6 +45,16 @@ func (m *Map) Validate() []Problem {
 	for _, s := range m.Steps {
 		stepAt[s.AtPDFPage] = s
 	}
+	restartAt := map[int]bool{}
+	for _, r := range m.Restarts {
+		if r < 2 || r > len(m.Entries) {
+			probs = append(probs, Problem{PDFPage: r,
+				Detail: fmt.Sprintf("a restart is declared here, outside the %d pages of the volume",
+					len(m.Entries))})
+			continue
+		}
+		restartAt[r] = true
+	}
 
 	for i, e := range m.Entries {
 		if e.PDFPage != i+1 {
@@ -64,6 +74,20 @@ func (m *Map) Validate() []Problem {
 		}
 		prev := m.Entries[i-1]
 		if prev.Page == 0 || e.Page == 0 || prev.Chapter != e.Chapter {
+			continue
+		}
+		// A declared restart is where one fascicule ends and the next begins,
+		// and the printed number goes back to the front of the new one. There
+		// is no arithmetic to check it against, so what is checked is that it
+		// goes back at all: a restart that runs on is one written against the
+		// wrong page, and the page it was meant for is the one the fit gets
+		// wrong.
+		if restartAt[e.PDFPage] {
+			if e.Page >= prev.Page {
+				probs = append(probs, Problem{PDFPage: e.PDFPage,
+					Detail: fmt.Sprintf("a restart is declared here, but page %d follows page %d and does not start over",
+						e.Page, prev.Page)})
+			}
 			continue
 		}
 		// Printed pages advance by one, and the only licensed exception is a
