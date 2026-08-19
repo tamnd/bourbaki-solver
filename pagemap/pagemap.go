@@ -198,21 +198,28 @@ type Options struct {
 	Pagination Pagination
 	// MinRun is how many consecutive anchors have to agree on a new offset
 	// before the fitter believes the printing stepped rather than the OCR
-	// slipped. Zero means the default of 3.
+	// slipped. Zero means DefaultMinRun.
 	MinRun int
 }
 
 // DefaultMinRun is the run length that separates a step in the printing from a
-// misread. Two is not enough: the 2003 scan produces adjacent misreads.
-const DefaultMinRun = 3
-
-// NativeMinRun is the run length for a volume whose text layer was written by
-// the typesetter rather than by somebody's OCR. There is nothing to misread in
-// such a volume, so two anchors that agree are two anchors that agree, and
-// demanding three throws away the short stretches at the back of the book: the
-// English Lie groups chapters 7 to 9 steps twice in its indexes, each time with
-// only two numbered pages between the steps.
-const NativeMinRun = 2
+// misread.
+//
+// It was three for the scanned volumes, because a scan produces misreads and
+// two of them in a row could agree on an offset that is not there, and two for
+// the born-digital ones, where there is nothing to misread. It is two for both
+// now. The reason it had to be three was that the head reader accepted lines
+// that are not heads at all, so a volume had misreads in quantity and adjacent
+// ones were not rare; with the gap rule, the split numerals, the two-edged
+// heads and the table of contents all dealt with, they are.
+//
+// Three throws away the short stretches at the back of the book, and that is
+// where the printing steps: Algebre commutative chapitres 5 a 7 numbers its
+// index terminologique and its table des matieres with two numbered pages in
+// each, and Groupes et algebres de Lie chapitres 4 a 6 does the same across its
+// planches. Over the 41 volumes that can be mapped, dropping to two leaves
+// every committed map byte for byte as it was and lets those two fit.
+const DefaultMinRun = 2
 
 // SplitPages splits a whole-document pdftotext dump into pages. pdftotext ends
 // every page with a form feed, including the last, so a plain split leaves a

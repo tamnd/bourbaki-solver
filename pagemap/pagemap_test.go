@@ -747,3 +747,28 @@ func TestAConflictSaysWhatTheDisagreementIsAbout(t *testing.T) {
 		t.Errorf("Pages() = %q, %q, want ?.9 and II.11", read, fitted)
 	}
 }
+
+// The printing steps at the back of the book, where a stretch can have only two
+// numbered pages in it. Algebre commutative chapitres 5 a 7 numbers its index
+// terminologique on two pages and its table des matieres on two more, and
+// wanting three before believing a step left both stretches unfitted.
+func TestTwoAnchorsThatAgreeAreAStep(t *testing.T) {
+	as := []anchor{
+		{pdfPage: 1, page: 2}, {pdfPage: 2, page: 3}, {pdfPage: 3, page: 4},
+		{pdfPage: 5, page: 8}, {pdfPage: 7, page: 10},
+		{pdfPage: 11, page: 15}, {pdfPage: 12, page: 16},
+	}
+	segs, outliers := fitOffsets(as, DefaultMinRun)
+	if len(outliers) != 0 {
+		t.Fatalf("outliers %v, want none", outliers)
+	}
+	want := []int{-1, -3, -4}
+	if len(segs) != len(want) {
+		t.Fatalf("got %d segments, want %d: %+v", len(segs), len(want), segs)
+	}
+	for i, off := range want {
+		if segs[i].offset != off {
+			t.Errorf("segment %d offset = %d, want %d", i, segs[i].offset, off)
+		}
+	}
+}
