@@ -120,7 +120,14 @@ func extractionOf(root string, entry corpus.Book) (report.Volume, error) {
 
 	pmap, mapErr := pagemap.Load(root, entry.ID)
 	row.NoPageMap = mapErr != nil
-	manifest, _ := render.ReadManifest(root, entry.ID)
+	// The manifest is what says a page is blank or nearly blank, and the short
+	// rule is relaxed on a page it calls sparse. It lives under images/, which
+	// is not in git, so whether it is here at all changes the acceptance figure
+	// by a fraction of a point between the machine that rendered the PDFs and a
+	// clean checkout. Missing is the ordinary case rather than an error, and the
+	// report says how many volumes had one so the number carries its own caveat.
+	manifest, manifestErr := render.ReadManifest(root, entry.ID)
+	row.NoManifest = manifestErr != nil
 
 	for _, path := range paths {
 		file, err := corpus.ReadFile[corpus.PageFrontMatter](path)
