@@ -95,3 +95,45 @@ func TestLoadRejectsABadRow(t *testing.T) {
 		t.Error("a row with the wrong number of columns should be an error")
 	}
 }
+
+// The validator reads the map back off disk as well as building it, so what the
+// volume said about where its scan begins has to survive the header.
+func TestTheHeaderCarriesWhereTheScanBegins(t *testing.T) {
+	root := t.TempDir()
+	m, err := Build(perChapterVolume(), Options{Book: "mini", Chapters: []string{"IV"}, FirstPage: 3})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(Path(root, "mini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "first_page=3") {
+		t.Errorf("the header does not say where the scan begins:\n%s", strings.SplitN(string(b), "\n", 3)[1])
+	}
+	back, err := Load(root, "mini")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.FirstPage != 3 {
+		t.Errorf("first page came back as %d, want 3", back.FirstPage)
+	}
+	// A volume whose scan starts at the beginning writes nothing.
+	plain, err := Build(perChapterVolume(), Options{Book: "plain", Chapters: []string{"IV"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := plain.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	b, err = os.ReadFile(Path(root, "plain"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "first_page") {
+		t.Error("a scan that starts at the beginning wrote a first page anyway")
+	}
+}

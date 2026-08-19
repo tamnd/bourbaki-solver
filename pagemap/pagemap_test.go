@@ -772,3 +772,35 @@ func TestTwoAnchorsThatAgreeAreAStep(t *testing.T) {
 		}
 	}
 }
+
+// The front of a volume is where a leaf goes missing. The scan of Fonctions
+// d'une variable reelle in French opens on the half title with FVR I.3 fitted
+// to it, and a chapter that does not start at printed 1 is otherwise a fit that
+// has slipped, so the volume has to say which of the two it is.
+func TestAScanThatStartsPartWayIntoTheVolumeSaysSo(t *testing.T) {
+	m := &Map{
+		Book: "mini", Pagination: PerChapter,
+		Chapters: []Span{{Chapter: "I", FirstPDF: 1, LastPDF: 2, FirstPage: 3, LastPage: 4}},
+		Entries: []Entry{
+			{PDFPage: 1, Chapter: "I", Page: 3, Confidence: FromHead},
+			{PDFPage: 2, Chapter: "I", Page: 4, Confidence: FromHead},
+		},
+	}
+	probs := m.Validate()
+	if len(probs) != 1 || !strings.Contains(probs[0].Detail, "not 1") {
+		t.Fatalf("validate found %v, want the chapter starting above printed 1", probs)
+	}
+	m.FirstPage = 3
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("validate found %v, want none once the volume says it starts at 3", probs)
+	}
+	// It excuses the page it names and no other. A second chapter that starts
+	// at 3 is the fit having slipped, whatever the front of the file is missing.
+	m.Chapters = append(m.Chapters, Span{Chapter: "II", FirstPDF: 3, LastPDF: 4, FirstPage: 3, LastPage: 4})
+	m.Entries = append(m.Entries,
+		Entry{PDFPage: 3, Chapter: "II", Page: 3, Confidence: FromHead},
+		Entry{PDFPage: 4, Chapter: "II", Page: 4, Confidence: FromHead})
+	if probs := m.Validate(); len(probs) != 1 || probs[0].Chapter != "II" {
+		t.Errorf("validate found %v, want the second chapter reported", probs)
+	}
+}

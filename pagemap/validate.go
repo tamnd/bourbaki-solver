@@ -79,9 +79,17 @@ func (m *Map) Validate() []Problem {
 	}
 
 	for _, sp := range m.Chapters {
-		if m.Pagination == PerChapter && sp.FirstPage != 1 {
+		// A per-chapter volume numbers every chapter from 1. The one chapter
+		// that can honestly start above it is the first, and only where the
+		// scan does not have the front of the volume, which the volume has to
+		// say in its manifest because nothing in the file gives it away.
+		want := 1
+		if sp.FirstPDF == 1 && m.FirstPage != 0 {
+			want = m.FirstPage
+		}
+		if m.Pagination == PerChapter && sp.FirstPage != want {
 			probs = append(probs, Problem{Chapter: sp.Chapter, PDFPage: sp.FirstPDF,
-				Detail: fmt.Sprintf("chapter starts at printed page %d, not 1", sp.FirstPage)})
+				Detail: fmt.Sprintf("chapter starts at printed page %d, not %d", sp.FirstPage, want)})
 		}
 		missing := 0
 		for _, s := range m.Steps {
