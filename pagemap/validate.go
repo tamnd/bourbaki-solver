@@ -32,9 +32,9 @@ func (m *Map) Validate() []Problem {
 	// It is worth saying because of how it comes out otherwise: none of the
 	// checks below has an entry to fail on, so an empty map passes them all and
 	// gets written, and from then on the volume counts as mapped. Nothing
-	// downstream then treats it as work still to do. The Algebre commutative
-	// chapitre 10 scan does exactly this, 222 pages of which 57 have been read
-	// and none carry a number the fitter could use.
+	// downstream then treats it as work still to do. The Algebre chapitre 10
+	// scan does exactly this, 222 pages of which 57 have been read and none
+	// carry a number the fitter could use.
 	if m.BodyPages() == 0 && len(m.Entries) > 0 {
 		probs = append(probs, Problem{
 			Detail: fmt.Sprintf("none of the %d pages was mapped, so the fit found nothing",
