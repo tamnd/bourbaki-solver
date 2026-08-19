@@ -403,6 +403,35 @@ func TestValidateCatchesAnUnconfirmedOverrule(t *testing.T) {
 	}
 }
 
+func TestValidateCatchesAMapThatMappedNothing(t *testing.T) {
+	// Every page unknown is what a scan with no usable running head fits to.
+	// None of the other checks has an entry to fail on, so without this one the
+	// map is clean, gets written, and the volume counts as mapped from then on.
+	m := &Map{Book: "mini", Pagination: PerChapter, PDFPages: 3, Entries: []Entry{
+		{PDFPage: 1, Confidence: Unknown},
+		{PDFPage: 2, Confidence: Unknown},
+		{PDFPage: 3, Confidence: Unknown},
+	}}
+	probs := m.Validate()
+	if len(probs) != 1 || !strings.Contains(probs[0].Detail, "the fit found nothing") {
+		t.Errorf("problems = %v, want one saying nothing was mapped", probs)
+	}
+}
+
+func TestValidateAcceptsAVolumeOnlyPartlyMapped(t *testing.T) {
+	// A front matter of two pages and one body page is the shape of a volume
+	// whose pages are still being read, and it is not the shape this catches.
+	m := &Map{Book: "mini", Pagination: PerChapter, PDFPages: 3, Entries: []Entry{
+		{PDFPage: 1, Confidence: Unknown},
+		{PDFPage: 2, Confidence: Unknown},
+		{PDFPage: 3, Chapter: "IV", Page: 1, Confidence: FromHead},
+	}}
+	m.Chapters = chapterSpans(m.Entries, []string{"IV"})
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("problems = %v, want none", probs)
+	}
+}
+
 func TestPDFPageOf(t *testing.T) {
 	m, err := Build(perChapterVolume(), Options{Book: "mini", Chapters: []string{"IV"}})
 	if err != nil {
