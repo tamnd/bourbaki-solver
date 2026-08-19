@@ -30,6 +30,10 @@ type ErrataManifest struct {
 	// not a labelled piece of anything and so cannot be listed above. See
 	// BookErrata.
 	Contents []BookErrata `yaml:"contents"`
+
+	// Heads is the same thing for the running heads a page map is fitted from.
+	// See HeadErrata.
+	Heads []HeadErrata `yaml:"heads"`
 }
 
 // BookErrata is what is wrong with the table of contents of one volume.
@@ -49,6 +53,39 @@ type ErrataManifest struct {
 type BookErrata struct {
 	Book   string    `yaml:"book"`
 	Errata []Erratum `yaml:"errata"`
+}
+
+// HeadErrata is what a page map cannot read off the running heads of a volume.
+//
+// The page map is fitted from the numbers printed in the running heads, and
+// most of the library is scans whose text layer is somebody else's OCR, so a
+// head comes back mangled often enough that the fitter is built to overrule
+// one. What it cannot do is overrule one safely on a page whose neighbours it
+// also could not read, and that is where the map is left with a page it has to
+// report rather than decide. Algebre chapitres 4 a 7 in French reads
+// "A V I . 37" on pdf 370, which is chapter VII page 37 with a stroke lost.
+//
+// So the reading is written down here, by the PDF page it is on, and
+// bourbaki pagemap build applies it to that page before the head is read. The
+// page is named because a mangled head is not unique in a volume the way a
+// contents line is, and because saying which page it is on is what makes the
+// entry checkable against the printing.
+//
+// A page that prints no number at all is corrected to a line with no number on
+// it. Algebre commutative chapitres 5 a 7 heads pdf 343 "TABLEAU DES STABILITES
+// - 1", where the 1 is the number of the tableau, and reading it as a page put
+// page 1 directly after page 343.
+type HeadErrata struct {
+	Book   string        `yaml:"book"`
+	Errata []PageErratum `yaml:"errata"`
+}
+
+// PageErratum is one running head, on one PDF page, read as it is printed.
+type PageErratum struct {
+	// PDFPage is the page of the PDF, counting from 1, not the printed page.
+	// The printed page is what is in dispute.
+	PDFPage int `yaml:"pdf_page"`
+	Erratum `yaml:",inline"`
 }
 
 // LabelErrata is what is wrong with one labelled piece of one printing.
@@ -135,6 +172,51 @@ func (m *ErrataManifest) check(path string) error {
 			}
 		}
 	}
+	heads := map[string]bool{}
+	for _, e := range m.Heads {
+		switch {
+		case e.Book == "":
+			return fmt.Errorf("%s: a heads entry has no book", path)
+		case len(e.Errata) == 0:
+			return fmt.Errorf("%s: the heads of %s list no errata", path, e.Book)
+		case heads[e.Book]:
+			return fmt.Errorf("%s: the heads of %s are entered twice", path, e.Book)
+		}
+		heads[e.Book] = true
+		pages := map[int]bool{}
+		for i, x := range e.Errata {
+			if x.PDFPage < 1 {
+				return fmt.Errorf("%s: heads of %s, erratum %d has to say which pdf page it is on",
+					path, e.Book, i+1)
+			}
+			if pages[x.PDFPage] {
+				return fmt.Errorf("%s: heads of %s, pdf page %d is entered twice",
+					path, e.Book, x.PDFPage)
+			}
+			pages[x.PDFPage] = true
+			// Read may be a line with no number on it, which is how a page
+			// that prints none is written down, but it cannot be the line the
+			// page already has.
+			if x.Says == "" || x.Says == x.Read {
+				return fmt.Errorf("%s: heads of %s, pdf page %d has to say what the head says and what to read instead",
+					path, e.Book, x.PDFPage)
+			}
+			if x.Why == "" {
+				return fmt.Errorf("%s: heads of %s, pdf page %d has no reason on it",
+					path, e.Book, x.PDFPage)
+			}
+		}
+	}
+	return nil
+}
+
+// HeadErrata is the corrections to one volume's running heads, by PDF page.
+func (m *ErrataManifest) HeadErrata(book string) []PageErratum {
+	for _, e := range m.Heads {
+		if e.Book == book {
+			return e.Errata
+		}
+	}
 	return nil
 }
 
@@ -174,7 +256,10 @@ func (m *ErrataManifest) Bytes() ([]byte, error) {
 	contents := make([]BookErrata, len(m.Contents))
 	copy(contents, m.Contents)
 	sort.Slice(contents, func(i, j int) bool { return contents[i].Book < contents[j].Book })
-	enc, err := yaml.Marshal(&ErrataManifest{Entries: sorted, Contents: contents})
+	heads := make([]HeadErrata, len(m.Heads))
+	copy(heads, m.Heads)
+	sort.Slice(heads, func(i, j int) bool { return heads[i].Book < heads[j].Book })
+	enc, err := yaml.Marshal(&ErrataManifest{Entries: sorted, Contents: contents, Heads: heads})
 	if err != nil {
 		return nil, err
 	}

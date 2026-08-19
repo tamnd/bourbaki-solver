@@ -86,3 +86,51 @@ func TestAVolumeNobodyHasReadSaysWhichCommandsToRun(t *testing.T) {
 		t.Fatalf("the error is %q, want it to name bourbaki render and bourbaki ocr", err)
 	}
 }
+
+// A running head that comes back mangled is written down against the PDF page
+// it is on, and the correction is applied before the number is read, so the fit
+// gets an anchor rather than a conflict it has to talk itself out of.
+func TestCorrectHeadsMendsTheHeadBeforeItIsRead(t *testing.T) {
+	pages := []string{
+		"A V I . 37     ENDOMORPHISMES DES ESPACES VECTORIELS\n\nbody\n",
+		"A VII.38       ENDOMORPHISMES DES ESPACES VECTORIELS\n\nA V I . 37 is cited here\n",
+	}
+	err := correctHeads(pages, []corpus.PageErratum{{
+		PDFPage: 1,
+		Erratum: corpus.Erratum{
+			Says: "A V I . 37", Read: "A VII.37",
+			Why: "the scan lost a stroke off the numeral",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(pages[0], "A VII.37") {
+		t.Errorf("the head was not corrected:\n%s", pages[0])
+	}
+	if !strings.Contains(pages[1], "A V I . 37") {
+		t.Error("the correction ran past the page it was written for")
+	}
+}
+
+func TestCorrectHeadsRefusesAnErratumItCannotPlace(t *testing.T) {
+	for _, c := range []struct {
+		name, says string
+		page       int
+	}{
+		{"not on the page", "nowhere in the volume", 1},
+		{"twice on the page", "twice over", 2},
+		{"past the end", "anything", 9},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			pages := []string{"a head\n", "twice over\n\ntwice over\n"}
+			err := correctHeads(pages, []corpus.PageErratum{{
+				PDFPage: c.page,
+				Erratum: corpus.Erratum{Says: c.says, Read: "x", Why: "y"},
+			}})
+			if err == nil {
+				t.Fatal("no error")
+			}
+		})
+	}
+}

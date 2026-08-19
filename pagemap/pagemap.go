@@ -111,15 +111,28 @@ type Conflict struct {
 	Raw         string `json:"raw"`
 }
 
+// Pages is the two readings as the book would write them, the one on the page
+// and the one the fit worked out. The chapter goes on either only where the map
+// knows one, and it has to go on both or neither: a page read as VI.37 where the
+// fit says VII.37 disagrees about the chapter and not about the number, and
+// printing the two bare numbers says "37 was overruled by 37".
+func (c Conflict) Pages() (read, fitted string) {
+	read, fitted = strconv.Itoa(c.Read), strconv.Itoa(c.Fitted)
+	if c.ReadChapter == "" && c.Chapter == "" {
+		return read, fitted
+	}
+	label := func(chapter, page string) string {
+		if chapter == "" {
+			chapter = "?"
+		}
+		return chapter + "." + page
+	}
+	return label(c.ReadChapter, read), label(c.Chapter, fitted)
+}
+
 // String describes a conflict the way it reads in the book.
 func (c Conflict) String() string {
-	read, fitted := strconv.Itoa(c.Read), strconv.Itoa(c.Fitted)
-	if c.ReadChapter != "" {
-		read = c.ReadChapter + "." + read
-	}
-	if c.Chapter != "" {
-		fitted = c.Chapter + "." + fitted
-	}
+	read, fitted := c.Pages()
 	return fmt.Sprintf("pdf %d read %s, fitted %s: %s", c.PDFPage, read, fitted, c.Raw)
 }
 

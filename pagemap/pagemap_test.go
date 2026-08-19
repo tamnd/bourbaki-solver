@@ -420,8 +420,8 @@ func TestBuildContinuous(t *testing.T) {
 // exercises and the blank leaf after them, neither of which carries a head.
 func frenchHeadVolume(firstOpener, secondOpener string) []string {
 	return []string{
-		head("TABLE DES MATIÈRES"),                                     // 1
-		head(firstOpener),                                              // 2, printed 1
+		head("TABLE DES MATIÈRES"), // 1
+		head(firstOpener),          // 2, printed 1
 		head("2      MESURES SUR LES ESPACES SÉPARÉS     Ch. I, § 1"),  // 3
 		head("3      MESURES SUR LES ESPACES SÉPARÉS     Ch. I, § 1"),  // 4
 		head("la fin des exercices"),                                   // 5, printed 4
@@ -723,5 +723,27 @@ func TestOpenerGoesToTheChapterItOpens(t *testing.T) {
 	// the six volumes that map cleanly carries an odd printed number.
 	if p := got[1].from - got[1].offset; p != 199 {
 		t.Errorf("the opener is printed page %d, want 199", p)
+	}
+}
+
+// A page read as VI.37 where the fit says VII.37 disagrees about the chapter and
+// not about the number, and printing the two bare numbers says that 37 was
+// overruled by 37.
+func TestAConflictSaysWhatTheDisagreementIsAbout(t *testing.T) {
+	c := Conflict{PDFPage: 370, Read: 37, ReadChapter: "VI", Fitted: 37, Chapter: "VII"}
+	read, fitted := c.Pages()
+	if read != "VI.37" || fitted != "VII.37" {
+		t.Errorf("Pages() = %q, %q, want VI.37 and VII.37", read, fitted)
+	}
+	// A volume with no chapters on it says the numbers plainly.
+	bare := Conflict{PDFPage: 12, Read: 9, Fitted: 11}
+	if read, fitted := bare.Pages(); read != "9" || fitted != "11" {
+		t.Errorf("Pages() = %q, %q, want 9 and 11", read, fitted)
+	}
+	// One side knowing a chapter and the other not is still a disagreement
+	// about the chapter, so it goes on both.
+	half := Conflict{PDFPage: 12, Read: 9, Fitted: 11, Chapter: "II"}
+	if read, fitted := half.Pages(); read != "?.9" || fitted != "II.11" {
+		t.Errorf("Pages() = %q, %q, want ?.9 and II.11", read, fitted)
 	}
 }

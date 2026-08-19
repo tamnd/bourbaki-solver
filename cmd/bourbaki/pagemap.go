@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -63,6 +64,11 @@ func pagemapBuild(args []string) error {
 		return fmt.Errorf("no books registered in %s", corpus.BooksPath(root))
 	}
 
+	errata, err := corpus.LoadErrata(root)
+	if err != nil {
+		return err
+	}
+
 	ctx := context.Background()
 	failed := 0
 	for _, b := range books {
@@ -72,6 +78,9 @@ func pagemapBuild(args []string) error {
 		}
 		if len(pages) != b.Pages {
 			fmt.Printf("%s: got %d pages, the manifest says %d\n", b.ID, len(pages), b.Pages)
+		}
+		if err := correctHeads(pages, errata.HeadErrata(b.ID)); err != nil {
+			return fmt.Errorf("%s: %w", b.ID, err)
 		}
 		// A born-digital volume has no misreads to guard against, so two anchors
 		// that agree are enough there and three are not needed. It matters at the
@@ -128,6 +137,33 @@ func pagemapBuild(args []string) error {
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d volumes did not map", failed)
+	}
+	return nil
+}
+
+// correctHeads puts the errata of a volume's running heads into the pages
+// before the page numbers are read off them.
+//
+// It is applied here and not to the finished map because the map is generated
+// and says so at the top of itself, and because a head that reads correctly is
+// an anchor the fit uses rather than a conflict it has to talk itself out of.
+//
+// A says that is not on the page it names, or is on it more than once, is an
+// error and not a warning. An erratum nobody applied is a person having written
+// down a correction in the belief that it was in force, and the page it names
+// is exactly the page the fit was going to get wrong.
+func correctHeads(pages []string, errata []corpus.PageErratum) error {
+	for _, e := range errata {
+		if e.PDFPage > len(pages) {
+			return fmt.Errorf("the head erratum for pdf page %d is past the end of a %d page volume",
+				e.PDFPage, len(pages))
+		}
+		pg := pages[e.PDFPage-1]
+		if n := strings.Count(pg, e.Says); n != 1 {
+			return fmt.Errorf("the head erratum %q is on pdf page %d %d times, want exactly one",
+				e.Says, e.PDFPage, n)
+		}
+		pages[e.PDFPage-1] = strings.Replace(pg, e.Says, e.Read, 1)
 	}
 	return nil
 }
