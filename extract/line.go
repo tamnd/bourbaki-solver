@@ -843,7 +843,30 @@ func finish(l *Line) {
 		}
 		r.Depth = depths[r.Spec.Size]
 		if r.Depth == 0 {
-			parent = append(parent[:1], *r)
+			// A run on the baseline becomes the parent of the indices that
+			// follow it, and takes the place of the run that held it before,
+			// which is parent[0] and not parent[1]. Writing it one slot along
+			// left parent[0] holding the box of the whole line for the length
+			// of the line, so every index was measured against the line rather
+			// than against the letter it hangs off.
+			//
+			// The line box is not a bad reference for prose, where the type is
+			// all one size and the box sits where the letters do, and that is
+			// why this stood. It is a bad reference for a display, where a
+			// large operator or a tall bracket raises the top of the box well
+			// above the baseline and drags the mid point of the box up with it,
+			// so an exponent measured against it falls on the low side and is
+			// read as an index. Page 441 of the French Algebra VIII sets
+			// pi(-1) to the n minus i three times, once in prose and twice in a
+			// display, and the prose reading is right while both displays are
+			// wrong: (9) puts the whole exponent under the line and (10) splits
+			// it, taking the minus above and n and i below.
+			//
+			// (9) is the worse of the two. An exponent read as an index is
+			// still a subscript KaTeX accepts, so the page builds and ships and
+			// says something the book does not say, while (10) at least fails
+			// loudly with a double subscript.
+			parent = append(parent[:0], *r)
 			continue
 		}
 		for len(parent) <= r.Depth {
@@ -867,7 +890,7 @@ func finish(l *Line) {
 		if i > 0 && !offband(l.Runs[i-1]) && r.Left > l.Runs[i-1].Right()+4*r.Spec.Size &&
 			!across(*r, l.Runs) {
 			r.Depth = 0
-			parent = append(parent[:1], *r)
+			parent = append(parent[:0], *r)
 			continue
 		}
 		// A run set below its parent is an index and one set above is an
