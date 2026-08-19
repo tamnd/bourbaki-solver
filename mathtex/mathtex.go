@@ -331,13 +331,42 @@ func DropStray(body string) (string, bool) {
 //     cheap, and it is the only reason this can run unattended over 510 pages.
 //
 // It returns the new body and how many spans it repaired.
+// It repairs to a fixed point and not to the end of one walk. Taking a bracket
+// out of one span changes what the prose of that line is holding open, and the
+// next span along can be a straddle that was not one a moment ago:
+// "(pr$_{J_\lambda})_{\lambda\in L}$ de $\prod$" gives one back on the first
+// pass and the second is only visible after it. A round that repairs nothing
+// ends it, and every round moves at least one bracket out of a span, so the
+// count that bounds the loop is there against a bug and not against the corpus.
 func Unstraddle(body string) (string, int) {
+	total := 0
+	for range 16 {
+		out, n := unstraddleOnce(body)
+		if n == 0 {
+			break
+		}
+		body, total = out, total+n
+	}
+	return body, total
+}
+
+func unstraddleOnce(body string) (string, int) {
 	spans, _ := Split(body)
 	rs := []rune(body)
 	var b strings.Builder
 	n, at := 0, 0
+	// What each line has already given back on this walk. The counts below are
+	// read off rs, which is the body as it stood when the walk started, so a
+	// bracket an earlier span on the line has just handed to the prose is still
+	// sitting inside the mathematics as far as they can see. Without this the
+	// line closes its own brackets twice over: "Card(W$\varpi_2), . . .$,
+	// Card(W$.2\varpi_4)$ ... $d)$" gives two back and then reads as holding two
+	// open still, and the list label "d)" at the end, which is not a straddle and
+	// belongs to nobody's bracket, is taken for the third.
+	given := map[int]int{}
 	for _, s := range spans {
-		if !straddles(rs, spans, s) {
+		from := lineStart(rs, s.Start)
+		if !straddles(rs, spans, s, given[from]) {
 			continue
 		}
 		text := []rune(s.Text)
@@ -346,20 +375,47 @@ func Unstraddle(body string) (string, int) {
 		for cut+run < len(text) && text[cut+run] == ')' {
 			run++
 		}
-		if open := looseOpeners(rs[lineStart(rs, s.Start):s.Start]); run > open {
+		// How many the line can afford to give back. Counting prose and
+		// mathematics alike is the wider of the two most of the time, since an
+		// opener left dangling in an earlier span is usually this same fault
+		// mirrored, and it is not always: a closing bracket inside an earlier
+		// span eats the depth the prose opened, and then the line reads as
+		// holding nothing open while the prose plainly is. Neither count is
+		// wrong, so the cap is whichever is larger and the trigger stays with
+		// the prose.
+		//
+		// The loose count needs no credit taken off it. A bracket that moved out
+		// of an earlier span on this line moved from one side of a delimiter to
+		// the other and stayed in front of this span either way, so the loose
+		// count had it before the repair and has it after.
+		open := looseOpeners(rs[from:s.Start])
+		if prose := proseOpeners(rs, spans, from, s.Start) - given[from]; prose > open {
+			open = prose
+		}
+		if run > open {
 			run = open
 		}
 		head := strings.TrimRight(string(text[:cut]), " \t")
-		if run == 0 || head == "" {
+		if run == 0 {
 			continue
 		}
-		b.WriteString(string(rs[at:s.Start]))
-		b.WriteString(head)
-		b.WriteString("$")
-		b.WriteString(string(text[:cut])[len(head):]) // the spaces trimmed off it
+		b.WriteString(string(rs[at : s.Start-1])) // up to but not into the delimiter
+		if head == "" {
+			// The bracket is the first thing in the span, as in
+			// "(VIII, p. 5, Example 3$).*$", so nothing of the mathematics
+			// stands in front of it. The opening delimiter moves to the far
+			// side of the bracket rather than closing on an empty span.
+			b.WriteString(string(text[:cut]))
+		} else {
+			b.WriteString("$")
+			b.WriteString(head)
+			b.WriteString("$")
+			b.WriteString(string(text[:cut])[len(head):]) // the spaces trimmed off it
+		}
 		b.WriteString(strings.Repeat(")", run))
 		b.WriteString(wrap(string(text[cut+run:])))
 		at = s.End + 1 // the closing delimiter, which has been written already
+		given[from] += run
 		n++
 	}
 	if n == 0 {
@@ -386,7 +442,9 @@ func Straddles(body string) []Span {
 	rs := []rune(body)
 	var out []Span
 	for _, s := range spans {
-		if straddles(rs, spans, s) {
+		// Nothing has been given back, because this reads a page as it stands
+		// rather than repairing one as it goes.
+		if straddles(rs, spans, s, 0) {
 			out = append(out, s)
 		}
 	}
@@ -414,16 +472,21 @@ func Straddles(body string) []Span {
 // span reading [a, b) closes a bracket it did not open and looks exactly like a
 // straddle, and moving that bracket out would break the notation, so a span
 // still holding a square bracket open at the loose closer is not a straddle.
-func straddles(rs []rune, spans []Span, s Span) bool {
-	if s.Display {
-		return false
+//
+// given is what the line has already handed back on this walk, and it comes off
+// the prose count. The walk reads the body as it stood when it started, so
+// without it a line that has just been repaired twice still looks like a line
+// holding two brackets open, and the next span along is convicted on them.
+func straddles(rs []rune, spans []Span, s Span, given int) bool {
+	if s.Display || s.Start < 2 {
+		return false // the prose needs room for a bracket and the delimiter
 	}
 	text := []rune(s.Text)
 	cut := looseCloser(text)
 	if cut < 0 || squaresOpen(text[:cut]) > 0 {
 		return false
 	}
-	return proseOpeners(rs, spans, lineStart(rs, s.Start), s.Start) > 0
+	return proseOpeners(rs, spans, lineStart(rs, s.Start), s.Start)-given > 0
 }
 
 // wrap puts what is left of a span back in delimiters, with the space at either

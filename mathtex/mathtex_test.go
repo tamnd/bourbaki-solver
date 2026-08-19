@@ -387,6 +387,19 @@ func TestUnstraddle(t *testing.T) {
 			0,
 		},
 		{
+			// Two straddles and a list label on one line. The brackets the two
+			// give back are the two the prose had open, so by the time the
+			// label is reached the line is holding nothing, and the "d)" that
+			// is nobody's bracket has to be left where it is. This came off
+			// Lie VIII § 9 exercise 16, where the label was taken for a third
+			// straddle and the Vietnamese and the English then disagreed on
+			// what span 28 was.
+			"a list label after the line has paid up",
+			`Calculate Card(W$\varpi_2), . . .$, Card(W$.2\varpi_4)$ later. $d)$ Make`,
+			`Calculate Card(W$\varpi_2$)$, . . .$, Card(W$.2\varpi_4$) later. $d)$ Make`,
+			2,
+		},
+		{
 			"a labelled item",
 			"$\\alpha$) the first case\n",
 			"$\\alpha$) the first case\n",
@@ -406,12 +419,22 @@ func TestUnstraddle(t *testing.T) {
 			0,
 		},
 		{
-			// Nothing but a bracket in front of it, so there is no formula to
-			// leave behind and the span is left alone.
-			"an empty span",
+			// The span holds a bracket and nothing else, so the delimiters were
+			// never around mathematics at all and taking them off is the whole
+			// repair. There is no empty span left behind.
+			"a span holding only the bracket",
 			`the value f($)$ is odd`,
-			`the value f($)$ is odd`,
-			0,
+			`the value f() is odd`,
+			1,
+		},
+		{
+			// The bracket is the first thing in the span but not the only thing,
+			// so the opening delimiter moves to the far side of it and the rest
+			// of the span stays mathematics.
+			"the bracket at the head of the span",
+			`Artinian (VIII, p. 5, Example 3$).*$`,
+			`Artinian (VIII, p. 5, Example 3)$.*$`,
+			1,
 		},
 		{
 			// The space that held the delimiter off the bracket stays where it
