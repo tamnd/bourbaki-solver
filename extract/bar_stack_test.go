@@ -448,3 +448,57 @@ func TestAFootnoteRuleIsNotAFractionBar(t *testing.T) {
 		t.Errorf("Render: %s, want the note whole", got)
 	}
 }
+
+// exponents carries formula (9) of page 441 of the French Algebra VIII, which
+// sets pi(-1) to the n minus i times pi(mu_i) to the minus 1. The display opens
+// with a large minus sign eighteen units tall, which reaches four units above
+// the type it stands in and so sets the top of the line box above the baseline
+// of the type. Every exponent on the line is three to five units above that
+// baseline, which is where an exponent belongs, and below the mid point of the
+// line box, which is where an index belongs.
+var exponents = pdfsrc.Page{
+	Number: 441, Width: 659, Height: 999,
+	Spans: []pdfsrc.Span{
+		{Top: 388, Left: 240, Width: 8, Height: 12, Font: 11, Text: "π"},
+		{Top: 388, Left: 248, Width: 5, Height: 12, Font: 0, Text: "("},
+		{Top: 384, Left: 254, Width: 11, Height: 18, Font: 8, Text: "−"},
+		{Top: 388, Left: 264, Width: 12, Height: 12, Font: 0, Text: "1)"},
+		{Top: 385, Left: 277, Width: 6, Height: 8, Font: 13, Text: "n"},
+		{Top: 383, Left: 282, Width: 8, Height: 12, Font: 12, Text: "−"},
+		{Top: 385, Left: 290, Width: 3, Height: 8, Font: 13, Text: "i"},
+		{Top: 388, Left: 294, Width: 8, Height: 12, Font: 11, Text: "π"},
+		{Top: 388, Left: 302, Width: 5, Height: 12, Font: 0, Text: "("},
+		{Top: 388, Left: 307, Width: 8, Height: 12, Font: 11, Text: "μ"},
+		{Top: 394, Left: 315, Width: 3, Height: 8, Font: 13, Text: "i"},
+		{Top: 388, Left: 319, Width: 5, Height: 12, Font: 0, Text: ")"},
+		{Top: 383, Left: 325, Width: 8, Height: 12, Font: 12, Text: "−"},
+		{Top: 385, Left: 332, Width: 5, Height: 8, Font: 2, Text: "1"},
+		{Top: 388, Left: 338, Width: 9, Height: 12, Font: 11, Text: "ϕ"},
+		{Top: 388, Left: 347, Width: 5, Height: 12, Font: 0, Text: "("},
+		{Top: 388, Left: 352, Width: 7, Height: 12, Font: 11, Text: "p"},
+		{Top: 380, Left: 353, Width: 26, Height: 18, Font: 11, Text: "\u0302"},
+		{Top: 388, Left: 359, Width: 5, Height: 12, Font: 0, Text: "("},
+		{Top: 388, Left: 364, Width: 7, Height: 12, Font: 11, Text: "v"},
+		{Top: 394, Left: 371, Width: 3, Height: 8, Font: 13, Text: "i"},
+		{Top: 388, Left: 376, Width: 10, Height: 12, Font: 0, Text: "))"},
+	},
+}
+
+func TestAnExponentInADisplayIsNotReadAsAnIndex(t *testing.T) {
+	lines := Lines(enlay, exponents)
+	if len(lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(lines))
+	}
+	got := Render(lines[0])
+	for _, want := range []string{"^{n-i}", "^{-1}"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Render: %s, want it to carry %s", got, want)
+		}
+	}
+	if strings.Contains(got, "_{n-i}") || strings.Contains(got, "_{-1}") {
+		t.Errorf("Render: %s, want no exponent read as an index", got)
+	}
+	if !strings.Contains(got, "\\mu_i") {
+		t.Errorf("Render: %s, want the index of mu kept as an index", got)
+	}
+}
