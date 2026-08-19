@@ -522,6 +522,95 @@ func TestJoinable(t *testing.T) {
 	}
 }
 
+func TestMends(t *testing.T) {
+	cases := []struct {
+		prev, next string
+		want       bool
+	}{
+		// The 88 junctions this places are all of this shape: the page before
+		// stops in the middle of a sentence and the page after picks it up.
+		{"for example undetermined letters. To", "simplify the exposition it is", true},
+		{"then $S_1$ is weakly compa-", "tible in $z$ and $t$", true},
+		// A full stop ends the paragraph, whatever the page after opens on.
+		{"is neither Artinian nor Noetherian.", "the next thing", false},
+		{"determined by this condition.*", "the next thing", false},
+		{"(VIII, p. 267, exerc. 11).", "the next thing", false},
+		{"$$x = y$$", "the next thing", false},
+		// A stop set as mathematics is still a stop. Exercise 11 of § 7 of Lie
+		// VIII ends its page on a colon inside the dollars and the page after
+		// opens on the sum the colon introduces, and the dollar on the end hid
+		// the one thing that said not to join them.
+		{"with coefficients in $\\mathbf{Q}[\\Delta ]$)$:$", "$$P = \\sum a_i$$", false},
+		{"in a variable T$:$", "the next thing", false},
+		// A capital is where this stops, and it costs seven sentences broken at
+		// a word set as mathematics to keep fourteen junctions from being run
+		// together. See the note on mends.
+		{"be the relations of the form", "$S_{i_1}$ and $S_{i_2}$", false},
+		{"We have a commutative diagram", "ZL$^2(G)$", false},
+		// The lettered parts of an exercise, and the head of a table.
+		{"The set of minimal ideals of Z", "g) The set of maximal ideals", false},
+		{"for every A-module M and", "– a B-linear homomorphism", false},
+		{"the canonical mapping", "(i) *Let $(x^{(i)})$*", false},
+		{"$\\varpi_8$ 1", "TABLE 2", false},
+	}
+	for _, c := range cases {
+		if got := mends(c.prev, c.next); got != c.want {
+			t.Errorf("mends(%q, %q) = %v, want %v", c.prev, c.next, got, c.want)
+		}
+	}
+}
+
+// Page 24 of Theory of Sets breaks a sentence at "To" and page 25 picks it up
+// at "simplify", and neither page says so: the indent the reader would have
+// taken continues from is not there to be read. The text is, and it is enough.
+func TestJoinMendsAPageThatDoesNotSayItContinues(t *testing.T) {
+	parts := []part{
+		{page: 24, body: "the rules involve assemblies which are more or less undetermined, for example undetermined letters. To"},
+		{page: 25, body: "simplify the exposition it is convenient to denote such assemblies by less cumbersome symbols."},
+	}
+	got, _ := join(parts, printings["en"])
+	if len(got) != 1 {
+		t.Fatalf("got %d blocks, want 1: %+v", len(got), got)
+	}
+	if !strings.Contains(got[0].text, "letters. To simplify the exposition") {
+		t.Errorf("the sentence broken at the page break was not mended:\n%s", got[0].text)
+	}
+	if got[0].last != 25 {
+		t.Errorf("the mended block ends on page %d, want 25", got[0].last)
+	}
+}
+
+// The same two pages with a full stop where the break falls. Nothing says the
+// paragraph runs on, so nothing joins it.
+func TestJoinLeavesTwoParagraphsApart(t *testing.T) {
+	parts := []part{
+		{page: 24, body: "the rules involve assemblies which are more or less undetermined."},
+		{page: 25, body: "we shall not enunciate strict general rules for the use of these symbols."},
+	}
+	if got, _ := join(parts, printings["en"]); len(got) != 2 {
+		t.Fatalf("got %d blocks, want 2: %+v", len(got), got)
+	}
+}
+
+// The same page with the same missing indent, opening on an exercise. Nothing
+// here may join that: an exercise glued onto the page before it is an exercise
+// the corpus has no file for.
+func TestChapterDoesNotMendOntoAnExercise(t *testing.T) {
+	ch, pages := smallChapter()
+	p := pages[20]
+	p.Body = strings.TrimPrefix(p.Body, "### Exercises\n\n")
+	pages[20] = p
+	ch.Sections[0].Exercises = nil
+
+	got, err := Chapter("alg", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got[1].Body, "\n\n1) Let A be a ring.") {
+		t.Errorf("the exercise was mended onto the paragraph before it:\n%s", got[1].Body)
+	}
+}
+
 // Page 18 carries the imprint as a paragraph of its own and page 485 has one
 // glued onto the end of a footnote, which is why this trims rather than drops.
 func TestImprint(t *testing.T) {
