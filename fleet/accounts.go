@@ -90,15 +90,26 @@ func ParseAccounts(host, out string) Accounts {
 			continue
 		}
 		board.Verified++
+		// The state is matched without regard to case, because the host does not
+		// keep one: it prints BANNED and LOCKED in capitals and stale-lock in
+		// lower case, on the same table. Reading the lock in lower case alone
+		// found neither of the two locked slots the fleet really had, counted
+		// each of them ready instead, and that one miscount was enough to keep
+		// the sweep awake: Wait returns nothing to sleep on the moment a host
+		// reads ready, so the loop sent a batch every few minutes to two hosts
+		// whose only unbanned slot was held by another process, and got back
+		// "the model is out of turns for now" forty five seconds to eight
+		// minutes later, eleven cycles and 0 pages in a row.
+		state := strings.ToUpper(line)
 		switch {
-		case strings.Contains(line, "BANNED"):
+		case strings.Contains(state, "BANNED"):
 			board.Banned++
 			if left, ok := parseLeft(line); ok && (soonest < 0 || left < soonest) {
 				soonest = left
 			}
-		case strings.Contains(line, "stale-lock"):
+		case strings.Contains(state, "STALE-LOCK"):
 			board.Stale++
-		case strings.Contains(line, "lock"):
+		case strings.Contains(state, "LOCK"):
 			board.Locked++
 		default:
 			board.Ready++
