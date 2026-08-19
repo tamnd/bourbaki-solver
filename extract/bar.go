@@ -146,8 +146,11 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 		first, last := -1, -1
 		for i, l := range lines {
 			var over half
-			below := false
+			below, cut := false, false
 			for _, run := range l.Runs {
+				if crosses(run, r) {
+					cut = true
+				}
 				if !halved(run, r) {
 					continue
 				}
@@ -175,7 +178,7 @@ func builtUp(lines []Line, rules []pdfsrc.Rule) []Line {
 					below = true
 				}
 			}
-			if astraddle(over, r) {
+			if astraddle(over, r) && !cut {
 				first = i // the nearest line above, so the last one found
 			}
 			if below && last < 0 {
@@ -420,6 +423,41 @@ func overline(lines []Line, r pdfsrc.Rule) bool {
 // across those ten and end fourteen units higher up.
 func halved(run Run, r pdfsrc.Rule) bool {
 	return run.Left >= r.Left && run.Right() <= r.Right()
+}
+
+// crosses reports whether a run begins on one side of an edge of a rule and
+// ends on the other, which is what says the line it is on is not the numerator
+// of a fraction the rule is the bar of.
+//
+// TeX draws the bar as wide as the wider of the two halves and centres both on
+// it, so an edge of the bar falls in the white either side of the numerator and
+// there is nothing for it to cut through. A line of prose that merely happens to
+// lie over a closure bar is set to the measure and knows nothing about where the
+// bar ends, so an edge lands in the middle of a word about as often as not, and
+// that is the one thing the two cases do not have in common.
+//
+// Page 389 of Lie VII to IX is four bars on one page and every one of them is
+// cut this way. The closure of D(G_beta) is barred from 215 to 258 and the line
+// above reads ") since" from 253 to 297; the closure of D(G_alpha) is barred
+// from 291 to 334 and "is surjective; since" runs from 333 to 454. Read as
+// numerators they folded five printed lines of Lemma 1 into three, spliced two
+// citations together, and left rule R01 reporting Prop. 6 and Prop. 9 as
+// references that do not resolve.
+//
+// Asked of every run of the line and not only of the ones over the bar, since a
+// run that laps an edge is by construction not one of the runs the bar reaches
+// across.
+//
+// A unit or two either way is not a crossing, for the reason astraddle gives:
+// the box a run is reported at overruns the glyphs drawn in it, so the outer
+// half of a fraction ends a unit or so outside its own bar as often as not.
+// Page 89 of Theories spectrales I to II bars mM over pi from 293 to 322 and
+// reports the M ending at 323. What the page above 389 of Lie VII to IX does is
+// nothing like that: ") since" runs 39 units past the end of the bar it laps.
+func crosses(run Run, r pdfsrc.Rule) bool {
+	const slack = 3
+	return (run.Left < r.Left-slack && run.Right() > r.Left+slack) ||
+		(run.Left < r.Right()-slack && run.Right() > r.Right()+slack)
 }
 
 // oneLine reads a run of lines as the one line they are.
