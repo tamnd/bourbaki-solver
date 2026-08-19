@@ -95,11 +95,19 @@ func pagemapBuild(args []string) error {
 		}
 		printPagemap(pm)
 		if probs := pm.Validate(); len(probs) > 0 {
-			fmt.Printf("  %d problems:\n", len(probs))
+			// A map with a problem in it is not written, which is what the
+			// line at the end of the run has always said and what this did
+			// not do. Every reader downstream takes the map for the truth
+			// about where a printed page is, and a map that contradicts
+			// itself is worse than no map: the volume counts as done, the
+			// coverage table counts its pages, and the page the fitter got
+			// wrong is quoted back by everything that asks.
+			fmt.Printf("  %d problems, not written:\n", len(probs))
 			for _, pr := range probs {
 				fmt.Printf("    %s\n", pr)
 			}
 			failed++
+			continue
 		}
 		if *dry {
 			continue
