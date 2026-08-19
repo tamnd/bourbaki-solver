@@ -315,17 +315,16 @@ func DropStray(body string) (string, bool) {
 // The rule is deliberately narrower than "the brackets inside a span balance".
 // Measured over the corpus, 979 of 18,664 spans do not balance their own
 // brackets and most of them are innocent, because the book writes "(resp. $x$)"
-// and labels list items "$\alpha$)". What makes this one a fault is the bracket
-// standing immediately before the opening delimiter with nothing between them.
-// That shape occurs 138 times in 66 pages and every one of them is a name in
-// prose: Tr, det, Ker, Im, Card, cl, deg, rg, diag, int, Br, Nrd, Pc.
+// and labels list items "$\alpha$)". What makes this one a fault is the prose of
+// the line holding a bracket open at the point the span starts, which is what
+// straddles tests and what its comment sets out.
 //
 // Two conditions past the shape, and both are there to keep it from inventing:
 //
-//   - No more brackets come out than the line has open. A span may close a
+//   - No more brackets come out than the prose has open. A span may close a
 //     bracket opened earlier in the same line, and the count is taken over the
-//     line with the delimiters removed, so a bracket opened inside an earlier
-//     span counts as much as one opened in the prose.
+//     line outside the spans, so a bracket opened inside an earlier span is the
+//     mathematics' own and buys the span nothing.
 //   - Nothing but a delimiter moves. The body with every dollar sign taken out
 //     has to be the body it started as, character for character, and a body that
 //     fails that check is handed back untouched. It is a total proof and it is
@@ -338,7 +337,7 @@ func Unstraddle(body string) (string, int) {
 	var b strings.Builder
 	n, at := 0, 0
 	for _, s := range spans {
-		if !straddles(rs, s) {
+		if !straddles(rs, spans, s) {
 			continue
 		}
 		text := []rune(s.Text)
@@ -387,19 +386,44 @@ func Straddles(body string) []Span {
 	rs := []rune(body)
 	var out []Span
 	for _, s := range spans {
-		if straddles(rs, s) {
+		if straddles(rs, spans, s) {
 			out = append(out, s)
 		}
 	}
 	return out
 }
 
-// straddles is the shape: a bracket standing against the opening delimiter with
-// nothing between them, and a closing one inside the span that closes nothing of
-// the span's own. A display is set on its own lines, so there is no prose
-// against it and nothing to have been swept in.
-func straddles(rs []rune, s Span) bool {
-	return !s.Display && s.Start >= 2 && rs[s.Start-2] == '(' && looseCloser([]rune(s.Text)) >= 0
+// straddles is the shape: a bracket the prose of the line opened and never
+// closed, and a closing one inside the span that closes nothing of the span's
+// own. A display is set on its own lines, so there is no prose against it and
+// nothing to have been swept in.
+//
+// The opener does not have to stand against the delimiter. It did in the first
+// version of this rule, which read Tr($u)$ and nothing else, and that left the
+// commoner shape behind: the name takes an argument of its own and the bracket
+// that comes through as prose is the outer one, as in Card(I$_L)$ and
+// (resp. de $\widehat{G})$ and (cf. INT, VIII, §2, n$^o6)$. What the two have in
+// common is not where the bracket sits, it is that the prose is holding a
+// bracket open at the point the span starts.
+//
+// Only the prose counts. A bracket opened inside an earlier span on the line is
+// the mathematics' own and it is not owed anything, so $f(x$ and $y)$ is left
+// alone; the closing bracket there belongs where it is.
+//
+// The one shape past that which has to be refused is the half-open interval. A
+// span reading [a, b) closes a bracket it did not open and looks exactly like a
+// straddle, and moving that bracket out would break the notation, so a span
+// still holding a square bracket open at the loose closer is not a straddle.
+func straddles(rs []rune, spans []Span, s Span) bool {
+	if s.Display {
+		return false
+	}
+	text := []rune(s.Text)
+	cut := looseCloser(text)
+	if cut < 0 || squaresOpen(text[:cut]) > 0 {
+		return false
+	}
+	return proseOpeners(rs, spans, lineStart(rs, s.Start), s.Start) > 0
 }
 
 // wrap puts what is left of a span back in delimiters, with the space at either
@@ -431,7 +455,8 @@ func looseCloser(rs []rune) int {
 }
 
 // looseOpeners is how many brackets are still open at the end of a stretch of
-// body, counting prose and mathematics alike.
+// body, counting prose and mathematics alike. It caps how many a straddle gives
+// back, and proseOpeners says what a straddle is in the first place.
 func looseOpeners(rs []rune) int {
 	depth := 0
 	for _, r := range rs {
@@ -439,6 +464,73 @@ func looseOpeners(rs []rune) int {
 		case '(':
 			depth++
 		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return depth
+}
+
+// proseOpeners is how many brackets the prose of rs[from:to] still has open,
+// counting only what falls outside the math spans.
+//
+// It is what decides whether a span is a straddle at all, and it is not what
+// decides how many brackets come out of one. A bracket left open at the end of
+// an earlier span is usually the same fault read from the other side, the text
+// layer having swept the opener in rather than the closer, so it is fair to give
+// back against it once the line is known to be holding a prose bracket open. It
+// is not fair to start there: a line that reads $f(x$ and $y)$ is a function
+// whose argument the text layer cut in half, the closing bracket belongs where
+// it stands, and there is no prose bracket on that line to say otherwise.
+func proseOpeners(rs []rune, spans []Span, from, to int) int {
+	if from < 0 {
+		from = 0
+	}
+	if to > len(rs) {
+		to = len(rs)
+	}
+	depth := 0
+	for i := from; i < to; i++ {
+		if inSpan(spans, i) {
+			continue
+		}
+		switch rs[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+	}
+	return depth
+}
+
+// inSpan reports whether the rune at i is inside the mathematics of a span. The
+// delimiters themselves are dollar signs and are neither bracket, so it does not
+// matter which side of the line they are counted on.
+func inSpan(spans []Span, i int) bool {
+	for _, s := range spans {
+		if s.Start > i {
+			return false // Split hands them back in order
+		}
+		if i < s.End {
+			return true
+		}
+	}
+	return false
+}
+
+// squaresOpen is how many square brackets a stretch of a span still has open. It
+// is what tells a half-open interval from a straddle.
+func squaresOpen(rs []rune) int {
+	depth := 0
+	for _, r := range rs {
+		switch r {
+		case '[':
+			depth++
+		case ']':
 			if depth > 0 {
 				depth--
 			}

@@ -338,12 +338,52 @@ func TestUnstraddle(t *testing.T) {
 			1,
 		},
 		{
-			// The two innocent straddles, which are most of them. A space
-			// between the bracket and the delimiter means the bracket belongs to
-			// the sentence and not to a name.
+			// This one used to be left alone, on the reading that a bracket with
+			// a space before the delimiter belongs to the sentence rather than to
+			// a name and so was never swept in. That is half right: it does
+			// belong to the sentence, and the text layer swept it in all the
+			// same. It renders as an italic bracket after the B and it costs the
+			// same refusal, because a translator hands the bracket back as prose.
 			"resp",
 			`the ring $A$ (resp. $B)$ is one`,
-			`the ring $A$ (resp. $B)$ is one`,
+			`the ring $A$ (resp. $B$) is one`,
+			1,
+		},
+		{
+			// The commoner shape, and the one the narrow rule left behind: the
+			// name takes an argument of its own, so the bracket that came through
+			// as prose is the outer one and there is a letter between it and the
+			// delimiter.
+			"a name with an argument",
+			`so Card(I$_L)$ is finite`,
+			`so Card(I$_L$) is finite`,
+			1,
+		},
+		{
+			// A reference, where the bracket the prose opened is a whole clause
+			// back and the span is a superscript.
+			"a reference in brackets",
+			`(cf. INT, VIII, §2, n$^o6)$.`,
+			`(cf. INT, VIII, §2, n$^o6$).`,
+			1,
+		},
+		{
+			// The prose holds nothing open, so the bracket in the span is the
+			// mathematics' own however unbalanced it looks. This is a function
+			// whose argument the text layer cut in half at a word of prose, and
+			// moving the bracket out would put it in front of the argument.
+			"no prose bracket open",
+			`we have $f(x$ and $y)$ here`,
+			`we have $f(x$ and $y)$ here`,
+			0,
+		},
+		{
+			// A half-open interval closes a bracket it did not open and looks
+			// exactly like a straddle. The square bracket still open at the
+			// closer is what tells them apart.
+			"a half-open interval",
+			`on the set (of points of $[a, b)$)`,
+			`on the set (of points of $[a, b)$)`,
 			0,
 		},
 		{

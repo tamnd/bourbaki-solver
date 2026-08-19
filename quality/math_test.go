@@ -179,12 +179,13 @@ func TestM05(t *testing.T) {
 	}
 }
 
-// M07 is the rule a translation found rather than a reader. The two shapes here
-// print the same and say different things, and only the second is a fault.
+// M07 is the rule a translation found rather than a reader. The shapes here
+// print alike and say different things, and what tells them apart is whether the
+// prose of the line is holding a bracket open where the span starts.
 func TestM07(t *testing.T) {
-	// The bracket belongs to the sentence, and the space in front of the
-	// delimiter is what says so. Most straddles in the corpus are this.
-	if got := run(t, m07, doc("a.md", `the ring $A$ (resp. $B)$ is one`)); len(got) != 0 {
+	// The prose opened nothing on this line, so the bracket in the span is the
+	// mathematics' own and there is nothing to report.
+	if got := run(t, m07, doc("a.md", `the item $\alpha$) is the first`)); len(got) != 0 {
 		t.Errorf("an innocent straddle was reported: %v", got)
 	}
 	if got := run(t, m07, doc("a.md", `the sum is Tr($u$).`)); len(got) != 0 {

@@ -120,11 +120,14 @@ text: the mathematics of the first is "u)". A translator asked to copy the
 formulae hands back "u", correctly, and the audit refuses the section because a
 translation may not alter mathematics.
 
-It repairs only a bracket standing immediately before an opening delimiter with
-nothing in between, which is the shape that comes from a name. A straddle with
-a space in front of it is the sentence's own bracket, as in "(resp. $x$)", and
-is left alone. No more brackets come out of a span than the line has open, and
-the page with every delimiter removed has to be the page it started as, so this
+It repairs a span the prose of the line has a bracket open against, whether the
+bracket stands against the delimiter as in Tr($u)$ or a whole clause back as in
+(cf. INT, VIII, §2, n$^o6)$. Where the prose holds nothing open the bracket in
+the span is the mathematics' own and is left alone, so "$\alpha$)" at the head
+of a list item and "$f(x$ and $y)$" both stay as they are, and so does a span
+still holding a square bracket open, which is a half-open interval and not a
+straddle. No more brackets come out of a span than the line has open, and the
+page with every delimiter removed has to be the page it started as, so this
 moves delimiters and never a character of prose or of mathematics.
 
 Run bourbaki assemble afterwards, or the section files still hold the old text.
