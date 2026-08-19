@@ -631,20 +631,22 @@ func Detect(pages []string, chapters []string) Grammar {
 // in while the number itself counts the volume. Taking the older convention for
 // both put every page of chapter I of that volume in chapter II.
 func detectPagination(as []anchor) Pagination {
-	lowest := map[string]int{}
+	lowest, highest := map[string]int{}, map[string]int{}
 	var order []string
 	for _, a := range as {
 		if a.chapter == "" {
 			continue
 		}
-		n, seen := lowest[a.chapter]
-		if !seen {
+		if _, seen := lowest[a.chapter]; !seen {
 			order = append(order, a.chapter)
-			lowest[a.chapter] = a.page
+			lowest[a.chapter], highest[a.chapter] = a.page, a.page
 			continue
 		}
-		if a.page < n {
+		if a.page < lowest[a.chapter] {
 			lowest[a.chapter] = a.page
+		}
+		if a.page > highest[a.chapter] {
+			highest[a.chapter] = a.page
 		}
 	}
 	// One chapter cannot tell the two apart, and nothing downstream depends on
@@ -652,12 +654,24 @@ func detectPagination(as []anchor) Pagination {
 	if len(order) < 2 {
 		return PerChapter
 	}
-	// A chapter opener carries no running head and neither does the first page
-	// of its first section, so the lowest number read off a restarting chapter
-	// is 2 or 3 as often as it is 1.
+	// A chapter that numbers straight on from the one before it starts above
+	// where that one ended, and a chapter that restarts starts below it. That
+	// is the question, and asking it this way needs nothing from the pages a
+	// volume happens not to print a head on.
+	//
+	// Asking instead whether the lowest number read in a chapter is 1, 2 or 3
+	// is what this used to do, and it is a question about the scan rather than
+	// about the printing. Topologie generale sets the head of its first pages
+	// of chapter III as "T G 111.2", with the book letters apart, which reads
+	// as prefix G and is dropped with every other page that is not the volume's
+	// own prefix, and the first four pages of chapter IV have no head in the
+	// text layer at all. The lowest number the reader saw in those two chapters
+	// was 5, so a volume whose four chapters run 1 to 127, 1 to 44, 1 to 88 and
+	// 1 to 96 was called continuously paginated, which decides whether a page
+	// of it is labelled TG III.5 or just 5.
 	restarts := 0
-	for _, ch := range order[1:] {
-		if lowest[ch] <= 3 {
+	for i, ch := range order[1:] {
+		if lowest[ch] < highest[order[i]] {
 			restarts++
 		}
 	}
@@ -832,8 +846,16 @@ func Build(pages []string, opt Options) (*Map, error) {
 		// "INT IX.10" does, and on the scans whose opener line the OCR mangled
 		// that is the difference between a volume with chapters and a volume
 		// that is one unnamed run: Lie chapitres 7 et 8 found no opener at all.
-		if opt.Grammar == HeadLabel ||
-			(len(starts) < len(opt.Chapters) && anchorsNameChapters(as)) {
+		//
+		// This holds for the label grammar as much as for the bare-number ones,
+		// though it did not used to. A labelled page says which chapter it is
+		// in and that looked exact enough to prefer, but what stands between
+		// the last labelled page of a chapter and the opener of the next is the
+		// back matter of the chapter that is ending: Topologie generale prints
+		// a NOTE HISTORIQUE and a BIBLIOGRAPHIE there and neither carries a
+		// page number. Reading the heads put those three pages of chapter II at
+		// the front of chapter III and gave them printed pages -2, -1 and 0.
+		if len(starts) < len(opt.Chapters) && anchorsNameChapters(as) {
 			starts = chapterStartsFromAnchors(as)
 		}
 		covers = coverContinuous(as, len(pages), starts, opt)
