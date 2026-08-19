@@ -46,6 +46,7 @@ const reportHelp = `usage: bourbaki report <what>
 
   usage        what the fleet did: pages, questions, wall clock, and what failed
   coverage     what the corpus holds against what the table of contents says
+  extraction   how much of each volume has been read, and how well
   printings    where the two printings of a chapter disagree
   translation  what each language holds, what is stale, and which terms it misses
   solutions    the scorecard: what has an answer, and how well it is believed
@@ -63,6 +64,8 @@ func runReport(args []string) error {
 		return reportUsageCmd(args[1:])
 	case "coverage":
 		return reportCoverageCmd(args[1:])
+	case "extraction":
+		return reportExtractionCmd(args[1:])
 	case "printings":
 		return reportPrintingsCmd(args[1:])
 	case "translation", "translations":
@@ -73,7 +76,7 @@ func runReport(args []string) error {
 		fmt.Fprint(os.Stderr, reportHelp)
 		return nil
 	}
-	return fmt.Errorf("unknown report %q, try: usage, coverage, printings, translation, solutions", args[0])
+	return fmt.Errorf("unknown report %q, try: usage, coverage, extraction, printings, translation, solutions", args[0])
 }
 
 const translationUsage = `usage: bourbaki report translation [flags]
