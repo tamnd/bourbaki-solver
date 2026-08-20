@@ -685,6 +685,17 @@ func m10(c *Corpus) ([]Finding, error) {
 // untouched and content/vi carried the same four glyphs in the same places,
 // which is what a fault does when nothing catches it.
 //
+// The fifth spelling is the bare ASCII asterisk, and that one does damage a
+// reader can see. There are 142 of them across nine volumes, more than the four
+// ornaments together, and "* (3) The set R of real numbers is totally ordered.
+// *" opens a bullet list on the first and leaves an indented item with no list
+// around it. The test for one is the space, which is Bourbaki's own: To the
+// Reader says these passages are "always placed between two asterisks: * . . .
+// *", set with the space on the inside, and Markdown wants emphasis to open and
+// close on a non-space, so the two rules agree that an asterisk with a space on
+// both sides is not emphasis. content/solutions is left out of this, being the
+// one tree in the corpus that writes real bullet lists.
+//
 // A star also has to be found before it can be counted, and they come in pairs.
 // Nothing here checks the parity yet, because a passage can open on one page and
 // close on the next and the pages are read one at a time. Getting them all
@@ -700,6 +711,15 @@ func m10(c *Corpus) ([]Finding, error) {
 func m11(c *Corpus) ([]Finding, error) {
 	var out []Finding
 	for _, d := range c.Docs {
+		// A solution is prose a model wrote rather than a page Bourbaki printed,
+		// and it is the one place in the corpus that writes Markdown bullet
+		// lists. A bullet is an asterisk with a space after it at the head of a
+		// line, which is the shape of a star, so reading them here would report
+		// 19 lists as marks the Elements never set. bourbaki fix star does not
+		// walk this tree either, for the same reason.
+		if d.Kind == KindSolution {
+			continue
+		}
 		for _, o := range textguard.Ornaments(d.Body) {
 			out = append(out, Finding{File: d.Path, Line: d.BodyLine(o.Line),
 				Msg: fmt.Sprintf("%s where the corpus writes %s: %s",
