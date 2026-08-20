@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -514,6 +515,22 @@ func extractPage(args []string) error {
 // is a difference, and the number worth looking at is the one beside it: how
 // many spans of each body KaTeX refuses. A page whose fresh read refuses fewer
 // is a page whose repair has been overtaken.
+//
+// -unmarked runs the same comparison over the other pages, and there a
+// difference means something else entirely. A page with no manual: true is a
+// page the pipeline claims it wrote and could write again, so a fresh read of
+// it ought to give back what is committed. When it does not, either somebody
+// repaired the page and did not say so, or the extractor has changed under it.
+// Both want looking at and only one of them is a bug, but the unmarked repair
+// is the one that bites: extract run will happily write over a page that
+// carries no mark, so the repair lasts exactly until the next run of the volume
+// and nothing reports its loss. pages/ts-i-ii-fr/0283.md was found that way,
+// with a closing bracket swept into a formula that somebody had pulled back out
+// again, and it was found by rebuilding the corpus from the PDFs on a clean
+// clone rather than by any rule. This is that check made cheap enough to run.
+//
+// It reads no model and costs nothing but the PDF, which is why it can be run
+// over every native volume rather than the one somebody happens to suspect.
 func extractDrift(args []string) error {
 	fs := flag.NewFlagSet("extract drift", flag.ExitOnError)
 	book := fs.String("book", "", "book id")
@@ -521,8 +538,10 @@ func extractDrift(args []string) error {
 	last := fs.Int("l", 0, "last pdf page")
 	verbose := fs.Bool("v", false, "print the paragraphs that differ")
 	fix := fs.Bool("fix", false, "take the paragraphs whose fresh read KaTeX sets and the committed one it does not")
+	unmarked := fs.Bool("unmarked", false, "the other way round: pages that differ and carry no manual: true")
+	setMark := fs.Bool("mark", false, "write manual: true on the pages -unmarked found")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki extract drift -book <id> [-f N] [-l N] [-v] [-fix]\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki extract drift -book <id> [-f N] [-l N] [-v] [-fix|-unmarked [-mark]]\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -531,6 +550,16 @@ func extractDrift(args []string) error {
 	if *book == "" {
 		fs.Usage()
 		os.Exit(2)
+	}
+	// -fix takes the fresh read over the committed body, which is the right
+	// trade on a page whose repair has been overtaken and the exact wrong one on
+	// a page whose repair is unmarked: there the committed body is the repair
+	// and the fresh read is the fault it was made to undo.
+	if *fix && *unmarked {
+		return errors.New("extract drift: -fix would undo the repair -unmarked just found, so the two do not go together")
+	}
+	if *setMark && !*unmarked {
+		return errors.New("extract drift: -mark is what -unmarked does about what it finds, so it wants -unmarked")
 	}
 	root, err := corpus.Root()
 	if err != nil {
@@ -587,26 +616,44 @@ func extractDrift(args []string) error {
 		if err != nil {
 			return err
 		}
-		if !f.Meta.Manual {
+		if f.Meta.Manual == *unmarked {
 			continue
 		}
 		manual++
 		p := extract.ReadPageWith(lay, pg, vol)
-		if p.Body == f.Body {
+		d := diffCount(paragraphs(f.Body), paragraphs(p.Body))
+		if !drifted(*unmarked, d, f.Body, p.Body) {
 			continue
 		}
 		moved++
 		was, now := refused(eng, f.Body), refused(eng, p.Body)
 		mark := "  "
-		if now < was {
+		switch {
+		case *unmarked:
+			mark = "!!" // a page nobody marked, and it does not read back
+		case now < was:
 			mark = "<-" // the fresh read sets what the repair could not
 		}
 		fmt.Printf("%s %s p %d  %d paragraphs differ  KaTeX refuses %d, would refuse %d\n",
-			mark, b.ID, pg.Number, diffCount(paragraphs(f.Body), paragraphs(p.Body)), was, now)
+			mark, b.ID, pg.Number, d, was, now)
 		if *verbose {
 			for _, l := range paraDiff(paragraphs(f.Body), paragraphs(p.Body)) {
 				fmt.Printf("    %s\n", l)
 			}
+		}
+		// Marking is all that is done about an unmarked page. The committed body
+		// is the repair and is kept exactly as it stands; what changes is that
+		// extract run will now leave it alone. If the reader has since overtaken
+		// the repair, the forward direction of this same command finds that and
+		// -fix takes what KaTeX sets, which is the path a marked page is already
+		// on. So the two directions compose and neither one guesses.
+		if *setMark {
+			f.Meta.Manual = true
+			if err := f.Write(path); err != nil {
+				return err
+			}
+			took++
+			continue
 		}
 		if !*fix || now >= was {
 			continue
@@ -621,6 +668,13 @@ func extractDrift(args []string) error {
 		}
 		took += n
 		fmt.Printf("   took %d paragraphs from the fresh read of p %d\n", n, pg.Number)
+	}
+	if *unmarked {
+		fmt.Printf("%s: %d pages carry no mark, %d of them do not read back\n", b.ID, manual, moved)
+		if *setMark {
+			fmt.Printf("%s: %d of them marked manual\n", b.ID, took)
+		}
+		return nil
 	}
 	fmt.Printf("%s: %d pages repaired by hand, %d of them read differently today\n", b.ID, manual, moved)
 	if *fix {
@@ -726,6 +780,28 @@ func refused(eng *katex.Renderer, body string) int {
 		}
 	}
 	return n
+}
+
+// drifted says whether a page counts as having moved, and the two directions of
+// extract drift want two different answers.
+//
+// On a marked page the byte is the right unit. The page is frozen, the question
+// is whether a read today would write anything at all differently, and a change
+// in whitespace is a change the run would make.
+//
+// On an unmarked page the byte is the wrong unit and badly so. Every page in
+// this corpus has had bourbaki fix run over it since it was extracted, and the
+// fresh read has not, so the two differ in whitespace and delimiters on nearly
+// every page with not a word of the text having moved. Measured by byte, 338 of
+// the 340 unmarked pages of ts-i-ii-fr had drifted, which is a report that says
+// nothing. Measured by paragraph, which is the unit a repair is made in and
+// which puts both sides through corpus.NormalizeBody first, four had, and all
+// four were hand repairs nobody had marked.
+func drifted(unmarked bool, paragraphs int, committed, fresh string) bool {
+	if unmarked {
+		return paragraphs > 0
+	}
+	return committed != fresh
 }
 
 // paragraphs cuts a page body into the blocks it is written in, which is the
