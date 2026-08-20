@@ -1,9 +1,11 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/katex"
 )
 
@@ -180,5 +182,47 @@ func TestDriftRefusesFixAndUnmarkedTogether(t *testing.T) {
 	}
 	if err := extractDrift([]string{"-book", "ens-i-iv", "-mark"}); err == nil {
 		t.Fatal("-mark was accepted without -unmarked")
+	}
+}
+
+// The whole worth of -unmarked rests on it asking the same question extract run
+// asks, and the first version of it did not. It compared every page against a
+// fresh native extraction and kept only the pages without manual: true, so it
+// reported twenty one pages across three volumes as repairs nobody had marked.
+// Every one of them was a page extract run already keeps: twelve are method:
+// ocr and nine are pictured: true. A page a model read from the picture and a
+// page whose display was clipped out and read as an image both differ from a
+// native extraction by construction, and neither difference is a repair.
+//
+// So the predicate is repairedByHand and not the manual flag, and this is the
+// test that says so. It reads the three reasons off corpus rather than
+// restating them, so a fourth reason added there does not quietly fall out of
+// the check.
+func TestRepairedByHandKeepsThePicturedAndTheModelReadPagesToo(t *testing.T) {
+	dir := t.TempDir()
+	for _, tc := range []struct {
+		name string
+		meta corpus.PageFrontMatter
+		keep bool
+	}{
+		{"a page nobody touched", corpus.PageFrontMatter{Method: corpus.MethodNative}, false},
+		{"a page repaired by hand", corpus.PageFrontMatter{Method: corpus.MethodNative, Manual: true}, true},
+		{"a page whose display was read as a picture", corpus.PageFrontMatter{Method: corpus.MethodNative, Pictured: true}, true},
+		{"a page a model read", corpus.PageFrontMatter{Method: corpus.MethodOCR}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(dir, strings.ReplaceAll(tc.name, " ", "_")+".md")
+			f := corpus.PageFile{Meta: tc.meta, Body: "\nsome text\n"}
+			if err := f.Write(path); err != nil {
+				t.Fatal(err)
+			}
+			got, err := repairedByHand(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tc.keep {
+				t.Errorf("repairedByHand gave %v, want %v, so extract run and extract drift -unmarked disagree about this page", got, tc.keep)
+			}
+		})
 	}
 }

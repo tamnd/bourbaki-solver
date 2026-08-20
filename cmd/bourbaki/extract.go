@@ -616,7 +616,28 @@ func extractDrift(args []string) error {
 		if err != nil {
 			return err
 		}
-		if f.Meta.Manual == *unmarked {
+		// The forward direction asks about hand repairs, so it wants the pages
+		// carrying the mark and nothing else.
+		//
+		// -unmarked asks a different question: which pages would extract run
+		// write over. That is not the same set. repairedByHand keeps a page for
+		// three reasons, not one, and the other two matter here. A page read by
+		// a model was read from the picture and not from the text layer, and a
+		// page that is a picture was never text at all, so neither of them has
+		// any business being measured against a fresh native extraction: they
+		// differ from it by construction and every one of them would be reported
+		// as an unmarked repair. Twelve pages of lie-vii-ix were reported that
+		// way and all twelve are method: ocr. Asking exactly the question
+		// extract run asks is what keeps the answer honest.
+		if *unmarked {
+			keep, err := repairedByHand(path)
+			if err != nil {
+				return err
+			}
+			if keep {
+				continue
+			}
+		} else if !f.Meta.Manual {
 			continue
 		}
 		manual++
