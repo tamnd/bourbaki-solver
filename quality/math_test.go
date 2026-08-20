@@ -373,4 +373,33 @@ func TestM11(t *testing.T) {
 	if got := run(t, m11, pair); len(got) != 1 {
 		t.Errorf("a pair on one line gave %d findings, want 1: %v", len(got), got)
 	}
+
+	// The bare asterisk, which is the spelling a reader can see, since one at the
+	// head of a line opens a bullet list.
+	bareLine := doc("d.md", "the ordering is total.\n* (3) The set $\\mathbf{R}$ is totally ordered. *")
+	got := run(t, m11, bareLine)
+	if len(got) != 1 {
+		t.Fatalf("a bare pair gave %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].Line != 2 {
+		t.Errorf("the bare pair is on line %d, want 2", got[0].Line)
+	}
+	if !strings.HasPrefix(got[0].Msg, "a bare asterisk where the corpus writes") {
+		t.Errorf("the bare pair is reported as %q", got[0].Msg)
+	}
+
+	// Emphasis, bold and the units of a ring are asterisks that are not the mark,
+	// and all three are everywhere in the Elements.
+	notTheMark := doc("e.md", "The *signs* of a theory.\n**Definition 1.** — the group $K^*$ of units")
+	if got := run(t, m11, notTheMark); len(got) != 0 {
+		t.Errorf("emphasis, bold or the units were reported: %v", got)
+	}
+
+	// A solution is the one place the corpus writes real bullet lists, and a
+	// bullet has the shape of a star.
+	bullets := Doc{Path: "content/solutions/en/ens/I/a0/01.md", Lang: "en", Kind: KindSolution, head: 1,
+		Body: "Write $B$ as three pieces:\n* $F$ = the first segment\n* $D$ = the overlap"}
+	if got := run(t, m11, bullets); len(got) != 0 {
+		t.Errorf("a solution's bullet list was reported as the mark: %v", got)
+	}
 }

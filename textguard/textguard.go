@@ -353,10 +353,12 @@ func displayBrackets(text string) string {
 // line, which is invisible in review and shows up in every later diff.
 //
 // The star is not in the replacer with the dangerous bend, though the two faults
-// are the same fault. A replacer cannot see where the mathematics is, and one of
-// the four glyphs the star comes back as is a binary operation inside a span. So
-// Stars runs on its own, after the delimiters have been turned round, since it
-// has to be able to find the spans to keep out of them.
+// are the same fault. A replacer cannot see where the mathematics is, and two of
+// the five spellings the star comes back as are operations inside a span: U+2217
+// is a binary law or a dual, and the plain asterisk is a convolution, an adjoint
+// or the units of a ring, running through the volumes in their thousands as K^*.
+// So Stars runs on its own, after the delimiters have been turned round, since
+// it has to be able to find the spans to keep out of them.
 func Normalise(text string) string {
 	text = bareBlackboard.ReplaceAllString(text, `\mathbf{$1}`)
 	text = displayBrackets(text)

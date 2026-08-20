@@ -44,24 +44,63 @@ type Ornament struct {
 	Text string // the line it was found on
 }
 
-// Stars puts the corpus's star back wherever a model wrote an ornament for it,
-// and returns the text and how many it put back.
+// bareStar is the plainest way of getting the star wrong, and the only one that
+// changes what the reader sees: a bare ASCII asterisk where the corpus writes
+// the escaped one.
+//
+// The test is the space around it, and it comes from the Elements themselves. To
+// the Reader says the passages are "always placed between two asterisks: * . . .
+// *", and that is how they are set, with the space on the inside. Markdown reads
+// the same shape the other way round: an emphasis run has to open on a non-space
+// and close on a non-space, so *signs* is emphasis and * signs * is not. An
+// asterisk with a space or a line end on both sides is therefore neither one end
+// of an emphasis run nor half of a bold pair nor an escaped star already, and in
+// Bourbaki it is the mark and nothing else.
+//
+// Left alone it renders wrong, which is what separates this from the ornaments.
+// "* (3) The set R of real numbers is totally ordered. *" opens a bullet list on
+// the star and the reader gets an indented item with no list around it. Nothing
+// in the corpus writes a bullet list: the Elements number their lists and the
+// only Markdown bullets anywhere are under content/solutions, which this never
+// runs on.
+func bareStar(rs []rune, i int, math []bool) bool {
+	if rs[i] != '*' || math[i] {
+		return false
+	}
+	space := func(j int) bool {
+		if j < 0 || j >= len(rs) {
+			return true // a line end counts, and so does the start of the body
+		}
+		return rs[j] == ' ' || rs[j] == '\n' || rs[j] == '\t'
+	}
+	// A backslash, a second asterisk and a letter all fail this, so an escaped
+	// star, a bold run and an emphasis run are all left alone without being
+	// named separately.
+	return space(i-1) && space(i+1)
+}
+
+// Stars puts the corpus's star back wherever a model wrote something else for
+// it, and returns the text and how many it put back.
 //
 // It works outside the math spans only, and that is not tidiness. U+2217 is the
 // asterisk operator and inside the mathematics it is a binary operation, a dual
 // or a pullback, so the same glyph means one thing on one side of a dollar and
-// another on the other. Outside a span it can be nothing but the mark, since
-// prose has no operators in it. Inside one it belongs to bourbaki fix math,
-// which turns it into the TeX that prints it. The other three have no reading
-// anywhere and are left inside a span all the same, so that this function and
-// the rule that reads it cannot disagree about where the mark can be.
+// another on the other. The ASCII asterisk is worse: inside a span it is a
+// convolution, an adjoint, a dual basis or the units of a ring, and K^* runs
+// through the volumes in their thousands. Outside a span neither can be anything
+// but the mark, since prose has no operators in it. Inside one they belong to
+// bourbaki fix math, which turns them into the TeX that prints them. The three
+// dingbats have no reading anywhere and are left inside a span all the same, so
+// that this function and the rule that reads it cannot disagree about where the
+// mark can be.
 func Stars(text string) (string, int) {
 	math := inMath(text)
 	rs := []rune(text)
 	var b strings.Builder
 	n := 0
 	for i, r := range rs {
-		if _, bad := ornament[r]; bad && !math[i] {
+		_, bad := ornament[r]
+		if (bad && !math[i]) || bareStar(rs, i, math) {
 			b.WriteString(Star)
 			n++
 			continue
@@ -72,19 +111,24 @@ func Stars(text string) (string, int) {
 }
 
 // Ornaments is the same reading with nothing given back, for the audit. It hands
-// over each line that carries an ornament and says which glyph it found, so a
-// finding can name it rather than leave somebody to look up a code point.
+// over each line that carries one and says what it found, so a finding can name
+// it rather than leave somebody to look up a code point.
 func Ornaments(text string) []Ornament {
 	math := inMath(text)
+	rs := []rune(text)
 	var out []Ornament
 	at, line := 0, 1
 	for _, l := range strings.Split(text, "\n") {
 		for i, r := range []rune(l) {
 			name, bad := ornament[r]
-			if bad && !math[at+i] {
-				out = append(out, Ornament{Line: line, Name: name, Text: l})
-				break
+			if !bad || math[at+i] {
+				if !bareStar(rs, at+i, math) {
+					continue
+				}
+				name = "a bare asterisk"
 			}
+			out = append(out, Ornament{Line: line, Name: name, Text: l})
+			break
 		}
 		at += len([]rune(l)) + 1
 		line++
