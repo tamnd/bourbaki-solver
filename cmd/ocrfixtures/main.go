@@ -1,0 +1,534 @@
+// Command ocrfixtures records what this repository's acceptance rules and text
+// normalisation actually do, as JSON, so that a reimplementation elsewhere can
+// be tested against the original rather than against its author's memory of it.
+//
+// It exists because tamnd/local-ocr has to apply the same eight rules and the
+// same normalisation on the machine that reads the pages, in Python, and a
+// second implementation of a rule is a second opinion about what the rule is.
+// Two opinions that drift produce a corpus half of which was accepted under one
+// set of rules. The fixtures are the thing that makes them fail loudly instead.
+//
+// Every case here is written for a branch. The verdicts are not written at all:
+// they come from calling ocr.Validate and textguard.Normalise, so a change to
+// either shows up as a changed fixture and then as a failing test downstream.
+//
+// Usage:
+//
+//	go run ./cmd/ocrfixtures -out ../local-ocr/tests/fixtures
+package main
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/tamnd/bourbaki-solver/mathtex"
+	"github.com/tamnd/bourbaki-solver/ocr"
+	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/textguard"
+)
+
+// splitSpans records where mathtex.Split says the mathematics of a body is.
+//
+// The Python side finds spans the same way, and Stars depends on it: the same
+// asterisk is a binary law on one side of a dollar and Bourbaki's mark on the
+// other, so a splitter that disagrees by one rune rewrites the wrong glyph.
+func splitSpans(body string) ([]spanJSON, *spanJSON) {
+	found, open := mathtex.Split(body)
+	out := make([]spanJSON, 0, len(found))
+	for _, s := range found {
+		out = append(out, spanJSON{Text: s.Text, Display: s.Display, Line: s.Line, Start: s.Start, End: s.End})
+	}
+	if open == nil {
+		return out, nil
+	}
+	return out, &spanJSON{Text: open.Text, Display: open.Display, Line: open.Line, Start: open.Start, End: open.End}
+}
+
+// prose is a block of ordinary mathematical writing long enough to clear
+// MinChars on its own, so that a case about some other rule is not also a case
+// about rule 1.
+const prose = `Let $E$ be a set and let $R$ be a relation on $E$. We say that $R$ is an
+equivalence relation if it is reflexive, symmetric and transitive. The set of
+equivalence classes is written $E/R$, and the canonical mapping of $E$ onto
+$E/R$ sends each element to the class containing it. Every mapping of $E$ into
+a set $F$ which is constant on each class factors uniquely through $E/R$.`
+
+// expectJSON is the ocr.Expect a case runs under, in the shape the Python side
+// reads it back in.
+type expectJSON struct {
+	Book       string `json:"book"`
+	PDFPage    int    `json:"pdf_page"`
+	Blank      bool   `json:"blank"`
+	Sparse     bool   `json:"sparse"`
+	Grammar    string `json:"grammar"`
+	Chapter    string `json:"chapter"`
+	Page       int    `json:"page"`
+	Confidence string `json:"confidence"`
+	HasHead    bool   `json:"has_head"`
+}
+
+type problemJSON struct {
+	Rule   string `json:"rule"`
+	Detail string `json:"detail"`
+	Line   int    `json:"line"`
+}
+
+type validateCase struct {
+	Name     string        `json:"name"`
+	Why      string        `json:"why"`
+	Text     string        `json:"text"`
+	Expect   expectJSON    `json:"expect"`
+	Problems []problemJSON `json:"problems"`
+}
+
+type normaliseCase struct {
+	Name         string     `json:"name"`
+	Why          string     `json:"why"`
+	In           string     `json:"in"`
+	Normalise    string     `json:"normalise"`
+	Prose        string     `json:"normalise_prose"`
+	Dollars      string     `json:"dollars"`
+	DollarsCount int        `json:"dollars_count"`
+	Stars        string     `json:"stars"`
+	StarsCount   int        `json:"stars_count"`
+	Strip        string     `json:"strip"`
+	Idempotent   bool       `json:"normalise_is_idempotent"`
+	Spans        []spanJSON `json:"spans"`
+	Unclosed     *spanJSON  `json:"unclosed"`
+}
+
+type spanJSON struct {
+	Text    string `json:"text"`
+	Display bool   `json:"display"`
+	Line    int    `json:"line"`
+	Start   int    `json:"start"`
+	End     int    `json:"end"`
+}
+
+type leakCase struct {
+	Name  string     `json:"name"`
+	Why   string     `json:"why"`
+	Text  string     `json:"text"`
+	Leaks []leakJSON `json:"leaks"`
+}
+
+type leakJSON struct {
+	Kind   string `json:"kind"`
+	Detail string `json:"detail"`
+	Line   int    `json:"line"`
+}
+
+type file struct {
+	Note      string          `json:"note"`
+	Generator string          `json:"generator"`
+	Validate  []validateCase  `json:"validate,omitempty"`
+	Normalise []normaliseCase `json:"normalise,omitempty"`
+	Leaks     []leakCase      `json:"leaks,omitempty"`
+}
+
+func main() {
+	out := flag.String("out", "", "directory to write the fixture files into")
+	flag.Parse()
+	if *out == "" {
+		fmt.Fprintln(os.Stderr, "ocrfixtures: -out is required")
+		os.Exit(2)
+	}
+	if err := os.MkdirAll(*out, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "ocrfixtures:", err)
+		os.Exit(1)
+	}
+
+	const note = "Generated by cmd/ocrfixtures in tamnd/bourbaki-solver. Do not edit by hand: " +
+		"the verdicts are what the Go rules return, so an edit here is a lie about the original."
+
+	write(filepath.Join(*out, "validate.json"), file{
+		Note: note, Generator: "cmd/ocrfixtures", Validate: validateCases(),
+	})
+	write(filepath.Join(*out, "leaks.json"), file{
+		Note: note, Generator: "cmd/ocrfixtures", Leaks: leakCases(),
+	})
+	write(filepath.Join(*out, "normalise.json"), file{
+		Note: note, Generator: "cmd/ocrfixtures", Normalise: normaliseCases(),
+	})
+}
+
+func write(path string, f file) {
+	body, err := json.MarshalIndent(f, "", "  ")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ocrfixtures:", err)
+		os.Exit(1)
+	}
+	if err := os.WriteFile(path, append(body, '\n'), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, "ocrfixtures:", err)
+		os.Exit(1)
+	}
+	fmt.Println(path)
+}
+
+// headLabel is the volume grammar most of the corpus prints, with the page map
+// confident about a printed number, which is what turns rules 4 and 6 on.
+func headLabel(chapter string, page int) expectJSON {
+	return expectJSON{
+		Book: "alg-viii", PDFPage: page + 20, Grammar: string(pagemap.HeadLabel),
+		Chapter: chapter, Page: page, Confidence: string(pagemap.FromHead), HasHead: true,
+	}
+}
+
+func toExpect(e expectJSON) ocr.Expect {
+	return ocr.Expect{
+		Book: e.Book, PDFPage: e.PDFPage, Blank: e.Blank, Sparse: e.Sparse,
+		Grammar: pagemap.Grammar(e.Grammar), Chapter: e.Chapter, Page: e.Page,
+		Confidence: pagemap.Confidence(e.Confidence), HasHead: e.HasHead,
+	}
+}
+
+func validateCases() []validateCase {
+	type raw struct {
+		name, why, text string
+		expect          expectJSON
+	}
+	raws := []raw{
+		{
+			"a good page passes every rule",
+			"The baseline. If this ever reports a problem the fixture set is measuring the wrong thing.",
+			"A VIII.13\n\n" + prose,
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 1 rejects a page under the minimum",
+			"A truncated answer and a one line apology both land here. Two hundred runes is under half the thinnest real page.",
+			"A VIII.13\n\nLet $E$ be a set.",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 1 stands down on a sparse page",
+			"The Springer knight at 0.47 percent ink is short because the book is short there. Three calls at 151 seconds each, then filed as a defect that is not one.",
+			"A VIII.3\n\nSpringer",
+			func() expectJSON { e := headLabel("VIII", 3); e.Sparse = true; e.HasHead = false; return e }(),
+		},
+		{
+			"an empty answer is a leak before it is ever a short page",
+			"Rule 3 runs first and returns on its own, so the report says what happened rather than listing four symptoms of it. A blank page never reaches the validator anyway.",
+			"",
+			func() expectJSON { e := headLabel("VIII", 4); e.Blank = true; e.HasHead = false; return e }(),
+		},
+		{
+			"rule 1 counts runes and not bytes",
+			"A page of French accents is shorter in runes than in bytes, and the rule is about how much page there is.",
+			"A VIII.13\n\n" + strings.Repeat("é", 150),
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 2 catches an odd number of inline delimiters",
+			"Parity over the page is the crude half of the rule and it still has to hold.",
+			"A VIII.13\n\n" + prose + "\n\nHence $x \\in E and the result follows for every such $E$ chosen in this way.",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 2 catches a dollar left open when a paragraph ends",
+			"Page 53 of Algebra I came back with two unclosed dollars in different paragraphs and the two odd counts added to an even one. Parity passed it. This is the half of the rule that did not.",
+			"A VIII.13\n\nWe have $x \\in E. The rest of this paragraph is ordinary prose written out\nat length so that the page clears the minimum length rule comfortably.\n\nAnd separately $\\sup$ and $\\inf. The same again here, at enough length that\nnothing else about this page is in question.\n",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 2 leaves an escaped dollar alone",
+			"The historical notes print prices. A backslash makes the next character literal, dollar included.",
+			"A VIII.13\n\n" + prose + "\n\nThe first printing sold for \\$4 in 1939 and for \\$6 after the war.",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 2 does not count a lone dollar inside a display",
+			"Inside a display block the dollars are not inline delimiters, and while the display count is odd the paragraph rule stands down.",
+			"A VIII.13\n\n" + prose + "\n\n$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\n$$\n",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 2 catches an odd number of display delimiters",
+			"A display opened and never closed takes the rest of the page with it.",
+			"A VIII.13\n\n" + prose + "\n\n$$ x = y\n\nand so the assertion holds for every element of the set considered above.",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 4 rejects a first line that reads as prose",
+			"A page whose running head the scan ate looks exactly like a page that starts mid sentence, and only the page map knows which.",
+			"Let $E$ be a set and let $R$ be a relation on it.\n\n" + prose,
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 4 rejects an empty first line where the map says there is a head",
+			"",
+			"\n\n" + prose,
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 4 stands down where the page prints no head",
+			"The first page of a chapter, a part title and the front matter print nothing up there.",
+			prose,
+			func() expectJSON { e := headLabel("VIII", 13); e.HasHead = false; e.Page = 0; return e }(),
+		},
+		{
+			"rule 4 accepts a section locator on a foot numbered volume",
+			"The 1998 printing of chapters I to III carries no page label at all, only this.",
+			"§ 6.5\n\n" + prose,
+			expectJSON{Book: "alg-i-iii", PDFPage: 40, Grammar: string(pagemap.FootNumber),
+				Confidence: string(pagemap.FromFoot), HasHead: true},
+		},
+		{
+			"rule 4 accepts a running head set in capitals",
+			"Bourbaki sets its heads in capitals and OCR brings small capitals back mixed, so half is enough.",
+			"ALGEBRAIC STRUCTURES\n\n" + prose,
+			expectJSON{Book: "alg-i-iii", PDFPage: 41, Grammar: string(pagemap.FootNumber),
+				Confidence: string(pagemap.FromFoot), HasHead: true},
+		},
+		{
+			"rule 4 accepts a head ending in no.",
+			"The one full stop that does not make a line a sentence.",
+			"§ 4, no.\n\n" + prose,
+			expectJSON{Book: "alg-i-iii", PDFPage: 42, Grammar: string(pagemap.FootNumber),
+				Confidence: string(pagemap.FromFoot), HasHead: true},
+		},
+		{
+			"rule 4 rejects a head longer than ninety runes",
+			"A running head is not a paragraph.",
+			strings.Repeat("VERY LONG HEADING ", 6) + "\n\n" + prose,
+			expectJSON{Book: "alg-i-iii", PDFPage: 43, Grammar: string(pagemap.FootNumber),
+				Confidence: string(pagemap.FromFoot), HasHead: true},
+		},
+		{
+			"rule 4 accepts a head with no letters in it at all",
+			"A bare number or a locator, which is what a foot numbered volume prints on a recto.",
+			"46\n\n" + prose,
+			expectJSON{Book: "alg-i-iii", PDFPage: 44, Grammar: string(pagemap.FootNumber),
+				Confidence: string(pagemap.FromFoot), HasHead: true},
+		},
+		{
+			"rule 5 accepts two unreadable spots",
+			"Up to two is a damaged scan, and these are damaged scans.",
+			"A VIII.13\n\n" + prose + "\n\nThe symbol ⟪illegible⟫ stands where ⟪illegible⟫ could not be read.",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 5 rejects three",
+			"More than two is a model that gave up, and 600 dpi is worth the call.",
+			"A VIII.13\n\n" + prose + "\n\nHere ⟪illegible⟫ and ⟪illegible⟫ and also ⟪illegible⟫ were not read.",
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 6 rejects a page whose label names the wrong chapter",
+			"Two different pages of the same volume, one of them in the wrong place.",
+			"A IV.13\n\n" + prose,
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 6 allows one page of slack",
+			"A verso head and the facing recto head differ by one, and these scans are off by a page in their own numbering.",
+			"A VIII.14\n\n" + prose,
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 6 rejects a difference of two",
+			"",
+			"A VIII.15\n\n" + prose,
+			headLabel("VIII", 13),
+		},
+		{
+			"rule 6 stands down on an interpolated number",
+			"Two guesses disagreeing says nothing at all.",
+			"A VIII.40\n\n" + prose,
+			func() expectJSON {
+				e := headLabel("VIII", 13)
+				e.Confidence = string(pagemap.Interpolated)
+				return e
+			}(),
+		},
+		{
+			"rule 6 stands down where the page map has no number",
+			"Front matter carries no Bourbaki page number, which is the correct answer and not a gap.",
+			"A VIII.40\n\n" + prose,
+			func() expectJSON { e := headLabel("VIII", 0); e.Page = 0; return e }(),
+		},
+		{
+			"rule 8 rejects an exercise set as a heading",
+			"Page 289 of Theory of Sets. Nothing of a section comes after its exercises, so a numbered heading below the head is the reading and not the page.",
+			"E III.29\n\n## EXERCISES\n\n## § 1\n\n### 1. Let S be the set of signs\n\n" + prose,
+			expectJSON{Book: "ens-i-iv", PDFPage: 300, Grammar: string(pagemap.HeadLabel),
+				Chapter: "III", Page: 29, Confidence: string(pagemap.FromHead), HasHead: true},
+		},
+		{
+			"rule 8 leaves a section heading below the exercises head alone",
+			"A chapter gathers the exercises of all its sections under one head and divides them by section, so this is the printing.",
+			"E III.29\n\n## EXERCISES\n\n## § 1\n\n1. Let $S$ be the set of signs, and let $T$ be its complement.\n\n" + prose,
+			expectJSON{Book: "ens-i-iv", PDFPage: 300, Grammar: string(pagemap.HeadLabel),
+				Chapter: "III", Page: 29, Confidence: string(pagemap.FromHead), HasHead: true},
+		},
+		{
+			"a page can fail more than one rule at once",
+			"Short and headless is a truncated answer; short alone is a page whose head the scan ate. The retry differs, so both are reported.",
+			"Let $E$ be a set.",
+			headLabel("VIII", 13),
+		},
+	}
+
+	cases := make([]validateCase, 0, len(raws))
+	for _, r := range raws {
+		problems := ocr.Validate(r.text, toExpect(r.expect), ocr.Options{})
+		out := make([]problemJSON, 0, len(problems))
+		for _, p := range problems {
+			out = append(out, problemJSON{Rule: string(p.Rule), Detail: p.Detail, Line: p.Line})
+		}
+		cases = append(cases, validateCase{
+			Name: r.name, Why: r.why, Text: r.text, Expect: r.expect, Problems: out,
+		})
+	}
+	return cases
+}
+
+func leakCases() []leakCase {
+	type raw struct{ name, why, text string }
+	raws := []raw{
+		{"an empty answer", "Nothing came back at all, which is its own kind and not a short page.", "   \n\n  "},
+		{"a refusal", "A page that opens with one of these has no transcription in it anywhere.", "I'm sorry, I can't help with that.\n\n" + prose},
+		{
+			"a refusal written with a typographic apostrophe",
+			"A model writes I'm with U+2019 and every phrase in the list is spelled with U+0027, which is why one of these reached the corpus with no leak reported.",
+			"I\u2019m sorry, I can\u2019t help with that.\n\n" + prose,
+		},
+		{
+			"the word violates in ordinary mathematics",
+			"A theorem says a map violates no relation. The bare word rejected a real page of chapter IV the first time this ran, so the phrases are narrow on purpose.",
+			"A VIII.13\n\nThe mapping violates no relation of the family considered above, and\ntherefore factors through the quotient in exactly one way.\n\n" + prose,
+		},
+		{
+			"the upload failed and the model said so",
+			"Not a refusal and not narration. The prompt got through and the page did not, and the answer is a browser fix rather than another call.",
+			"I don't see an image attached. Please upload the page you want transcribed.",
+		},
+		{"the model narrating over a good transcription", "Worse than a refusal, because the transcription usually follows and the page looks almost right.", "Here is the transcription of the image:\n\n" + prose},
+		{"the prompt handed back", "Two solutions of the Theory of Sets went into the corpus containing the repair prompt read back and nothing else.", "Transcribe the complete text of this page.\nRender all mathematical expressions as LaTeX."},
+		{"the model thinking out loud", "The model works out what it was asked, in numbered steps, and stops before writing the thing it was working out.", "Here's a thinking process for transcribing this page.\n\nFirst I will look at the running head."},
+		{
+			"a directive fence",
+			"A retranslation of the appendix on the Nullstellensatz reached the corpus inside one of these and passed all seven translation rules. It was found by reading the diff.",
+			":::writing{variant=\"document\" id=\"58321\"}\n" + prose + "\n:::",
+		},
+		{"a citation anchor", "Where one provider hides its own anchors.", "A VIII.13\n\nThe result is due to Steinitz 【4:2†source】.\n\n" + prose},
+		{"a private use character", "Where another provider hides them. Nothing in Bourbaki is in that block.", "A VIII.13\n\nThe result is due to Steinitz \ue200.\n\n" + prose},
+		{"one bad line is one leak", "A line that both apologises and narrates is one bad line, and counting it twice makes the failures report count problems it does not have.", "I'm sorry, here is the transcription.\n\n" + prose},
+		{"a clean page leaks nothing", "", "A VIII.13\n\n" + prose},
+	}
+	cases := make([]leakCase, 0, len(raws))
+	for _, r := range raws {
+		leaks := textguard.Check(r.text)
+		out := make([]leakJSON, 0, len(leaks))
+		for _, l := range leaks {
+			out = append(out, leakJSON{Kind: l.Kind, Detail: l.Detail, Line: l.Line})
+		}
+		cases = append(cases, leakCase{Name: r.name, Why: r.why, Text: r.text, Leaks: out})
+	}
+	return cases
+}
+
+func normaliseCases() []normaliseCase {
+	type raw struct{ name, why, text string }
+	raws := []raw{
+		{"blackboard bold becomes bold", "Bourbaki prints bold, and a corpus that mixes the two makes every search for a ring name miss half its hits.", `The ring $\mathbb{Z}$ and the field $\mathbb{Q}$ and also $\mathbb{R}$.`},
+		{
+			"blackboard bold without braces",
+			"The first live page came back with $\\mathbb Z$, which the braced list missed.",
+			`The ring $\mathbb Z$ and the field $\mathbb Q$.`,
+		},
+		{
+			"a blackboard macro whose argument is a longer name is left alone",
+			"The character after the letter must not be a letter, or \\mathbb Zeta loses its tail.",
+			`Write $\mathbb Zeta$ for that.`,
+		},
+		{
+			"a matrix row break survives the delimiter rewrite",
+			"LOAD BEARING. Dollars swaps every \\\\ to a null byte before substituting and back afterwards, because \\\\ starts with a backslash that is not a delimiter's. The corpus has a good many \\\\[2pt] and every one is a row break.",
+			"$$\n\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}\n$$",
+		},
+		{
+			"a spaced row break survives too",
+			"\\\\[2pt] is a row break asking for space after it, and the bracket in it is not a display.",
+			"$$\n\\begin{pmatrix} a & b \\\\[2pt] c & d \\end{pmatrix}\n$$",
+		},
+		{
+			"bracket delimiters become dollars",
+			"Every rule that reads mathematics here finds spans by their dollars, so a formula written with brackets is prose with backslashes in it as far as the corpus is concerned.",
+			"The identity \\( x + y = y + x \\) holds, and so does\n\\[ (x + y) + z = x + (y + z) \\]\nfor every triple.",
+		},
+		{
+			"normalisation is idempotent",
+			"bourbaki fix dollars is run over the corpus as often as anyone likes, so a second pass has to change nothing.",
+			"The identity \\( x + y = y + x \\) holds and $\\mathbb{Z}$ is the ring.",
+		},
+		{
+			"a bare asterisk with space on both sides is the mark",
+			"To the Reader says the passages are always placed between two asterisks, with the space on the inside, and Markdown reads that same shape the other way round.",
+			"* (3) The set $\\mathbf{R}$ of real numbers is totally ordered. *",
+		},
+		{
+			"an emphasis run is not the mark",
+			"An emphasis run opens on a non space and closes on a non space, so *signs* fails the test on both sides without being named separately.",
+			"The set of *signs* is finite and the argument is unchanged.",
+		},
+		{
+			"an escaped star is left as it is",
+			"A backslash fails the space test on the left, so the form the corpus already writes is not rewritten again.",
+			`\* (3) The set is totally ordered. \*`,
+		},
+		{
+			"the asterisk operator inside a span is left alone",
+			"U+2217 inside the mathematics is a binary law or a dual. Outside it there is nothing it can be but the mark.",
+			"The dual $K^{\u2217}$ is considered, and the passage ends \u2217 here.",
+		},
+		{
+			"the units of a ring are left alone",
+			"K^* runs through the volumes in their thousands, and it is inside a span every time.",
+			"The group $K^*$ of units is considered.",
+		},
+		{
+			"the dangerous bend has near misses",
+			"The prompt never said how to write it, so the model chose by what the glyph looked like.",
+			"\u26a0\n\nThis passage is delicate.\n\n\u26f0",
+		},
+		{"invisible spaces go", "A non breaking space breaks every word match if it is kept, and a zero width one hides differences in a diff.", "the\u00a0set\u2009of\u200b signs\ufeff"},
+		{"trailing space goes from every line", "Invisible in review, and in every later diff.", "A VIII.13   \n\nThe set of signs.  \n"},
+		{
+			"prose normalisation leaves a bullet list alone",
+			"On a scanned page a star at the head of a line is Bourbaki's mark, because the volumes set no bullet lists. In a solution it is a list, and a backslash at the head of every item is not what anyone wrote.",
+			"The proof has two parts.\n\n* first, the easy one\n* second, the other",
+		},
+		{
+			"a code fence around a good answer is packaging",
+			"A fenced answer is correct text in the wrong wrapper, and unwrapping it is safe in a way that trimming a narrated one is not.",
+			"```markdown\nA VIII.13\n\nThe set of signs is finite.\n```",
+		},
+		{
+			"an unclosed span takes the rest of the body with it",
+			"That is not what the page means, it is a file M01 is already reporting, and marking the tail leaves it alone, which is the right thing to do with text whose reading is not known.",
+			"We have $x \\in E and then \u2217 later on.",
+		},
+	}
+	cases := make([]normaliseCase, 0, len(raws))
+	for _, r := range raws {
+		once := textguard.Normalise(r.text)
+		dollars, dn := textguard.Dollars(r.text)
+		stars, sn := textguard.Stars(r.text)
+		spans, open := splitSpans(once)
+		cases = append(cases, normaliseCase{
+			Name: r.name, Why: r.why, In: r.text,
+			Normalise: once, Prose: textguard.NormaliseProse(r.text),
+			Dollars: dollars, DollarsCount: dn,
+			Stars: stars, StarsCount: sn,
+			Strip:      textguard.Strip(r.text),
+			Idempotent: textguard.Normalise(once) == once,
+			Spans:      spans, Unclosed: open,
+		})
+	}
+	return cases
+}
