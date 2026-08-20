@@ -771,3 +771,63 @@ func TestTheObligationsAreCountedOffTheReference(t *testing.T) {
 		t.Errorf("the one line the fixture owes was refused: %v", err)
 	}
 }
+
+// A model that writes its display the other way round has it turned into the
+// corpus's spelling before anything reads it, so what the judges saw and what
+// the file carries are the same text. Left to itself the pipeline shipped
+// exercise 1 of § 5 of chapter II of Theory of Sets with three of these in it,
+// verified by both judges, because nothing downstream can see inside a span the
+// dollars do not mark.
+func TestTheDelimitersAreTurnedRoundBeforeTheJudgesReadThem(t *testing.T) {
+	brackets := "Let \\(N\\) be a submodule. Then\n\\[ N = \\sum_i A x_i \\]\nand the chain stops.\n\nUSES: 0001\n"
+	a := &asker{by: map[string][]string{
+		"reference":                {reference},
+		"candidate-direct":         {brackets},
+		"candidate-contrapositive": {brackets},
+		"candidate-elementary":     {brackets},
+		"select":                   {"Candidate 1 covers the obligation.\n\nSELECTED: 1\n"},
+		"truth":                    {pass},
+		"audit":                    {auditPass},
+	}}
+	got, err := engine(a).Solve(context.Background(), exercise("Prove that $M$ is Noetherian."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := got.Solution.Body
+	if strings.Contains(body, `\[`) || strings.Contains(body, `\(`) {
+		t.Errorf("the file carries the other spelling: %q", body)
+	}
+	if !strings.Contains(body, "$$ N = \\sum_i A x_i $$") || !strings.Contains(body, "$N$") {
+		t.Errorf("the display or the span did not come out as the corpus writes it: %q", body)
+	}
+	// And the judges read it that way, which is what makes the verdict about
+	// the file rather than about a draft of it.
+	for _, stage := range []string{"truth", "audit"} {
+		if q := a.question(t, stage); strings.Contains(q, `\[`) {
+			t.Errorf("the %s judge was shown the other spelling", stage)
+		}
+	}
+}
+
+// The solver writes Markdown somebody's own hand wrote, and a bullet list in it
+// is a bullet list. The OCR's star repair would put a backslash at the head of
+// every item, so the solver gets the rest of the typography and not that.
+func TestABulletListInASolutionIsLeftAlone(t *testing.T) {
+	list := "There are two cases.\n\n* $N$ is finitely generated.\n* $N$ is not.\n\nUSES: 0001\n"
+	a := &asker{by: map[string][]string{
+		"reference":                {reference},
+		"candidate-direct":         {list},
+		"candidate-contrapositive": {list},
+		"candidate-elementary":     {list},
+		"select":                   {"Candidate 1 covers the obligation.\n\nSELECTED: 1\n"},
+		"truth":                    {pass},
+		"audit":                    {auditPass},
+	}}
+	got, err := engine(a).Solve(context.Background(), exercise("Prove that $M$ is Noetherian."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Solution.Body, `\*`) {
+		t.Errorf("the bullet list was read as Bourbaki's star: %q", got.Solution.Body)
+	}
+}

@@ -501,7 +501,23 @@ func (s *state) judgeOnce(ctx context.Context, solution string) (Judgement, erro
 }
 
 // judge runs the judges and the correction loop.
+//
+// The answer is put into the corpus's typography before it is judged, and not
+// after, so that what the judges read is what gets written. The other way round
+// leaves a solution filed as verified that nobody verified in the form it was
+// filed in.
+//
+// This is the seam the solver had missing. The OCR normalises every page it
+// writes and the mender normalises every translation, and the solver, which is
+// the third thing in this repository that writes Markdown into the corpus, did
+// neither. The corrections notes of eight solutions record a whole model call
+// spent asking for the \( \) delimiters to be turned round, which the code could
+// have done for nothing, and exercise 1 of § 5 of chapter II of Theory of Sets
+// shipped three displays written the wrong way anyway, with status verified and
+// both judges passing, because no rule in the corpus can see inside a span the
+// dollars do not mark.
 func (s *state) judge(ctx context.Context, solution string) (Result, error) {
+	solution = textguard.NormaliseProse(solution)
 	for {
 		j, err := s.judgeOnce(ctx, solution)
 		if err != nil {
@@ -529,7 +545,7 @@ func (s *state) judge(ctx context.Context, solution string) (Result, error) {
 			s.engine.logf("%s: the correction call failed, keeping what was judged: %v", s.ctx.Label, err)
 			return s.finish(j, solution), nil
 		}
-		solution = fixed
+		solution = textguard.NormaliseProse(fixed)
 	}
 }
 
@@ -583,7 +599,7 @@ const (
 func (s *state) verdict(status, why, reference string) Result {
 	out := s.result()
 	out.Solution = Solution{Meta: s.meta(status),
-		Body: why + "\n\n" + strings.TrimSpace(reference) + "\n"}
+		Body: textguard.NormaliseProse(why+"\n\n"+strings.TrimSpace(reference)) + "\n"}
 	return out
 }
 

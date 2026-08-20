@@ -403,3 +403,59 @@ func TestM11(t *testing.T) {
 		t.Errorf("a solution's bullet list was reported as the mark: %v", got)
 	}
 }
+
+func TestM12(t *testing.T) {
+	// The corpus's own delimiters, which are the whole of what the rest of this
+	// group can read.
+	clean := doc("a.md", "for every $x$ in $E$ we have\n$$\nf(x) = 0\n$$\nand nothing else")
+	if got := run(t, m12, clean); len(got) != 0 {
+		t.Errorf("a file written the corpus's way was reported: %v", got)
+	}
+
+	for _, tc := range []struct{ name, body, want string }{
+		{"a display opened", "we have\n\\[ f(x) = 0 $$", "a display opened with a bracket"},
+		{"a display closed", "we have\n$$ f(x) = 0 \\]", "a display closed with a bracket"},
+		{"a span opened", "for every\n\\(x\\) in $E$", "a span opened with a parenthesis"},
+		{"a span closed", "for every\n$x\\) in $E$", "a span closed with a parenthesis"},
+	} {
+		got := run(t, m12, doc("b.md", tc.body))
+		if len(got) != 1 {
+			t.Errorf("%s gave %d findings, want 1: %v", tc.name, len(got), got)
+			continue
+		}
+		if got[0].Line != 2 {
+			t.Errorf("%s is on line %d, want 2", tc.name, got[0].Line)
+		}
+		if !strings.HasPrefix(got[0].Msg, tc.want+" where the corpus writes") {
+			t.Errorf("%s does not name the delimiter: %s", tc.name, got[0].Msg)
+		}
+	}
+
+	// One finding to a line, so a display opened and closed on one line sends
+	// somebody to that line once.
+	pair := doc("c.md", `\[ f(x) = 0 \]`)
+	if got := run(t, m12, pair); len(got) != 1 {
+		t.Errorf("a display on one line gave %d findings, want 1: %v", len(got), got)
+	}
+
+	// The row break of a matrix is the one thing in the corpus with this shape
+	// that is not a display, and both spellings here are ones the corpus uses.
+	rows := doc("d.md", `$$\begin{pmatrix} a & b \\[2pt] c & d \end{pmatrix}$$`+"\n"+
+		`$$\begin{pmatrix} a & b \\[-1.5em] c & d \end{pmatrix}$$`)
+	if got := run(t, m12, rows); len(got) != 0 {
+		t.Errorf("a row break was reported as a display: %v", got)
+	}
+
+	// The solutions are read, unlike M11, and they are the reason the rule is
+	// here: this is what exercise 1 of § 5 of chapter II of Theory of Sets
+	// shipped with, verified by both judges.
+	sol := Doc{Path: "content/solutions/en/ens/II/s5/01.md", Lang: "en", Kind: KindSolution, head: 1,
+		Body: "By induction on $n$:\n" + `\[ \operatorname{Card}(A) = n \]`}
+	got := run(t, m12, sol)
+	if len(got) != 1 {
+		t.Fatalf("a solution gave %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].Line != 2 {
+		t.Errorf("the display is on line %d, want 2", got[0].Line)
+	}
+}
