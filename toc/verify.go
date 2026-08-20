@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/mathtex"
 )
 
 // Verify opens every page the contents points at and looks for the heading that
@@ -276,8 +277,18 @@ var (
 )
 
 // check looks for one heading and records it.
+//
+// The mathematics comes out of the title before the words are taken, because a
+// macro name is not a word and the page it is looked for on is a scan of type.
+// No. 3 of chapter III of the topological vector spaces volume is titled "The
+// spaces $\mathscr{L}_{\mathfrak{S}}(E; F)$", and read as prose that title asks
+// the page for spaces, mathscr and mathfrak, of which the page can only ever
+// carry the first: one word in three, under a threshold of half, and the
+// heading was reported missing from the page it is printed on. Nothing else in
+// this file has to change, since a heading left with no words at all is already
+// passed over rather than counted as a miss.
 func (r *Report) check(norm []string, c Check) {
-	words := wordRe.FindAllString(strings.ToLower(c.Title), -1)
+	words := wordRe.FindAllString(strings.ToLower(mathtex.Strip(c.Title)), -1)
 	if len(words) == 0 {
 		return
 	}
