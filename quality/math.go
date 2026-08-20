@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/mathtex"
+	"github.com/tamnd/bourbaki-solver/textguard"
 )
 
 // The mathematics rules are about the one thing a transcription of Bourbaki has
@@ -41,6 +42,8 @@ func init() {
 			Title: "no base carries two superscripts or two subscripts", Run: m09},
 		Check{ID: "M10", Group: Mathematics, Hard: true,
 			Title: "no relation sign has lost the stroke that negates it", Run: m10},
+		Check{ID: "M11", Group: Mathematics, Hard: true,
+			Title: "the star on a forward-looking passage is the corpus's star", Run: m11},
 	)
 }
 
@@ -654,6 +657,53 @@ func m10(c *Corpus) ([]Finding, error) {
 			out = append(out, Finding{File: d.Path, Line: d.BodyLine(s.Line),
 				Msg: fmt.Sprintf("%s has lost the stroke that negates it, and the span now says the opposite: %s",
 					signs[i], ellipsis(s.Text, 60))})
+		}
+	}
+	return out, nil
+}
+
+// M11. The star on a forward-looking passage is the corpus's star.
+//
+// Bourbaki sets an asterisk at each end of a passage that leans on results
+// proved in a later Book, so a reader knows to take it on trust or pass over it.
+// The corpus writes that mark as \*, escaped, because a bare asterisk at the
+// head of a line opens a list and a bare pair in a sentence opens emphasis, and
+// 82 of them in pages/ are written that way.
+//
+// None of the OCR prompts said so. A model handed a page picked a glyph by what
+// the printed mark looked like rather than what it meant, and four of them are
+// in the corpus: an asterisk operator, a low asterisk, and two dingbats. Theory
+// of Sets has 24 against the 82 on its own pages, and § 1 of chapter IV sets
+// both forms in one paragraph.
+//
+// It is hard for M10's reason, at a smaller cost. An ornament at the end of a
+// sentence reads as an ornament at the end of a sentence, so nothing on the page
+// looks damaged and no renderer complains. What is lost is that the star is part
+// of Bourbaki's apparatus rather than decoration: it says this passage uses a
+// Book you have not read, and a reader who wants those passages, or a tool that
+// wants to mark them, finds a quarter of them. It went through translation
+// untouched and content/vi carried the same four glyphs in the same places,
+// which is what a fault does when nothing catches it.
+//
+// A star also has to be found before it can be counted, and they come in pairs.
+// Nothing here checks the parity yet, because a passage can open on one page and
+// close on the next and the pages are read one at a time. Getting them all
+// spelled the same way is what makes that check possible later.
+//
+// The math spans are left out. U+2217 inside one is the asterisk operator, a
+// binary law or a dual, and it belongs to M03 and bourbaki fix math, which turn
+// it into the TeX that prints it. Outside a span prose has no operators, so
+// there the glyph can be nothing but the mark. bourbaki fix star repairs every
+// one of them without opening a PDF, and textguard.Normalise does the same as an
+// answer is written, so a finding here means either a page read before that
+// landed or a hand edit that put one back.
+func m11(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		for _, o := range textguard.Ornaments(d.Body) {
+			out = append(out, Finding{File: d.Path, Line: d.BodyLine(o.Line),
+				Msg: fmt.Sprintf("%s where the corpus writes %s: %s",
+					o.Name, textguard.Star, ellipsis(o.Text, 60))})
 		}
 	}
 	return out, nil

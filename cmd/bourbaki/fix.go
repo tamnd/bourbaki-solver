@@ -15,6 +15,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/footnote"
 	"github.com/tamnd/bourbaki-solver/mathtex"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/textguard"
 	"github.com/tamnd/bourbaki-solver/toc"
 )
 
@@ -46,6 +47,7 @@ commands:
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
   notin     put the stroke back on a relation sign that came back struck through
+  star      write the star that marks a forward-looking passage the corpus's way
   folio     move the printed page number off the foot and into the front matter
   heading   set a numbered heading at the level the table of contents gives it
   footnote  take the printed mark off a footnote that already has a reference
@@ -55,10 +57,11 @@ Run the first three in that order. Everything after an unclosed delimiter reads
 as mathematics, so stray comes first and the other two will not touch a span
 whose end they cannot see, and parens comes before math so that math reads the
 spans as they will be rather than as they are. notin runs after those three,
-since it works inside the spans and wants them closed and whole. folio and
-heading touch no mathematics and can be run at any point before assemble. seal
-works on content/ and not on pages/, and is the last thing run after a hand
-correction.
+since it works inside the spans and wants them closed and whole. star runs there
+too and for the same reason from the other side, since it works everywhere the
+spans are not. folio and heading touch no mathematics and can be run at any
+point before assemble. seal works on content/ and not on pages/, and is the last
+thing run after a hand correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
 `
@@ -223,6 +226,43 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixStarUsage = `usage: bourbaki fix star [flags]
+
+Writes the star that marks a forward-looking passage the way the corpus writes
+it.
+
+Bourbaki sets an asterisk at each end of a passage that leans on results proved
+in a later Book, so the reader knows to take it on trust or skip it. The corpus
+writes that mark as \*, escaped, because a bare asterisk at the head of a line
+opens a list and a bare pair in a sentence opens emphasis.
+
+None of the OCR prompts said so, so a model handed a page chose a glyph by what
+the printed mark looked like rather than what it meant, and four of them are in
+the corpus: an asterisk operator, a low asterisk, and two dingbats. Theory of
+Sets has 24 against 82 written properly on its own pages, and one paragraph of
+chapter IV has both forms in it.
+
+It is quiet in the way the notin fault is quiet. An ornament at the end of a
+sentence reads as an ornament at the end of a sentence, so nothing on the page
+looks wrong, and the only thing lost is that a reader who wants the starred
+passages finds a quarter of them. It went through translation untouched, which
+is what a fault does when nothing catches it.
+
+It works outside the math spans only. U+2217 inside a span is the asterisk
+operator, a binary law or a dual, and belongs to bourbaki fix math, which turns
+it into the TeX that prints it. Outside a span there are no operators, so there
+the same glyph can be nothing but the mark.
+
+It runs over content/ as well as pages/, for fix parens' reason, and moves a
+translation on with its source the way fix notin does.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
 const fixHeadingUsage = `usage: bourbaki fix heading [flags]
 
 Sets a numbered heading at the level the table of contents gives it.
@@ -336,6 +376,8 @@ func runFix(args []string) error {
 		return fixParens(args[1:])
 	case "notin":
 		return fixNotin(args[1:])
+	case "star":
+		return fixStar(args[1:])
 	case "folio":
 		return fixFolio(args[1:])
 	case "heading":
@@ -960,6 +1002,61 @@ func fixNotin(args []string) error {
 		files, content, followed, verbed)
 	if changed > 0 && !*check {
 		fmt.Println("fix notin: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+func fixStar(args []string) error {
+	fs := flag.NewFlagSet("fix star", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixStarUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, stars int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := textguard.Stars(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		stars += n
+		if *check {
+			fmt.Printf("%s  %d stars\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	files, content, followed, err := repairContent(root, *check, "stars", textguard.Stars)
+	if err != nil {
+		return err
+	}
+
+	verb := "wrote"
+	if *check {
+		verb = "would write"
+	}
+	fmt.Printf("fix star: %d pages read, %s %d stars on %d of them\n", pages, verb, stars, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix star: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	if changed > 0 && !*check {
+		fmt.Println("fix star: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
