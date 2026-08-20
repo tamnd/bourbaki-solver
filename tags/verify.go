@@ -172,6 +172,27 @@ func checkCorpus(s *Set, found map[string][]Item, printings []string) []Failure 
 // of what T10 reported: 236 findings, every one of them a volume read in August
 // against a statement added to it later. What is left is the thing the rule was
 // written for, two statements out of order inside one reading.
+//
+// There is a third thing it reports, and it is neither a defect nor a correct
+// edit, so it is worth writing down rather than leaving somebody to work it out
+// again. An assembler that put two statements in the wrong order, and was then
+// fixed, leaves the tags standing in the order the old assembly read them. The
+// content moves and the tags cannot, because a tag is permanent: that is the
+// whole of what a tag is for. So the file is right, the identifiers are right,
+// and they disagree about the order forever.
+//
+// Both of the two the corpus has are that. § 3 of chapter II of Theory of Sets
+// has Definition 3 at 03PI and Remark 1 at 03PH, and the page it is assembled
+// from, pdf 84, prints the definition and then the remarks under it. § 4 of
+// chapter IX of the Lie volume has Theorem 1 at 01C4, a corollary at 01C7, a
+// remark at 01C5 and Proposition 10 at 01C6, and pdf 318 to 320 print them
+// theorem, corollary, remark, proposition, which is the order the files are in
+// now. Four statements, two sections, both checked against the printed page,
+// and nothing to do about either.
+//
+// Which is the reason the rule reports and counts rather than failing. Reading
+// a T10 finding means opening the page, and none of the three things it can
+// mean is worth blocking a build over.
 func Order(items []Item, runs []Run) []Failure {
 	var out []Failure
 	type where struct {
