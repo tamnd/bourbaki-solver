@@ -45,6 +45,7 @@ commands:
   stray     take out a delimiter that opens mathematics and closes nothing
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
+  notin     put the stroke back on a relation sign that came back struck through
   folio     move the printed page number off the foot and into the front matter
   heading   set a numbered heading at the level the table of contents gives it
   footnote  take the printed mark off a footnote that already has a reference
@@ -53,9 +54,11 @@ commands:
 Run the first three in that order. Everything after an unclosed delimiter reads
 as mathematics, so stray comes first and the other two will not touch a span
 whose end they cannot see, and parens comes before math so that math reads the
-spans as they will be rather than as they are. folio and heading touch no
-mathematics and can be run at any point before assemble. seal works on content/
-and not on pages/, and is the last thing run after a hand correction.
+spans as they will be rather than as they are. notin runs after those three,
+since it works inside the spans and wants them closed and whole. folio and
+heading touch no mathematics and can be run at any point before assemble. seal
+works on content/ and not on pages/, and is the last thing run after a hand
+correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
 `
@@ -186,6 +189,40 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixNotinUsage = `usage: bourbaki fix notin [flags]
+
+Puts back the stroke that negates a relation sign.
+
+The books write "x is not in A" with a stroke through the epsilon. A text layer
+with no glyph for the struck sign hands the sign and the stroke back as two
+characters, and the stroke arrives as an ordinary solidus, on whichever side the
+layer met first. Both forms are in the corpus, "$0\in /S$" and "$\lambda /\in$".
+
+It is the worst fault the corpus has, because it is the only one that is silent.
+Everything else these commands repair shows on the page as damage a reader can
+see. This one renders, reads as ordinary mathematics, and says the opposite of
+what Bourbaki wrote.
+
+What makes it safe to do by rule is that nothing divides by a relation sign.
+Quotients are on every other page and $\mathbf{Z}/n$ and $G/H$ are untouched,
+because the test is not a solidus near a relation, it is a solidus whose other
+operand is a relation sign, and that has no second reading. Three signs are
+repaired, \in and \subset and \equiv, which are the three the corpus strikes
+through and no more.
+
+It runs over content/ as well as pages/, for fix parens' reason. English and
+French sections come back from the next assemble whatever this does, and a
+translation has no page under it and would otherwise carry the inverted sentence
+until somebody paid a model to do the section again. A translation whose source
+moved is moved on with it, and one that was already stale stays stale.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
 const fixHeadingUsage = `usage: bourbaki fix heading [flags]
 
 Sets a numbered heading at the level the table of contents gives it.
@@ -297,6 +334,8 @@ func runFix(args []string) error {
 		return fixStray(args[1:])
 	case "parens":
 		return fixParens(args[1:])
+	case "notin":
+		return fixNotin(args[1:])
 	case "folio":
 		return fixFolio(args[1:])
 	case "heading":
@@ -511,6 +550,14 @@ func fixParens(args []string) error {
 // is English and it is a translation of the French, and moving it on with the
 // French it was made from is the whole point of having the rule at all.
 func parensContent(root string, check bool) (files, changed, followed int, err error) {
+	return repairContent(root, check, "spans", mathtex.Unstraddle)
+}
+
+// repairContent is the walk parens and notin share. A repair of the mathematics
+// alone is the same work in every language, so it takes the repair as an
+// argument and the two commands differ only in what they call the thing they
+// counted.
+func repairContent(root string, check bool, unit string, repair func(string) (string, int)) (files, changed, followed int, err error) {
 	// The source body each translation was made from, before and after, keyed by
 	// the corpus-relative path the translation names.
 	moved := map[string][2]string{}
@@ -532,7 +579,7 @@ func parensContent(root string, check bool) (files, changed, followed int, err e
 			return nil
 		}
 		files++
-		body, n := mathtex.Unstraddle(f.Body)
+		body, n := repair(f.Body)
 		if sources {
 			record(path, f.Body, body)
 		} else if now, ok := follow(f.Meta.TranslatedFrom, f.Meta.SourceSHA256); ok {
@@ -547,7 +594,7 @@ func parensContent(root string, check bool) (files, changed, followed int, err e
 		}
 		changed++
 		if check {
-			fmt.Printf("%s  %d spans\n", rel(root, path), n)
+			fmt.Printf("%s  %d %s\n", rel(root, path), n, unit)
 			return nil
 		}
 		f.Body = body
@@ -558,7 +605,7 @@ func parensContent(root string, check bool) (files, changed, followed int, err e
 			return nil
 		}
 		files++
-		body, n := mathtex.Unstraddle(f.Body)
+		body, n := repair(f.Body)
 		if sources {
 			record(path, f.Body, body)
 		} else if now, ok := follow(f.Meta.TranslatedFrom, f.Meta.SourceSHA256); ok {
@@ -573,7 +620,7 @@ func parensContent(root string, check bool) (files, changed, followed int, err e
 		}
 		changed++
 		if check {
-			fmt.Printf("%s  %d spans\n", rel(root, path), n)
+			fmt.Printf("%s  %d %s\n", rel(root, path), n, unit)
 			return nil
 		}
 		f.Body = body
@@ -856,6 +903,63 @@ func fixMath(args []string) error {
 		pages, verb, chars, changed, len(refused))
 	if changed > 0 && !*check {
 		fmt.Println("fix math: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+func fixNotin(args []string) error {
+	fs := flag.NewFlagSet("fix notin", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixNotinUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, signs int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := mathtex.Negation(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		signs += n
+		if *check {
+			fmt.Printf("%s  %d signs\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	// The whole corpus and not one volume, since a translation names the source
+	// it was made from and -book is a page filter with nothing to say about it.
+	files, content, followed, err := repairContent(root, *check, "signs", mathtex.Negation)
+	if err != nil {
+		return err
+	}
+
+	verb := "struck"
+	if *check {
+		verb = "would strike"
+	}
+	fmt.Printf("fix notin: %d pages read, %s %d signs on %d of them\n", pages, verb, signs, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix notin: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	if changed > 0 && !*check {
+		fmt.Println("fix notin: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
