@@ -515,3 +515,55 @@ func TestAMatrixSetFlushAgainstItsParentheses(t *testing.T) {
 		t.Errorf("got  %s\nwant %s", got, want)
 	}
 }
+
+// alg448lay is what page 448 of the French Algebra VIII declares. The body of
+// that page is set at 12 point and comes back at 14, one size up from the 10
+// point body frlay carries, and the two script sizes under it at 9 and 7. The
+// sizes are what the levels are read from, so the page gets its own layout
+// rather than borrowing one measured off another printing.
+var alg448lay = &pdfsrc.Layout{Fonts: map[int]pdfsrc.FontSpec{
+	0: {ID: 0, Size: 14, Family: "LMRoman12"},
+	1: {ID: 1, Size: 14, Family: "LMMathSymbols10"},
+	2: {ID: 2, Size: 12, Family: "CMEX10"},
+	3: {ID: 3, Size: 9, Family: "LMRoman8"},
+	4: {ID: 4, Size: 7, Family: "LMMathItalic6"},
+	5: {ID: 5, Size: 7, Family: "LMMathSymbols6"},
+	6: {ID: 6, Size: 7, Family: "LMRoman6"},
+}}
+
+// Page 448 of the French Algebra VIII sets the homomorphism that embeds a two
+// by two matrix as the bottom right block of a larger one, and it is the same
+// flush parenthesis shape as the page above with one thing more: an entry that
+// carries scripts of its own. I_{n-2} is drawn as the I at the level the matrix
+// is set at with the n, the minus and the 2 a level deeper, so neither the
+// column shape nor the row shape can read it and it falls to byInk.
+//
+// That is what makes it worth its own fixture. The first two shapes are written
+// over the runs of one level and this one is not, and the parentheses have to
+// be found on a cluster two levels deep just as they are on a cluster of one.
+// Read as scripts instead, the page shipped U\rightarrow^{I_n}_{0^{-2}U}^0,
+// which is not a matrix, is not what the page says, and is two superscripts
+// against one base, so KaTeX refuses it by name and publish stops on the file.
+func TestAMatrixWhoseEntriesCarryScriptsOfTheirOwn(t *testing.T) {
+	p := pdfsrc.Page{
+		Number: 448, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{
+			{Top: 168, Left: 80, Width: 10, Height: 12, Font: 0, Text: "U", Italic: true},
+			{Top: 165, Left: 97, Width: 14, Height: 18, Font: 1, Text: "→"},
+			{Top: 154, Left: 115, Width: 7, Height: 15, Font: 2, Text: "0"},
+			{Top: 166, Left: 124, Width: 4, Height: 8, Font: 3, Text: "I"},
+			{Top: 169, Left: 128, Width: 5, Height: 6, Font: 4, Text: "n"},
+			{Top: 177, Left: 132, Width: 5, Height: 8, Font: 3, Text: "0"},
+			{Top: 167, Left: 133, Width: 7, Height: 9, Font: 5, Text: "−"},
+			{Top: 167, Left: 140, Width: 4, Height: 9, Font: 6, Text: "2"},
+			{Top: 174, Left: 148, Width: 7, Height: 12, Font: 3, Text: "U", Italic: true},
+			{Top: 166, Left: 150, Width: 5, Height: 8, Font: 3, Text: "0"},
+			{Top: 154, Left: 159, Width: 7, Height: 15, Font: 2, Text: "1"},
+			{Top: 168, Left: 171, Width: 24, Height: 12, Font: 0, Text: "de "},
+		},
+	}
+	const want = `$U\rightarrow \begin{pmatrix} I_{n-2} & 0 \\ 0 & U \end{pmatrix}$ de`
+	if got := sole(t, alg448lay, p); got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
