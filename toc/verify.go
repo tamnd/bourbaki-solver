@@ -314,7 +314,9 @@ func onPage(norm []string, page int, words []string) bool {
 	}
 	got := 0
 	for _, w := range words {
-		if strings.Contains(norm[page-1], w) || nearWord(norm[page-1], w) {
+		p := norm[page-1]
+		if strings.Contains(p, w) || nearWord(p, w) ||
+			strings.Contains(fold(p), fold(w)) || nearWord(fold(p), fold(w)) {
 			got++
 		}
 	}
@@ -343,6 +345,28 @@ func nearWord(page, w string) bool {
 	}
 	return false
 }
+
+// fold puts the one confusion of two letters for one that this library's scans
+// actually make.
+//
+// No. 7 of chapter III of the topological vector spaces volume is
+// "$\mathfrak{S}$-bornologies on $\mathscr{L}(E; F)$" in the contents, and the
+// body sets it on printed page 21 where the contents says it does. The scan
+// hands that line back as "7. 6-bomologies on f/! (E ; F)". Strip the
+// mathematics out of the title and one word is left, and the page does not
+// carry it, so the heading was the last miss in the English library that was
+// not a page the scan had eaten: one heading in 193.
+//
+// It is not a near word. The pair rn read as an m is a letter replaced and a
+// letter dropped, two edits and not one, and widening nearWord to two edits
+// would let a six letter word reach a great many words it has nothing to do
+// with. Folding is tighter than that and it says what the fault is. It runs on
+// the page and on the heading both, so the two meet in the middle whichever way
+// round the misreading went, and a scan that sets an m as an rn is covered by
+// the same line.
+func fold(s string) string { return foldRN.Replace(s) }
+
+var foldRN = strings.NewReplacer("rn", "m")
 
 // normalize strips a page down to lowercase letters and digits, which throws
 // away the line breaks, the leader dots and the spacing that the two pieces of
