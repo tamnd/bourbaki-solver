@@ -43,6 +43,7 @@ const fixUsage = `usage: bourbaki fix <command> [arguments]
 Repairs the committed Markdown in the ways that need no PDF and no model.
 
 commands:
+  dollars   write a formula set between brackets between dollars instead
   stray     take out a delimiter that opens mathematics and closes nothing
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
@@ -53,15 +54,18 @@ commands:
   footnote  take the printed mark off a footnote that already has a reference
   seal      write content_sha256 over a section body that was edited by hand
 
-Run the first three in that order. Everything after an unclosed delimiter reads
-as mathematics, so stray comes first and the other two will not touch a span
-whose end they cannot see, and parens comes before math so that math reads the
-spans as they will be rather than as they are. notin runs after those three,
-since it works inside the spans and wants them closed and whole. star runs there
-too and for the same reason from the other side, since it works everywhere the
-spans are not. folio and heading touch no mathematics and can be run at any
-point before assemble. seal works on content/ and not on pages/, and is the last
-thing run after a hand correction.
+Run dollars first. A formula written \[ ... \] is not a math span to anything in
+this repository, because every tool here finds the mathematics by its dollars,
+so until the delimiters are turned round the three repairs after it cannot see
+inside it and neither can the audit. Then run the next three in that order.
+Everything after an unclosed delimiter reads as mathematics, so stray comes next
+and the two after it will not touch a span whose end they cannot see, and parens
+comes before math so that math reads the spans as they will be rather than as
+they are. notin runs after those, since it works inside the spans and wants them
+closed and whole. star runs there too and for the same reason from the other
+side, since it works everywhere the spans are not. folio and heading touch no
+mathematics and can be run at any point before assemble. seal works on content/
+and not on pages/, and is the last thing run after a hand correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
 `
@@ -226,6 +230,42 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixDollarsUsage = `usage: bourbaki fix dollars [flags]
+
+Writes a formula set between LaTeX's other delimiters between dollars, which is
+how this corpus writes one.
+
+A display is $$ ... $$ or \[ ... \] and an inline span is $ ... $ or \( ... \),
+and the two spellings of each mean the same thing to a mathematician. They do
+not mean the same thing here. Every tool in this repository finds the
+mathematics by its dollars, so a formula written with brackets is prose with
+backslashes in it as far as the corpus is concerned: none of the eleven
+mathematics rules of the audit look inside it, none of the repairs above touch
+it, and the site renders it as the characters it is made of, a backslash and a
+bracket in the middle of a sentence. That is the reason this runs first.
+
+The one thing with this shape that is not a display is the row break of a
+matrix. \\ ends a row and \\[2pt] ends one asking for space after it, and the
+corpus uses several such measures in real matrices. The row breaks are put aside
+before the delimiters are read and put back afterwards, so none of them is
+touched.
+
+It walks three trees rather than two. pages/ and content/ for the reason fix
+parens walks both, moving a translation on with its source the way fix notin
+does, and content/solutions as well, which is the tree the other repairs leave
+alone. The solutions are where the fault mostly is: the solver writes Markdown
+into the corpus the way the OCR and the mender do, and it was the one of the
+three that did not put what it wrote into the corpus's typography first. It does
+now, so a solution written after this needs nothing done to it, and this command
+is for the ones written before.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
 const fixStarUsage = `usage: bourbaki fix star [flags]
 
 Writes the star that marks a forward-looking passage the way the corpus writes
@@ -368,6 +408,8 @@ func runFix(args []string) error {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "dollars":
+		return fixDollars(args[1:])
 	case "math":
 		return fixMath(args[1:])
 	case "stray":
@@ -1006,6 +1048,81 @@ func fixNotin(args []string) error {
 	return nil
 }
 
+func fixDollars(args []string) error {
+	fs := flag.NewFlagSet("fix dollars", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixDollarsUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, marks int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := textguard.Dollars(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		marks += n
+		if *check {
+			fmt.Printf("%s  %d delimiters\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	files, content, followed, err := repairContent(root, *check, "delimiters", textguard.Dollars)
+	if err != nil {
+		return err
+	}
+
+	var solutions, solved int
+	err = eachSolution(root, "", func(path string, f *corpus.File[corpus.SolutionFrontMatter]) error {
+		solutions++
+		body, n := textguard.Dollars(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		solved++
+		if *check {
+			fmt.Printf("%s  %d delimiters\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	verb := "wrote"
+	if *check {
+		verb = "would write"
+	}
+	fmt.Printf("fix dollars: %d pages read, %s %d delimiters on %d of them\n", pages, verb, marks, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix dollars: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	fmt.Printf("fix dollars: %d solutions read, %d of them changed\n", solutions, solved)
+	if changed > 0 && !*check {
+		fmt.Println("fix dollars: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
 func fixStar(args []string) error {
 	fs := flag.NewFlagSet("fix star", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixStarUsage) }
@@ -1399,6 +1516,58 @@ func fixFootnote(args []string) error {
 		files, content, followed, verbed)
 	if repaired > 0 && !*check {
 		fmt.Println("fix footnote: run bourbaki assemble")
+	}
+	return nil
+}
+
+// eachSolution walks the solution files of one language, or of every language,
+// in path order. It is eachSection for the other tree eachSection skips.
+//
+// content/solutions is laid out by language and then by volume the way the rest
+// of content/ is, and everything under it is a solution, so there is no path
+// test to make beyond the language: a directory named exercises under it holds
+// solutions to exercises and is not the exercises themselves.
+//
+// The repairs left this tree alone until fix dollars, and mostly still should. A
+// solution is prose somebody's own hand wrote rather than a reading of a printed
+// page, so a repair whose whole justification is "the page does not say that"
+// has nothing to say about it, and fix star in particular would read its bullet
+// lists as Bourbaki's mark. The delimiters are the exception, since the corpus
+// writes them one way in every tree and a solution written the other way is
+// invisible to the audit in exactly the way a page written that way is.
+func eachSolution(root, lang string, fn func(path string, f *corpus.File[corpus.SolutionFrontMatter]) error) error {
+	dir := filepath.Join(root, "content", "solutions")
+	var paths []string
+	err := filepath.WalkDir(dir, func(path string, e iofs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if e.IsDir() || filepath.Ext(path) != ".md" {
+			return nil
+		}
+		if lang != "" {
+			if l, _, _ := strings.Cut(filepath.ToSlash(mustRel(dir, path)), "/"); l != lang {
+				return nil
+			}
+		}
+		paths = append(paths, path)
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	sort.Strings(paths)
+	for _, path := range paths {
+		f, err := corpus.ReadFile[corpus.SolutionFrontMatter](path)
+		if err != nil {
+			return err
+		}
+		if err := fn(path, &f); err != nil {
+			return err
+		}
 	}
 	return nil
 }

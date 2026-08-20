@@ -44,6 +44,8 @@ func init() {
 			Title: "no relation sign has lost the stroke that negates it", Run: m10},
 		Check{ID: "M11", Group: Mathematics, Hard: true,
 			Title: "the star on a forward-looking passage is the corpus's star", Run: m11},
+		Check{ID: "M12", Group: Mathematics, Hard: true,
+			Title: "the mathematics is written between dollars", Run: m12},
 	)
 }
 
@@ -724,6 +726,59 @@ func m11(c *Corpus) ([]Finding, error) {
 			out = append(out, Finding{File: d.Path, Line: d.BodyLine(o.Line),
 				Msg: fmt.Sprintf("%s where the corpus writes %s: %s",
 					o.Name, textguard.Star, ellipsis(o.Text, 60))})
+		}
+	}
+	return out, nil
+}
+
+// M12. The mathematics is written between dollars.
+//
+// LaTeX has two spellings for each delimiter. A display is $$ ... $$ or
+// \[ ... \], an inline span is $ ... $ or \( ... \), and to a mathematician
+// reading the source the pairs are interchangeable. To this corpus they are not,
+// and the difference is not one of taste.
+//
+// Every rule in this group reads mathematics through the same split, mathtex.
+// Split, and that split finds spans by their dollars. A formula written with
+// brackets is therefore not a formula as far as the audit is concerned: it is
+// prose with backslashes in it. M02 does not ask whether its number sets are
+// bold, M03 does not look for a character stranded out of its TeX, M04 does not
+// parse it, M07 does not check its brackets, M08 does not notice a flattened
+// matrix, M10 does not look for a lost stroke. Eleven rules go quiet over the
+// same span at once, and the audit reports nothing, which is worse than
+// reporting a fault: it says the mathematics was checked.
+//
+// It is not quiet to a reader either. KaTeX on the site is configured for the
+// dollars the corpus writes, so \[ f(x) = 0 \] renders as those characters, a
+// backslash and a bracket sitting in the middle of a sentence.
+//
+// So it is hard. The repair is exact and mechanical, the two spellings mean the
+// same thing, and there is no page to open and no judgement to make: bourbaki
+// fix dollars turns them round, and textguard.Dollars does the same as a page or
+// a solution is written.
+//
+// The one thing that looks like this and is not is the row break of a matrix.
+// \\ ends a row and \\[2pt] ends one asking for space after it, and the corpus
+// uses \\[2pt], \\[2mm], \\[4mm], \\[2ex], \\[-1ex] and \\[-1.5em] in real
+// matrices. The bracket there belongs to the row break and not to a display, so
+// the row breaks are put aside before the delimiters are read, which is done in
+// textguard so that the rule and the repair cannot disagree about it.
+//
+// Unlike M11 this does read the solutions, and they are the reason it exists.
+// The solver is the third thing in this repository that writes Markdown into the
+// corpus, after the OCR and the mender, and it was the one that did not
+// normalise what it wrote. Eight solutions carry a corrections note recording a
+// whole model call spent asking for exactly this, and exercise 1 of § 5 of
+// chapter II of Theory of Sets shipped three displays written the other way
+// regardless, with status verified and both judges passing, because by then
+// there was nothing left that could see them.
+func m12(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		for _, b := range textguard.Brackets(d.Body) {
+			out = append(out, Finding{File: d.Path, Line: d.BodyLine(b.Line),
+				Msg: fmt.Sprintf("%s where the corpus writes %s and %s: %s",
+					b.Name, textguard.Display, textguard.Span, ellipsis(b.Text, 60))})
 		}
 	}
 	return out, nil
