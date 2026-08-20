@@ -425,7 +425,10 @@ func localHosts(lanes int) ([]ocr.Host, error) {
 	if lanes <= 0 {
 		lanes = localLanes
 	}
-	return []ocr.Host{{Name: ocr.LocalHost, Tool: self, Lanes: lanes, RateDelay: localRateDelay}}, nil
+	return []ocr.Host{{
+		Name: ocr.LocalHost, Tool: self, Lanes: lanes,
+		RateDelay: localRateDelay, Model: localModelName,
+	}}, nil
 }
 
 // localLanes is how many pages this machine reads at once by default.
@@ -442,12 +445,23 @@ const localLanes = 6
 // in the same instant.
 const localRateDelay = 1.0
 
-// runModel is what the pages of this run will say read them.
+// runModel is what a page of this run says read it when its host names nothing.
+//
+// It used to answer for the whole run by looking at hosts[0], which was wrong
+// in both directions and got worse the moment the fleet stopped being three
+// boxes running the same thing. A run holding this machine and server2 stamped
+// claude-opus on the pages server2 read; a run holding server2 and this machine
+// stamped gpt-5 on the pages read here. The front matter is the only record of
+// who read a page, so a wrong answer there is not cosmetic, and it was about to
+// stamp gpt-5 on every page a local card reads. The host answers for itself now
+// and this is only the fallback. See ocr.Runner.modelFor.
 func runModel(hosts []ocr.Host) string {
-	if len(hosts) > 0 && hosts[0].Local() {
-		return localModelName
+	for _, host := range hosts {
+		if !host.Local() {
+			return route.DefaultModel
+		}
 	}
-	return route.DefaultModel
+	return localModelName
 }
 
 // localModelName is what a page read here records in its front matter. The CLI
