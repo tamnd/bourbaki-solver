@@ -24,6 +24,17 @@ type Printed struct {
 	// contains and the pages are what is being checked.
 	Numbers []Numbered
 	Pages   []PrintedPage
+	// After is the page the next § starts on, where that page has been read.
+	//
+	// A § almost never ends at the foot of a page. It ends partway down the
+	// next one, with the heading of the § after it below, so the last paragraph
+	// of this § is printed on a page that belongs to the next. Audit does not
+	// look at this and must not: a page whose greater part is the next § cannot
+	// be demanded of this import. Read does look at it, in one direction only.
+	// Without it the closing paragraph of every § in the library reads as a
+	// sentence the import invented, which is three of the five that § 2 of
+	// chapter I turned up the first time this was run.
+	After []PrintedPage
 }
 
 // Numbered is one no. of a section: the number the book prints and its title.
@@ -343,13 +354,38 @@ var (
 	mathRE  = regexp.MustCompile(`(?s)\$\$.*?\$\$|\$[^$\n]*\$`)
 	frontRE = regexp.MustCompile(`(?s)\A---\n.*?\n---\n`)
 	wordRE  = regexp.MustCompile(`[a-z]+`)
+
+	// proseRE is a macro whose whole purpose is to set prose inside a formula.
+	// \text{ or } is the word or, printed as a word and read as a word by
+	// anybody looking at the page.
+	proseRE = regexp.MustCompile(`\\(?:text|textrm|textit|textup|mbox|operatorname\*?)\s*\{([^{}]*)\}`)
 )
 
 // words is the prose of a text, lowercased, with the front matter, the
 // mathematics and everything that is not a letter removed.
+//
+// The prose set inside a formula stays. The two sides disagree about where a
+// formula ends: the printed page of criterion C10 sets "A or (not A)" with the
+// or and the not as words between three short formulae, and the import writes
+// the whole thing as one formula with \text{ or } and \operatorname{not} inside
+// it. Both render the same line of type and a reader cannot tell them apart.
+// Dropping the argument of those macros along with the mathematics made the two
+// readings differ in every connective, which on § 3 of chapter I was twelve
+// sentences of one import reported as printed nowhere in the book. They are
+// printed on the page, in words, and the macro names say so.
 func words(s string) []string {
 	s = frontRE.ReplaceAllString(s, "")
-	s = mathRE.ReplaceAllString(s, " ")
+	// The prose comes out of the formula as the formula goes, and not before
+	// it: a \text{ or } sits inside the dollars, so lifting it first and
+	// stripping afterwards would take it away again with everything else.
+	s = mathRE.ReplaceAllStringFunc(s, func(m string) string {
+		out := " "
+		for _, g := range proseRE.FindAllStringSubmatch(m, -1) {
+			out += g[1] + " "
+		}
+		return out
+	})
+	s = proseRE.ReplaceAllString(s, " $1 ")
 	return wordRE.FindAllString(strings.ToLower(s), -1)
 }
 
