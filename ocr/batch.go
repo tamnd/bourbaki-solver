@@ -54,6 +54,18 @@ type Host struct {
 	// Tool is the absolute path to chatgpt-tool on that box. It differs per
 	// host, so it is discovered by fleet doctor and never assumed.
 	Tool string
+	// Reader names the program Tool is, when it is not chatgpt-tool.
+	//
+	// It exists for one question: whether a batch on this host opens a browser.
+	// chatgpt-tool drives a Chrome under Xvfb, so a host running it is asked
+	// for a display before anything is sent, and refused if it has none. A host
+	// running a program that talks to a card in the same box has no display to
+	// have, and asking it for one refuses a host that would have worked.
+	//
+	// Empty means chatgpt-tool, so every host that predates this reads exactly
+	// as it did. The batch protocol itself is unchanged: same directories, same
+	// detached start, same poll on a file count.
+	Reader string
 	// Lanes is -j, how many pages the host reads at once. Measured, not guessed:
 	// each lane is a Chrome profile and a browser needs about a gigabyte.
 	//
@@ -104,6 +116,16 @@ type Host struct {
 // DefaultDisplay is where Xvfb is on these hosts. run-serve.sh starts it on :99
 // and leaves it running, which is why serve works and an ssh command does not.
 const DefaultDisplay = ":99"
+
+// needsDisplay says whether a batch on this host opens a browser, and so
+// whether prepare has to find an Xvfb before it sends one.
+//
+// This machine opens no browser and neither does a host whose reader is not
+// chatgpt-tool. Everything else is a box driving a Chrome, which without a
+// display fails every page in a second, and a pile of instant failures is what
+// the tool reads as an IP level block before it bans the accounts for eight
+// hours.
+func (h Host) needsDisplay() bool { return !h.Local() && strings.TrimSpace(h.Reader) == "" }
 
 func (h Host) display() string {
 	if strings.TrimSpace(h.Display) != "" {
@@ -481,9 +503,9 @@ func prepare(ctx context.Context, shell Shell, host Host, clear string, dirs ...
 	if clear != "" {
 		command = "rm -rf " + quote(clear) + " && " + command
 	}
-	// This machine opens no browser, so there is no display to ask about. The
-	// directories are still made, because the protocol below is the same one.
-	if host.Local() {
+	// No browser here, so there is no display to ask about. The directories are
+	// still made, because the protocol below is the same one.
+	if !host.needsDisplay() {
 		if _, err := shell.Run(ctx, host.Name, command); err != nil {
 			return fmt.Errorf("prepare %s: %w", host.Name, err)
 		}
