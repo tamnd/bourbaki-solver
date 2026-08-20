@@ -98,6 +98,17 @@ func LoadExercises(root string) (*ExercisesManifest, error) {
 	return &m, nil
 }
 
+// Get is the volume's committed record, and whether there is one. A partial
+// assemble reads it to carry a skipped chapter's exercises through.
+func (m *ExercisesManifest) Get(id string) (BookExercises, bool) {
+	for _, b := range m.Books {
+		if b.ID == id {
+			return b, true
+		}
+	}
+	return BookExercises{}, false
+}
+
 // Upsert replaces a volume's record, or appends it, leaving the order of the
 // other volumes alone.
 func (m *ExercisesManifest) Upsert(b BookExercises) {

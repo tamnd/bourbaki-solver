@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -259,6 +260,113 @@ func addUnreadChapter(t *testing.T, root string) {
 	toc.Upsert(nt)
 	if err := toc.Save(root); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// readChapterIX writes the four pages of the second chapter, so that a volume
+// which addUnreadChapter left half read is read through and assembles whole.
+func readChapterIX(t *testing.T, root string) {
+	t.Helper()
+	bodies := map[int]string{
+		22: "## CHAPTER IX SESQUILINEAR AND QUADRATIC FORMS\n\n" +
+			"## § 1. SESQUILINEAR FORMS\n\n" +
+			"### 1. Sesquilinear Forms\n\n" +
+			"**Definition 1.** — Let A be a ring with an involution.",
+		23: "**Proposition 1.** — Every sesquilinear form is a linear form in its first argument.",
+		24: "**Proposition 2.** — The set of sesquilinear forms is a module.",
+		25: "# BIBLIOGRAPHY",
+	}
+	for n, body := range bodies {
+		f := corpus.PageFile{Meta: corpus.PageFrontMatter{
+			Book: "alg-viii", PDFPage: n, Method: corpus.MethodNative,
+		}, Body: body}
+		if n < 25 {
+			f.Meta.PageLabel = corpus.PageLabel{Book: "A", Chapter: "IX", Page: n - 21}.String()
+		}
+		out, err := f.Bytes()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(corpus.PagePath(root, "alg-viii", n), out, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// The manifests are written a volume at a time, and for as long as they were
+// written out of the chapters the run walked, a partial run took every chapter
+// it skipped out of them. That is what happened to chapter IV of Theory of Sets:
+// content/ was untouched and still right, the command reported the skip as
+// ordinary progress, and the only sign was 31 references two rules downstream
+// that no longer resolved.
+//
+// This is that run. Both chapters assemble, a page in the middle of the second
+// goes missing the way a page goes missing when the table of contents grows, and
+// the partial run that follows has to leave the second chapter's accounting
+// exactly as it found it.
+func TestAssemblePartialCarriesASkippedChapterThroughTheManifests(t *testing.T) {
+	root := smallCorpus(t)
+	addUnreadChapter(t, root)
+	readChapterIX(t, root)
+	t.Setenv("BOURBAKI_CORPUS", root)
+
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := corpus.LoadSections(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, ok := before.Get("alg-viii")
+	if !ok || len(whole.Chapters) != 2 {
+		t.Fatalf("the full run recorded %+v", before.Books)
+	}
+	beforex, err := corpus.LoadExercises(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wholex, _ := beforex.Get("alg-viii")
+
+	if err := os.Remove(corpus.PagePath(root, "alg-viii", 23)); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-partial", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := corpus.LoadSections(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, _ := after.Get("alg-viii")
+	if len(part.Chapters) != 2 {
+		t.Fatalf("the partial run left %+v, want both chapters", part.Chapters)
+	}
+	// The order is the table of contents' order, so a volume assembled chapter
+	// by chapter reads the same as one assembled at once.
+	if part.Chapters[0].Chapter != "VIII" || part.Chapters[1].Chapter != "IX" {
+		t.Fatalf("the chapters came back as %q and %q",
+			part.Chapters[0].Chapter, part.Chapters[1].Chapter)
+	}
+	if !reflect.DeepEqual(part.Chapters[1], whole.Chapters[1]) {
+		t.Errorf("chapter IX was rewritten by a run that did not assemble it:\ngot  %+v\nwant %+v",
+			part.Chapters[1], whole.Chapters[1])
+	}
+
+	afterx, err := corpus.LoadExercises(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partx, _ := afterx.Get("alg-viii")
+	if !reflect.DeepEqual(partx, wholex) {
+		t.Errorf("the exercise manifest lost the skipped chapter:\ngot  %+v\nwant %+v", partx, wholex)
+	}
+
+	// The files themselves were never the problem and have to stay that way: a
+	// run that skips a chapter sweeps nothing out from under it.
+	if _, err := os.Stat(filepath.Join(root, "content", "en", "alg", "IX",
+		"01_s1_sesquilinear_forms.md")); err != nil {
+		t.Errorf("the partial run swept the chapter it skipped: %v", err)
 	}
 }
 
