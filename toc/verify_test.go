@@ -2,6 +2,7 @@ package toc
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -18,6 +19,50 @@ func TestNearWord(t *testing.T) {
 	// Short words are left alone, or "rings" would match "kings".
 	if nearWord("kings", "rings") {
 		t.Error("a five letter word was matched with a letter changed")
+	}
+}
+
+// The scan of the topological vector spaces volume sets no. 7 of chapter III as
+// "7. 6-bomologies on f/! (E ; F)", reading the rn of bornologies as an m. That
+// is two edits and not one, so nearWord cannot reach it and the fold has to.
+func TestFold(t *testing.T) {
+	page := normalize("7.   6-bomologies on f/! (E ; F)\n\nLet E and F be two locally convex spaces.\n")
+	if strings.Contains(page, "bornologies") || nearWord(page, "bornologies") {
+		t.Fatal("the page carries the word after all, and the fold is not what fixed this")
+	}
+	if !strings.Contains(fold(page), fold("bornologies")) {
+		t.Error("the fold did not bring bomologies and bornologies together")
+	}
+	// And the same line whichever way round the scan made the mistake.
+	if !strings.Contains(fold(normalize("the bornology of E")), fold("bomology")) {
+		t.Error("the fold did not bring bornology and bomology together")
+	}
+	// It leaves a word with no rn and no m in it alone.
+	if fold("simple modules") != "simple modules" {
+		t.Errorf("fold changed a word it has no business changing: %q", fold("simple modules"))
+	}
+}
+
+// The whole of the fix, read the way toc verify reads it: a heading whose only
+// word is misread as two letters for one is still on the page it is printed on.
+func TestAHeadingWhoseOneWordTheScanFoldedIsFound(t *testing.T) {
+	pages := []string{
+		"CHAPTER III\n\nSPACES OF CONTINUOUS LINEAR MAPPINGS\n",
+		"NO.7   SPACES OF CONTINUOUS LINEAR MAPPINGS   TVS III.21\n\n" +
+			"7.   6-bomologies on f/! (E ; F)\n\nLet E and F be two locally convex spaces.\n",
+	}
+	b := corpus.BookTOC{ID: "test", Chapters: []corpus.Chapter{{
+		Numeral: "III", Title: "Spaces of Continuous Linear Mappings", PDFPage: 1,
+		Sections: []corpus.Section{{
+			Number: 3, Title: "Spaces of Continuous Linear Mappings", PDFPage: 2,
+			Subsections: []corpus.Subsection{{
+				Number: 7, Title: `$\mathfrak{S}$-bornologies on $\mathscr{L}(E; F)$`, PDFPage: 2,
+			}},
+		}},
+	}}}
+	r := Verify(pages, b)
+	if r.Matched != r.Checked {
+		t.Errorf("matched %d of %d, misses %v", r.Matched, r.Checked, r.Misses)
 	}
 }
 
