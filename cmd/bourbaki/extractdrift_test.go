@@ -133,3 +133,52 @@ func TestOvertakenWritesNothingBackToAPageItCannotRebuild(t *testing.T) {
 		t.Errorf("overtaken() took %d paragraphs from a page it cannot rebuild:\n%s", n, got)
 	}
 }
+
+// The other direction of extract drift, and the one measurement in it that had
+// to be taken rather than reasoned about. A page carrying no manual: true is a
+// page the pipeline says it could write again, so a fresh read of it should
+// give back what is committed, and when it does not somebody has repaired the
+// page without saying so. extract run overwrites a page with no mark, so that
+// repair lasts until the next run of the volume and nothing reports its loss.
+//
+// The trap is the unit. Comparing bytes finds the fix chain rather than the
+// repair, because every committed page has had bourbaki fix run over it and the
+// fresh read has not.
+func TestDriftedReadsTheUnmarkedPagesByParagraphAndTheMarkedOnesByByte(t *testing.T) {
+	// The same words, set the way fix leaves a page and the way the extractor
+	// hands one back. Nobody wrote anything different here.
+	committed := "Let $E$ be a set.\n\n$$\nf(x) = 0\n$$\n"
+	fresh := "Let $E$ be a set.\n\n$$\nf(x) = 0\n$$"
+
+	if drifted(true, 0, committed, fresh) {
+		t.Error("an unmarked page with no paragraph changed was reported, and that is the 338 of 340")
+	}
+	if !drifted(false, 0, committed, fresh) {
+		t.Error("a marked page has to be read by byte, since the run would write the difference")
+	}
+	if !drifted(true, 3, committed, committed) {
+		t.Error("an unmarked page with three paragraphs changed is an unmarked repair and has to be reported")
+	}
+	// A marked page whose fresh read is identical has not moved either way.
+	if drifted(false, 0, committed, committed) {
+		t.Error("a page that reads back exactly was reported")
+	}
+}
+
+// -fix takes the fresh read over the committed body. On a marked page that is
+// the trade the command is for. On an unmarked page the committed body is the
+// repair and the fresh read is the fault it was made to undo, so the two flags
+// together would destroy exactly what -unmarked had just found. They are
+// refused rather than ordered, because there is no sensible order for them.
+func TestDriftRefusesFixAndUnmarkedTogether(t *testing.T) {
+	err := extractDrift([]string{"-book", "ens-i-iv", "-unmarked", "-fix"})
+	if err == nil {
+		t.Fatal("-fix and -unmarked were accepted together")
+	}
+	if !strings.Contains(err.Error(), "undo the repair") {
+		t.Errorf("the reason given was %q", err)
+	}
+	if err := extractDrift([]string{"-book", "ens-i-iv", "-mark"}); err == nil {
+		t.Fatal("-mark was accepted without -unmarked")
+	}
+}
