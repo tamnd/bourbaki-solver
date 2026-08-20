@@ -12,6 +12,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/queue"
+	"github.com/tamnd/bourbaki-solver/textguard"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
 
@@ -598,5 +599,59 @@ func TestTheRetryNoteDoesNotMoveThePromptHash(t *testing.T) {
 	}
 	if before != after {
 		t.Error("asking with a note moved the prompt hash, which marks every translated file stale")
+	}
+}
+
+// Translation is the fourth thing in this repository that writes Markdown into
+// the corpus, after the OCR, the mender and the solver, and it was the last one
+// still writing whatever spelling a model happened to choose. The other three
+// put their output into the corpus's typography first.
+//
+// content/vi/ens/III/exercises/s1/24.md is the page that showed it. The English
+// ends a paragraph with the corpus star, written \*, the model handed back a
+// bare asterisk, and that is a hard M11 finding sitting in the corpus over a
+// repair that already existed and that nothing on this path called.
+func TestTheTranslationIsPutIntoTheCorpusTypographyBeforeItIsWritten(t *testing.T) {
+	// Every fault a model actually sends: a bare star for the corpus star, a
+	// display set with brackets, blackboard bold written bare, a warning sign
+	// from the wrong font, and a line with space hanging off the end.
+	answer := "Cho $E$ la mot tap hop. \\(x\\) thuoc \\mathbb{Z}.   \n" +
+		"\\[ f(x) = 0 \\]\n" +
+		"Ket thuc doan nay. *\n"
+	got := textguard.Normalise(answer)
+
+	for _, bad := range []string{`\[`, `\]`, `\(`, `\)`} {
+		if strings.Contains(got, bad) {
+			t.Errorf("the delimiter %s survived: %q", bad, got)
+		}
+	}
+	if !strings.Contains(got, "$$ f(x) = 0 $$") {
+		t.Errorf("the display is not written as the corpus writes one: %q", got)
+	}
+	if !strings.Contains(got, `Ket thuc doan nay. \*`) {
+		t.Errorf("the bare star was not put back as the corpus star: %q", got)
+	}
+	if strings.Contains(got, "   \n") {
+		t.Errorf("the hanging space survived: %q", got)
+	}
+	if !strings.Contains(got, `\mathbf{Z}`) {
+		t.Errorf("the blackboard bold was not written the corpus's way: %q", got)
+	}
+}
+
+// The star repair works outside the math spans only, and a translation carries
+// plenty of asterisks that are not the mark. K^* runs through these volumes in
+// their thousands, and the emphasis a printing sets is written with asterisks
+// against the letters. Neither may move.
+func TestNormalisingATranslationLeavesTheAsterisksThatAreNotTheMark(t *testing.T) {
+	for _, body := range []string{
+		`Nhom $K^*$ la nhom cac don vi cua $K$.`,
+		`Mot tap hop duoc goi la *phan nhanh* neu voi moi $x$.`,
+		`Da duoc danh dau \* o cuoi.`,
+		`Chuoi $A^{**}$ va $f * g$ trong $L^1$.`,
+	} {
+		if got := textguard.Normalise(body); got != body {
+			t.Errorf("normalising changed a line it should not have:\n got %q\nwant %q", got, body)
+		}
 	}
 }

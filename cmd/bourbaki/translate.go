@@ -25,6 +25,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/quality"
 	"github.com/tamnd/bourbaki-solver/queue"
 	"github.com/tamnd/bourbaki-solver/report"
+	"github.com/tamnd/bourbaki-solver/textguard"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
 
@@ -836,7 +837,11 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 	if len(problems) > 0 {
 		return "", "", problems
 	}
-	body := translate.Join(answers)
+	// Again on the join, and not because askChunk missed anything. A chunk an
+	// earlier run answered comes back off the queue and never goes through
+	// askChunk at all, so a file assembled from cached chunks would otherwise
+	// keep whatever those runs wrote. Normalise costs nothing to run twice.
+	body := textguard.Normalise(translate.Join(answers))
 	// The join is audited against the whole English as well as chunk by chunk.
 	// Every rule here is about order, and a chunk that is right on its own can
 	// still land in the wrong place if a lane returned late, so this is what
@@ -920,6 +925,25 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// translate.Respace: a correct translation whose only fault is that it
 		// wrote $M \cap N$ for $M\cap N$ is worth putting right rather than
 		// asking again for five minutes to get it laid out some third way.
+		// The first repair is not about this translation in particular. Every
+		// other writer into this corpus puts what it writes into the corpus's
+		// typography before it commits it: the OCR normalises every page, the
+		// mender normalises every repair, and the solver was given the same seam
+		// when it turned out not to have one. Translation is the fourth writer
+		// and it had none either, so whatever spelling a model chose for a star
+		// or a delimiter was what landed on disk.
+		//
+		// content/vi/ens/III/exercises/s1/24.md is what it costs. The English
+		// ends a paragraph with the corpus star, written \*, and the model handed
+		// back a bare asterisk. That is a hard M11 finding and bourbaki fix star
+		// would have put it right in a second, which is the point: the repair
+		// existed and nothing on this path called it.
+		//
+		// It runs before Respace and before the audit, not after, because Dollars
+		// decides where the math spans are and both of those read spans. Fixing
+		// the delimiters afterwards would mean the audit compared a formula the
+		// corpus does not think is a formula.
+		answer.Text = textguard.Normalise(answer.Text)
 		answer.Text = translate.Respace(body, answer.Text)
 		// And the second repair, for the same reason: a citation the model wrote
 		// in the words of the language it was translating into is a citation
