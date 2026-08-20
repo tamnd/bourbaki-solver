@@ -339,3 +339,38 @@ func TestM10(t *testing.T) {
 		}
 	}
 }
+
+func TestM11(t *testing.T) {
+	// The corpus's own star, and the operator inside a span, which is a binary
+	// law and a dual and belongs to M03.
+	clean := doc("a.md", "\\* the passage runs from here to here. \\*\nthe law $x ∗ y$ and the dual $E^{∗}$")
+	if got := run(t, m11, clean); len(got) != 0 {
+		t.Errorf("the corpus's star or the operator was reported: %v", got)
+	}
+
+	for _, tc := range []struct{ name, body, want string }{
+		{"an asterisk operator", "of the field of scalars.\nis richer than that. ∗", "an asterisk operator"},
+		{"a teardrop spoked asterisk", "no least element).\nGive an example. ✻", "a teardrop spoked asterisk"},
+		{"an eight spoked asterisk", "the mapping is\nnot injective. ✳", "an eight spoked asterisk"},
+		{"a low asterisk", "the continuum is\nequipotent to it. ⁎", "a low asterisk"},
+	} {
+		got := run(t, m11, doc("b.md", tc.body))
+		if len(got) != 1 {
+			t.Errorf("%s gave %d findings, want 1: %v", tc.name, len(got), got)
+			continue
+		}
+		if got[0].Line != 2 {
+			t.Errorf("%s is on line %d, want 2", tc.name, got[0].Line)
+		}
+		if !strings.HasPrefix(got[0].Msg, tc.want+" where the corpus writes") {
+			t.Errorf("%s does not name the glyph: %s", tc.name, got[0].Msg)
+		}
+	}
+
+	// One finding to a line, so a pair set on one line is reported once and the
+	// line is what somebody goes and looks at.
+	pair := doc("c.md", "no least element). ✻ Give an example. ✻")
+	if got := run(t, m11, pair); len(got) != 1 {
+		t.Errorf("a pair on one line gave %d findings, want 1: %v", len(got), got)
+	}
+}

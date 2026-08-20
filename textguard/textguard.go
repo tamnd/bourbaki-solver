@@ -351,10 +351,17 @@ func displayBrackets(text string) string {
 
 // Normalise applies those substitutions and trims trailing space from every
 // line, which is invisible in review and shows up in every later diff.
+//
+// The star is not in the replacer with the dangerous bend, though the two faults
+// are the same fault. A replacer cannot see where the mathematics is, and one of
+// the four glyphs the star comes back as is a binary operation inside a span. So
+// Stars runs on its own, after the delimiters have been turned round, since it
+// has to be able to find the spans to keep out of them.
 func Normalise(text string) string {
 	text = bareBlackboard.ReplaceAllString(text, `\mathbf{$1}`)
 	text = displayBrackets(text)
 	text = normalise.Replace(text)
+	text, _ = Stars(text)
 	lines := strings.Split(text, "\n")
 	for i, line := range lines {
 		lines[i] = strings.TrimRightFunc(line, unicode.IsSpace)
