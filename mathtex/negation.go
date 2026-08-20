@@ -55,6 +55,28 @@ func Negation(body string) (string, int) {
 	return b.String(), n
 }
 
+// Strokes is the same reading with nothing given back, for the audit. It hands
+// over each span that carries a stroke the repair would take, and the sign it
+// found there, so a rule can say which relation the page has inverted.
+func Strokes(body string) ([]Span, []string) {
+	spans, _ := Split(body)
+	var out []Span
+	var signs []string
+	for _, s := range spans {
+		for _, m := range strokeRE.FindAllStringSubmatch(s.Text, -1) {
+			sign := m[1]
+			if sign == "" {
+				sign = m[2]
+			}
+			if _, ok := negated[sign]; ok {
+				out = append(out, s)
+				signs = append(signs, sign)
+			}
+		}
+	}
+	return out, signs
+}
+
 // negated is what each struck sign becomes.
 var negated = map[string]string{
 	`\in`:     `\notin`,

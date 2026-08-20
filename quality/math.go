@@ -39,6 +39,8 @@ func init() {
 			Title: "no matrix is left flattened into a pair of scripts", Run: m08},
 		Check{ID: "M09", Group: Mathematics, Hard: false,
 			Title: "no base carries two superscripts or two subscripts", Run: m09},
+		Check{ID: "M10", Group: Mathematics, Hard: true,
+			Title: "no relation sign has lost the stroke that negates it", Run: m10},
 	)
 }
 
@@ -613,6 +615,45 @@ func m09(c *Corpus) ([]Finding, error) {
 				out = append(out, Finding{File: d.Path, Line: d.BodyLine(s.Line),
 					Msg: "two of one script against one base, which TeX will not set: " + w})
 			}
+		}
+	}
+	return out, nil
+}
+
+// M10. No relation sign has lost the stroke that negates it.
+//
+// Bourbaki writes "x is not in A" with a stroke through the epsilon. A text
+// layer with no glyph for the struck sign hands the sign and the stroke back as
+// two characters, and the stroke arrives as an ordinary solidus, on whichever
+// side the layer met first. The corpus held both shapes, $0\in /S$ and
+// $\lambda /\in$, 130 of them over 102 pages of the six native volumes.
+//
+// It is hard, and this is the rule with the strongest claim to be. Every other
+// fault in this group shows itself: a span that never closes, a bracket in the
+// wrong place, a matrix flattened into scripts. Those are wrong in a way a
+// reader can see and a renderer will complain about. This one renders, reads as
+// ordinary mathematics, and says the opposite of what the book says. Nothing
+// downstream can catch it either, because there is nothing to catch: the
+// formula is well formed, a translator copies it faithfully, and the inverted
+// sentence goes into every language the corpus carries.
+//
+// Nothing divides by a relation sign, so the reading is not a guess. The test
+// is not a solidus near a relation, it is a solidus whose other operand is one,
+// and quotients are left alone: $\mathbf{Z}/n$, $G/H$, $X/\sim$ and $|y|$ over
+// its norm all come through untouched. Three signs are read, \in and \subset
+// and \equiv, being the three this corpus strikes through.
+//
+// bourbaki fix notin repairs every one of them without opening a PDF, and
+// extract does the same repair as it writes a page, so a finding here means
+// either a page read before that landed or a hand edit that put one back.
+func m10(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		spans, signs := mathtex.Strokes(d.Body)
+		for i, s := range spans {
+			out = append(out, Finding{File: d.Path, Line: d.BodyLine(s.Line),
+				Msg: fmt.Sprintf("%s has lost the stroke that negates it, and the span now says the opposite: %s",
+					signs[i], ellipsis(s.Text, 60))})
 		}
 	}
 	return out, nil

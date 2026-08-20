@@ -266,6 +266,14 @@ func ReadPageWith(l *pdfsrc.Layout, p pdfsrc.Page, v Volume) *Page {
 	// the spans as they will be rather than as they arrived.
 	out.Body, _ = mathtex.Unstraddle(out.Body)
 	out.Body, _, _ = mathtex.Repair(out.Body)
+	// Then the stroke that negates a relation sign, which the text layer hands
+	// back as a solidus beside the sign because it has no glyph for the struck
+	// one. It goes after Repair rather than before it, so that a sign which
+	// arrived as a bare glyph and became TeX a line ago is read here too. This
+	// is the one fault on the page that says the opposite of what the page says
+	// while looking like nothing is wrong, so it is repaired as the page is
+	// written rather than left for anybody to notice.
+	out.Body, _ = mathtex.Negation(out.Body)
 	if strings.Count(out.Body, "$")%2 != 0 {
 		out.flag(FlagUnbalanced)
 	}

@@ -307,3 +307,35 @@ func TestM04ReadsTheCorpusSpans(t *testing.T) {
 		t.Errorf("findings %v", got)
 	}
 }
+
+func TestM10(t *testing.T) {
+	// A quotient is a quotient. Nothing here divides by a relation sign, and the
+	// last of these is the equivalence a set is quotiented by.
+	clean := doc("a.md", `the group $\mathbf{Z}/n\mathbf{Z}$, the map $G \to G/H$, the space $X/\sim$`)
+	if got := run(t, m10, clean); len(got) != 0 {
+		t.Errorf("a quotient was reported as a struck sign: %v", got)
+	}
+	if got := run(t, m10, doc("a.md", `if $0\notin S$ then`)); len(got) != 0 {
+		t.Errorf("a repaired page was reported: %v", got)
+	}
+
+	// Both sides, since the stroke falls on whichever the text layer met first.
+	for _, tc := range []struct{ name, body, want string }{
+		{"a stroke after the sign", "we have\n$0\\in /S$ here", `\in`},
+		{"a stroke before the sign", "we have\n$\\lambda  /\\in$ Sp($u$)", `\in`},
+		{"an inclusion", "we have\n$\\mathfrak{g}\\subset /\\mathfrak{h}$", `\subset`},
+		{"a congruence", "we have\n$n\\equiv / p$ (mod. 3)", `\equiv`},
+	} {
+		got := run(t, m10, doc("b.md", tc.body))
+		if len(got) != 1 {
+			t.Errorf("%s gave %d findings, want 1: %v", tc.name, len(got), got)
+			continue
+		}
+		if got[0].Line != 2 {
+			t.Errorf("%s is on line %d, want 2", tc.name, got[0].Line)
+		}
+		if !strings.HasPrefix(got[0].Msg, tc.want+" has lost") {
+			t.Errorf("%s does not name the sign: %s", tc.name, got[0].Msg)
+		}
+	}
+}
