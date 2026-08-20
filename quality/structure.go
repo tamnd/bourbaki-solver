@@ -52,6 +52,8 @@ func init() {
 			Title: "no footnote carries the mark the printing gave it", Run: s10},
 		Check{ID: "S11", Group: Structure, Hard: true,
 			Title: "the printings of a § hold the same exercises", Run: s11},
+		Check{ID: "S12", Group: Structure, Hard: true,
+			Title: "the sections manifest names every § file and describes it", Run: s12},
 	)
 }
 
@@ -882,4 +884,79 @@ func sameSet(want, have map[string]bool) bool {
 		}
 	}
 	return true
+}
+
+// S12. The sections manifest names every § file and describes it.
+//
+// The manifest is not a report of the assembly, it is the index the rest of the
+// corpus reads. R01 resolves a reference by looking a § up in it, publish walks
+// it to lay out the site, and a file that is not in it is a file nothing can
+// reach even though it is sitting there with its text intact.
+//
+// It went wrong for the first time on the Theory of Sets star repair, and the
+// way it went wrong is why this rule is here. assemble -partial skips a chapter
+// that is not read through, and chapter IV of Theory of Sets has 8 pages still
+// unread, so one assemble of that volume took the whole chapter out of the
+// manifest. Nothing said so. The command reported the skip as ordinary
+// progress, the content files kept their text, and the only sign of it was 31
+// R01 findings of the form "Example 4 does not resolve", two rules downstream
+// from the damage and pointing at the wrong thing. See bourbaki-solver#309.
+//
+// The hash is the other half and is checked here rather than in S08, which asks
+// whether a file's own front matter describes the body under it. That is a
+// different question, and both can be right while the manifest is wrong: a
+// section repaired and resealed correctly still leaves the manifest holding the
+// hash of a body that is gone, and anything that trusts the manifest to say
+// whether a file has changed will believe it has not.
+//
+// It reads the files that were assembled out of pages, which is what the
+// manifest is a manifest of, and a translation is left out. The test for one is
+// that it names the source it was made from rather than that it is in some
+// language, since English and French are both assembled and both are in the
+// manifest.
+func s12(c *Corpus) ([]Finding, error) {
+	named := map[string]corpus.SectionRecord{}
+	for _, b := range c.Sections.Books {
+		if b.Introduction != nil {
+			named[b.Introduction.Path] = *b.Introduction
+		}
+		for _, ch := range b.Chapters {
+			for _, s := range ch.Sections {
+				named[s.Path] = s
+			}
+		}
+	}
+
+	var out []Finding
+	onDisk := map[string]bool{}
+	for _, d := range c.Docs {
+		// A translation names the source it was made from, and that is the test
+		// rather than the language, because the manifest's business is what was
+		// assembled out of pages. English and French are both assembled and both
+		// are in it, 90 files and 85. content/vi has no page under it, is not
+		// rewritten by an assemble, and is not the manifest's to name.
+		if d.Kind != KindSection || d.Section == nil || d.Section.TranslatedFrom != "" {
+			continue
+		}
+		onDisk[d.Path] = true
+		rec, ok := named[d.Path]
+		if !ok {
+			out = append(out, Finding{File: d.Path,
+				Msg: "no entry in manifests/sections.yaml, so nothing that reads the manifest can reach this file"})
+			continue
+		}
+		if have := corpus.ContentSHA256(d.Body); rec.ContentSHA256 != have {
+			out = append(out, Finding{File: d.Path,
+				Msg: fmt.Sprintf("manifests/sections.yaml holds content_sha256 %s and the body here hashes to %s",
+					short(rec.ContentSHA256), short(have))})
+		}
+	}
+	for path := range named {
+		if !onDisk[path] {
+			out = append(out, Finding{File: path,
+				Msg: "named in manifests/sections.yaml and there is no such file"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out, nil
 }
