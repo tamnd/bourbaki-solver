@@ -57,10 +57,15 @@ type Runner struct {
 	// Prompt is the OCR instruction, and its hash is part of every job id, so a
 	// changed prompt is new work rather than a silent reuse of old answers.
 	Prompt string
-	Model  string
-	Hosts  []Host
-	Shell  Shell
-	Copy   Copier
+	// Model is what a page records in its front matter when the host that read
+	// it does not name one of its own. A fallback, not the answer: a run can
+	// mix a box driving a browser, a gateway over HTTP and a card in the next
+	// room, and stamping one name on all of them makes the front matter lie
+	// about the page it is attached to. See modelFor.
+	Model string
+	Hosts []Host
+	Shell Shell
+	Copy  Copier
 	// Batch is pages per batch. Zero means DefaultBatch.
 	Batch int
 	// Expect says what is already known about a page, which is what rules 4 and
@@ -896,7 +901,7 @@ func (r *Runner) file(ctx context.Context, host Host, dest string, value task, o
 		out.repaired++
 		value.repaired = Reasons(problems)
 	}
-	changes, err := r.write(value, text)
+	changes, err := r.write(host, value, text)
 	if err != nil {
 		r.reject(value, out, nil, "could not write the page: "+err.Error())
 		return
@@ -987,8 +992,24 @@ func (r *Runner) reject(value task, out *outcome, rules []Rule, reason string) {
 	r.logf("page %d rejected on attempt %d: %s", value.page, value.job.Attempts, reason)
 }
 
+// modelFor is what a page read on this host records in its front matter.
+//
+// The host is asked first, because the host is the thing that knows. A gateway
+// carries the model it calls, a card in the next room carries whatever it is
+// serving today, and a box driving a browser carries nothing and falls back to
+// the run's default. Reading the run's default for every host was a real bug:
+// it stamped whichever model the first host in the list uses onto pages that
+// were read somewhere else entirely, and the front matter is the only record
+// of who read a page.
+func (r *Runner) modelFor(host Host) string {
+	if name := strings.TrimSpace(host.Model); name != "" {
+		return name
+	}
+	return r.Model
+}
+
 // write puts an accepted page in the corpus.
-func (r *Runner) write(value task, text string) (changes []FaceChange, err error) {
+func (r *Runner) write(host Host, value task, text string) (changes []FaceChange, err error) {
 	head, body := SplitHead(text)
 	// The mark the volume prints beside a footnote is furniture of that page's
 	// typesetting, and the reference Markdown prints is the corpus's own. A
@@ -997,7 +1018,7 @@ func (r *Runner) write(value task, text string) (changes []FaceChange, err error
 	// package footnote for what is taken and what is left.
 	body, _ = footnote.Normalize(body)
 	meta := corpus.PageFrontMatter{
-		Book: r.Book, PDFPage: value.page, Method: corpus.MethodOCR, Model: r.Model,
+		Book: r.Book, PDFPage: value.page, Method: corpus.MethodOCR, Model: r.modelFor(host),
 		PageLabel: head.Label, RunningHead: head.Title, Locator: head.Locator,
 		InputSHA256: value.sha, PromptSHA256: sha256Hex(r.Prompt),
 		Lines: len(strings.Split(strings.TrimSpace(body), "\n")),

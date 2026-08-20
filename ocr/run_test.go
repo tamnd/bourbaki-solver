@@ -1205,3 +1205,27 @@ func mustList(t *testing.T, q *queue.Queue, state queue.State) []queue.Job {
 	}
 	return jobs
 }
+
+// The bug this replaced stamped one model name on a whole run. It looked at the
+// first host in the list and answered for all of them, so a run holding this
+// machine and server2 recorded claude-opus on the pages server2 read, and a run
+// holding server2 and this machine recorded gpt-5 on the pages read here. The
+// front matter is the only record of who read a page.
+func TestTheHostNamesTheModelAndTheRunIsOnlyTheFallback(t *testing.T) {
+	runner := &Runner{Model: "fallback"}
+	cases := []struct {
+		what string
+		host Host
+		want string
+	}{
+		{"a box driving a browser names nothing", Host{Name: "server2"}, "fallback"},
+		{"a gateway names what it calls", Host{Name: "zen", Model: "grok-4"}, "grok-4"},
+		{"a card in the next room names what it serves", Host{Name: "gpc", Model: "olmocr-2-7b"}, "olmocr-2-7b"},
+		{"whitespace is not a name", Host{Name: "server3", Model: "  "}, "fallback"},
+	}
+	for _, c := range cases {
+		if got := runner.modelFor(c.host); got != c.want {
+			t.Errorf("%s: recorded %q, want %q", c.what, got, c.want)
+		}
+	}
+}

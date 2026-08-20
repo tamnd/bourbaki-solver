@@ -353,11 +353,21 @@ func TestAPageReadHereSaysSo(t *testing.T) {
 	if here[0].Lanes != localLanes {
 		t.Errorf("the local host reads %d pages at once, want %d", here[0].Lanes, localLanes)
 	}
+	if here[0].Model != localModelName {
+		t.Errorf("the local host records %q, want %q", here[0].Model, localModelName)
+	}
 	if got := runModel(here); got != localModelName {
 		t.Errorf("a page read here would record %q, want %q", got, localModelName)
 	}
 	if got := runModel([]ocr.Host{{Name: "server2"}}); got == localModelName {
 		t.Error("a page read on the fleet would record the model of this machine")
+	}
+	// The case the old runModel got wrong. A mixed run must not stamp this
+	// machine's model on the pages the fleet read, and the fallback is the
+	// fleet's because that is the host that names nothing of its own.
+	mixed := []ocr.Host{{Name: ocr.LocalHost, Model: localModelName}, {Name: "server2"}}
+	if got := runModel(mixed); got == localModelName {
+		t.Errorf("a mixed run falls back to %q, want the fleet's model", got)
 	}
 }
 
