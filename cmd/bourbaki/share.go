@@ -15,6 +15,7 @@ const shareUsage = `usage: bourbaki share <command> [arguments]
 commands:
   import    read public ChatGPT share links into imports/
   audit     hold an import against the printed volume
+  read      write the sheet a person reads one section against the pages with
   promote   move a checked import into content/, or say why not
 
 Set BOURBAKI_CORPUS to the checkout of tamnd/bourbaki.
@@ -30,6 +31,8 @@ func runShare(args []string) error {
 		return shareImport(args[1:])
 	case "audit":
 		return shareAudit(args[1:])
+	case "read":
+		return shareRead(args[1:])
 	case "promote":
 		return sharePromote(args[1:])
 	case "help", "-h", "--help":

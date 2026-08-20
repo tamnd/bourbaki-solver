@@ -234,6 +234,15 @@ func printedSection(root, book string, bt *corpus.BookTOC, chapter, section int)
 		}
 		p.Pages = append(p.Pages, share.PrintedPage{PDFPage: pg, Text: f.Body})
 	}
+	// The page the next § starts on, where it has been read. A § ends partway
+	// down it and the rest of that page is somebody else's, which is why it
+	// goes in a field of its own rather than in Pages: share read wants it and
+	// share audit must not have it.
+	if f, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, book, last)); err == nil {
+		p.After = append(p.After, share.PrintedPage{PDFPage: last, Text: f.Body})
+	} else if !os.IsNotExist(err) {
+		return share.Printed{}, 0, err
+	}
 	return p, unread, nil
 }
 
