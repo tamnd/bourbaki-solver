@@ -90,6 +90,22 @@ func LoadSections(root string) (*SectionsManifest, error) {
 	return &m, nil
 }
 
+// Get is the volume's committed record, and whether there is one.
+//
+// Assembly writes this manifest and does not read it to do its work, so for a
+// long time nothing needed this. What needs it is a partial assemble, which has
+// to know what the last full one recorded for a chapter it is not assembling
+// this time, so that skipping a chapter does not take that chapter out of the
+// manifest.
+func (m *SectionsManifest) Get(id string) (BookSections, bool) {
+	for _, b := range m.Books {
+		if b.ID == id {
+			return b, true
+		}
+	}
+	return BookSections{}, false
+}
+
 // Upsert replaces a volume's record, or appends it, leaving the order of the
 // other volumes alone.
 func (m *SectionsManifest) Upsert(b BookSections) {

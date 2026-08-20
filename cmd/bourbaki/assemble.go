@@ -34,6 +34,19 @@ import (
 // resolved and no translation starts for a week. With it, chapter I assembles
 // the day it finishes and the rest of the pipeline runs on it while the reading
 // goes on.
+//
+// A chapter it skips keeps the manifest entries the run that did assemble it
+// wrote. That is the whole of the fix for a fault that cost an afternoon. The
+// manifests are written a volume at a time, out of the chapters the run walked,
+// so for as long as a skipped chapter contributed nothing, one partial assemble
+// of Theory of Sets took all of chapter IV out of manifests/sections.yaml and
+// manifests/exercises.json. The files under content/ were untouched and still
+// right, the command reported the skip as ordinary progress, and the only sign
+// anything had happened was 31 R01 findings two rules downstream saying that
+// "Example 4" does not resolve. S12 reports the damage now and this stops it
+// being done. A run that carries entries through says how many, because a
+// manifest mostly copied out of the last one is not the same thing as a
+// manifest that was built.
 
 func runAssemble(args []string) error {
 	fs := flag.NewFlagSet("assemble", flag.ExitOnError)
@@ -78,13 +91,20 @@ func runAssemble(args []string) error {
 		}
 		fmt.Printf("removed %s\n", rel(root, path))
 	}
-	fmt.Printf("%s: %d files, %d statements, %d exercises\n",
+	fmt.Printf("%s: %d files, %d statements, %d exercises",
 		*book, len(files)-2, sum.statements, sum.exercises)
+	if sum.carried > 0 {
+		fmt.Printf(", and %d entries carried through from chapters this run did not assemble", sum.carried)
+	}
+	fmt.Println()
 	return nil
 }
 
-// assembleTotals is what one run of the assembler came to.
-type assembleTotals struct{ statements, exercises int }
+// assembleTotals is what one run of the assembler came to. carried is the
+// entries a partial run did not assemble and took from the committed manifest
+// instead, and it is reported because a run that writes a manifest mostly out
+// of what was already in it is a different thing from a run that built it.
+type assembleTotals struct{ statements, exercises, carried int }
 
 // assembleBook is the assembler itself, with the flags and the writing taken
 // out. It returns what the run would put on disk and what is on disk that the
@@ -156,6 +176,29 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	errataOf := errata.Lookup(lang)
 	used := map[string]bool{}
 
+	// The manifests are read before anything is assembled, because a partial run
+	// has to carry a skipped chapter's committed entries through. They are read
+	// on a full run too and simply not used, which costs one file read and keeps
+	// the two paths the same shape.
+	sections, err := corpus.LoadSections(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	exm, err := corpus.LoadExercises(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	was, _ := sections.Get(book)
+	wasx, _ := exm.Get(book)
+	wasSections := map[string]corpus.ChapterSections{}
+	for _, ch := range was.Chapters {
+		wasSections[ch.Chapter] = ch
+	}
+	wasExercises := map[string]corpus.ChapterExercises{}
+	for _, ch := range wasx.Chapters {
+		wasExercises[ch.Chapter] = ch
+	}
+
 	rec := corpus.BookSections{ID: book}
 	exrec := corpus.BookExercises{ID: book}
 	files := map[string][]byte{}
@@ -169,6 +212,11 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 		if gap := unread(pages, in.FirstPDFPage, in.LastPDFPage); len(gap) > 0 && partial {
 			fmt.Fprintf(os.Stderr, "the introduction runs pdf %d to %d and %d of those pages are not read yet, skipping it\n",
 				in.FirstPDFPage, in.LastPDFPage, len(gap))
+			if was.Introduction != nil {
+				rec.Introduction = was.Introduction
+				sum.carried++
+				fmt.Fprintf(os.Stderr, "  carrying its committed entry through\n")
+			}
 		} else {
 			f, p, err := introFile(*b, lang, pages)
 			if err != nil {
@@ -203,6 +251,25 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 			if gap := unread(pages, from, to); len(gap) > 0 {
 				fmt.Fprintf(os.Stderr, "chapter %s runs pdf %d to %d and %d of those pages are not read yet, skipping it\n",
 					ch.Numeral, from, to, len(gap))
+				// A chapter this run did not assemble keeps the entries the run
+				// that did assemble it wrote. They go back in the order the table
+				// of contents puts them, which is here, so a volume assembled
+				// chapter by chapter reads the same as one assembled at once.
+				if c, ok := wasSections[ch.Numeral]; ok {
+					rec.Chapters = append(rec.Chapters, c)
+					x, ok := wasExercises[ch.Numeral]
+					if !ok {
+						// The sections manifest has the chapter and the exercises
+						// manifest does not, which a full run cannot produce, since
+						// it writes an entry for every chapter it walks whether the
+						// chapter has exercises in it or not. The shell keeps the
+						// two manifests naming the same chapters.
+						x = corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
+					}
+					exrec.Chapters = append(exrec.Chapters, x)
+					sum.carried += len(c.Sections)
+					fmt.Fprintf(os.Stderr, "  carrying its %d committed entries through\n", len(c.Sections))
+				}
 				continue
 			}
 		}
@@ -262,10 +329,6 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 		return nil, nil, sum, err
 	}
 
-	sections, err := corpus.LoadSections(root)
-	if err != nil {
-		return nil, nil, sum, err
-	}
 	sections.Upsert(rec)
 	manifest, err := sections.Bytes()
 	if err != nil {
@@ -273,10 +336,6 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	}
 	files[corpus.SectionsPath(root)] = manifest
 
-	exm, err := corpus.LoadExercises(root)
-	if err != nil {
-		return nil, nil, sum, err
-	}
 	exm.Upsert(exrec)
 	exmanifest, err := exm.Bytes()
 	if err != nil {
