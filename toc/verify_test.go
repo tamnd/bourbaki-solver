@@ -127,3 +127,49 @@ func TestVerify(t *testing.T) {
 		t.Fatalf("moved = %+v, want the heading found on pdf 3", moved)
 	}
 }
+
+func TestAHeadingWhoseTitleIsMostlyMathematicsIsCheckedOnItsWords(t *testing.T) {
+	// The page is a scan of type and carries the words of the title and the
+	// formula as it was set. It does not carry the names of the macros the
+	// corpus writes that formula with, and asking it for them puts a heading
+	// that is printed exactly where the contents says it is into the misses.
+	pages := []string{
+		"CHAPTER III\n\nSPACES OF CONTINUOUS LINEAR MAPPINGS\n",
+		"§ 3. SPACES OF CONTINUOUS LINEAR MAPPINGS\n\n3. The spaces L_S(E; F)\n\nLet E and F be locally convex spaces.\n",
+	}
+	b := corpus.BookTOC{ID: "test", Chapters: []corpus.Chapter{{
+		Numeral: "III", Title: "Spaces of Continuous Linear Mappings", PDFPage: 1,
+		Sections: []corpus.Section{{
+			Number: 3, Title: "Spaces of Continuous Linear Mappings", PDFPage: 2,
+			Subsections: []corpus.Subsection{
+				{Number: 3, Title: `The spaces $\mathscr{L}_{\mathfrak{S}}(E; F)$`, PDFPage: 2},
+			},
+		}},
+	}}}
+	r := Verify(pages, b)
+	if len(r.Misses) != 0 {
+		t.Fatalf("misses = %+v, want the heading found on the page it is printed on", r.Misses)
+	}
+}
+
+func TestATitleThatIsNothingButMathematicsIsPassedOver(t *testing.T) {
+	// There is nothing to look for and nothing honest to say about it, so it
+	// is left out of the count rather than counted as a heading that is there
+	// or a heading that is not.
+	pages := []string{"CHAPTER I\n\nGROUPS\n", "§ 1. GROUPS\n\n2. G_a\n\nLet G be a group.\n"}
+	b := corpus.BookTOC{ID: "test", Chapters: []corpus.Chapter{{
+		Numeral: "I", Title: "Groups", PDFPage: 1,
+		Sections: []corpus.Section{{
+			Number: 1, Title: "Groups", PDFPage: 2,
+			Subsections: []corpus.Subsection{{Number: 2, Title: `$G_{a}$`, PDFPage: 2}},
+		}},
+	}}}
+	r := Verify(pages, b)
+	// The chapter and the § carry words, the no. does not.
+	if r.Checked != 2 {
+		t.Errorf("checked %d headings, want the two that carry words", r.Checked)
+	}
+	if len(r.Misses) != 0 {
+		t.Errorf("misses = %+v", r.Misses)
+	}
+}
