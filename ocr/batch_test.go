@@ -639,3 +639,38 @@ func TestKeepLeavesTheImagesWhereTheyAre(t *testing.T) {
 		t.Error("keep was asked for and the images were removed anyway")
 	}
 }
+
+// The Xvfb question is about the reader, not about where the box is. A card in
+// the next room runs a batch the same way server2 does, over ssh and rsync,
+// with a program that opens no browser. Asking it for a display refuses a host
+// that would have worked, and it is the last thing between local-ocr and the
+// fleet.
+func TestAHostThatOpensNoBrowserIsNotAskedForADisplay(t *testing.T) {
+	machine := &box{}
+	host := Host{Name: "gpc", Tool: "/home/gopher/local-ocr/ocr-batch", Reader: "local-ocr", Lanes: 4}
+	if err := prepare(context.Background(), machine, host, "", "bourbaki-ocr/in"); err != nil {
+		t.Fatalf("a host with no browser was refused: %v", err)
+	}
+	if len(machine.commands) != 1 {
+		t.Fatalf("prepare ran %d commands, want one round trip", len(machine.commands))
+	}
+	if strings.Contains(machine.commands[0], "Xvfb") {
+		t.Errorf("a host with no browser was asked for a display: %s", machine.commands[0])
+	}
+	if !strings.Contains(machine.commands[0], "bourbaki-ocr/in") {
+		t.Errorf("the scratch directory was not made: %s", machine.commands[0])
+	}
+}
+
+func TestABoxDrivingAChromeIsStillAskedForADisplay(t *testing.T) {
+	host := Host{Name: "server2", Tool: "/usr/local/bin/chatgpt-tool", Lanes: 4}
+	if !host.needsDisplay() {
+		t.Error("a box running chatgpt-tool must still be asked for its Xvfb")
+	}
+	if (Host{Name: LocalHost}).needsDisplay() {
+		t.Error("this machine opens no browser")
+	}
+	if (Host{Name: "server3", Reader: "  "}).needsDisplay() != true {
+		t.Error("whitespace is not the name of a reader")
+	}
+}
