@@ -256,9 +256,10 @@ func TestRule4ForTheVolumeThatPrintsItsNumberAtTheFoot(t *testing.T) {
 // The rule used to veto any first line ending in a full stop, on the reading
 // that a sentence ends in one and a head does not. hist prints its heads with
 // the stop, so the veto rejected the head the page really carries, three times
-// each, and 36 pages of that volume went dead on it. There are 96 first lines
-// across the 4698 raw readings on disk that are short, mostly capitals and end
-// in a stop, 93 of them in hist, and a 15 line sample of those held no prose.
+// each, and pages of that volume went dead on it. Across the 4809 raw readings
+// on disk there are 112 first lines of 90 characters or fewer that end in a
+// stop. 97 read as a head under the rule as it stands now, over 60 distinct
+// pages, 56 of those in hist. The other 15 are mixed case sentences.
 func TestRule4TheVolumeThatPrintsAFullStopInItsHead(t *testing.T) {
 	head := func(first string) []Problem {
 		body := first + "\n\n**Theorem 1.** — Every group is isomorphic to a group of permutations." +
