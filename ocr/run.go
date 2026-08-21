@@ -91,6 +91,11 @@ type Runner struct {
 	// RetryDPI is what Rerender is asked for on the second attempt and after.
 	RetryDPI int
 	Options  Options
+	// RereadProtected turns the guard off and reads every stale page again
+	// whoever read it first. For the case where the prompt changed because the
+	// old readings were wrong, which is the one case where walking over them is
+	// the point.
+	RereadProtected bool
 	// Keep leaves the page images on the hosts.
 	Keep bool
 	// Limit stops the run after this many pages have been read, for a pilot. Zero
@@ -253,7 +258,10 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 	// The image hash is compared as well as the prompt. A page re-rendered at
 	// 600 dpi is a different image and deserves a fresh reading, and comparing
 	// only the prompt would keep the old answer.
-	if file.Meta.PromptSHA256 != promptSHA || file.Meta.InputSHA256 != source.SHA256 {
+	if file.Meta.InputSHA256 != source.SHA256 {
+		return false
+	}
+	if file.Meta.PromptSHA256 != promptSHA && !r.keepReading(file.Meta.Model) {
 		return false
 	}
 	expect := Expect{Book: r.Book, PDFPage: source.Page}
@@ -262,6 +270,55 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 	}
 	text := textguard.Normalise(textguard.Strip(file.Body))
 	return len(Validate(text, expect, r.Options)) == 0
+}
+
+// Protected is the readers whose work a prompt change does not throw away,
+// matched on the front of the model name so that a version bump keeps the
+// protection.
+//
+// A changed prompt is new work and that is the right rule for a page nobody has
+// read well. It is the wrong rule for a page that a stronger reader already
+// read, and the queue cannot tell the two apart on its own, because the front
+// matter says which model read the page and nothing compares that against the
+// model about to read it. So a prompt change sent 33 pages of Theory of Sets
+// and Algebra back into the queue, the card read them again, and the new
+// reading was written over the old one.
+//
+// What that cost is on the record. On ens-i-iv page 116 the old reading has the
+// canonical bijection of the disjoint union \coprod_{\lambda \in L} J_\lambda
+// onto I x K and the new one has the product \prod_{\lambda \in L} J_\lambda,
+// which is a different statement. The index letters went with it: Bourbaki runs
+// these families over \iota and \varkappa and the new reading has i and \chi
+// down the whole page. Both readings passed the rules, so nothing downstream
+// would have caught either.
+//
+// Prefixes and not whole names, because the corpus already holds claude-opus
+// and gpt-5 and will hold their successors, and a list that has to be edited
+// every time a model is renamed is a list that will be out of date on the day
+// it matters.
+var Protected = []string{"claude", "gpt-4", "gpt-5", "o1", "o3"}
+
+// keepReading says whether a reading already on disk outranks this run, in
+// which case a prompt change is not on its own a reason to read the page again.
+//
+// The image hash is still compared before this is asked, so a page re-rendered
+// at a higher resolution is read again whoever read it first. What this guards
+// is only the prompt, which is the one input that changes without the page
+// changing.
+func (r *Runner) keepReading(model string) bool {
+	if r.RereadProtected {
+		return false
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return false
+	}
+	for _, name := range Protected {
+		if strings.HasPrefix(model, name) {
+			return true
+		}
+	}
+	return false
 }
 
 // Failure is a page that did not come back clean, kept so the audit can name it
