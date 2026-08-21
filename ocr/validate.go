@@ -441,13 +441,14 @@ func looksLikeHead(line string) bool {
 	// reading that a sentence ends in one and a head does not. That holds for
 	// the volumes whose heads are a title and a locator and fails for hist,
 	// which prints "23. HAAR MEASURE. CONVOLUTION.", "PREFACE." and "TABLE OF
-	// CONTENTS." with the stop. It cost 36 pages of hist, every one of them
-	// dead after three attempts on a head the page really prints. Across the
-	// 4698 raw readings on disk there are 96 first lines that are short, mostly
-	// capitals and end in a stop, 93 of them in hist, and every one of a 15 line
-	// sample is a genuine printed head. The capitals test does the veto's work
-	// anyway: a sentence of prose ending in a full stop is mixed case and fails
-	// it, which is why the veto only ever fired on heads.
+	// CONTENTS." with the stop, and pages of it went dead after three attempts
+	// on a head the page really prints. Across the 4809 raw readings on disk
+	// there are 112 first lines of 90 characters or fewer that end in a stop.
+	// 97 of them read as a head under this rule, over 60 distinct pages, 56 of
+	// those in hist. The other 15 are mixed case sentences, and the capitals
+	// test below rejects every one of them on its own. That is the whole of the
+	// veto's work: a sentence of prose ending in a full stop is mixed case and
+	// fails the capitals test anyway, so the veto only ever fired on heads.
 	return upper*2 >= letters
 }
 

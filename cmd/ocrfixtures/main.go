@@ -293,7 +293,7 @@ func validateCases() []validateCase {
 		},
 		{
 			"rule 4 accepts a head in capitals that ends in a full stop",
-			"hist prints its heads with the stop, and vetoing those cost 36 pages of that volume.",
+			"hist prints its heads with the stop, and vetoing those cost 56 pages of that volume.",
 			"234  23. HAAR MEASURE. CONVOLUTION.\n\n" + prose,
 			expectJSON{Book: "hist", PDFPage: 234, Grammar: string(pagemap.HeadNumber),
 				Confidence: string(pagemap.FromHead), HasHead: true},
