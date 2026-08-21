@@ -929,7 +929,14 @@ func (r *Runner) record(host Host, page int, raw string) Thread {
 		// A page read here has no conversation to go back to and needs none: a
 		// re-read on this machine is fifteen seconds, which is cheaper than the
 		// question a repair would ask, and the queue does it already.
-		if host.Local() {
+		//
+		// The same is true of a reader, and for the same reason. gamingpc reads
+		// a page in thirteen seconds against a rented box's four minutes, so a
+		// page it got wrong is read again rather than argued with, and there is
+		// no thread to argue in: a vLLM holds no conversation between calls.
+		// Saying so once per page was a line of stderr for every page of every
+		// volume about a host behaving exactly as designed.
+		if host.Local() || strings.TrimSpace(host.Reader) != "" {
 			return thread
 		}
 		// An older chatgpt-tool does not report it. Worth saying once per page
