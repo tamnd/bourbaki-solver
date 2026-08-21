@@ -224,6 +224,51 @@ func TestOnlyTheHostsThatCanReadPagesComeBack(t *testing.T) {
 	}
 }
 
+// A reader is a host whose ssh name is not the route's name and whose program
+// is not chatgpt-tool, and both of those have to survive the trip from the route
+// file to the batch. The ssh name did not, once: the facts went into the state
+// file under the ssh host and ocr run looked them up under the route name, so a
+// probe that had just printed the tool path was followed by "no chatgpt-tool
+// path, run bourbaki doctor".
+func TestAReaderCarriesItsProgramAndItsModel(t *testing.T) {
+	home := t.TempDir()
+	routes := filepath.Join(home, "routes.json")
+	write(t, routes, `{"routes":[
+		{"name":"gamingpc","host":"gpc","model":"olmOCR-2-7B-1025-FP8","reader":"local-ocr","concurrency":8},
+		{"name":"server3","wire":"chat","base_url":"http://127.0.0.1:18773/v1","model":"gpt-5","host":"server3","concurrency":4}
+	]}`)
+	gaming := server3
+	gaming.Name, gaming.Cores, gaming.Tool = "gamingpc", 32, "/home/gopher/chatgpt-tool/.venv/bin/chatgpt-tool"
+	state := filepath.Join(home, "fleet.json")
+	raw, _ := json.Marshal(fleet.State{Written: time.Now(),
+		Hosts: map[string]fleet.Facts{"gamingpc": gaming, "server3": server3}})
+	write(t, state, string(raw))
+	t.Setenv("BOURBAKI_FLEET_STATE", state)
+
+	hosts, err := ocrHosts(routes, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 2 {
+		t.Fatalf("got %+v, want gamingpc and server3", hosts)
+	}
+	if hosts[0].Name != "gpc" {
+		t.Errorf("Name = %q, want the ssh destination and not the route name", hosts[0].Name)
+	}
+	if hosts[0].Reader != "local-ocr" {
+		t.Errorf("Reader = %q, so the batch would look for a display this box has no use for", hosts[0].Reader)
+	}
+	if hosts[0].Model != "olmOCR-2-7B-1025-FP8" {
+		t.Errorf("Model = %q, so a page read on a 4090 would claim gpt-5 read it", hosts[0].Model)
+	}
+	// And the boxes are untouched. A browser host draws whichever slug the pool
+	// gives it that morning, so the route's model is not the answer for it and
+	// modelFor falls back to the run's default on purpose.
+	if hosts[1].Reader != "" || hosts[1].Model != "" {
+		t.Errorf("server3 = %+v, want a box that names neither", hosts[1])
+	}
+}
+
 func TestARunWithNoUsableHostSaysSo(t *testing.T) {
 	home := t.TempDir()
 	routes := filepath.Join(home, "routes.json")

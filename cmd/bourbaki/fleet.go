@@ -150,10 +150,15 @@ func runFleetProbe(args []string) error {
 	if err != nil {
 		return err
 	}
-	// Keyed by ssh host, because that is what every later command has in hand
-	// when it needs the chatgpt-tool path.
+	// Keyed by route name, which is the name the route file gives the box and
+	// the name every report and every -hosts list uses. It was keyed by ssh
+	// host, which was the same string for every host in the pool until one
+	// arrived whose ssh stanza is not called what the route is: gamingpc is
+	// reached as gpc, the facts went in under gpc, ocr run asked for gamingpc
+	// and was told no chatgpt-tool path, run bourbaki doctor. The doctor had
+	// already run and had the path in its hand.
 	for index, target := range targets {
-		state.Hosts[target.Host] = rows[index]
+		state.Hosts[target.Name] = rows[index]
 	}
 	state.Written = time.Now().UTC()
 	if err := state.Save(path); err != nil {
@@ -385,7 +390,7 @@ func runFleetStatus(args []string) error {
 		fmt.Println()
 		rows := make([]fleet.Facts, 0, len(state.Hosts))
 		for _, value := range registry.Routes {
-			if facts, ok := state.Hosts[value.Host]; ok {
+			if facts, ok := state.Hosts[value.Name]; ok {
 				facts.Name = value.Name
 				rows = append(rows, facts)
 			}

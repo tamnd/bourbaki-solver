@@ -87,6 +87,21 @@ type Route struct {
 	// A route with a command has no base URL and no wire, since nothing is sent
 	// over a socket, and like a gateway it reads no page images.
 	Command string `json:"command,omitempty"`
+
+	// Reader names the program at the far end of the ssh connection, when that
+	// program is not chatgpt-tool.
+	//
+	// Every host in the pool until now was a rented box driving a headed Chrome
+	// through chatgpt.com, so the program was always the same and there was
+	// nothing to name. gamingpc is not that. It is a card in the next room with
+	// a vLLM in front of it, and what reads a page there is local-ocr, which
+	// speaks the same ocr-batch protocol on purpose.
+	//
+	// Naming it does two things. A page read there records the reader in its
+	// front matter rather than the pool's default slug, so the corpus does not
+	// claim gpt-5 read a page that olmOCR read. And the batch knows the far end
+	// opens no browser, which is what needsDisplay is for.
+	Reader string `json:"reader,omitempty"`
 }
 
 // WireChat is the only wire: POST /v1/chat/completions, streaming.
@@ -135,14 +150,33 @@ func (r Route) Validate() error {
 		return fmt.Errorf("route %s has unknown wire %q, want %q", r.Name, wire, WireChat)
 	}
 	// A command is run rather than called, so there is no address to be missing
-	// and asking for one would refuse a route that works.
-	if strings.TrimSpace(r.BaseURL) == "" && strings.TrimSpace(r.Command) == "" {
+	// and asking for one would refuse a route that works. The same is true of a
+	// reader: it is reached over ssh and rsync and never over a socket, and the
+	// vLLM it drives listens on the far side of that ssh on a loopback address
+	// that means nothing here.
+	if strings.TrimSpace(r.BaseURL) == "" &&
+		strings.TrimSpace(r.Command) == "" && strings.TrimSpace(r.Reader) == "" {
 		return fmt.Errorf("route %s has no base_url", r.Name)
 	}
 	if r.Concurrency < 0 {
 		return fmt.Errorf("route %s has negative concurrency", r.Name)
 	}
 	return nil
+}
+
+// Answers says whether this route can be asked a question.
+//
+// Every route until gamingpc could. A box, a gateway and a command are three
+// ways of reaching a chat model and the pool treats them as one thing, which is
+// why the pool has never had to ask. A reader is the first route that is not
+// that: it reads page images over ssh and there is nothing at the other end
+// that will answer a question about a proof.
+//
+// Left in the pool it would take its turn, find neither a base URL nor a
+// command, and fail every ask routed to it until the pool marked it dead. That
+// is a slow way to learn something the route file already says.
+func (r Route) Answers() bool {
+	return strings.TrimSpace(r.BaseURL) != "" || strings.TrimSpace(r.Command) != ""
 }
 
 // Lanes is how many calls this route takes at once. A route file that omits it
@@ -325,6 +359,12 @@ func (r Registry) Names() []string {
 func Default() Registry {
 	registry := Registry{Routes: []Route{
 		{
+			Name: "gamingpc", Wire: WireChat, Host: "gpc",
+			Reader: LocalOCRReader, Model: LocalOCRModel,
+			Rank: 5, Concurrency: 8, Timeout: Duration(20 * time.Minute),
+			Note: "a 4090 in the next room, reads pages and answers no questions",
+		},
+		{
 			Name: "server3", Wire: WireChat, Host: "server3",
 			BaseURL: "http://127.0.0.1:18773/v1", Model: DefaultModel,
 			APIKeyEnv: KeyEnv, RemotePort: 8077, LocalPort: 18773,
@@ -398,6 +438,16 @@ func Default() Registry {
 
 // DefaultModel is the strongest slug the pool exposes.
 const DefaultModel = "gpt-5"
+
+// LocalOCRReader is the program on gamingpc, and LocalOCRModel is what it is
+// serving. The two are separate because the program is stable and the weights
+// are the thing under review: the bake off in tamnd/local-ocr measured five
+// readers on the same 200 pages and the winner is an entry in a config file
+// there, so this name is expected to change and the wrapper on the box is not.
+const (
+	LocalOCRReader = "local-ocr"
+	LocalOCRModel  = "olmOCR-2-7B-1025-FP8"
+)
 
 // KeyEnv is the environment variable every route reads its key from. The key
 // itself is never written to a file this repo can see.

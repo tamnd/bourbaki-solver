@@ -61,6 +61,11 @@ type Pool struct {
 func NewPool(registry Registry) *Pool {
 	pool := &Pool{}
 	for _, value := range registry.Enabled() {
+		// A reader reads page images and answers nothing, so it never enters
+		// the pool. See Route.Answers.
+		if !value.Answers() {
+			continue
+		}
 		pool.entries = append(pool.entries, &entry{route: value})
 	}
 	return pool

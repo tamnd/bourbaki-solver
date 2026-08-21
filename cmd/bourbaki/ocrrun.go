@@ -531,7 +531,18 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 			refused = append(refused, value.Name+": "+why)
 			continue
 		}
-		out = append(out, ocr.Host{Name: value.Host, Tool: tool, Lanes: lanes})
+		// Reader and Model are carried only when the route names them, which
+		// today means only gamingpc. A box driving a browser names neither, and
+		// stamping the route's model on one would put gpt-5 in the front matter
+		// of a page whose host drew a different slug out of the pool that
+		// morning. modelFor falls back to the run's default for exactly that
+		// case, and this is what gives it something better to fall back from.
+		host := ocr.Host{Name: value.Host, Tool: tool, Lanes: lanes}
+		if reader := strings.TrimSpace(value.Reader); reader != "" {
+			host.Reader = reader
+			host.Model = value.Model
+		}
+		out = append(out, host)
 	}
 	for _, line := range refused {
 		fmt.Fprintf(os.Stderr, "skipping %s\n", line)
@@ -658,7 +669,7 @@ func refreshFleet(ctx context.Context, routeFile, names string) error {
 		if rows[index].Err != "" && rows[index].Hostname == "" {
 			continue
 		}
-		state.Hosts[target.Host] = rows[index]
+		state.Hosts[target.Name] = rows[index]
 	}
 	state.Written = time.Now().UTC()
 	return state.Save(path)

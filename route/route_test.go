@@ -168,7 +168,13 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 	// Not because it is worse, it is quicker and better than either, but
 	// because the boxes and the free gateway cost nothing at all and a
 	// subscription has a week's allowance to spend on what they cannot do.
-	if got := registry.Names(); strings.Join(got, ",") != "server3,server2,server1,zen,zen-hy3,zen-laguna,zen-deepseek,zen-mimo,zen-lightning,codex-mini,codex" {
+	// gamingpc is first and is not part of any of that. It is ranked ahead of
+	// the boxes because when it can take a page it should have it: a 4090 in
+	// the next room reads a page in seconds where a rented box driving a
+	// browser takes minutes and runs out of turns by lunchtime. It is also the
+	// only route that answers no questions at all, so the ordering below is
+	// about OCR for exactly one entry and about text for the rest.
+	if got := registry.Names(); strings.Join(got, ",") != "gamingpc,server3,server2,server1,zen,zen-hy3,zen-laguna,zen-deepseek,zen-mimo,zen-lightning,codex-mini,codex" {
 		t.Errorf("Names = %v; the fleet ranks on verified profiles then free memory, then the gateway, then this machine", got)
 	}
 	// Every route is enabled and every one carries the numbers it was ranked
@@ -177,7 +183,7 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 	for _, want := range []struct {
 		name        string
 		concurrency int
-	}{{"server3", 4}, {"server2", 3}, {"server1", 1}, {"zen", 2},
+	}{{"gamingpc", 8}, {"server3", 4}, {"server2", 3}, {"server1", 1}, {"zen", 2},
 		{"zen-hy3", 2}, {"zen-laguna", 2}, {"zen-deepseek", 2},
 		{"zen-mimo", 2}, {"zen-lightning", 2}, {"codex-mini", 2}, {"codex", 2}} {
 		value, ok := registry.Find(want.name)
@@ -197,6 +203,14 @@ func TestDefaultIsTheMeasuredFleet(t *testing.T) {
 	}
 	if got := NewPool(registry).Lanes(); got != 24 {
 		t.Errorf("the fleet, the gateway and this machine carry %d calls at once, want 24", got)
+	}
+	// gamingpc's eight lanes are not in that 24 and must not be. They are eight
+	// page images at once through one vLLM, which is a different resource from
+	// a chat lane and is spent by a different stage.
+	for _, value := range NewPool(registry).entries {
+		if value.route.Name == "gamingpc" {
+			t.Error("gamingpc is in the answering pool, and it answers nothing")
+		}
 	}
 	// Neither the gateway nor the command has a box behind it, and that is
 	// what keeps OCR off both of them. A route is exactly one of the three
@@ -276,6 +290,12 @@ func TestTheGatewayIsSixFreeModels(t *testing.T) {
 // fifteen hours, and a lane that sits that out is a lane that is gone.
 func TestEveryRouteRefusesToSitOutAProviderSuspension(t *testing.T) {
 	for _, value := range Default().Routes {
+		// A reader has no client to build. It is reached over ssh and rsync and
+		// there is no provider on the other end to ask anything of, so there is
+		// no wait for it to sit out.
+		if !value.Answers() {
+			continue
+		}
 		client, err := value.Client(0, 2)
 		if err != nil {
 			t.Fatalf("%s: %v", value.Name, err)
