@@ -93,8 +93,9 @@ type Runner struct {
 	Options  Options
 	// RereadProtected turns the guard off and reads every stale page again
 	// whoever read it first. For the case where the prompt changed because the
-	// old readings were wrong, which is the one case where walking over them is
-	// the point.
+	// old readings were wrong, or where the pages were deliberately re-rendered
+	// at a higher resolution to be read better, which are the two cases where
+	// walking over the old readings is the point.
 	RereadProtected bool
 	// Keep leaves the page images on the hosts.
 	Keep bool
@@ -239,8 +240,9 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 	return added, nil
 }
 
-// accepted says whether a page is already on disk, read from this image with
-// this prompt, and passing the rules.
+// accepted says whether a page is already on disk, passing the rules, and
+// either read from this image with this prompt or read by a stronger model than
+// the one this run would use.
 //
 // The last of those is not pedantry. Pages 50 and 53 of Algebra I have been
 // sitting in the corpus failing the math rule since the pilot, and no run would
@@ -255,13 +257,11 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 	if file.Meta.Method != corpus.MethodOCR {
 		return false
 	}
-	// The image hash is compared as well as the prompt. A page re-rendered at
-	// 600 dpi is a different image and deserves a fresh reading, and comparing
-	// only the prompt would keep the old answer.
-	if file.Meta.InputSHA256 != source.SHA256 {
-		return false
-	}
-	if file.Meta.PromptSHA256 != promptSHA && !r.keepReading(file.Meta.Model) {
+	// Both inputs are compared, and both are behind the same guard. A page read
+	// from a different image or under a different prompt is a stale reading and
+	// is read again, unless a stronger reader wrote it, in which case it stands.
+	stale := file.Meta.InputSHA256 != source.SHA256 || file.Meta.PromptSHA256 != promptSHA
+	if stale && !r.keepReading(file.Meta.Model) {
 		return false
 	}
 	expect := Expect{Book: r.Book, PDFPage: source.Page}
@@ -272,7 +272,7 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 	return len(Validate(text, expect, r.Options)) == 0
 }
 
-// Protected is the readers whose work a prompt change does not throw away,
+// Protected is the readers whose work a changed input does not throw away,
 // matched on the front of the model name so that a version bump keeps the
 // protection.
 //
@@ -299,12 +299,26 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 var Protected = []string{"claude", "gpt-4", "gpt-5", "o1", "o3"}
 
 // keepReading says whether a reading already on disk outranks this run, in
-// which case a prompt change is not on its own a reason to read the page again.
+// which case neither a changed prompt nor a changed image is on its own a
+// reason to read the page again.
 //
-// The image hash is still compared before this is asked, so a page re-rendered
-// at a higher resolution is read again whoever read it first. What this guards
-// is only the prompt, which is the one input that changes without the page
-// changing.
+// The image hash used to sit in front of this and be checked on its own, on the
+// reasoning that a page re-rendered at 600 dpi is a better picture and deserves
+// a fresh reading. That reasoning is right about the picture and wrong about
+// the answer. Most re-renders are not a resolution change at all, they are the
+// same page rendered again at the same settings because the images directory
+// was swept, and the bytes differ for no reason that has anything to do with
+// how well the page can be read. So the sweep put every page of Theory of Sets
+// back in the queue and the card read over gpt-5 again: on ens-i-iv page 200
+// the inverse limits \underset{\leftarrow}{\lim} all came back as plain \lim,
+// which loses the direction of the limit, the equation number (7) went missing,
+// the folio went missing, and every emphasis on a defined term went with them.
+//
+// Even when the re-render really is at a higher resolution, a stronger reader
+// on the older picture beats a weaker one on the newer picture, so keeping the
+// old answer is still the better default. RereadProtected is how an operator
+// says otherwise, and that is the flag to reach for after a deliberate
+// re-render at a higher dpi.
 func (r *Runner) keepReading(model string) bool {
 	if r.RereadProtected {
 		return false

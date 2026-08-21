@@ -51,6 +51,13 @@ flags for fill and run:
                  it is for the volumes whose text layer drops that column
   -unread        only the pages with no reading committed, so that editing the
                  prompt does not send the pages already read back to the fleet
+  -reread-protected
+                 read over pages that claude or gpt-5 already read. Those stand
+                 by default even when the prompt or the render moved under them,
+                 because a weaker reader writing over them has cost the corpus
+                 real mathematics twice. Ask for this after a prompt change made
+                 because the old readings were wrong, or after a deliberate
+                 re-render at a higher resolution, and not otherwise
   -dry           say what would be read and stop
 
 flags for check:

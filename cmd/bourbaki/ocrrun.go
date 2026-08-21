@@ -280,6 +280,14 @@ func ocrRun(args []string) error {
 	// read yet, and a re-read is then something asked for rather than something
 	// a prompt edit causes.
 	unread := fs.Bool("unread", false, "only the pages with no reading committed")
+	// A reading by claude or gpt-5 stands even when the prompt or the render
+	// moved under it, because the alternative is a weaker reader writing over
+	// it, which has now happened twice. This is how to say that the old
+	// readings are the thing being replaced on purpose: after a prompt change
+	// made because they were wrong, or after a deliberate re-render at a higher
+	// resolution. It is spelled out rather than implied by a re-render, because
+	// a re-render happens by accident whenever the images directory is swept.
+	reread := fs.Bool("reread-protected", false, "read over readings by a stronger model too")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -329,7 +337,7 @@ func ocrRun(args []string) error {
 		Shell: ocr.LocalShell{Remote: fleet.SSH{Timeout: 2 * time.Minute}},
 		Copy:  ocr.LocalCopy{Remote: ocr.Rsync{Timeout: 30 * time.Minute}},
 		Batch: *batch, Limit: *limit, Keep: *keep,
-		First: *first, Last: *last,
+		First: *first, Last: *last, RereadProtected: *reread,
 		Expect: state.expect, RetryDPI: render.RetryDPI,
 		Rerender: rerender(state),
 		Logf:     logf,

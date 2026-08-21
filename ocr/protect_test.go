@@ -78,14 +78,49 @@ func TestAnUnchangedPageIsStillAccepted(t *testing.T) {
 	}
 }
 
-// The guard is about the prompt and only the prompt. A page rendered again at
-// 600 dpi is a different picture, and the reading on disk is a reading of the
-// old one, so it is read again however strong the reader was.
-func TestAFreshRenderIsReadAgainEvenByAStrongerReader(t *testing.T) {
+// A changed image is guarded the same way a changed prompt is. This started out
+// the other way round, on the reasoning that a page rendered again at 600 dpi is
+// a better picture and deserves a fresh reading, and that let the card read over
+// gpt-5 on sixteen pages of Theory of Sets. The re-render was not a resolution
+// change at all, it was the same page at the same settings after the images
+// directory was swept, and the bytes differ for reasons that have nothing to do
+// with how well the page can be read.
+func TestAFreshRenderDoesNotThrowAwayAStrongerReading(t *testing.T) {
+	r, source := write(t, "claude-opus", "same-prompt", "the-old-render")
+	source.SHA256 = "the-new-render"
+	if !r.accepted(source, "same-prompt") {
+		t.Error("a re-render sent a stronger reading back to the card")
+	}
+}
+
+// Both inputs moving at once is the case the sweep actually produced, since the
+// prompt had changed as well, and it has to be guarded like either one alone.
+func TestANewRenderAndANewPromptTogetherAreStillGuarded(t *testing.T) {
+	r, source := write(t, "gpt-5", "old-prompt", "the-old-render")
+	source.SHA256 = "the-new-render"
+	if !r.accepted(source, "new-prompt") {
+		t.Error("two changed inputs got past a guard that either one alone would hit")
+	}
+}
+
+// The other half again. A re-render is a fresh reading for a page the local
+// readers read, because there is nothing there worth keeping.
+func TestAFreshRenderStillRereadsALocalReading(t *testing.T) {
+	r, source := write(t, "olmOCR-2-7B-1025-FP8", "same-prompt", "the-old-render")
+	source.SHA256 = "the-new-render"
+	if r.accepted(source, "same-prompt") {
+		t.Error("a local reading of an image that is gone was kept")
+	}
+}
+
+// After a deliberate re-render at a higher resolution, this is the flag that
+// says so, and it has to reach the image hash and not only the prompt.
+func TestRereadProtectedAlsoCoversAReRender(t *testing.T) {
 	r, source := write(t, "claude-opus", "same-prompt", "the-300-dpi-image")
 	source.SHA256 = "the-600-dpi-image"
+	r.RereadProtected = true
 	if r.accepted(source, "same-prompt") {
-		t.Error("a new render kept the reading of the old one")
+		t.Error("the guard held on a re-render with RereadProtected set")
 	}
 }
 
