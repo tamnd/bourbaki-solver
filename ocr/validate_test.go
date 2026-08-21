@@ -250,6 +250,47 @@ func TestRule4ForTheVolumeThatPrintsItsNumberAtTheFoot(t *testing.T) {
 	}
 }
 
+// TestRule4TheVolumeThatPrintsAFullStopInItsHead is the second branch that let
+// the rule down, and the more expensive of the two.
+//
+// The rule used to veto any first line ending in a full stop, on the reading
+// that a sentence ends in one and a head does not. hist prints its heads with
+// the stop, so the veto rejected the head the page really carries, three times
+// each, and 36 pages of that volume went dead on it. There are 96 first lines
+// across the 4698 raw readings on disk that are short, mostly capitals and end
+// in a stop, 93 of them in hist, and a 15 line sample of those held no prose.
+func TestRule4TheVolumeThatPrintsAFullStopInItsHead(t *testing.T) {
+	head := func(first string) []Problem {
+		body := first + "\n\n**Theorem 1.** — Every group is isomorphic to a group of permutations." +
+			strings.Repeat(" The proof follows from the preceding remarks.", 6)
+		return Validate(body, Expect{
+			Book: "hist", Grammar: pagemap.HeadNumber, Chapter: "I",
+			Page: 234, Confidence: pagemap.FromHead, HasHead: true,
+		}, Options{})
+	}
+	for _, first := range []string{
+		"234  23. HAAR MEASURE. CONVOLUTION.",
+		"17. INFINITESIMAL CALCULUS.",
+		"148  12. REAL NUMBERS.",
+		"PREFACE.",
+		"TABLE OF CONTENTS.",
+	} {
+		if problems := head(first); has(problems, RuleHead) {
+			t.Errorf("a printed running head was rejected: %q: %s", first, Reasons(problems))
+		}
+	}
+	// The capitals test is what keeps prose out, and it still does. Both of
+	// these end in a full stop too, and neither is set in capitals.
+	for _, first := range []string{
+		"The theory of Haar measure is developed in the following section.",
+		"We now turn to the convolution of two measures on a group.",
+	} {
+		if problems := head(first); !has(problems, RuleHead) {
+			t.Errorf("a line of prose passed as a running head: %q", first)
+		}
+	}
+}
+
 func TestRule5Illegible(t *testing.T) {
 	body := func(n int) string {
 		return "A IV.7  POLYNOMIALS  § 1\n\nThe element " +

@@ -381,7 +381,7 @@ const longestHead = 90
 // volume with head labels has to show one. A volume that prints its number at
 // the foot has only the chapter name or the section locator up there, and the
 // most that can be asked is that the first line is a head and not the first
-// sentence of a paragraph: short, and not ending in a full stop.
+// sentence of a paragraph: short, and set in capitals.
 func checkHead(head string, expect Expect) (Problem, bool) {
 	if strings.TrimSpace(head) == "" {
 		return Problem{Rule: RuleHead, Detail: "the first line is empty, the page map says this page has a running head", Line: 1}, false
@@ -418,9 +418,6 @@ func looksLikeHead(line string) bool {
 	if len([]rune(line)) > longestHead {
 		return false // a running head is not a paragraph
 	}
-	if strings.HasSuffix(line, ".") && !strings.HasSuffix(line, "no.") {
-		return false // a sentence, not a head
-	}
 	letters, upper := 0, 0
 	for _, r := range line {
 		switch {
@@ -439,6 +436,18 @@ func looksLikeHead(line string) bool {
 	}
 	// Bourbaki sets its running heads in capitals. Half is enough, because the
 	// small capitals of a chapter title come back from OCR mixed.
+	//
+	// A terminal full stop used to veto the line before this test, on the
+	// reading that a sentence ends in one and a head does not. That holds for
+	// the volumes whose heads are a title and a locator and fails for hist,
+	// which prints "23. HAAR MEASURE. CONVOLUTION.", "PREFACE." and "TABLE OF
+	// CONTENTS." with the stop. It cost 36 pages of hist, every one of them
+	// dead after three attempts on a head the page really prints. Across the
+	// 4698 raw readings on disk there are 96 first lines that are short, mostly
+	// capitals and end in a stop, 93 of them in hist, and every one of a 15 line
+	// sample is a genuine printed head. The capitals test does the veto's work
+	// anyway: a sentence of prose ending in a full stop is mixed case and fails
+	// it, which is why the veto only ever fired on heads.
 	return upper*2 >= letters
 }
 

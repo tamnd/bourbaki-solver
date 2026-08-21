@@ -286,10 +286,24 @@ func validateCases() []validateCase {
 		},
 		{
 			"rule 4 accepts a head ending in no.",
-			"The one full stop that does not make a line a sentence.",
+			"A full stop in a head is not what makes a line a sentence.",
 			"§ 4, no.\n\n" + prose,
 			expectJSON{Book: "alg-i-iii", PDFPage: 42, Grammar: string(pagemap.FootNumber),
 				Confidence: string(pagemap.FromFoot), HasHead: true},
+		},
+		{
+			"rule 4 accepts a head in capitals that ends in a full stop",
+			"hist prints its heads with the stop, and vetoing those cost 36 pages of that volume.",
+			"234  23. HAAR MEASURE. CONVOLUTION.\n\n" + prose,
+			expectJSON{Book: "hist", PDFPage: 234, Grammar: string(pagemap.HeadNumber),
+				Confidence: string(pagemap.FromHead), HasHead: true},
+		},
+		{
+			"rule 4 rejects a sentence that ends in a full stop",
+			"The capitals test is what keeps prose out, and it does the vetoed stop's work.",
+			"The theory of Haar measure is developed in the following section.\n\n" + prose,
+			expectJSON{Book: "hist", PDFPage: 235, Grammar: string(pagemap.HeadNumber),
+				Confidence: string(pagemap.FromHead), HasHead: true},
 		},
 		{
 			"rule 4 rejects a head longer than ninety runes",
