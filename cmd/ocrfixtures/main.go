@@ -306,6 +306,20 @@ func validateCases() []validateCase {
 				Confidence: string(pagemap.FromFoot), HasHead: true},
 		},
 		{
+			"rule 4 rejects a paragraph that cites a page label",
+			"ParsePageLabel searches the line, so a paragraph carrying a citation used to answer yes to the head-label branch and the page was accepted with no head at all.",
+			"still hold for generalized formal power series, by the argument of A VIII.202, and the corollary above applies to each of them without change in this case.\n\n" + prose,
+			expectJSON{Book: "alg-iv-vii", PDFPage: 45, Grammar: string(pagemap.HeadLabel),
+				Chapter: "IV", Page: 7, Confidence: string(pagemap.FromHead), HasHead: true},
+		},
+		{
+			"rule 4 rejects a display opener as a head",
+			"A line with no letters in it reads as a bare folio to the capitals test, and a reader that opens the page on a display writes \\[ and nothing else.",
+			"\\[\n\n" + prose,
+			expectJSON{Book: "alg-i-iii", PDFPage: 46, Grammar: string(pagemap.FootNumber),
+				Confidence: string(pagemap.FromFoot), HasHead: true},
+		},
+		{
 			"rule 5 accepts two unreadable spots",
 			"Up to two is a damaged scan, and these are damaged scans.",
 			"A VIII.13\n\n" + prose + "\n\nThe symbol ⟪illegible⟫ stands where ⟪illegible⟫ could not be read.",

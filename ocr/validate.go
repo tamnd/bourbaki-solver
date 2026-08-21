@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
@@ -359,6 +360,21 @@ func checkAfterExercises(text string) (Problem, bool) {
 	return Problem{}, true
 }
 
+// longestHead is how long a running head is allowed to be, in runes.
+//
+// Bourbaki prints a chapter name and a page label and nothing else up there.
+// Over the 200 pages of golden-dev the longest one printed is 64 runes, so 90
+// is not a tight bound, it is room for a printing whose heads run longer than
+// any of these do.
+//
+// It is a named constant because three places need it and two of them did not
+// have it. ParsePageLabel and ParseSectionLocator both search the string they
+// are given rather than matching it, which is what their other callers want,
+// since the job there is to pull a locator out of the middle of a citation. Ask
+// either of them whether a 473 rune paragraph is a running head, because it
+// happens to cite II, § 4, and it says yes.
+const longestHead = 90
+
 // checkHead is rule 4.
 //
 // What counts as a plausible head depends on how the volume prints one. A
@@ -369,6 +385,13 @@ func checkAfterExercises(text string) (Problem, bool) {
 func checkHead(head string, expect Expect) (Problem, bool) {
 	if strings.TrimSpace(head) == "" {
 		return Problem{Rule: RuleHead, Detail: "the first line is empty, the page map says this page has a running head", Line: 1}, false
+	}
+	// Before the grammar, because it is true under both of them and because the
+	// label branch below is the one that let it through. 9 of the 200 readings
+	// on golden-dev open with a paragraph of body text carrying a citation, and
+	// this rule called every one of them a page with a running head.
+	if len([]rune(strings.TrimSpace(head))) > longestHead {
+		return Problem{Rule: RuleHead, Detail: fmt.Sprintf("the first line reads as prose, not a running head: %q", clip(head)), Line: 1}, false
 	}
 	if expect.Grammar == pagemap.HeadLabel {
 		if _, ok := corpus.ParsePageLabel(head); !ok {
@@ -392,7 +415,7 @@ func checkHead(head string, expect Expect) (Problem, bool) {
 // line in the audit, which a person reads anyway.
 func looksLikeHead(line string) bool {
 	line = strings.TrimSpace(line)
-	if len([]rune(line)) > 90 {
+	if len([]rune(line)) > longestHead {
 		return false // a running head is not a paragraph
 	}
 	if strings.HasSuffix(line, ".") && !strings.HasSuffix(line, "no.") {
@@ -409,7 +432,10 @@ func looksLikeHead(line string) bool {
 		}
 	}
 	if letters == 0 {
-		return true // a bare number or a locator
+		// A bare number or a locator, both of which carry a digit. Without the
+		// digit the line is punctuation, and the one that turns up is a reader
+		// opening the page on a display and writing \[ or \( on the first line.
+		return strings.ContainsFunc(line, unicode.IsDigit)
 	}
 	// Bourbaki sets its running heads in capitals. Half is enough, because the
 	// small capitals of a chapter title come back from OCR mixed.

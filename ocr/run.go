@@ -1214,6 +1214,16 @@ func readHead(line string, blankAfter bool) (Head, bool) {
 	if strings.HasPrefix(line, "#") {
 		return Head{}, false
 	}
+	// A paragraph is body too, and this is the more expensive way to get it
+	// wrong. ParsePageLabel searches the line, so a first line that is the
+	// continuation of a paragraph from the previous page and cites A VIII.202
+	// somewhere in it took the unambiguous branch below and was cut out of the
+	// body wholesale. 256 of the 4492 raw pages in the corpus open with a line
+	// like that, the longest 473 runes, and every one of them would lose its
+	// opening paragraph on the way in.
+	if len([]rune(line)) > longestHead {
+		return Head{}, false
+	}
 	var head Head
 	rest := line
 	if label, ok := corpus.ParsePageLabel(line); ok {

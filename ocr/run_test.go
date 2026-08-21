@@ -615,6 +615,36 @@ func TestSplitHeadKeepsAPageThatPrintsNoHead(t *testing.T) {
 			text: "## APPENDIX\n\n## CHARACTERIZATION OF TERMS AND RELATIONS",
 			body: "## APPENDIX\n\n## CHARACTERIZATION OF TERMS AND RELATIONS",
 		},
+		{
+			// A page whose first line carries on a paragraph from the page
+			// before, and cites another page while doing it. ParsePageLabel
+			// searches the line rather than matching it, so this took the
+			// unambiguous branch and the whole paragraph was cut out of the
+			// body and filed as the title of a running head. 256 of the 4492
+			// raw pages in the corpus open with a line of this shape.
+			name: "a paragraph that cites a page is not a head",
+			text: "still hold for generalized formal power series, by the argument of A VIII.202, " +
+				"and the corollary above applies to each of them without change here.\n\n" +
+				"Let $A$ be a ring.",
+			body: "still hold for generalized formal power series, by the argument of A VIII.202, " +
+				"and the corollary above applies to each of them without change here.\n\n" +
+				"Let $A$ be a ring.",
+		},
+		{
+			// The other letterless line. A reader that opens the page on a
+			// display writes \[ and nothing else, and the capitals test reads a
+			// line with no letters in it as a bare folio.
+			name: "a display opener is not a bare folio",
+			text: "\\[\n\n= \\prod_{x \\in H} g_1 c(s(x)^{-1})\n\\]",
+			body: "\\[\n\n= \\prod_{x \\in H} g_1 c(s(x)^{-1})\n\\]",
+		},
+		{
+			// The line the digit rule has to keep working for.
+			name:  "a bare folio is still a head",
+			text:  "496\n\nTABLE OF CONTENTS",
+			title: "496",
+			body:  "TABLE OF CONTENTS",
+		},
 	}
 	for _, test := range cases {
 		head, body := SplitHead(test.text)
