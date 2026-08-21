@@ -184,6 +184,39 @@ func TestRule4RunningHead(t *testing.T) {
 	}
 }
 
+// TestRule4ParagraphThatCitesAPage is the branch that let the rule down.
+//
+// ParsePageLabel searches the line it is given, which is what its other callers
+// want, so a paragraph carrying a citation answered yes to "is there a page
+// label in the first line" and the rule accepted the page. 9 of the 200 pages of
+// golden-dev open with a paragraph shaped like this, the longest 1425 runes,
+// against a longest genuinely printed head on the same set of 64.
+func TestRule4ParagraphThatCitesAPage(t *testing.T) {
+	opening := "still hold for generalized formal power series, by the argument of A VIII.202, " +
+		"and the corollary above applies to each of them without change in this case."
+	body := opening + "\n\n**Theorem 1.** — Every group is isomorphic to a group of permutations." +
+		strings.Repeat(" The proof follows from the preceding remarks.", 6)
+	if !has(Validate(body, alg4(7), Options{}), RuleHead) {
+		t.Error("a paragraph that cites a page was accepted as a running head")
+	}
+}
+
+// TestRule4DisplayOpener is the other letterless line.
+//
+// looksLikeHead reads a line with no letters in it as a bare folio, and a reader
+// that opens the page on a display writes \[ and nothing else.
+func TestRule4DisplayOpener(t *testing.T) {
+	body := "\\[\n\n**Theorem 1.** — Every group is isomorphic to a group of permutations." +
+		strings.Repeat(" The proof follows from the preceding remarks.", 6)
+	expect := Expect{
+		Book: "alg-i-iii", Grammar: pagemap.FootNumber, Chapter: "I",
+		Page: 24, Confidence: pagemap.FromFoot, HasHead: true,
+	}
+	if !has(Validate(body, expect, Options{}), RuleHead) {
+		t.Error("a display opener was accepted as a running head")
+	}
+}
+
 func TestRule4ForTheVolumeThatPrintsItsNumberAtTheFoot(t *testing.T) {
 	// alg-i-iii prints no page label. The head carries the chapter title in
 	// capitals on one side and the section locator on the other, so the rule
