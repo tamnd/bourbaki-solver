@@ -485,6 +485,21 @@ const localModelName = "claude-opus"
 // which costs a gigabyte. A host that has the memory for the first and not the
 // second gets zero lanes and is skipped, which is exactly server1.
 func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
+	return boxes(routeFile, names, ocrLanes, "read page images", false)
+}
+
+// laneRule is how many lanes a box gets for one kind of work, and when the
+// answer is none, why. ocrLanes and askLanes are the two.
+type laneRule func(route.Route, fleet.Facts) (int, string)
+
+// boxes is the body ocrHosts and askHosts share.
+//
+// work goes into the refusals and the error, since "no host can read page
+// images" is the wrong thing to print at somebody whose translation went
+// nowhere. taken says the caller has already picked up the gateways and the
+// commands for itself, which askHosts has, and stops this refusing routes that
+// are about to be used.
+func boxes(routeFile, names string, lanesFor laneRule, work string, taken bool) ([]ocr.Host, error) {
 	registry, path, err := route.LoadOrDefault(routeFile)
 	if err != nil {
 		return nil, err
@@ -509,8 +524,8 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 			// A command on this machine has no box either, and the same
 			// reasoning applies: it is only worth a line when somebody asked
 			// for it by name and is waiting to hear why it is not being used.
-			if asked {
-				refused = append(refused, value.Name+": a command on this machine reads no page images")
+			if asked && !taken {
+				refused = append(refused, value.Name+": a command on this machine cannot "+work)
 			}
 			continue
 		}
@@ -520,8 +535,8 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 			// of every volume would be a line of stderr forever about a route
 			// behaving exactly as it is meant to. It is said when it was asked
 			// for by name, because then somebody is waiting to hear why.
-			if asked {
-				refused = append(refused, value.Name+": a gateway reads no page images, it has no box to run chatgpt-tool on")
+			if asked && !taken {
+				refused = append(refused, value.Name+": a gateway cannot "+work+", it has no box to run chatgpt-tool on")
 			}
 			continue
 		}
@@ -534,7 +549,7 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 			refused = append(refused, value.Name+": no chatgpt-tool path, run bourbaki doctor")
 			continue
 		}
-		lanes, why := ocrLanes(value, state.Hosts[value.Name])
+		lanes, why := lanesFor(value, state.Hosts[value.Name])
 		if lanes <= 0 {
 			refused = append(refused, value.Name+": "+why)
 			continue
@@ -556,7 +571,7 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 		fmt.Fprintf(os.Stderr, "skipping %s\n", line)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("no host can read page images, run bourbaki doctor")
+		return nil, fmt.Errorf("no host can %s, run bourbaki doctor", work)
 	}
 	return out, nil
 }
@@ -570,9 +585,10 @@ func ocrHosts(routeFile, names string) ([]ocr.Host, error) {
 // them: a question put to the fleet spends an upload on an account that runs
 // out of them for hours, and one put here spends nothing.
 //
-// A box still needs its chatgpt-tool and its lanes, so those checks are the
-// same ones and are not repeated here: ocrHosts does them and this adds the
-// gateways to what it found. When the fleet is spent, or when a run names the
+// A box still needs its chatgpt-tool and its lanes, so those checks are not
+// repeated here: boxes does them under askLanes, which differs from ocrLanes
+// only in what a thrashing box is worth, and this adds the gateways to what it
+// found. When the fleet is spent, or when a run names the
 // gateway on the command line, that leaves a list with only gateways in it,
 // which is the point.
 func askHosts(routeFile, names string) ([]ocr.Host, error) {
@@ -587,7 +603,7 @@ func askHosts(routeFile, names string) ([]ocr.Host, error) {
 	}
 
 	var out []ocr.Host
-	var boxes bool
+	var anyBox bool
 	for _, value := range registry.Enabled() {
 		if value.Command != "" {
 			lanes := value.Concurrency
@@ -599,7 +615,7 @@ func askHosts(routeFile, names string) ([]ocr.Host, error) {
 			continue
 		}
 		if !value.Gateway {
-			boxes = true
+			anyBox = true
 			continue
 		}
 		client, err := value.Client(0, gatewayRetries)
@@ -613,7 +629,7 @@ func askHosts(routeFile, names string) ([]ocr.Host, error) {
 		}
 		out = append(out, ocr.Host{Name: value.Name, Lanes: lanes, Client: client, Model: value.Model})
 	}
-	if !boxes {
+	if !anyBox {
 		if len(out) == 0 {
 			return nil, fmt.Errorf("no route can answer a question, run bourbaki doctor")
 		}
@@ -622,7 +638,7 @@ func askHosts(routeFile, names string) ([]ocr.Host, error) {
 	// A fleet that cannot be reached is not fatal here when a gateway can be:
 	// the question gets answered, which is what the caller asked for, and the
 	// reason the fleet was skipped has already been printed.
-	hosts, err := ocrHosts(routeFile, names)
+	hosts, err := boxes(routeFile, names, askLanes, "answer a question", true)
 	if err != nil {
 		if len(out) == 0 {
 			return nil, err
@@ -764,18 +780,8 @@ func hostsWithin(ctx context.Context, wait time.Duration, logf func(string, ...a
 // page blank. So the ceiling here is Facts.Lanes, which counts cores, and the
 // memory floor below is kept only to refuse a box that has nothing left at all.
 func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
-	switch {
-	case !facts.Xvfb:
-		return 0, "no xvfb-run, it cannot open a browser"
-	case !facts.Rsync:
-		return 0, "no rsync, the page images cannot get there"
-	case facts.MemFreeMB > 0 && facts.MemFreeMB < ocrLaneMemoryMB:
-		return 0, fmt.Sprintf("%d MB free, one lane needs %d", facts.MemFreeMB, ocrLaneMemoryMB)
-	// Cores is the marker of a box that was measured, and it is used here
-	// rather than a nonzero disk figure because zero free disk is the case
-	// this check exists for. server2 read 0 and kept its lane.
-	case facts.Cores > 0 && facts.DiskFreeMB < fleet.OCRDiskMB:
-		return 0, fmt.Sprintf("%d MB free on disk, one lane needs %d", facts.DiskFreeMB, fleet.OCRDiskMB)
+	if ok, why := laneFloor(facts); !ok {
+		return 0, why
 	}
 	lanes := value.Concurrency
 	if lanes <= 0 {
@@ -797,6 +803,72 @@ func ocrLanes(value route.Route, facts fleet.Facts) (int, string) {
 		lanes = min(lanes, capacity)
 	}
 	return lanes, ""
+}
+
+// laneFloor is what a box has to have before how many lanes it can carry is
+// worth asking, and it is the same for a page and for a question. What differs
+// between the two is only what a busy box is worth, which is below.
+func laneFloor(facts fleet.Facts) (bool, string) {
+	switch {
+	case !facts.Xvfb:
+		return false, "no xvfb-run, it cannot open a browser"
+	case !facts.Rsync:
+		return false, "no rsync, the files cannot get there"
+	case facts.MemFreeMB > 0 && facts.MemFreeMB < ocrLaneMemoryMB:
+		return false, fmt.Sprintf("%d MB free, one lane needs %d", facts.MemFreeMB, ocrLaneMemoryMB)
+	// Cores is the marker of a box that was measured, and it is used here
+	// rather than a nonzero disk figure because zero free disk is the case
+	// this check exists for. server2 read 0 and kept its lane.
+	case facts.Cores > 0 && facts.DiskFreeMB < fleet.OCRDiskMB:
+		return false, fmt.Sprintf("%d MB free on disk, one lane needs %d", facts.DiskFreeMB, fleet.OCRDiskMB)
+	}
+	return true, ""
+}
+
+// askLanes is ocrLanes for a question, which is text going out and text coming
+// back rather than a page image going up.
+//
+// Everything the box needs it still needs. The question is rsynced over as a
+// file, so rsync is not optional here either, and it is still a headed Chrome
+// on chatgpt.com under Xvfb, so the memory and the disk are the same. The one
+// thing that differs is what a thrashing box is worth, and the answer measured
+// rather than assumed is: one lane.
+//
+// server3 sat at a load average between 49 and 59 on eight cores for a day,
+// somebody else's build, six times past the mark where ocrLanes gives up. In
+// that state it answered three questions in a row, in 1m48s, 2m25s and 4m10s,
+// and healed thirteen profiles, each of which is a browser launched and a page
+// loaded. So the box was slow and it was not stuck. On the same box in the same
+// hour a page image batch failed, and it failed on a Cloudflare interstitial on
+// the address, which is a thing the load has nothing to do with.
+//
+// The asymmetry is the work. Reading a page is a large upload and a long
+// generation, and it comes back blank when the browser cannot get the CPU to
+// finish rendering, which is where ocrLanes was written from and is still right
+// about. A question is a paste and a wait. What it costs on a crowded box is
+// minutes, and minutes are worth having when the alternative is a translate
+// queue with 2299 pending and every route refusing it.
+//
+// One and not facts.Lanes(): a thrashing box gets a lane, not a share of a
+// machine it does not have. When the box is not thrashing this is ocrLanes
+// exactly, so nothing changes for a fleet that is behaving.
+func askLanes(value route.Route, facts fleet.Facts) (int, string) {
+	lanes, why := ocrLanes(value, facts)
+	if lanes > 0 {
+		return lanes, why
+	}
+	// Only the load is overturned, and the floor is asked again rather than
+	// told apart from the sentence ocrLanes wrote, so a box that is both
+	// thrashing and out of memory is still refused and still refused for the
+	// memory. Reading the reason back out of the message is how the two drift
+	// apart the first time one of them is reworded.
+	if ok, cannot := laneFloor(facts); !ok {
+		return 0, cannot
+	}
+	if facts.Thrashing() {
+		return 1, ""
+	}
+	return lanes, why
 }
 
 // writeOCRReport publishes what the run cost.
