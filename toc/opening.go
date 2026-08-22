@@ -102,7 +102,28 @@ func plainLine(s string) bool {
 //
 // The number is taken as characters and not as a number, because the character
 // is the thing that was misread. See sectionNumber.
-var lostSection = regexp.MustCompile(`^(\*\*)?(§ )?([0-9A-Za-z]{1,4})\. +(.+?)(\*\*)?$`)
+//
+// The space after the sign is optional because the printing does not always set
+// one and the reading does not always keep one. Integration VII to IX has
+// "§1. CONSTRUCTION OF A HAAR MEASURE" on page 7 and every one of its thirteen
+// § openings is set that way, so requiring the space refused the lot of them and
+// left the volume unassembled. What goes back is normalised, see sectionSign.
+var lostSection = regexp.MustCompile(`^(\*\*)?(§ *)?([0-9A-Za-z]{1,4})\. +(.+?)(\*\*)?$`)
+
+// sectionSign is what goes in front of the number of a § heading, given what the
+// page had in front of it.
+//
+// The page decides whether there is a sign at all, since Algebra I to III prints
+// one and Topology I to IV does not, and the assembler reads either. It does not
+// decide the spacing: the corpus sets "## § 1." in all 143 § headings that carry
+// a sign, so a page that ran the sign into the number gets the space put in
+// rather than carried through.
+func sectionSign(had string) string {
+	if had == "" {
+		return ""
+	}
+	return "§ "
+}
 
 // SectionOpening puts back the heading over a § whose page kept the title and
 // lost the level, the number, or both. It gives the run of lines it replaces,
@@ -175,7 +196,7 @@ func opening(body []string, number int, title, level string, sign bool) (int, in
 		run := []string{m[4]}
 		for j := i; ; j++ {
 			if flatten(strings.Join(run, " ")) == want {
-				return i, j, level + m[2] + strconv.Itoa(number) + ". " + strings.Join(run, " "), true
+				return i, j, level + sectionSign(m[2]) + strconv.Itoa(number) + ". " + strings.Join(run, " "), true
 			}
 			if j+1 >= len(body) || strings.TrimSpace(body[j+1]) == "" || !plainLine(body[j+1]) {
 				break

@@ -97,6 +97,54 @@ func TestASectionHeadingKeepsTheSignThePagePrints(t *testing.T) {
 	}
 }
 
+func TestASignRunIntoItsNumberIsStillASection(t *testing.T) {
+	// Page 7 of Integration VII to IX, and the other twelve § openings of that
+	// volume, which are all set the same way. Requiring a space after the sign
+	// refused every one of them and the volume did not assemble at all.
+	body := []string{
+		"All locally convex spaces will be assumed to be Hausdorff.",
+		"",
+		"§1. CONSTRUCTION OF A HAAR MEASURE",
+		"",
+		"1. Definitions and notations",
+	}
+	from, to, head, ok := SectionOpening(body, 1, "Construction of a Haar measure")
+	if !ok {
+		t.Fatal("the contents opens § 1 on this page under this title")
+	}
+	if from != 2 || to != 2 {
+		t.Errorf("rewrote lines %d to %d, want line 2 alone", from, to)
+	}
+	if want := "## § 1. CONSTRUCTION OF A HAAR MEASURE"; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestTheSpaceAfterTheSignIsWrittenTheCorpusWay(t *testing.T) {
+	// The page decides whether there is a sign and the corpus decides the
+	// spacing. All 143 § headings in the corpus that carry a sign are set
+	// "## § N.", so a page that ran the two together gets the space put in.
+	for _, line := range []string{"§1. POLYNOMIALS", "§ 1. POLYNOMIALS", "§   1. POLYNOMIALS"} {
+		_, _, head, ok := SectionOpening([]string{line}, 1, "Polynomials")
+		if !ok {
+			t.Fatalf("%q: the contents opens § 1 on that page", line)
+		}
+		if want := "## § 1. POLYNOMIALS"; head != want {
+			t.Errorf("%q: got %q, want %q", line, head, want)
+		}
+	}
+}
+
+func TestANoStillRefusesASignRunIntoItsNumber(t *testing.T) {
+	// The printings that set a sign set it over the § and never over a no., so
+	// the sign is how the two are told apart where the number cannot do it.
+	// Losing the space must not lose that.
+	if _, _, _, ok := NumberOpening([]string{"§1. CONSTRUCTION OF A HAAR MEASURE"},
+		1, "Construction of a Haar measure"); ok {
+		t.Error("a line carrying the sign is a § and not a no.")
+	}
+}
+
 func TestASectionInBoldIsToldFromItsOwnFirstNo(t *testing.T) {
 	// Page 103 of Topology I to IV carries § 10 and no. 1 of § 10 under the
 	// same title, both in bold. The number is what separates them.

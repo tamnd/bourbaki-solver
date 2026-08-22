@@ -35,6 +35,16 @@ import (
 // the day it finishes and the rest of the pipeline runs on it while the reading
 // goes on.
 //
+// It skips a chapter that is read through and will not assemble as well, for the
+// same reason. Integration I to VI has chapter I and chapter II whole and
+// chapter III short one no. of what the contents lists, which is one heading a
+// reading dropped, and stopping the volume on it holds up two chapters that are
+// right. The chapter is named with the reason it would not assemble, so the
+// thing to fix is on the terminal rather than buried, and the count goes in the
+// last line of the run. A full run still stops: a volume with all its pages in
+// and a chapter that will not assemble is a fault to fix and not a fact to work
+// around.
+//
 // A chapter it skips keeps the manifest entries the run that did assemble it
 // wrote. That is the whole of the fix for a fault that cost an afternoon. The
 // manifests are written a volume at a time, out of the chapters the run walked,
@@ -97,6 +107,10 @@ func runAssemble(args []string) error {
 		fmt.Printf(", and %d entries carried through from chapters this run did not assemble", sum.carried)
 	}
 	fmt.Println()
+	if sum.refused > 0 {
+		fmt.Printf("%s: %d chapters are read through and would not assemble, and the rest of the volume went out without them\n",
+			*book, sum.refused)
+	}
 	return nil
 }
 
@@ -104,7 +118,10 @@ func runAssemble(args []string) error {
 // entries a partial run did not assemble and took from the committed manifest
 // instead, and it is reported because a run that writes a manifest mostly out
 // of what was already in it is a different thing from a run that built it.
-type assembleTotals struct{ statements, exercises, carried int }
+// refused is the chapters a partial run walked away from because they would not
+// assemble, which is worth a line of its own: a skipped chapter is waiting on
+// the reader and a refused one is waiting on somebody.
+type assembleTotals struct{ statements, exercises, carried, refused int }
 
 // assembleBook is the assembler itself, with the flags and the writing taken
 // out. It returns what the run would put on disk and what is on disk that the
@@ -244,6 +261,28 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 			}
 		}
 	}
+	// carry is what a skipped chapter leaves behind: the entries the run that did
+	// assemble it wrote. They go back in the order the table of contents puts
+	// them, which is where this is called from, so a volume assembled chapter by
+	// chapter reads the same as one assembled at once.
+	carry := func(ch corpus.Chapter) {
+		c, ok := wasSections[ch.Numeral]
+		if !ok {
+			return
+		}
+		rec.Chapters = append(rec.Chapters, c)
+		x, ok := wasExercises[ch.Numeral]
+		if !ok {
+			// The sections manifest has the chapter and the exercises manifest
+			// does not, which a full run cannot produce, since it writes an entry
+			// for every chapter it walks whether the chapter has exercises in it
+			// or not. The shell keeps the two manifests naming the same chapters.
+			x = corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
+		}
+		exrec.Chapters = append(exrec.Chapters, x)
+		sum.carried += len(c.Sections)
+		fmt.Fprintf(os.Stderr, "  carrying its %d committed entries through\n", len(c.Sections))
+	}
 	done := make([]corpus.Chapter, 0, len(bt.Chapters))
 	for i, ch := range bt.Chapters {
 		if partial {
@@ -251,33 +290,30 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 			if gap := unread(pages, from, to); len(gap) > 0 {
 				fmt.Fprintf(os.Stderr, "chapter %s runs pdf %d to %d and %d of those pages are not read yet, skipping it\n",
 					ch.Numeral, from, to, len(gap))
-				// A chapter this run did not assemble keeps the entries the run
-				// that did assemble it wrote. They go back in the order the table
-				// of contents puts them, which is here, so a volume assembled
-				// chapter by chapter reads the same as one assembled at once.
-				if c, ok := wasSections[ch.Numeral]; ok {
-					rec.Chapters = append(rec.Chapters, c)
-					x, ok := wasExercises[ch.Numeral]
-					if !ok {
-						// The sections manifest has the chapter and the exercises
-						// manifest does not, which a full run cannot produce, since
-						// it writes an entry for every chapter it walks whether the
-						// chapter has exercises in it or not. The shell keeps the
-						// two manifests naming the same chapters.
-						x = corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
-					}
-					exrec.Chapters = append(exrec.Chapters, x)
-					sum.carried += len(c.Sections)
-					fmt.Fprintf(os.Stderr, "  carrying its %d committed entries through\n", len(c.Sections))
-				}
+				carry(ch)
 				continue
 			}
 		}
-		done = append(done, ch)
 		pieces, err := assemble.Chapter(b.Book, lang, ch, pages)
 		if err != nil {
-			return nil, nil, sum, err
+			// A chapter read through whose structure still does not check out.
+			// Integration I to VI is the case: chapter I and chapter II are whole
+			// and chapter III is short one no. of what the contents lists, which
+			// is one heading the reading dropped in the middle of a 487 page
+			// volume. Without this the whole volume stops on it, and 235 pages
+			// that are right wait on one page that is not, which is the fault
+			// -partial exists to stop. A full run still stops, because a volume
+			// with all its pages in and a chapter that will not assemble is a
+			// fault to fix and not a fact to work around.
+			if !partial {
+				return nil, nil, sum, err
+			}
+			fmt.Fprintf(os.Stderr, "chapter %s is read through and does not assemble, skipping it: %v\n", ch.Numeral, err)
+			sum.refused++
+			carry(ch)
+			continue
 		}
+		done = append(done, ch)
 		cr := corpus.ChapterSections{Chapter: ch.Numeral, Title: ch.Title}
 		cx := corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
 		for _, p := range pieces {
