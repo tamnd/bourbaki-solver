@@ -327,3 +327,69 @@ func TestThePromptOffersTheConfirmingAnswerFirst(t *testing.T) {
 		t.Error("the prompt does not say which span is in question")
 	}
 }
+
+// The repair path calls ocr.Validate with empty options, which leaves the echo
+// half of rule 3 off, and the question that raises is whether an answer that
+// hands the repair prompt back can reach the corpus through here.
+//
+// It cannot, and not because of rule 3. The two audits above are stricter than
+// rule 3 is: the delimiter audit compares the two texts with every dollar
+// removed and refuses anything that is not identical, and the glyph audit
+// requires the answer to open with the prefix and close with the suffix of the
+// line it was asked about, byte for byte. A prompt cannot get past either. The
+// echo check would be a third opinion on a question already settled twice, and
+// the prompt it would need is the one that read the page, which is in another
+// process and another conversation.
+//
+// These are here so that stays true. If someone loosens either audit, this is
+// the test that says what it cost.
+func TestAnAnswerThatIsTheRepairPromptIsRefused(t *testing.T) {
+	work := request(t)
+	for _, c := range []struct {
+		name   string
+		answer string
+	}{
+		{"the prompt whole", work.Prompt()},
+		{"the rules only", work.Prompt()[strings.Index(work.Prompt(), "Rules, and they are absolute"):]},
+		{"the page with the rules after it",
+			fixed + "\n\n" + work.Prompt()[strings.Index(work.Prompt(), "Rules, and they are absolute"):]},
+		{"the page inside the markers it was quoted in",
+			"<<<BEGIN\n" + fixed + "\nEND>>>"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			result := Audit(work, c.answer, expect())
+			if result.Accepted {
+				t.Fatalf("the prompt came back and was accepted as a page:\n%s", result.Text)
+			}
+			if result.Reason == "" {
+				t.Error("rejected without saying why")
+			}
+		})
+	}
+}
+
+func TestAGlyphAnswerThatIsTheRepairPromptIsRefused(t *testing.T) {
+	work := glyphRequest()
+	for _, c := range []struct {
+		name   string
+		answer string
+	}{
+		{"the prompt whole", work.Prompt()},
+		{"one rule off it", "- Change nothing on the line outside the span quoted above."},
+		{"the quoted line with the rules after it",
+			suspect().Text + "\n" + work.Prompt()[strings.Index(work.Prompt(), "Rules for answer 2"):]},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			result := Audit(work, c.answer, glyphExpect())
+			if result.Accepted {
+				t.Fatalf("the prompt came back and was accepted as a line:\n%s", result.Text)
+			}
+			if result.Confirmed {
+				t.Fatal("the prompt was read as the model confirming the span")
+			}
+			if result.Reason == "" {
+				t.Error("rejected without saying why")
+			}
+		})
+	}
+}

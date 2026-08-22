@@ -282,6 +282,15 @@ func Audit(request Request, answer string, expect ocr.Expect) Result {
 
 	// It has to have worked. A repair that leaves the page failing the rule it
 	// was for is a call spent to write the same problem back.
+	//
+	// Empty options, which leaves the echo half of rule 3 off. The prompt that
+	// half needs is the one that read the page, and that is in another process
+	// and another conversation; the repair prompt is not it. Nothing gets in
+	// that way regardless. The two audits above are stricter than rule 3 is:
+	// the delimiter audit refuses any answer that is not the page byte for byte
+	// with the dollars taken out of both, and the glyph audit refuses any
+	// answer that does not open and close with the untouched ends of the line
+	// it asked about. See TestAnAnswerThatIsTheRepairPromptIsRefused.
 	if problems := ocr.Validate(candidate, expect, ocr.Options{}); len(problems) > 0 {
 		return Result{Reason: "the repaired page still fails: " + ocr.Reasons(problems)}
 	}
