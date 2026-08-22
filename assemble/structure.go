@@ -737,8 +737,20 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // 1209 lines write a section sign and a number and only these two put a bracket
 // after it. The rule that a marker counts only when it carries the number the §
 // is up to holds them down as well.
+//
+// The dagger is the same swap again and a bigger one. A model reading a page
+// image gives the pilcrow as a dagger 64 times, across nine volumes in both
+// languages, and page 95 of Algebra 4 to 7 is the case that found it: the
+// printing opens exercises 1, 3 and 4 of § 1 with a pilcrow and the reading
+// wrote "† 1)", so the § reported a preamble and no exercises at all and the
+// whole of chapter IV stopped assembling on it. It costs nothing to read,
+// because the dagger has one other use in this corpus and it is not this one:
+// of the 130 lines that write a dagger anywhere, the 64 that put a number and
+// a bracket after it all open the line with it, and not one of the other 66
+// puts a dagger in front of a number. Those 66 are footnote marks, which sit
+// inside a sentence or against the word they hang off.
 var exNumRE = regexp.MustCompile(
-	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
+	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
 		`(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // marks are the star and the pilcrow a book can set in front of an exercise
@@ -746,14 +758,17 @@ var exNumRE = regexp.MustCompile(
 // taken off first, so that it is not read as a star.
 func marksOf(prefix string) (star, pilcrow string) {
 	prefix = strings.ReplaceAll(prefix, "**", "")
-	// The section sign is a misread pilcrow and marks what the pilcrow marks.
-	// See exNumRE. It is looked for before the bare pilcrow for the same reason
-	// the control word is: both of them carry a letter that markOf would find in
-	// the other.
+	// The section sign and the dagger are misread pilcrows and mark what the
+	// pilcrow marks. See exNumRE. The two control words are looked for before
+	// the bare marks for the same reason: both of them carry a letter that
+	// markOf would find in the other.
 	for _, c := range []string{`\P`, `\S`} {
 		if p := markOf(prefix, c); p != "" {
 			return markOf(prefix, "*"), p
 		}
+	}
+	if p := markOf(prefix, "†"); p != "" {
+		return markOf(prefix, "*"), p
 	}
 	return markOf(prefix, "*"), markOf(prefix, "¶")
 }
