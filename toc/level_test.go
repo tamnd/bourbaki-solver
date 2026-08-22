@@ -295,3 +295,53 @@ func TestATitleThatFlattensToNothingMatchesNothing(t *testing.T) {
 		t.Errorf("Level = %d, want 0", got)
 	}
 }
+
+// A no. the book sets as supplementary carries an asterisk in front of its
+// number. Extraction writes it escaped and six lines of the corpus write it
+// bare, and no. 13 of § 21 of the French Algebra VIII is one of them. It is
+// read either way and written back escaped, since the escaped form is the one
+// the assembler reads.
+func TestABareAsteriskIsTheSupplementaryMark(t *testing.T) {
+	b := corpus.BookTOC{ID: "alg-viii-fr", Chapters: []corpus.Chapter{{
+		Numeral: "VIII",
+		Sections: []corpus.Section{{
+			Number: 21, Title: "Représentations linéaires des groupes finis", PDFPage: 389,
+			Subsections: []corpus.Subsection{
+				{Number: 13, Title: "Représentations linéaires complexes", PDFPage: 413},
+			},
+		}},
+	}}}
+	h, ok := ParseLostHeading("*13. Représentations linéaires complexes")
+	if !ok {
+		t.Fatal("the line was not taken apart")
+	}
+	if got := Level(b, 413, h.Number, h.Title); got != 3 {
+		t.Fatalf("Level = %d, want 3", got)
+	}
+	want := `### \*13. Représentations linéaires complexes`
+	if got := h.Write(3); got != want {
+		t.Errorf("Write(3) = %q, want %q", got, want)
+	}
+}
+
+// The other two of the six are exercise statements, and nothing here decides
+// they are headings. The contents refuses them the way it refuses a numbered
+// paragraph.
+func TestAStarredExerciseIsNotPromoted(t *testing.T) {
+	b := corpus.BookTOC{ID: "ens-i-iv", Chapters: []corpus.Chapter{{
+		Numeral: "III",
+		Sections: []corpus.Section{{
+			Number: 1, Title: "Order relations", PDFPage: 134,
+			Subsections: []corpus.Subsection{
+				{Number: 3, Title: "Increasing mappings", PDFPage: 134},
+			},
+		}},
+	}}}
+	h, ok := ParseLostHeading(`*3. Let $(\mathrm{X}_i)_{1 \leqslant i \leqslant n}$ be a finite family of sets. For each subset H of the index set $[1, n]$ let`)
+	if !ok {
+		t.Fatal("the line was not taken apart")
+	}
+	if got := Level(b, 134, h.Number, h.Title); got != 0 {
+		t.Errorf("Level = %d, want 0", got)
+	}
+}

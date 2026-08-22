@@ -50,7 +50,15 @@ var HeadingRE = regexp.MustCompile(`^(#{2,3}) (\\\*)?(\d+)\. (.+)$`)
 // line apart and hands the pieces to Level, which answers from the contents or
 // does not answer, and a line the contents does not put on that page stays the
 // paragraph it was read as.
-var LostHeadingRE = regexp.MustCompile(`^(\\\*)?(\d+)\. (.+)$`)
+//
+// The star is taken escaped or bare. A no. the book sets as supplementary has
+// an asterisk in front of its number, extraction writes that as "\*", and six
+// lines of the corpus write it as "*" instead. Four of the six are headings and
+// no. 13 of § 21 of the French Algebra VIII is one, which is the last thing
+// standing between that volume and assembling. Nothing is decided by taking the
+// bare form: the other two are exercise statements, and the contents refuses
+// them the same way it refuses a numbered paragraph.
+var LostHeadingRE = regexp.MustCompile(`^(\\?\*)?(\d+)\. (.+)$`)
 
 // Heading is one such line, taken apart.
 type Heading struct {
@@ -96,9 +104,16 @@ func ParseLostHeading(line string) (Heading, bool) {
 	return Heading{Star: m[1], Number: n, Title: m[3]}, true
 }
 
-// Write puts a heading back as a line, at the level given.
+// Write puts a heading back as a line, at the level given. The star is written
+// escaped whichever way it was read, because that is the one form the assembler
+// reads and a bare asterisk in that position is emphasis to anything else that
+// touches the file.
 func (h Heading) Write(level int) string {
-	return strings.Repeat("#", level) + " " + h.Star + strconv.Itoa(h.Number) + ". " + h.Title
+	star := h.Star
+	if star == "*" {
+		star = `\*`
+	}
+	return strings.Repeat("#", level) + " " + star + strconv.Itoa(h.Number) + ". " + h.Title
 }
 
 // Level is what the contents says a numbered heading printed on this PDF page
