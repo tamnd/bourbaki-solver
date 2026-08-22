@@ -610,11 +610,32 @@ func (b Batch) headLabel() string {
 	}
 }
 
+// headGrammar passes the manifest's own word for the grammar through to the
+// reader, beside the flag above and not in place of it.
+//
+// The flag answers one question, whether the head carries a page label, and it
+// answers it with a yes or a no. There is a second question it cannot carry.
+// A numbered title in capitals across the top of a page, "5. IMAGE OF A
+// SUMMABLE FAMILY UNDER A CONTINUOUS HOMOMORPHISM", is the running head on a
+// head-number volume and the body's section heading on a foot-number one. The
+// reader has to tell those apart to know whether the page lost its head, and a
+// flag that reads 0 for both cannot tell it. So the word goes over as itself.
+//
+// Unchecked here on purpose. The list of words that mean anything is in the
+// reader, in headpass.GRAMMARS, and a word off that list is treated there as
+// nothing said. Checking it in two places is how the two lists drift apart.
+func (b Batch) headGrammar() string {
+	if b.Grammar == "" {
+		return ""
+	}
+	return "LOCAL_OCR_HEAD_GRAMMAR=" + quote(b.Grammar) + " "
+}
+
 func (b Batch) start(ctx context.Context, _, in, out, prompt, logFile string) (int, error) {
 	command := fmt.Sprintf(
-		"%s%s %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
+		"%s%s%s %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
 			"--skip-existing --recursive --timeout %d --prompt \"$(cat %s)\" >%s 2>&1 </dev/null & echo $!",
-		b.headLabel(), b.launcher(), quote(b.Host.Tool), quote(in), quote(out),
+		b.headLabel(), b.headGrammar(), b.launcher(), quote(b.Host.Tool), quote(in), quote(out),
 		b.Host.lanes(), strconv.FormatFloat(b.Host.rateDelay(), 'f', -1, 64),
 		int(b.Host.pageTimeout().Seconds()), quote(prompt), quote(logFile))
 

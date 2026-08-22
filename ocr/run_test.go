@@ -1453,6 +1453,9 @@ func TestTheRunnerTellsTheReaderWhatTheVolumePrints(t *testing.T) {
 		if !strings.HasPrefix(command, "LOCAL_OCR_HEAD_LABEL=1 ") {
 			t.Errorf("a head-label volume did not say so:\n%s", command)
 		}
+		if !strings.Contains(command, "LOCAL_OCR_HEAD_GRAMMAR='head-label' ") {
+			t.Errorf("a head-label volume did not name its grammar:\n%s", command)
+		}
 	}
 }
 
@@ -1477,6 +1480,9 @@ func TestAVolumeWithNoExpectTellsTheReaderNothing(t *testing.T) {
 		if strings.Contains(command, "LOCAL_OCR_HEAD_LABEL") {
 			t.Errorf("a runner that knows nothing told the reader something:\n%s", command)
 		}
+		if strings.Contains(command, "LOCAL_OCR_HEAD_GRAMMAR") {
+			t.Errorf("a runner that knows nothing named a grammar:\n%s", command)
+		}
 	}
 }
 
@@ -1498,6 +1504,11 @@ func TestAFootNumberVolumeSaysSo(t *testing.T) {
 	for _, command := range machine.starts {
 		if !strings.HasPrefix(command, "LOCAL_OCR_HEAD_LABEL=0 ") {
 			t.Errorf("a foot-number volume did not say so:\n%s", command)
+		}
+		// The flag reads 0 for foot-number and for head-number both, so the
+		// word is the only thing that tells the reader which one this is.
+		if !strings.Contains(command, "LOCAL_OCR_HEAD_GRAMMAR='foot-number' ") {
+			t.Errorf("a foot-number volume did not name its grammar:\n%s", command)
 		}
 	}
 }
