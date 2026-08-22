@@ -118,3 +118,79 @@ func TestALineThatIsNotANumberedHeadingIsNotOne(t *testing.T) {
 		}
 	}
 }
+
+// A heading the reading wrote as a paragraph comes back at the level the
+// contents gives it. This is § 11 of Algebra VIII, where the contents lists
+// twelve no., page 218 wrote no. 10 with no hashes on it, and the assembler
+// stopped at eleven.
+func TestAHeadingReadAsAParagraphIsFoundByTheContents(t *testing.T) {
+	b := corpus.BookTOC{ID: "alg-viii", Chapters: []corpus.Chapter{{
+		Numeral: "VIII",
+		Sections: []corpus.Section{{
+			Number: 11, Title: "Grothendieck Groups", PDFPage: 200,
+			Subsections: []corpus.Subsection{
+				{Number: 9, Title: "The Grothendieck Group K0 (A) of an Artinian Ring", PDFPage: 217},
+				{Number: 10, Title: "Change of Rings for K0 (A)", PDFPage: 218},
+				{Number: 11, Title: "Frobenius Reciprocity", PDFPage: 219},
+			},
+		}},
+	}}}
+	h, ok := ParseLostHeading("10. Change of Rings for $ K_0(A) $")
+	if !ok {
+		t.Fatal("the line was not read as a heading that lost its level")
+	}
+	if h.Level != 0 {
+		t.Errorf("Level = %d, want 0, since the page said nothing about it", h.Level)
+	}
+	if got := Level(b, 218, h.Number, h.Title); got != 3 {
+		t.Fatalf("Level = %d, want 3", got)
+	}
+	if got, want := h.Write(3), "### 10. Change of Rings for $ K_0(A) $"; got != want {
+		t.Errorf("Write(3) = %q, want %q", got, want)
+	}
+}
+
+// The contents is the whole of the authority here. A numbered paragraph has the
+// same shape as a heading that lost its level, and the corpus has thousands of
+// them: every volume sets its "To the reader" as a numbered list, and page 5 of
+// Algebra I to III opens four of them. Level says nothing about any of these,
+// so nothing promotes them.
+func TestANumberedParagraphIsNotPromoted(t *testing.T) {
+	b := corpus.BookTOC{ID: "alg-i-iii", Chapters: []corpus.Chapter{{
+		Numeral: "I",
+		Sections: []corpus.Section{{
+			Number: 1, Title: "Laws of composition", PDFPage: 25,
+			Subsections: []corpus.Subsection{
+				{Number: 1, Title: "Laws of composition", PDFPage: 25},
+			},
+		}},
+	}}}
+	for _, line := range []string{
+		"1. This series of volumes, a list of which is given on pages ix and x",
+		"2. The method of exposition we have chosen is axiomatic and abstract",
+		"5. The logical framework of each chapter consists of the definitions",
+	} {
+		h, ok := ParseLostHeading(line)
+		if !ok {
+			t.Fatalf("%q was not taken apart", line)
+		}
+		if got := Level(b, 5, h.Number, h.Title); got != 0 {
+			t.Errorf("Level(%q) = %d, want 0", line, got)
+		}
+	}
+}
+
+// A line with no number on it is not one of these at all, and neither is a line
+// that already carries its level.
+func TestALineWithNoLostHeadingInItIsNotOne(t *testing.T) {
+	for _, line := range []string{
+		"### 10. Change of Rings",
+		"Let $E$ be a module and 10 its rank.",
+		"10.Change of Rings",
+		"10. ",
+	} {
+		if _, ok := ParseLostHeading(line); ok {
+			t.Errorf("%q was read as a heading that lost its level", line)
+		}
+	}
+}

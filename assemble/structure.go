@@ -685,8 +685,21 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // escaped the star, and "¶ * 18." on page 218 with the pilcrow first. Which mark
 // the exercise carries is then read off the run. § 1 of chapter III stopped at
 // its third exercise where the volume prints twenty four.
+//
+// The section sign is here because a page read as a picture sometimes comes back
+// with it where the pilcrow is printed. The two marks are close enough on the
+// page that a model swaps them, and page 447 of Algebra VIII is the case: the
+// text layer had given it as "$\P 22)$" and a re-reading of the page image gave
+// "$ \S 22) $", so § 21 stopped at exercise 21 and the nine the volume prints
+// after it were lost. The same swap is on page 137 of Topology I to IV, and
+// those two are the whole of it in this corpus. It costs nothing elsewhere,
+// because a section sign in front of a number is otherwise a citation, and a
+// citation is a comma or a page away from its number rather than a bracket:
+// 1209 lines write a section sign and a number and only these two put a bracket
+// after it. The rule that a marker counts only when it carries the number the §
+// is up to holds them down as well.
 var exNumRE = regexp.MustCompile(
-	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|¶)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
+	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
 		`(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // marks are the star and the pilcrow a book can set in front of an exercise
@@ -694,8 +707,14 @@ var exNumRE = regexp.MustCompile(
 // taken off first, so that it is not read as a star.
 func marksOf(prefix string) (star, pilcrow string) {
 	prefix = strings.ReplaceAll(prefix, "**", "")
-	if p := markOf(prefix, `\P`); p != "" {
-		return markOf(prefix, "*"), p
+	// The section sign is a misread pilcrow and marks what the pilcrow marks.
+	// See exNumRE. It is looked for before the bare pilcrow for the same reason
+	// the control word is: both of them carry a letter that markOf would find in
+	// the other.
+	for _, c := range []string{`\P`, `\S`} {
+		if p := markOf(prefix, c); p != "" {
+			return markOf(prefix, "*"), p
+		}
 	}
 	return markOf(prefix, "*"), markOf(prefix, "¶")
 }

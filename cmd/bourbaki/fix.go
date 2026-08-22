@@ -319,6 +319,15 @@ number and the title have to agree with it: a § and its first no. begin on the
 same page in most §§ and both are numbered 1, so the number alone would make
 the no. into a second §.
 
+A heading that lost its level altogether is put back the same way. Some pages
+were read with no hashes on the line at all, so page 218 of Algebra VIII gives
+no. 10 of § 11 as the paragraph "10. Change of Rings for $ K_0(A) $" and that §
+carried eleven no. against the twelve the contents lists. The line is looked up
+exactly as a heading is, and the contents is what makes it one: thousands of
+lines in this corpus are numbered that way and are paragraphs, since every
+volume sets its "To the reader" as a numbered list, and a line the contents
+does not put on that page stays the paragraph it was read as.
+
 It changes the level and nothing else. The number, the title, the supplementary
 star and the rest of the page are written back as they stand, and a heading the
 contents does not put on that page is left alone and named, since a heading in
@@ -876,7 +885,7 @@ func fixHeading(args []string) error {
 		return err
 	}
 
-	var pages, changed, unknown int
+	var pages, changed, unknown, restored int
 	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
 		pages++
 		bt, ok := man.Get(f.Meta.Book)
@@ -889,11 +898,25 @@ func fixHeading(args []string) error {
 		moved := false
 		for i, line := range lines {
 			h, ok := toc.ParseHeading(line)
+			lost := false
+			if !ok {
+				// A line the reading took for a paragraph. It is put to the
+				// contents the same way a heading is, and only the contents
+				// can make it one. See toc.LostHeadingRE for why the shape of
+				// the line settles nothing on its own.
+				h, ok = toc.ParseLostHeading(line)
+				lost = ok
+			}
 			if !ok {
 				continue
 			}
 			level := toc.Level(*bt, f.Meta.PDFPage, h.Number, h.Title)
 			switch {
+			case level == 0 && lost:
+				// An ordinary numbered paragraph, which the corpus has
+				// thousands of. It is not counted with the headings below,
+				// because saying the contents does not have it would be
+				// claiming it is a heading, and nothing here says it is.
 			case level == 0:
 				// The contents does not give this heading on this page. The
 				// front pages of a volume are mostly this: the contents itself
@@ -903,6 +926,9 @@ func fixHeading(args []string) error {
 			case level != h.Level:
 				lines[i] = h.Write(level)
 				moved = true
+				if lost {
+					restored++
+				}
 				if *check {
 					fmt.Printf("%s:%d  %s\n", rel(root, path), i+1, lines[i])
 				}
@@ -932,6 +958,9 @@ func fixHeading(args []string) error {
 	}
 	fmt.Printf("fix heading: %d pages read, %s %d of them, %d %s the contents does not have\n",
 		pages, verb, changed, unknown, heading)
+	if restored > 0 {
+		fmt.Printf("fix heading: %d of those had no level at all and were read as paragraphs\n", restored)
+	}
 	if changed > 0 && !*check {
 		fmt.Println("fix heading: run bourbaki assemble")
 	}

@@ -23,6 +23,35 @@ import (
 // star marks a subsection the book sets as supplementary.
 var HeadingRE = regexp.MustCompile(`^(#{2,3}) (\\\*)?(\d+)\. (.+)$`)
 
+// LostHeadingRE is the same line with no hashes on it at all, which is what the
+// reading writes when it takes a heading for a paragraph.
+//
+// This is the failure above one step further on. There the reading saw a
+// heading and put it at the wrong level; here it did not see a heading. The two
+// have the same consequence, since the § comes out short of a no. and the
+// assembler stops, and § 11 of Algebra VIII is the case that turned it up: the
+// contents lists twelve no. and the pages carried eleven, because page 218
+// wrote no. 10 as
+//
+//  10. Change of Rings for $ K_0(A) $
+//
+// where its eleven neighbours are written "### 10. ". Counted over the corpus,
+// 640 numbered lines have printed evidence that they are headings and are
+// written this way, 245 of them confirmed by the contents in the six volumes
+// the contents covers and the rest by the no. printed in the page's own running
+// head, in volumes whose contents has not been read yet.
+//
+// A line of this shape is not a heading on the strength of its shape, and that
+// is the whole difficulty with it. 3259 lines of the corpus are numbered this
+// way and are not headings: the front matter of every volume sets its "To the
+// reader" as numbered paragraphs, so page 5 of Algebra I to III opens items 1
+// to 4 and page 6 carries item 5, and a rule that read the shape would make
+// five headings out of them. So nothing here decides anything. It takes the
+// line apart and hands the pieces to Level, which answers from the contents or
+// does not answer, and a line the contents does not put on that page stays the
+// paragraph it was read as.
+var LostHeadingRE = regexp.MustCompile(`^(\\\*)?(\d+)\. (.+)$`)
+
 // Heading is one such line, taken apart.
 type Heading struct {
 	Level  int    // 2 or 3, as written
@@ -43,6 +72,28 @@ func ParseHeading(line string) (Heading, bool) {
 		return Heading{}, false
 	}
 	return Heading{Level: len(m[1]), Star: m[2], Number: n, Title: m[4]}, true
+}
+
+// ParseLostHeading reads a numbered line that carries no level, and gives it
+// back with Level 0. A line that is not numbered that way is not one, and the
+// second return says so.
+//
+// Level 0 is the honest value and not a placeholder. The page says nothing
+// about what level this line is, which is the fault being repaired, and the
+// caller has to ask the contents before it can write the line back at all.
+// Level then differs from it whatever the contents answers, so the same branch
+// that moves a heading between levels writes this one back with the hashes it
+// never had.
+func ParseLostHeading(line string) (Heading, bool) {
+	m := LostHeadingRE.FindStringSubmatch(line)
+	if m == nil {
+		return Heading{}, false
+	}
+	n, err := strconv.Atoi(m[2])
+	if err != nil {
+		return Heading{}, false
+	}
+	return Heading{Star: m[1], Number: n, Title: m[3]}, true
 }
 
 // Write puts a heading back as a line, at the level given.
