@@ -220,3 +220,122 @@ func TestATitleThePageAndTheContentsSpellDifferentlyIsNamed(t *testing.T) {
 		t.Errorf("got %q, want %q", got, want)
 	}
 }
+
+func TestANumberedHeadingWithNoLevelIsPutBack(t *testing.T) {
+	// Page 32 of Theory of Sets. The page sets PROOFS as its running head and
+	// "2. PROOFS" in bold under it, and the reading kept one of the two.
+	body := []string{
+		"**2. PROOFS**",
+		"",
+		"A *demonstrative text* in a theory $ \\mathscr{T} $ comprises:",
+	}
+	from, to, head, ok := NumberOpening(body, 2, "Proofs")
+	if !ok {
+		t.Fatal("the contents opens no. 2 on this page under this title")
+	}
+	if from != 0 || to != 0 {
+		t.Errorf("rewrote lines %d to %d, want line 0 alone", from, to)
+	}
+	if want := "### 2. PROOFS"; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestASectionIsNotReadAsOneOfItsOwnNo(t *testing.T) {
+	// Page 10 of Algebra IV to VII prints the sign over the § and over
+	// nothing else, so a line that carries one is not a no.
+	if _, _, _, ok := NumberOpening([]string{"§ 1. POLYNOMIALS"}, 1, "Polynomials"); ok {
+		t.Fatal("a § heading was read as the first no. of itself")
+	}
+}
+
+func TestANoTitleBrokenAtTheMeasureIsOneHeading(t *testing.T) {
+	// Page 379 of Topology I to IV, the second no. of § 8.
+	body := []string{
+		"2. EXPANSIONS OF REAL NUMBERS RELATIVE",
+		"TO A BASE SEQUENCE",
+		"",
+		"We shall limit ourselves to studying the case where",
+	}
+	from, to, head, ok := NumberOpening(body, 2, "Expansions of real numbers relative to a base sequence")
+	if !ok {
+		t.Fatal("the two lines together are the title the contents gives")
+	}
+	if from != 0 || to != 1 {
+		t.Errorf("rewrote lines %d to %d, want lines 0 to 1", from, to)
+	}
+	if want := "### 2. EXPANSIONS OF REAL NUMBERS RELATIVE TO A BASE SEQUENCE"; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestAStarredOrBoldNoIsAlreadyAHeading(t *testing.T) {
+	// § 21 no. 13 of Algebra VIII is starred and the reading writes the star
+	// with a backslash. None of these is a missing heading.
+	for _, line := range []string{
+		"### 13. Complex Linear Representations",
+		"### \\*13. Complex Linear Representations",
+		"### **13. Complex Linear Representations**",
+	} {
+		if !Numbered([]string{line}, 3, 13) {
+			t.Errorf("%q was read as no heading at all", line)
+		}
+	}
+	if Numbered([]string{"### 3. Complex Linear Representations"}, 3, 13) {
+		t.Error("no. 3 was taken for no. 13")
+	}
+	if Numbered([]string{"## 13. Complex Linear Representations"}, 3, 13) {
+		t.Error("a § heading was taken for a no. heading")
+	}
+	if !Numbered([]string{"## § 4. GROUPS AND GROUPS WITH OPERATORS"}, 2, 4) {
+		t.Error("a § heading with the sign on it was read as no heading at all")
+	}
+}
+
+func TestAHeadingFiledAsTheRunningHeadIsPutBack(t *testing.T) {
+	// Page 32 of Theory of Sets and page 69 of Algebra I to III. Both set the
+	// title of the no. at the head of the page and the heading under it, and
+	// both readings kept one line of the two and called it the running head.
+	for _, c := range []struct {
+		running string
+		number  int
+		title   string
+		head    string
+		want    string
+	}{
+		{"2. PROOFS", 2, "Proofs", "### 2. PROOFS", "PROOFS"},
+		{"8. PRODUCTS AND FIBRE PRODUCTS", 8, "Products and fibre products",
+			"### 8. PRODUCTS AND FIBRE PRODUCTS", "PRODUCTS AND FIBRE PRODUCTS"},
+	} {
+		head, running, ok := RunningHeadOpening(c.running, c.number, c.title)
+		if !ok {
+			t.Fatalf("%q reads as the heading of no. %d", c.running, c.number)
+		}
+		if head != c.head {
+			t.Errorf("got %q, want %q", head, c.head)
+		}
+		if running != c.want {
+			t.Errorf("running head is %q, want %q", running, c.want)
+		}
+	}
+}
+
+func TestARunningHeadWithNoNumberIsNotAHeading(t *testing.T) {
+	// Page 91 of Topology I to IV keeps a real running head and lost the
+	// heading, and page 35 of Theory of Sets keeps the chapter title. Neither
+	// is the line the body is missing.
+	for _, c := range []struct {
+		running string
+		number  int
+		title   string
+	}{
+		{"QUASI-COMPACTS SETS; COMPACT SETS; RELATIVELY COMPACT SETS", 3,
+			"Quasi-compact sets; compact sets; relatively compact sets"},
+		{"I DESCRIPTION OF FORMAL MATHEMATICS", 1, "Axioms"},
+		{"3. INITIAL TOPOLOGIES", 4, "Initial topologies"},
+	} {
+		if _, _, ok := RunningHeadOpening(c.running, c.number, c.title); ok {
+			t.Errorf("%q was written back as the heading of no. %d", c.running, c.number)
+		}
+	}
+}

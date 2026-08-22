@@ -135,6 +135,28 @@ var lostSection = regexp.MustCompile(`^(\*\*)?(§ )?([0-9A-Za-z]{1,4})\. +(.+?)(
 // Algebra IV to VII print it, Theory of Sets and Topology I to IV set the
 // number alone, and the assembler reads either.
 func SectionOpening(body []string, number int, title string) (int, int, string, bool) {
+	return opening(body, number, title, "## ", true)
+}
+
+// NumberOpening puts back the heading over a no. whose page kept the title and
+// lost the level. It is the same repair as SectionOpening one level down, and
+// it is the same fault: page 32 of Theory of Sets sets PROOFS as its running
+// head and "2. PROOFS" under it, and the reading kept one of the two.
+//
+// A no. is told from the § it belongs to by the sign. The printings that set a
+// sign set it over the § and never over a no., so a line that carries one is
+// refused here, and a printing that sets no sign at all leaves the number and
+// the title to do the telling, which is what they do everywhere else in this
+// file. Where the § has already been put back it is a heading by then and no
+// heading is looked at twice.
+func NumberOpening(body []string, number int, title string) (int, int, string, bool) {
+	return opening(body, number, title, "### ", false)
+}
+
+// opening is the run of lines a heading was set on and the heading that goes
+// back over them. level is the hashes the assembler reads it at, and sign is
+// whether the printing is allowed to set § in front of the number.
+func opening(body []string, number int, title, level string, sign bool) (int, int, string, bool) {
 	want := flatten(title)
 	if want == "" {
 		return 0, 0, "", false
@@ -147,10 +169,13 @@ func SectionOpening(body []string, number int, title string) (int, int, string, 
 		if m == nil || !sectionNumber(m[3], number) {
 			continue
 		}
+		if m[2] != "" && !sign {
+			continue
+		}
 		run := []string{m[4]}
 		for j := i; ; j++ {
 			if flatten(strings.Join(run, " ")) == want {
-				return i, j, "## " + m[2] + strconv.Itoa(number) + ". " + strings.Join(run, " "), true
+				return i, j, level + m[2] + strconv.Itoa(number) + ". " + strings.Join(run, " "), true
 			}
 			if j+1 >= len(body) || strings.TrimSpace(body[j+1]) == "" || !plainLine(body[j+1]) {
 				break
@@ -159,6 +184,64 @@ func SectionOpening(body []string, number int, title string) (int, int, string, 
 		}
 	}
 	return 0, 0, "", false
+}
+
+// RunningHeadOpening is the heading a reading filed as the running head of the
+// page, for a page where the two carry the same words.
+//
+// A recto sets the title of the current no. at the head of the page and the
+// heading of the no. right under it, so a page where a no. begins prints those
+// words twice, once without the number and once with it. Page 32 of Theory of
+// Sets heads the page PROOFS and opens no. 2 under "2. PROOFS", and page 69 of
+// Algebra I to III does the same with PRODUCTS AND FIBRE PRODUCTS. The reading
+// keeps one line of the two, files it as the running head, and the body loses
+// its heading.
+//
+// What makes this a repair rather than a re-reading is that the line is still
+// in the file. It is in the front matter instead of the body, and the number on
+// it is the tell: a running head carries no number and a heading does, so a
+// running head that reads as "2. Proofs" where the contents opens no. 2 under
+// that title is the heading and not the running head. Both go back, the heading
+// to the top of the page where the no. begins, and the running head to the
+// words without the number, which is what the page prints over them.
+//
+// A page whose running head is anything else is left alone and reported. The
+// chapter title, the title with no number on it, or a paragraph the reading
+// swallowed whole are all cases where the heading is not in the file at all.
+func RunningHeadOpening(runningHead string, number int, title string) (string, string, bool) {
+	m := lostSection.FindStringSubmatch(strings.TrimSpace(runningHead))
+	if m == nil || m[2] != "" || !sectionNumber(m[3], number) {
+		return "", "", false
+	}
+	if flatten(m[4]) != flatten(title) {
+		return "", "", false
+	}
+	return "### " + strconv.Itoa(number) + ". " + m[4], m[4], true
+}
+
+// numbered is a heading that opens on a number, with whatever the printing
+// sets between the hashes and the number.
+var numbered = regexp.MustCompile(`^(#{2,4}) +(?:\*\*)?(?:\\?\*)?(?:§ *)?(\d+)\.`)
+
+// Numbered is whether a page already carries a heading at this many hashes
+// under this number, so that the repair leaves it alone.
+//
+// What comes between the hashes and the number is not part of either. § 21 no.
+// 13 of Algebra VIII is a starred no., which the reading writes "### \*13.",
+// and a heading the reading put bold round is "### **13.". Reading those as
+// missing headings would send somebody to a page image over a heading that is
+// on the page and correct.
+func Numbered(body []string, hashes, number int) bool {
+	for _, line := range body {
+		m := numbered.FindStringSubmatch(line)
+		if m == nil || len(m[1]) != hashes {
+			continue
+		}
+		if n, err := strconv.Atoi(m[2]); err == nil && n == number {
+			return true
+		}
+	}
+	return false
 }
 
 // SectionTitle is what a page calls the § the contents numbers this way, for a
