@@ -51,6 +51,7 @@ commands:
   star      write the star that marks a forward-looking passage the corpus's way
   folio     move the printed page number off the foot and into the front matter
   heading   set a numbered heading at the level the table of contents gives it
+  opening   put back the heading that opens a chapter or a §
   footnote  take the printed mark off a footnote that already has a reference
   seal      write content_sha256 over a section body that was edited by hand
 
@@ -63,9 +64,9 @@ and the two after it will not touch a span whose end they cannot see, and parens
 comes before math so that math reads the spans as they will be rather than as
 they are. notin runs after those, since it works inside the spans and wants them
 closed and whole. star runs there too and for the same reason from the other
-side, since it works everywhere the spans are not. folio and heading touch no
-mathematics and can be run at any point before assemble. seal works on content/
-and not on pages/, and is the last thing run after a hand correction.
+side, since it works everywhere the spans are not. folio, heading and opening
+touch no mathematics and can be run at any point before assemble. seal works on
+content/ and not on pages/, and is the last thing run after a hand correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
 `
@@ -341,6 +342,58 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixOpeningUsage = `usage: bourbaki fix opening [flags]
+
+Puts back the heading that opens a chapter or a §, where the page still has the
+words of it.
+
+These are the largest type in a volume and the reading loses them anyway. Page
+22 of Theory of Sets opens chapter I and came back with the chapter title as two
+plain lines and no CHAPTER I above them at all. assemble finds a chapter by "##
+CHAPTER" and nothing else is one, so that volume does not begin and no part of
+it assembles. Nine chapter openings across four volumes are in that state and
+they are what holds Theory of Sets, Topology I to IV, Algebra I to III and
+Algebra IV to VII back.
+
+A § opening is lost three ways and the same authority settles all three.
+"§ 1. POLYNOMIALS" on page 10 of Algebra IV to VII is the heading with the
+hashes gone. "**10. PROPER MAPPINGS**" on page 103 of Topology I to IV is the
+heading in bold, and that page carries "**1. PROPER MAPPINGS**" twelve lines
+below it, the first no. of that § under the same title. "I. OPEN SETS,
+NEIGHBOURHOODS, CLOSED SETS" on page 23 of the same volume is § 1 with the digit
+read as the letter it is shaped like, and page 113 has "II. CONNECTEDNESS",
+which is § 11 read that way twice.
+
+manifests/toc.yaml is the authority, as it is for fix heading. It gives every
+chapter and every § with the page it opens on, and the number and the title both
+have to agree with it. That is what tells a § from its own first no. on page 103,
+and it is what keeps this off page 16 of the same volume, where "I. THEORY OF
+SETS" and "II. ALGEBRA" list the Books of the Éléments and no § opens at all.
+
+The page keeps its own words. The number is written as the contents gives it,
+the title as the page gives it, and the section sign is kept where the page has
+one, since Algebra I to III prints it and Topology I to IV does not and the
+assembler reads either. A chapter title broken across two lines is joined with a
+space, because the break is the width of the measure: page 22 sets "Description"
+and "of Formal Mathematics" and the contents calls that chapter DESCRIPTION OF
+FORMAL MATHEMATICS. A line the join does not need is left where it stands, so
+"(Elementary Theory)" under the title of chapter III of Topology I to IV stays a
+line of the page.
+
+An opening the reading dropped altogether is not put back. Seven § in this
+corpus are in that state, page 54 of Algebra I to III among them, where the page
+begins at the first no. and § 4 is nowhere on it. There is nothing there for the
+contents to agree with, and writing the heading in would mean putting a line on
+a page that no reading of it ever produced. Those are named and left, and what
+they need is a re-reading of the page image.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume the contents covers
+  -check     say what would change and change nothing
+`
+
 const fixFootnoteUsage = `usage: bourbaki fix footnote [flags]
 
 Takes the mark a volume prints beside a footnote off the pages that kept it.
@@ -433,6 +486,8 @@ func runFix(args []string) error {
 		return fixFolio(args[1:])
 	case "heading":
 		return fixHeading(args[1:])
+	case "opening":
+		return fixOpening(args[1:])
 	case "footnote":
 		return fixFootnote(args[1:])
 	case "seal":
@@ -963,6 +1018,151 @@ func fixHeading(args []string) error {
 	}
 	if changed > 0 && !*check {
 		fmt.Println("fix heading: run bourbaki assemble")
+	}
+	return nil
+}
+
+// fixOpening walks the contents rather than the pages, which every other
+// repair here does the other way round.
+//
+// The reason is that the fault is a line that is not there, or is there in a
+// shape nothing marks as a heading, and neither can be found by reading a page
+// and asking what is wrong with it. The contents knows where a chapter and a §
+// begin, so the page is opened because the contents sends the repair to it, and
+// a volume whose contents has not been read yet has no openings to put back.
+func fixOpening(args []string) error {
+	fs := flag.NewFlagSet("fix opening", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixOpeningUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+	man, err := corpus.LoadTOC(root)
+	if err != nil {
+		return err
+	}
+
+	var chapters, sections, unread, lost, differ int
+	for _, b := range books.Books {
+		if *book != "" && b.ID != *book {
+			continue
+		}
+		bt, ok := man.Get(b.ID)
+		if !ok {
+			continue
+		}
+		// Every page of a chapter start or a § start is opened at most once
+		// and written at most once, since a § and the chapter it opens share
+		// a page in most chapters and the two repairs would otherwise write
+		// over each other.
+		edits := map[int][]string{}
+		read := func(pdfPage int) ([]string, bool) {
+			if lines, ok := edits[pdfPage]; ok {
+				return lines, true
+			}
+			f, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, b.ID, pdfPage))
+			if err != nil {
+				unread++
+				return nil, false
+			}
+			return strings.Split(f.Body, "\n"), true
+		}
+		for _, ch := range bt.Chapters {
+			if ch.PDFPage > 0 {
+				lines, ok := read(ch.PDFPage)
+				switch {
+				case !ok:
+				case slices.ContainsFunc(lines, func(l string) bool {
+					return strings.HasPrefix(l, "## "+toc.ChapterWord(b.Lang))
+				}):
+				default:
+					out, done := toc.ChapterOpening(lines, b.Lang, ch.Numeral, ch.Title)
+					if !done {
+						lost++
+						fmt.Printf("%s chapter %s: pdf page %d has no line the contents can read as its title\n",
+							b.ID, ch.Numeral, ch.PDFPage)
+						break
+					}
+					edits[ch.PDFPage] = out
+					chapters++
+					if *check {
+						fmt.Printf("%s/%04d.md  %s\n", b.ID, ch.PDFPage, out[0])
+					}
+				}
+			}
+			for _, s := range ch.Sections {
+				if s.PDFPage == 0 || s.Appendix {
+					continue
+				}
+				lines, ok := read(s.PDFPage)
+				if !ok || slices.ContainsFunc(lines, func(l string) bool {
+					return strings.HasPrefix(l, fmt.Sprintf("## § %d.", s.Number)) ||
+						strings.HasPrefix(l, fmt.Sprintf("## %d.", s.Number))
+				}) {
+					continue
+				}
+				from, to, head, done := toc.SectionOpening(lines, s.Number, s.Title)
+				if !done {
+					if got, ok := toc.SectionTitle(lines, s.Number); ok {
+						differ++
+						fmt.Printf("%s chapter %s § %d: pdf page %d calls it %q, the table of contents calls it %q\n",
+							b.ID, ch.Numeral, s.Number, s.PDFPage, got, s.Title)
+					} else {
+						lost++
+						fmt.Printf("%s chapter %s § %d: pdf page %d has no line the contents can read as its heading\n",
+							b.ID, ch.Numeral, s.Number, s.PDFPage)
+					}
+					continue
+				}
+				lines = append(lines[:from], append([]string{head}, lines[to+1:]...)...)
+				edits[s.PDFPage] = lines
+				sections++
+				if *check {
+					fmt.Printf("%s/%04d.md  %s\n", b.ID, s.PDFPage, head)
+				}
+			}
+		}
+		if *check {
+			continue
+		}
+		for pdfPage, lines := range edits {
+			path := corpus.PagePath(root, b.ID, pdfPage)
+			f, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+			if err != nil {
+				return err
+			}
+			f.Body = strings.Join(lines, "\n")
+			// A chapter opening is one line longer than what it replaced,
+			// since the number and the title are set on lines of their own,
+			// and lines records how long the page is.
+			f.Meta.Lines = len(strings.Split(strings.TrimSpace(f.Body), "\n"))
+			if err := f.Write(path); err != nil {
+				return err
+			}
+		}
+	}
+
+	verb := "put back"
+	if *check {
+		verb = "would put back"
+	}
+	fmt.Printf("fix opening: %s %d chapter openings and %d § openings\n", verb, chapters, sections)
+	if lost > 0 {
+		fmt.Printf("fix opening: %s not on the page at all and need the page image read again\n", openings(lost))
+	}
+	if differ > 0 {
+		fmt.Printf("fix opening: %s on the page under a title the contents does not agree with\n", openings(differ))
+	}
+	if unread > 0 {
+		fmt.Printf("fix opening: %s on a page that has not been read\n", openings(unread))
+	}
+	if chapters+sections > 0 && !*check {
+		fmt.Println("fix opening: run bourbaki assemble")
 	}
 	return nil
 }
@@ -1658,4 +1858,14 @@ func mustRel(base, path string) string {
 		return path
 	}
 	return rest
+}
+
+// openings counts openings and agrees with itself about the verb, since these
+// three lines are read one at a time and "1 openings are" reads as a bug in the
+// thing that printed it.
+func openings(n int) string {
+	if n == 1 {
+		return "1 opening is"
+	}
+	return fmt.Sprintf("%d openings are", n)
 }
