@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -945,14 +946,35 @@ func StripToolHeader(text string) string {
 
 // file decides what happened to one page and tells the queue.
 func (r *Runner) file(ctx context.Context, host Host, dest string, value task, out *outcome) {
-	// Before the answer, because a refused page has none and the reason it has
-	// none is not that anything went wrong with it. See refused.go.
-	if said, ok := Refusal(dest, value.image); ok {
-		r.refuse(host, value, out, said)
-		return
-	}
+	// The answer first, and the refusal only when there is none.
+	//
+	// This used to read the sidecar first, on the reasoning that a refused page
+	// has no answer to read. That reasoning is right about one run and wrong
+	// about two, and two is what happens. A refusal deliberately does not spend
+	// an attempt, so a retry of the same pages hashes to the same batch id and
+	// lands in the same directory; the pull is rsync -az with no --delete, so
+	// whatever the earlier run left is still there. Read the sidecar first and
+	// a page that has now been read perfectly well is refused again on the
+	// strength of a marker describing a failure that is over.
+	//
+	// It cost two volumes. gamingpc's reader was down for forty two minutes and
+	// every page offered to it in that window got a sidecar reading
+	// "ConnectError: All connection attempts failed". The re-read afterwards
+	// worked, 25 of alg-viii and 32 of alg-viii-fr came back, and every one of
+	// them was thrown away unopened and handed back pending. No number of
+	// retries would ever have cleared it.
+	//
+	// A .md next to a .refused therefore means the page was read after it was
+	// refused, which is the whole point of handing it back. Believe the page.
 	raw, err := os.ReadFile(filepath.Join(dest, OutputName(filepath.Base(value.image))))
-	if err != nil {
+	// An empty file is not an answer. missing() already treats a zero byte .md
+	// as absent, and a batch that was killed mid write can leave one.
+	if err != nil || len(bytes.TrimSpace(raw)) == 0 {
+		// No answer, so the sidecar is the only account of why. See refused.go.
+		if said, ok := Refusal(dest, value.image); ok {
+			r.refuse(host, value, out, said)
+			return
+		}
 		r.reject(value, out, nil, "no answer came back for this page")
 		return
 	}

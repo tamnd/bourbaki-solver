@@ -29,6 +29,11 @@ type fleet struct {
 	// string for a page it was willing to read. A reader that refuses leaves a
 	// sidecar next to the answers rather than an answer. See refused.go.
 	refuse func(image string) string
+	// stale is a sidecar an earlier run left behind, written next to a perfectly
+	// good answer rather than instead of one. rsync -az does not delete, and a
+	// refusal reuses the batch directory because it does not spend an attempt,
+	// so a directory holding both is what a re-read after an outage looks like.
+	stale func(image string) string
 	// batches records every batch directory the fleet was asked to write into,
 	// which is how a test sees that a retry did not reuse a directory.
 	batches []string
@@ -98,13 +103,20 @@ func (f *fleet) Pull(ctx context.Context, host, remote, local string) error {
 	f.mu.Lock()
 	images := f.pending[batchOf(remote)]
 	f.batches = append(f.batches, filepath.Base(local))
-	answer, refuse := f.answer, f.refuse
+	answer, refuse, stale := f.answer, f.refuse, f.stale
 	f.mu.Unlock()
 
 	if err := os.MkdirAll(local, 0o755); err != nil {
 		return err
 	}
 	for _, image := range images {
+		if stale != nil {
+			if said := stale(image); said != "" {
+				if err := WriteRefusal(local, image, said); err != nil {
+					return err
+				}
+			}
+		}
 		if refuse != nil {
 			if said := refuse(image); said != "" {
 				if err := WriteRefusal(local, image, said); err != nil {
@@ -1178,6 +1190,61 @@ func TestARefusedPageIsNotOfferedToThatHostAgain(t *testing.T) {
 	}
 	if machine.started != 1 {
 		t.Errorf("the run started %d batches, want 1: the refused pages must not come round again", machine.started)
+	}
+}
+
+// gamingpc's reader was down for forty two minutes and every page offered to it
+// in that window got a sidecar reading "ConnectError: All connection attempts
+// failed". Those pages went back to pending, which is right, and were read again
+// afterwards, which worked. Every one of the readings was then thrown away
+// unopened, because the sidecar from the outage was still sitting beside it: a
+// refusal does not spend an attempt, so the retry hashed to the same batch id
+// and landed in the same directory, and rsync -az does not delete. Two whole
+// volumes could not be finished by any number of retries. The answer wins.
+func TestAnAnswerBeatsTheSidecarAnEarlierOutageLeft(t *testing.T) {
+	w := newWorld(t, 3)
+	machine := newFleet(func(string) string { return page("A IV.1") })
+	machine.stale = func(string) string { return "ConnectError: All connection attempts failed" }
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Accepted != 3 {
+		t.Errorf("accepted %d of 3 pages that all came back read", report.Accepted)
+	}
+	if report.Refused != 0 {
+		t.Errorf("refused %d pages that have an answer on disk, want 0", report.Refused)
+	}
+	if left := mustList(t, w.queue, queue.Pending); len(left) != 0 {
+		t.Errorf("%d pages are still pending, want none: they were read", len(left))
+	}
+}
+
+// The other half of the same rule. With no answer beside it the sidecar is the
+// only account of what happened to the page, and it still has to be believed.
+func TestAnEmptyAnswerIsNoAnswerAndTheSidecarSpeaks(t *testing.T) {
+	w := newWorld(t, 1)
+	machine := newFleet(func(string) string { return "   \n" })
+	machine.stale = func(string) string { return "ConnectError: All connection attempts failed" }
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Refused != 1 {
+		t.Errorf("refused %d, want the one page whose only account is the sidecar", report.Refused)
+	}
+	if report.Rejected != 0 {
+		t.Errorf("rejected %d, want 0: a page nobody read must keep its attempts", report.Rejected)
 	}
 }
 
