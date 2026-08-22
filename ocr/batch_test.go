@@ -717,7 +717,42 @@ func TestAnUnknownGrammarSaysNothing(t *testing.T) {
 	if strings.Contains(command, "LOCAL_OCR_HEAD_LABEL") {
 		t.Errorf("an unclassified volume told the reader something:\n%s", command)
 	}
+	if strings.Contains(command, "LOCAL_OCR_HEAD_GRAMMAR") {
+		t.Errorf("an unclassified volume named a grammar:\n%s", command)
+	}
 	if !strings.HasPrefix(command, "DISPLAY=") {
 		t.Errorf("the command no longer starts with the launcher:\n%s", command)
+	}
+}
+
+// The word itself, not the flag. A numbered title in capitals across the top of
+// a page is the running head on a head-number volume and the body's section
+// heading on a foot-number one, and both of those read 0 in the flag above, so
+// the flag cannot tell the reader which page it is looking at. See the head
+// pass note in tamnd/local-ocr.
+func TestTheGrammarWordItselfIsPassedToTheReader(t *testing.T) {
+	for _, grammar := range []string{"head-label", "foot-number", "head-number"} {
+		machine := &box{pid: 7, perPoll: 10}
+		work := batch(t, machine, 2)
+		work.Grammar = grammar
+		if _, err := work.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		command := machine.commands[1]
+		// Quoted, because this is a word out of a file and it lands on a
+		// shell command line. The reader strips nothing; the shell does.
+		want := "LOCAL_OCR_HEAD_GRAMMAR='" + grammar + "' "
+		if !strings.Contains(command, want) {
+			t.Errorf("%s: the start command has no %q in it:\n%s", grammar, want, command)
+		}
+		// Both assignments, and both in front of the launcher, or setsid gets
+		// them and the tool does not.
+		label := strings.Index(command, "LOCAL_OCR_HEAD_LABEL=")
+		word := strings.Index(command, "LOCAL_OCR_HEAD_GRAMMAR=")
+		launcher := strings.Index(command, "setsid")
+		if label != 0 || word < label || launcher < word {
+			t.Errorf("%s: the assignments are not both in front of the launcher:\n%s",
+				grammar, command)
+		}
 	}
 }
