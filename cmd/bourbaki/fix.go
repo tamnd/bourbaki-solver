@@ -17,6 +17,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/pagemap"
 	"github.com/tamnd/bourbaki-solver/textguard"
 	"github.com/tamnd/bourbaki-solver/toc"
+	"github.com/tamnd/bourbaki-solver/typography"
 )
 
 // fix is the repairs that are a function of the Markdown alone: no PDF, no
@@ -49,6 +50,7 @@ commands:
   math      put the characters stranded outside their TeX back inside it
   notin     put the stroke back on a relation sign that came back struck through
   star      write the star that marks a forward-looking passage the corpus's way
+  elision   write the apostrophe of a French elision the way the corpus sets it
   folio     move the printed page number off the foot and into the front matter
   heading   set a numbered heading at the level the table of contents gives it
   opening   put back the heading that opens a chapter or a §
@@ -64,8 +66,10 @@ and the two after it will not touch a span whose end they cannot see, and parens
 comes before math so that math reads the spans as they will be rather than as
 they are. notin runs after those, since it works inside the spans and wants them
 closed and whole. star runs there too and for the same reason from the other
-side, since it works everywhere the spans are not. folio, heading and opening
-touch no mathematics and can be run at any point before assemble. seal works on
+side, since it works everywhere the spans are not. elision runs after those two
+as well, since it reads the prose and wants to know where the prose ends. folio,
+heading and opening touch no mathematics and can be run at any point before
+assemble. seal works on
 content/ and not on pages/, and is the last thing run after a hand correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
@@ -304,6 +308,38 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixElisionUsage = `usage: bourbaki fix elision [flags]
+
+Writes the apostrophe of a French elision the way the rest of the corpus sets
+it.
+
+The printings set the typographic apostrophe and so does the corpus, on 5251
+French pages. The reader sets the straight one on 960 of them, and it does it
+page by page rather than volume by volume: Algebra I to III in French has 506
+pages with one mark and 123 with the other, from the same model reading the same
+printing on the same day. Two spellings of l'ensemble in one volume break a
+search, they show as a difference between two pages that say the same thing, and
+they reach the glossary, where the French side of an entry has to match the
+French in the page for the entry to be found at all.
+
+The words are not touched and neither is the mathematics. A straight apostrophe
+in a French page is one of two things, an elision or a prime on a letter that
+got out of its dollars, and the word in front of it tells them apart: l', d',
+qu', n', s' and c' are 9781 of the 10219 in the corpus, and what is left reads
+x'_1, e'_i and Q'_\mathfrak{p}, which are primes and no part of any word. So the
+rule asks which word is in front of the mark, it refuses everything else, and
+what it refuses is counted and reported rather than passed over.
+
+English pages have the same fault, 218 straight against 380 typographic, and
+this does not touch them. Hilbert's is not an elision, no closed list of words
+in front of the mark tells a possessive from a prime, and a rule that guessed
+would put a typographic apostrophe into somebody's mathematics.
+
+flags:
+  -book ID   only this volume
+  -check     say what would change and change nothing
+`
+
 const fixHeadingUsage = `usage: bourbaki fix heading [flags]
 
 Sets a numbered heading at the level the table of contents gives it.
@@ -482,6 +518,8 @@ func runFix(args []string) error {
 		return fixNotin(args[1:])
 	case "star":
 		return fixStar(args[1:])
+	case "elision":
+		return fixElision(args[1:])
 	case "folio":
 		return fixFolio(args[1:])
 	case "heading":
@@ -1451,6 +1489,70 @@ func fixStar(args []string) error {
 		files, content, followed, verbed)
 	if changed > 0 && !*check {
 		fmt.Println("fix star: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+// fixElision writes the apostrophe of a French elision the corpus's way.
+//
+// It walks the French printings and no others. The books manifest says what
+// language a volume is in, which is better than reading the -fr off the end of
+// an id, and the English volumes are left out on purpose rather than left out
+// because the rule happens not to fire on them. See fixElisionUsage.
+func fixElision(args []string) error {
+	fs := flag.NewFlagSet("fix elision", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixElisionUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, marks, left, primes int
+	for _, b := range books.Books {
+		if b.Lang != "fr" || (*book != "" && b.ID != *book) {
+			continue
+		}
+		err = eachPage(root, books, b.ID, func(path string, f *corpus.PageFile) error {
+			pages++
+			body, n, over := typography.Apostrophes(f.Body)
+			if over > 0 {
+				left++
+				primes += over
+			}
+			if n == 0 || body == f.Body {
+				return nil
+			}
+			changed++
+			marks += n
+			if *check {
+				fmt.Printf("%s  %d\n", rel(root, path), n)
+				return nil
+			}
+			f.Body = body
+			return f.Write(path)
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	verb := "wrote"
+	if *check {
+		verb = "would write"
+	}
+	fmt.Printf("fix elision: %d French pages read, %s %d apostrophes on %d of them\n",
+		pages, verb, marks, changed)
+	if primes > 0 {
+		fmt.Printf("fix elision: %d straight apostrophes on %d pages have no elision in front of them and stay as they are\n",
+			primes, left)
+	}
+	if changed > 0 && !*check {
+		fmt.Println("fix elision: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
