@@ -556,11 +556,22 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 	// out of the head that was just matched and carried to the heading, and it
 	// is the one part of a head that is not said again by the heading: the rest
 	// of what is dropped here is the kind, the number and the dash. See heading.
+	//
+	// The divisibility mark comes out of the head first. It sits between the same
+	// parentheses a name does and taking it for one would put DIV in the heading
+	// and lose the real name of the two heads that carry both, "COROLLARY 2 (DIV)
+	// (Euclid's lemma)" and "PROPOSITION 10 (DIV) (Gauss)".
+	head := m[0]
+	div := divMark.MatchString(head)
+	if div {
+		head = divMark.ReplaceAllString(head, "")
+	}
 	name := ""
-	if n := headName.FindStringSubmatch(m[0]); n != nil {
+	if n := headName.FindStringSubmatch(head); n != nil {
 		name = n[1]
 	}
 	r := id
+	r.Div = div
 	r.Kind = kind
 	rest := text[len(m[0]):]
 	if num == "" && kind.Scope() == corpus.ScopeSubsec {

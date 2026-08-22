@@ -157,9 +157,9 @@ var printings = map[string]printing{
 		exercises:  "### Exercises",
 		gathered:   "# EXERCISES",
 		head: regexp.MustCompile(
-			`^(?:(?:\*\*(` + enKinds + `)(?: (\d+))?\.\*\*|(` + enKinds + `)(?: (\d+))? \([^)]*\)\.|` +
+			`^(?:(?:\*\*(` + enKinds + `)(?: (\d+))?\.\*\*|(` + enKinds + `)(?: (\d+))?(?: \([^)]*\))+\.|` +
 				smallType + `(` + enKinds + `)(?: (\d+))?\.)\s*—\s*` +
-				`|(` + enCapKinds + `)(?: (\d+))?(?: \([^)]*\))?\.\s*` +
+				`|(` + enCapKinds + `)(?: (\d+))?(?: \([^)]*\))*\.\s*` +
 				`|(` + enPlainKinds + `)(?: (\d+))?\.\s+` +
 				`|\*\*(` + enKinds + `)(?: (\d+))?(?:\.\*\*|\*\* \([^)]*\)\.)\s+` +
 				`|\*\*(` + enCapKinds + `)(?: (\d+))?\.\*\*\s*` +
@@ -180,7 +180,7 @@ var printings = map[string]printing{
 		exercises:  "## EXERCICES",
 		gathered:   "# EXERCICES",
 		head: regexp.MustCompile(
-			`^(?:\*\*(` + frKinds + `)(?: (\d+))?\.\*\*|(` + frKinds + `)(?: (\d+))? \([^)]*\)\.|` +
+			`^(?:\*\*(` + frKinds + `)(?: (\d+))?\.\*\*|(` + frKinds + `)(?: (\d+))?(?: \([^)]*\))+\.|` +
 				smallType + `(` + frKinds + `)(?: (\d+))?\.|(` + frKinds + `)(?: (\d+))?\.` +
 				`|\*(` + frKinds + `)(?: (\d+))?\.\*)\s*—\s*`),
 		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:terminons|terminer|achevons|achever|` +
@@ -221,6 +221,15 @@ var smallTypeOpen = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup +
 // It is searched for in the head and not in the line, or the parenthesis of a
 // head that has none would be found in the statement under it.
 var headName = regexp.MustCompile(`\(([^)]*)\)`)
+
+// divMark is the mark chapter VI of Algebra 4 to 7 puts in a head to say the
+// statement belongs to its second, multiplicative numbering: "PROPOSITION 11
+// (DIV). —", "COROLLARY 2 (DIV) (Euclid's lemma). —".
+//
+// It sits between the same parentheses a name does and it is not a name, so it
+// is taken out of the head before the name is looked for. Nothing else in the
+// corpus writes DIV between parentheses, and 27 statements of that chapter do.
+var divMark = regexp.MustCompile(`\s*\(DIV\)`)
 
 // enKinds are the kinds an English printing states its results in, written the
 // way a reading of the page writes them rather than the way the page sets them.
