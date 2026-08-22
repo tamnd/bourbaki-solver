@@ -270,7 +270,7 @@ func (r *Runner) accepted(source Source, promptSHA string) bool {
 		expect = r.Expect(source.Page)
 	}
 	text := textguard.Normalise(textguard.Strip(file.Body))
-	return len(Validate(text, expect, r.Options)) == 0
+	return len(Validate(text, expect, r.options())) == 0
 }
 
 // Protected is the readers whose work a changed input does not throw away,
@@ -912,6 +912,20 @@ func named(result Result, host, id string, pages int, err error) Result {
 
 // batchID names a batch on the host.
 //
+// options is what the rules are run with: whatever the caller set, plus the
+// prompt this run is asking with.
+//
+// Rule 3 compares the answer against the question and only the runner knows
+// what the question was, so leaving it to the caller means every caller has to
+// remember to say it twice. A caller that sets it anyway is left alone.
+func (r *Runner) options() Options {
+	out := r.Options
+	if out.Prompt == "" {
+		out.Prompt = r.Prompt
+	}
+	return out
+}
+
 // grammar is how this volume prints its page number, for the reader to be told
 // rather than have to guess.
 //
@@ -1050,7 +1064,7 @@ func (r *Runner) file(ctx context.Context, host Host, dest string, value task, o
 	if r.Expect != nil {
 		expect = r.Expect(value.page)
 	}
-	if problems := Validate(text, expect, r.Options); len(problems) > 0 {
+	if problems := Validate(text, expect, r.options()); len(problems) > 0 {
 		fixed, ok := r.mend(ctx, thread, value.page, text, problems)
 		if !ok {
 			r.reject(value, out, Rules(problems), Reasons(problems))

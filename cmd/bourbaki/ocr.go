@@ -12,6 +12,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/render"
 )
 
@@ -185,7 +186,7 @@ func ocrCheck(args []string) error {
 		}
 		checked++
 
-		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{})
+		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID)})
 		if *only != "" {
 			problems = filterRule(problems, ocr.Rule(*only))
 		}

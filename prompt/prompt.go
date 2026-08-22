@@ -52,6 +52,18 @@ func OCRFor(book string) string {
 // OCRForSHA256 is the hash of the prompt one volume is read with.
 func OCRForSHA256(book string) string { return SHA256(OCRFor(book)) }
 
+// OCRAnything is every prompt a page of one volume could have been read with,
+// run together.
+//
+// For a caller holding a page and not the record of which prompt asked for it,
+// which is what `ocr check` and the extraction report are: they read the files
+// on disk and the front matter carries the hash of the prompt, not its text.
+// Rule 3 only ever matches a whole line, so the extra prompts cost nothing and
+// asking with the wrong one would miss a page that echoed a different one.
+func OCRAnything(book string) string {
+	return OCRFor(book) + "\n" + OCRNative() + "\n" + Contents()
+}
+
 //go:embed ocr_native.md
 var ocrNative string
 

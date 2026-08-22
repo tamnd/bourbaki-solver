@@ -11,6 +11,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/render"
 	"github.com/tamnd/bourbaki-solver/report"
 )
@@ -158,7 +159,7 @@ func extractionOf(root string, entry corpus.Book) (report.Volume, error) {
 		}
 		row.Checked++
 
-		problems := ocr.Validate(checkText(file), expectFor(&entry, pmap, manifest, page), ocr.Options{})
+		problems := ocr.Validate(checkText(file), expectFor(&entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID)})
 		if len(problems) == 0 {
 			continue
 		}

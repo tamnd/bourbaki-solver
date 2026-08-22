@@ -115,6 +115,12 @@ type Options struct {
 	// LaTeX runs rule 7. It is opt-in because it needs a TeX installation and
 	// costs a subprocess per page, and the other six catch almost everything.
 	LaTeX TeXChecker
+
+	// Prompt is what the model was asked, so rule 3 can tell whether it handed
+	// the question back instead of answering it. Empty leaves that half of the
+	// rule off, which is what a caller validating a page it did not read has to
+	// do, since the answer depends on which prompt read it.
+	Prompt string
 }
 
 // TeXChecker compiles a fragment and reports what went wrong. Behind an
@@ -136,6 +142,11 @@ func Validate(text string, expect Expect, options Options) []Problem {
 	// has no running head and no mathematics, so checking it first means the
 	// report says what actually happened rather than listing four symptoms.
 	for _, leak := range textguard.Check(text) {
+		problems = append(problems, Problem{Rule: RuleLeak, Detail: leak.Kind + ": " + leak.Detail, Line: leak.Line})
+	}
+	// The other half of rule 3, and it needs the prompt in hand rather than a
+	// list of phrases off an older one. See textguard.Echo.
+	for _, leak := range textguard.Echo(text, options.Prompt) {
 		problems = append(problems, Problem{Rule: RuleLeak, Detail: leak.Kind + ": " + leak.Detail, Line: leak.Line})
 	}
 	if len(problems) > 0 {

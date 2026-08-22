@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/prompt"
 )
 
 // goodPage is what an accepted page of alg-iv-vii looks like: a head label, a
@@ -476,5 +477,52 @@ called an *echelon type* on $x_1, \ldots, x_n$.
 letters $x_1, \ldots, x_n$, and that no other relation holds for all of them.`
 	if problems := Validate(page, ens(289), Options{}); has(problems, RuleExercise) {
 		t.Fatalf("a no. heading above the exercises head was rejected: %s", Reasons(problems))
+	}
+}
+
+// Rule 3 against the prompt the page was read with, which is the half of the
+// rule that pages 3 and 9 of Algebra IV to VII walked through.
+func TestRuleThreeCatchesThePromptHandedBack(t *testing.T) {
+	ask := prompt.OCR()
+	var body strings.Builder
+	body.WriteString("A IV.7 POLYNOMIALS AND RATIONAL FRACTIONS\n\n")
+	// The long house rules and not the short bullets above them, because that
+	// is the shape the failure has on disk. The model handed back the middle of
+	// the prompt and left the top of it out, which is exactly why the phrase
+	// list missed it: every phrase in that list is off the first eight lines.
+	for _, line := range strings.Split(ask, "\n") {
+		if strings.HasPrefix(line, "- ") && len([]rune(line)) >= 120 {
+			body.WriteString(line + "\n")
+		}
+	}
+	expect := alg4(7)
+
+	problems := Validate(body.String(), expect, Options{Prompt: ask})
+	if len(problems) == 0 {
+		t.Fatal("the prompt handed back was accepted")
+	}
+	for _, problem := range problems {
+		if problem.Rule != RuleLeak {
+			t.Errorf("rule = %q, want leak", problem.Rule)
+		}
+	}
+
+	// And without the prompt in hand it is what it was before: long, prose, no
+	// unbalanced mathematics, a first line that reads like a running head.
+	if problems := Validate(body.String(), expect, Options{}); len(problems) > 0 {
+		t.Fatalf("without the prompt there is nothing to compare against, got %v", problems)
+	}
+}
+
+func TestAPageIsNotItsPrompt(t *testing.T) {
+	page := "A IV.7 POLYNOMIALS AND RATIONAL FRACTIONS\n\n" +
+		"**Proposition 4.** — Let $A$ be a commutative ring and let $X$ be an indeterminate. " +
+		"Every polynomial of $A[X]$ whose leading coefficient is invertible is regular, and the " +
+		"quotient of the division is unique. The proof rests on the induction of no. 3 and on the " +
+		"remark that the degree of a product is the sum of the degrees when one of the two leading " +
+		"coefficients is not a divisor of zero.\n"
+	expect := alg4(7)
+	if problems := Validate(page, expect, Options{Prompt: prompt.OCR()}); len(problems) > 0 {
+		t.Fatalf("a page of the book was rejected against its own prompt: %v", problems)
 	}
 }

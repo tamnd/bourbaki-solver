@@ -364,3 +364,79 @@ func trimRight(text string) string {
 	}
 	return strings.Join(lines, "\n")
 }
+
+// EchoLines is how many whole lines of the prompt have to come back before the
+// answer is called an echo.
+//
+// One line is enough to be certain in principle and two is what is used, on the
+// grounds that a page of a book about mathematics could in principle print a
+// sentence that also appears in an instruction about transcribing mathematics.
+// Two of them in the same answer, matching end to end after the spacing is
+// flattened, could not happen by accident. Counted over the 4862 readings on
+// disk, 4860 echo none of the four OCR prompts and 2 echo fifteen lines each,
+// so anything from one to fifteen separates them and the number is not delicate.
+const EchoLines = 2
+
+// EchoLength is how long a line of the prompt has to be to be worth looking for.
+//
+// Short lines are headings, blank lines and fragments such as `# Rules`, and
+// those turn up in a page of a book often enough to be no evidence at all.
+const EchoLength = 40
+
+// Echo reports a prompt handed back in place of the page.
+//
+// This is the failure that rule 3's phrase list was written for, and the phrase
+// list does not catch it, because the phrases were taken off a prompt that has
+// since been rewritten. Searching for the prompt the model was actually given
+// needs no list and cannot go stale: pages 3 and 9 of Algebra IV to VII are in
+// the corpus today carrying every rule of prompt/ocr_bourbaki.md as their body,
+// having passed all seven rules, because the text is long, it is prose, it has
+// no unbalanced mathematics in it and its first line reads like a running head.
+//
+// Whole lines, and not phrases inside a line. A page that quotes six words of an
+// instruction has quoted six words; a page that reproduces a paragraph of it end
+// to end was never read.
+func Echo(text, prompt string) []Leak {
+	want := map[string]bool{}
+	for _, line := range strings.Split(prompt, "\n") {
+		if flat := flatten(line); len([]rune(flat)) >= EchoLength {
+			want[flat] = true
+		}
+	}
+	if len(want) == 0 {
+		return nil
+	}
+	var hits []Leak
+	seen := map[string]bool{}
+	for i, line := range strings.Split(text, "\n") {
+		flat := flatten(line)
+		if len([]rune(flat)) < EchoLength || !want[flat] || seen[flat] {
+			continue
+		}
+		seen[flat] = true
+		hits = append(hits, Leak{Kind: "prompt", Detail: clipLine(line), Line: i + 1})
+	}
+	if len(hits) < EchoLines {
+		return nil
+	}
+	return hits
+}
+
+// flatten puts a line in the form the two sides are compared in: lower case,
+// one space between words, and the Markdown that marks a list item or a heading
+// taken off the front, because the model reindents what it hands back.
+func flatten(line string) string {
+	line = strings.ToLower(straighten(line))
+	line = strings.TrimLeft(line, " \t-*#>_`")
+	return strings.Join(strings.Fields(line), " ")
+}
+
+// clipLine keeps the report readable. A rule of the prompt runs to three
+// hundred characters and the failures report puts one leak on a line.
+func clipLine(line string) string {
+	line = strings.TrimSpace(line)
+	if r := []rune(line); len(r) > 60 {
+		return string(r[:60]) + "..."
+	}
+	return line
+}

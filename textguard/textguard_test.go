@@ -332,3 +332,76 @@ func TestASolutionThatIsActuallyASolutionPassesClean(t *testing.T) {
 		}
 	}
 }
+
+// The prompt handed back in place of the page. Rule 3 was written for this and
+// its phrase list came off a prompt that has since been rewritten, so pages 3
+// and 9 of Algebra IV to VII went into the corpus carrying every rule of
+// prompt/ocr_bourbaki.md as their body.
+const askText = `# Reading a page of Bourbaki
+
+- A paragraph is one line. The breaks inside a printed paragraph are the width of the column and nothing more, so join those lines with a single space.
+- The first line of the page is the running head, printed above the text block. Transcribe it verbatim on its own first line.
+- Bourbaki sets the standard rings and fields in bold, not blackboard bold. Write \mathbf{Z} and never \mathbb.
+- Rules
+`
+
+func TestTheAnswerIsThePromptBack(t *testing.T) {
+	answer := "A I.24 ALGEBRAIC STRUCTURES\n\n" +
+		"- A paragraph is one line. The breaks inside a printed paragraph are the width of the column and nothing more, so join those lines with a single space.\n" +
+		"- The first line of the page is the running head, printed above the text block. Transcribe it verbatim on its own first line.\n"
+	leaks := Echo(answer, askText)
+	if len(leaks) != 2 {
+		t.Fatalf("want 2 leaks, got %d: %v", len(leaks), leaks)
+	}
+	for _, leak := range leaks {
+		if leak.Kind != "prompt" {
+			t.Errorf("kind = %q, want prompt", leak.Kind)
+		}
+		if leak.Line == 0 {
+			t.Errorf("leak has no line: %v", leak)
+		}
+	}
+}
+
+func TestOneLineOfThePromptIsNotAnEcho(t *testing.T) {
+	answer := "A I.24 ALGEBRAIC STRUCTURES\n\n" +
+		"- A paragraph is one line. The breaks inside a printed paragraph are the width of the column and nothing more, so join those lines with a single space.\n" +
+		"Let A be a ring and let X be an indeterminate over it.\n"
+	if leaks := Echo(answer, askText); leaks != nil {
+		t.Fatalf("one line is not an echo, got %v", leaks)
+	}
+}
+
+func TestAPageOfTheBookIsNotAnEcho(t *testing.T) {
+	answer := "A I.24 ALGEBRAIC STRUCTURES\n\n" +
+		"**Proposition 4.** — Let $G$ be a group and let $H$ be a subgroup of $G$ of finite index.\n" +
+		"The first line is the running head.\n" +
+		"Rules\n"
+	if leaks := Echo(answer, askText); leaks != nil {
+		t.Fatalf("a page that says some of the same short things is not an echo, got %v", leaks)
+	}
+}
+
+func TestTheEchoIsFoundThroughReindenting(t *testing.T) {
+	// The model hands the prompt back with its own list markers and its own
+	// wrapping, so the two sides are compared with the spacing flattened and
+	// the Markdown taken off the front.
+	answer := "  *   A paragraph is one line.  The breaks inside a printed paragraph are the width of the column and nothing more, so join those lines with a single space.\n" +
+		"# The first line of the page is the running head, printed above the text block. Transcribe it verbatim on its own first line.\n"
+	if leaks := Echo(answer, askText); len(leaks) != 2 {
+		t.Fatalf("want 2 leaks through the reindenting, got %v", leaks)
+	}
+}
+
+func TestTheSameLineTwiceIsOneEcho(t *testing.T) {
+	line := "- A paragraph is one line. The breaks inside a printed paragraph are the width of the column and nothing more, so join those lines with a single space.\n"
+	if leaks := Echo(line+line+line, askText); leaks != nil {
+		t.Fatalf("one line of the prompt repeated is one line of the prompt, got %v", leaks)
+	}
+}
+
+func TestNoPromptMeansNoCheck(t *testing.T) {
+	if leaks := Echo("anything at all", ""); leaks != nil {
+		t.Fatalf("with no prompt in hand there is nothing to compare against, got %v", leaks)
+	}
+}
