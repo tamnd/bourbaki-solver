@@ -762,7 +762,17 @@ func marksOf(prefix string) (star, pilcrow string) {
 // enumerations out. Page 15 lists the signs of a theory as "(1) The logical
 // signs", "(2) The letters", "(3) The specific signs", under no head and inside
 // a sentence that runs into them, and no run is open there.
-var runNumRE = regexp.MustCompile(`^(?:\\?\*\s*)?\((\d+)\)\s+`)
+//
+// The number has to be followed by the member on the same line, because that is
+// the one thing that tells it from the number of a displayed formula. The French
+// volumes set that number on a line of its own with the display under it, and
+// page 41 of Algebre commutative chapitres 5 a 7 is where it cost something: the
+// run of Remarques opened on page 40 with members 1) and 2) and stayed open, so
+// the "(3)" over the display on page 41 was read as Remarque 3, and page 42,
+// which prints "Remarques. - 3)", gave the same label to the remark that really
+// is the third. The chapter did not assemble. 162 pages of the corpus set a
+// formula number that way and every one of them is the same trap.
+var runNumRE = regexp.MustCompile(`^(?:\\?\*\s*)?\((\d+)\)[^\S\n]+`)
 
 // runItem reads the marker on a member of a run, either way a volume writes it,
 // and says what the number is, how much of the block the marker takes, and what
@@ -789,7 +799,12 @@ func runItem(text string) (num, marker, rest string, ok bool) {
 		return i[2], i[0], text[markerLen(i):], true
 	}
 	if i := runNumRE.FindStringSubmatch(text); i != nil {
-		return i[1], i[0], text[len(i[0]):], true
+		// A trailing space before the line break is not the member. The line
+		// has to carry something after the number, or this is the number of a
+		// display and not a member of the run.
+		if rest := text[len(i[0]):]; rest != "" && !strings.HasPrefix(rest, "\n") {
+			return i[1], i[0], rest, true
+		}
 	}
 	return "", "", "", false
 }

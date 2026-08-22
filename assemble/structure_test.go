@@ -1008,3 +1008,33 @@ func TestStatementsReadsAFrenchHeadWithTheItalicMarked(t *testing.T) {
 		"alg-viii-s11-n1-rem-1",
 	})
 }
+
+// Page 41 of Algebre commutative chapitres 5 a 7 sets the number of a displayed
+// formula on a line of its own, "(3)" with the display under it, while the run
+// of Remarques opened on page 40 is still open and up to 3. Read as a member,
+// that number takes the label of the remark on page 42 that really is the third,
+// two statements come out labelled ac-v-s2-n2-rem-3, and the chapter does not
+// assemble at all.
+func TestTheNumberOfADisplayedFormulaIsNotAMemberOfAnOpenRun(t *testing.T) {
+	in := blocks(
+		"### 2. Groupe de décomposition et groupe d’inertie",
+		"Remarques. — 1) On notera que $k'$ peut être de degré infini sur $k$.",
+		"2) Il est clair que $k'$ est une extension galoisienne de $k$.",
+		"(3)\n$$\nB = A + \\mathfrak{p}(B)\n$$",
+		"Remarques. — 3) Si $A'$ est intègre et noethérien.",
+		"4) Lorsque $\\mathfrak{p}$ n’est pas un idéal maximal de $A$.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "ac", Chapter: "V", Section: 2}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"ac-v-s2-n2-rem-1",
+		"ac-v-s2-n2-rem-2",
+		"ac-v-s2-n2-rem-3",
+		"ac-v-s2-n2-rem-4",
+	})
+	if !slices.Contains(texts(out), "(3)\n$$\nB = A + \\mathfrak{p}(B)\n$$") {
+		t.Errorf("the numbered display did not stay in the prose: %v", texts(out))
+	}
+}
