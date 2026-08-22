@@ -866,3 +866,39 @@ func TestAProofNotYetReachedLeavesTheParentAlone(t *testing.T) {
 	}
 	same(t, labels(got), []string{"ts-iii-s1-lem-1", "ts-iii-s1-lem-1-cor-1"})
 }
+
+// A pilcrow that came back from the page image as a section sign still marks the
+// exercise it marks. Page 447 of Algebra VIII is where this cost something: the
+// marker on exercise 22 was read that way, § 21 stopped at 21, and the nine the
+// volume prints after it were lost.
+func TestASectionSignIsReadAsAMisreadPilcrow(t *testing.T) {
+	const line = `$ \S 22) $ Let $ n $ be a natural number.`
+	m := exNumRE.FindStringSubmatch(line)
+	if m == nil {
+		t.Fatal("the marker was not read")
+	}
+	if m[2] != "22" {
+		t.Errorf("number = %q, want 22", m[2])
+	}
+	star, pilcrow := marksOf(m[1])
+	if pilcrow == "" {
+		t.Error("the exercise did not come out marked as one of the harder ones")
+	}
+	if star != "" {
+		t.Errorf("star = %q, want none", star)
+	}
+}
+
+// And a section sign in front of a number is otherwise a citation, which is what
+// 1209 lines of the corpus use it for. None of these opens an exercise.
+func TestASectionSignInACitationOpensNothing(t *testing.T) {
+	for _, line := range []string{
+		`$\S 8$, p. 639, Exercise 5`,
+		`(cf. III, $\S 1$, no. 2)`,
+		`\S 22, and the rest follows`,
+	} {
+		if exNumRE.MatchString(line) {
+			t.Errorf("%q was read as an exercise marker", line)
+		}
+	}
+}
