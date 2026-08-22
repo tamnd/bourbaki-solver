@@ -50,6 +50,19 @@ const (
 	// FlagWordInMath is an English word left inside dollar signs, which means
 	// a formula was cut in the wrong place.
 	FlagWordInMath Flag = "word-in-math"
+	// FlagPlainHead is a page that came back with the kind of a statement head
+	// in plain mixed case where the printing sets it in small capitals, and had
+	// the case put back. Rule 9 rejects a reading like that now, so no new page
+	// arrives in the state, but the pages read before the rule existed are
+	// committed and the assembler reads no statement on any of them.
+	//
+	// The flag stays on the page after the repair, for the same reason the stray
+	// delimiter flag does. Putting the capitals back is done from what the
+	// printing is known to set and not from the page image, so the page has been
+	// made to read correctly without having been read again, and it is still a
+	// page one reading got wrong. That is worth knowing when the queue has room
+	// to read it properly.
+	FlagPlainHead Flag = "plain-statement-head"
 	// FlagStackedMatrix is a matrix the text layer flattened. A matrix is set
 	// as rows one above the other, and the layer reports the top row raised and
 	// the bottom row lowered, so a 2 by 2 arrives as a superscript holding one
