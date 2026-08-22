@@ -1248,6 +1248,106 @@ func TestAnEmptyAnswerIsNoAnswerAndTheSidecarSpeaks(t *testing.T) {
 	}
 }
 
+// corpus.PageFrontMatter has said since the field was added that a page marked
+// manual must not be written over, and extract has honoured it from the start.
+// The OCR route never learned it. Running the flagged pages of Algebra VIII
+// rewrote 36 pages, 19 of them marked, and seven came back with every \mathscr
+// turned into \mathcal. Those pages carry the accents of § 21 and the summation
+// sign of § 5, which is the work the field exists to protect.
+func TestAPageRepairedByHandIsNotWrittenOver(t *testing.T) {
+	w := newWorld(t, 3)
+	repaired := "A IV.2  BY HAND  § 1\n\nSomething only a person reading the printed page could put here.\n"
+	byHand(t, w.root, 2, repaired)
+
+	machine := newFleet(func(string) string { return page("A IV.9") })
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Kept != 1 {
+		t.Errorf("kept %d pages, want the one somebody had repaired by hand", report.Kept)
+	}
+	if report.Accepted != 2 {
+		t.Errorf("accepted %d, want the 2 pages nobody had touched", report.Accepted)
+	}
+	got, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(w.root, "alg-iv-vii", 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Body, "only a person reading the printed page") {
+		t.Errorf("the repair was written over, the page now reads %q", got.Body)
+	}
+	if !got.Meta.Manual {
+		t.Error("the page lost its manual mark, so the next run would write over it too")
+	}
+	// A page nobody may write is not work left to do. Handing it back would put
+	// it in front of the model again on every run for ever.
+	for _, job := range mustList(t, w.queue, queue.Pending) {
+		if job.Target == Target("alg-iv-vii", 2) {
+			t.Error("the hand repaired page is still pending, so it will be read again next run")
+		}
+	}
+}
+
+// Pictured is the same promise about a narrower claim and is honoured the same
+// way. Method: ocr is not: a page read by this route is what a retry replaces.
+func TestOnlyAHumanClaimStopsAReread(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		set  func(*corpus.PageFrontMatter)
+		want int
+	}{
+		{"manual", func(m *corpus.PageFrontMatter) { m.Manual = true }, 1},
+		{"pictured", func(m *corpus.PageFrontMatter) { m.Pictured = true }, 1},
+		{"an earlier ocr reading", func(m *corpus.PageFrontMatter) { m.Method = corpus.MethodOCR }, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			w := newWorld(t, 1)
+			meta := corpus.PageFrontMatter{Book: "alg-iv-vii", PDFPage: 1, Method: corpus.MethodNative}
+			c.set(&meta)
+			path := corpus.PagePath(w.root, "alg-iv-vii", 1)
+			if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := (corpus.PageFile{Meta: meta, Body: "old\n"}).Write(path); err != nil {
+				t.Fatal(err)
+			}
+
+			runner := w.runner(t, newFleet(func(string) string { return page("A IV.1") }))
+			if _, err := runner.Fill(w.pages); err != nil {
+				t.Fatal(err)
+			}
+			report, err := runner.Do(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if report.Kept != c.want {
+				t.Errorf("kept %d, want %d", report.Kept, c.want)
+			}
+		})
+	}
+}
+
+// byHand writes a page the way a person who repaired one leaves it.
+func byHand(t *testing.T, root string, number int, body string) {
+	t.Helper()
+	path := corpus.PagePath(root, "alg-iv-vii", number)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	file := corpus.PageFile{Meta: corpus.PageFrontMatter{
+		Book: "alg-iv-vii", PDFPage: number, Method: corpus.MethodNative, Manual: true,
+	}, Body: body}
+	if err := file.Write(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAPageListReadsAsAPersonWouldWriteIt(t *testing.T) {
 	for _, c := range []struct {
 		pages []int

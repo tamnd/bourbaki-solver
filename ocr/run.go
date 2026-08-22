@@ -370,6 +370,10 @@ type Report struct {
 	// the run ends, which is the truth about them.
 	Refused  int   `json:"refused,omitempty"`
 	Refusals []int `json:"refusals,omitempty"`
+	// Kept is pages a person had already repaired by hand, which the run left
+	// alone. They are out of the rate for the same reason a refusal is: the run
+	// never judged a reading of them. See settled.
+	Kept int `json:"kept,omitempty"`
 	// Faces is every letter that changed typeface against the native reading a
 	// repaired page replaced. It is a list to read and not a count to watch: the
 	// model is wrong about a face more often than the extractor is and neither
@@ -404,6 +408,9 @@ func (r Report) Summary() string {
 	if r.Refused > 0 {
 		fmt.Fprintf(&out, "  %d pages the reader would not return at all, still pending, read them on another host: %s\n",
 			r.Refused, pageList(r.Refusals))
+	}
+	if r.Kept > 0 {
+		fmt.Fprintf(&out, "  %d pages somebody had already repaired by hand, left exactly as they were\n", r.Kept)
 	}
 	hosts := make([]string, 0, len(r.PerHost))
 	for host := range r.PerHost {
@@ -571,6 +578,7 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				report.Released += outcome.released
 				report.Refused += outcome.refused
 				report.Refusals = append(report.Refusals, outcome.refusals...)
+				report.Kept += outcome.kept
 				// The pages went back, so they are not read and the next host
 				// may still get them.
 				read -= outcome.released + outcome.refused
@@ -718,6 +726,9 @@ type outcome struct {
 	// refusals is which pages those were, so the run can name them rather than
 	// print a number nobody can act on.
 	refusals []int
+	// kept is pages a person had already repaired by hand, which this run left
+	// exactly as it found them. See settled.
+	kept int
 	// repaired is how many of the accepted pages needed a follow up first. They
 	// are counted apart because a run where a third of the pages had to be
 	// repaired is not a healthy run, and the accepted count alone hides that.
@@ -944,8 +955,45 @@ func StripToolHeader(text string) string {
 	return strings.TrimLeft(trimmed[len(match):], " \t\r\n")
 }
 
+// settled says a person has already repaired this page and nothing here may
+// write over it.
+//
+// corpus.PageFrontMatter has said so since the field was added: "Manual says
+// somebody has repaired this page by hand and extract must not write over it",
+// and extract has honoured it through repairedByHand from the beginning. The
+// OCR route was built later against the same corpus and was never taught the
+// rule, so a hand repaired page went through the model like any other and the
+// reading landed on top of the repair.
+//
+// It is not a small class. Running the flagged pages of Algebra VIII rewrote 36
+// pages and 19 of them carried the mark, including the accents of § 21 and the
+// summation sign of § 5, which is exactly the work the field was added to
+// protect. Seven pages came back with every \mathscr turned into \mathcal.
+//
+// Pictured is the same promise about a narrower claim, so it is honoured here
+// too. Method: ocr is not: a page read by this route is precisely the page a
+// retry is meant to replace.
+//
+// A page nobody may write is not work left to do, so the job is finished rather
+// than handed back. Handing it back would put it in front of the model again on
+// every run for ever.
+func settled(path string) bool {
+	old, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+	return err == nil && (old.Meta.Manual || old.Meta.Pictured)
+}
+
 // file decides what happened to one page and tells the queue.
 func (r *Runner) file(ctx context.Context, host Host, dest string, value task, out *outcome) {
+	// Before anything is read, because what came back does not matter: a page a
+	// person stands behind is settled whatever the model says about it.
+	if path := corpus.PagePath(r.Root, r.Book, value.page); settled(path) {
+		if _, err := r.Queue.Finish(value.job, true, ""); err != nil {
+			r.logf("page %d: could not mark the hand repaired job done: %v", value.page, err)
+		}
+		out.kept++
+		return
+	}
+
 	// The answer first, and the refusal only when there is none.
 	//
 	// This used to read the sidecar first, on the reasoning that a refused page
