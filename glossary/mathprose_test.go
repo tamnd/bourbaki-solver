@@ -89,3 +89,51 @@ func TestASpanWithNoWordsIsComparedAsItAlwaysWas(t *testing.T) {
 		t.Error("two different spans were read as one")
 	}
 }
+
+// The display that killed § 21 of Algebra VIII. Both arms of one cases block
+// are prose, and the rules have to want the same thing done to both of them.
+//
+// Before otherwise went on the list they wanted opposite things: if was prose
+// and had to be translated, otherwise was read as a name and had to be copied,
+// and the only answer that satisfied both was a cases block translated on one
+// side and not the other. The chunk was asked six times and refused six times,
+// three for translating otherwise and one for leaving if, and the file died at
+// 100 chunks of 101 answered.
+func TestBothArmsOfACasesBlockAreProse(t *testing.T) {
+	en := `\iota (s'\otimes m)(s^{-1}) =\begin{cases} m & \text{if } s=s',\\ 0 & \text{otherwise.}\end{cases}`
+	vi := `\iota (s'\otimes m)(s^{-1}) =\begin{cases} m & \text{nếu } s=s',\\ 0 & \text{nếu không.}\end{cases}`
+	if !SameMath(en, vi) {
+		t.Error("a cases block with both arms translated was refused as tampering")
+	}
+	if got := UntranslatedMathProse(en, vi); len(got) != 0 {
+		t.Errorf("reported %v, and both arms were translated", got)
+	}
+	// And the other half, so that this does not pass by the rules having gone
+	// quiet. An arm left in English is still an arm left in English.
+	half := `\iota (s'\otimes m)(s^{-1}) =\begin{cases} m & \text{nếu } s=s',\\ 0 & \text{otherwise.}\end{cases}`
+	if got := UntranslatedMathProse(en, half); len(got) != 1 {
+		t.Errorf("reported %v, want the arm that stayed in English", got)
+	}
+}
+
+// Exercise 9 of § 1 of Lie VIII, which is the same trap and had not been
+// sprung only because nobody had asked for that file yet.
+func TestTheParityWordsAreProse(t *testing.T) {
+	en := `n\text{ odd}`
+	if !SameMath(en, `n\text{ lẻ}`) {
+		t.Error("a translated parity word was refused as tampering")
+	}
+	if got := UntranslatedMathProse(en, en); len(got) != 1 {
+		t.Errorf("reported %v, want the run left in English", got)
+	}
+}
+
+// The other side of the same measurement. What the corpus genuinely sets
+// upright inside a formula stays off the list, and stays copied.
+func TestTheNamesTheCorpusSetsUprightStayNames(t *testing.T) {
+	for _, name := range []string{`\text{resp.}`, `\text{Card}`, `\text{i.e.,}`} {
+		if SameMath(name, `\text{gì đó}`) {
+			t.Errorf("%s was treated as prose and allowed to change", name)
+		}
+	}
+}
