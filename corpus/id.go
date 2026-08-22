@@ -217,6 +217,22 @@ type Ref struct {
 	// their statements would share a label.
 	Appendix bool
 
+	// Div says the statement belongs to the divisibility numbering, which is a
+	// second run of numbers alongside the ordinary one inside the same §.
+	//
+	// Chapter VI of Algebra 4 to 7 states the theory of ordered groups twice.
+	// It proves each result in additive notation and then states it again in
+	// the multiplicative notation divisibility is written in, and it marks the
+	// second one by putting DIV in the head: "PROPOSITION 11 (DIV). —". Both
+	// runs are numbered from one in the same §, so § 1 has two Proposition 7
+	// and two Corollary 5, and without this they share a label and the chapter
+	// refuses to assemble. 27 statements of that chapter are marked this way.
+	//
+	// It is a mark on the head and not a name, which is why it is not carried
+	// through as one: "COROLLARY 2 (DIV) (Euclid's lemma)" has both, and the
+	// name is Euclid's lemma.
+	Div bool
+
 	Kind   Kind
 	Number int // 0 when the statement is unnumbered
 
@@ -246,12 +262,21 @@ type Ref struct {
 //	alg-viii-s1-n2-exa-5      Example 5 of no. 2
 //	alg-viii-s1-n3-cor-1      the first unnumbered Corollary in no. 3
 //	alg-viii-a2-prop-3        a numbered Proposition of Appendix 2
+//	alg-vi-s1-div-prop-11     Proposition 11 (DIV) of § 1
 //
 // The label says where the book puts the statement and nothing about where the
 // file puts it, so it survives re-extraction, re-assembly and any amount of
 // editing. That is what makes it worth pointing a permanent tag at.
+//
+// The divisibility mark goes next to the section rather than next to the kind,
+// because that is where it belongs: it is a second numbering inside the § and
+// not a property of the one statement, so every label under it, the Corollary
+// as much as the Proposition it hangs from, sits inside the same div.
 func (r Ref) Label() string {
 	base := r.SectionLabel()
+	if r.Div {
+		base += "-div"
+	}
 	if r.Number == 0 {
 		return fmt.Sprintf("%s-n%d-%s-%d", base, r.Subsec, r.Kind, r.Occurrence)
 	}
@@ -275,12 +300,15 @@ func (r Ref) SectionLabel() string {
 }
 
 var (
+	// The optional div group is the divisibility numbering of chapter VI of
+	// Algebra 4 to 7. It cannot be confused with a kind, because a kind is
+	// always followed by a number and div never is.
 	numberedLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
 	childLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)-(?P<pkind>[a-z]+)-(?P<pnum>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-(?P<pkind>[a-z]+)-(?P<pnum>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
 	subsecLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)-n(?P<no>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-n(?P<no>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
 )
 
 // ParseLabel is the inverse of Ref.Label.
@@ -296,20 +324,21 @@ var (
 func ParseLabel(label string) (Ref, error) {
 	if m := childLabelRe.FindStringSubmatch(label); m != nil {
 		sec, _ := strconv.Atoi(m[4])
-		pnum, _ := strconv.Atoi(m[6])
-		num, _ := strconv.Atoi(m[8])
+		pnum, _ := strconv.Atoi(m[7])
+		num, _ := strconv.Atoi(m[9])
 		return Ref{
 			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
-			ParentKind: Kind(m[5]), ParentNumber: pnum, Kind: Kind(m[7]), Number: num,
+			Div:        m[5] != "",
+			ParentKind: Kind(m[6]), ParentNumber: pnum, Kind: Kind(m[8]), Number: num,
 		}, nil
 	}
 	if m := subsecLabelRe.FindStringSubmatch(label); m != nil {
 		sec, _ := strconv.Atoi(m[4])
-		no, _ := strconv.Atoi(m[5])
-		n, _ := strconv.Atoi(m[7])
+		no, _ := strconv.Atoi(m[6])
+		n, _ := strconv.Atoi(m[8])
 		r := Ref{
 			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
-			Kind: Kind(m[6]), Subsec: no,
+			Div: m[5] != "", Kind: Kind(m[7]), Subsec: no,
 		}
 		if r.Kind.Scope() == ScopeSubsec {
 			r.Number = n
@@ -320,10 +349,10 @@ func ParseLabel(label string) (Ref, error) {
 	}
 	if m := numberedLabelRe.FindStringSubmatch(label); m != nil {
 		sec, _ := strconv.Atoi(m[4])
-		num, _ := strconv.Atoi(m[6])
+		num, _ := strconv.Atoi(m[7])
 		return Ref{
 			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
-			Kind: Kind(m[5]), Number: num,
+			Div: m[5] != "", Kind: Kind(m[6]), Number: num,
 		}, nil
 	}
 	return Ref{}, fmt.Errorf("malformed label: %q", label)
