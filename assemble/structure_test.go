@@ -782,6 +782,63 @@ func TestTheLastRunOfAKindInANoCarriesTheNumbering(t *testing.T) {
 	}
 }
 
+// The same rule where the printing sets the lead with its first member on the
+// line instead of the word alone. No. 3 of § 1 of chapter I of Topology I to IV
+// prints "Examples. 1)" twice on page 27, once for fundamental systems of
+// neighbourhoods and once for bases of a topology, and read without the rule
+// both run number from 1 and the § has two statements called Example 1, which is
+// what stopped that volume assembling at all. See runLead.
+func TestTheLastInlineRunOfAKindInANoCarriesTheNumbering(t *testing.T) {
+	in := blocks(
+		"### 3. Fundamental Systems of Neighbourhoods; Bases of a Topology",
+		"DEFINITION 5. In a topological space X, a fundamental system of neighbourhoods of a point x is any set of neighbourhoods.",
+		"Examples. 1) In a discrete space (no. 1) the set $\\{x\\}$ alone constitutes a fundamental system of neighbourhoods of the point x.",
+		"2) In a topological space X the set of open neighbourhoods of a point x is a fundamental system of neighbourhoods of x.",
+		"DEFINITION 6. A base of the topology of a topological space X is any set of open sets.",
+		"Examples. 1) The discrete topology has as a base the set of subsets of X which consist of a single point.",
+		"2) The set of open intervals is a base of the topology of the rational line.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "top-i", Chapter: "I", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"top-i-i-s1-def-5",
+		"top-i-i-s1-def-6",
+		"top-i-i-s1-n3-exa-1",
+		"top-i-i-s1-n3-exa-2",
+	})
+	if !strings.HasPrefix(got[2].Body, "The discrete topology") {
+		t.Errorf("the numbers went to the first run, not the last: %q", got[2].Body)
+	}
+	for _, want := range []string{in[2].text, in[3].text} {
+		if !slices.Contains(texts(out), want) {
+			t.Errorf("the earlier run was taken apart: %q", want)
+		}
+	}
+}
+
+// A no. that prints one inline lead is read exactly as it was before the rule
+// above, which is what keeps Lie 7 to 9 where it is: 24 pages of that volume
+// open a run this way and every one of them is the only run of its kind in its
+// no. The lead is not a head of nothing, so the block it stands on is the first
+// member and not prose.
+func TestOneInlineRunIsStillNumberedFromItsLead(t *testing.T) {
+	in := blocks(
+		"### 2. Bases of a Root System",
+		"Remarks. 1) The set of roots of a base is linearly independent.",
+		"2) A base is contained in a chamber.",
+	)
+	out, got, err := statements(in, corpus.Ref{Book: "lie", Chapter: "VI", Section: 1}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"lie-vi-s1-n2-rem-1", "lie-vi-s1-n2-rem-2"})
+	if slices.Contains(texts(out), in[1].text) {
+		t.Errorf("the lead was passed through as prose: %v", texts(out))
+	}
+}
+
 // No. 4 of § 1 of chapter III announces its run in a sentence instead of setting
 // the word alone on a line, and chapter IV cites the third member of it. See
 // enRunKinds.

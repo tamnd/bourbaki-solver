@@ -45,6 +45,12 @@ type printing struct {
 	// for a printing that does not set one. See walk.
 	runHead *regexp.Regexp
 
+	// runLead is the other way a run is opened: the kind in the plural with the
+	// first member on the same line. It is not a head of nothing, so the block it
+	// matches is still read as the first member, and it is matched here only so
+	// that a no. printing two runs of one kind can be told apart. See walk.
+	runLead *regexp.Regexp
+
 	// resume is a paragraph that hands the reader back to the proof of a
 	// statement printed further up, which puts that statement in force again.
 	// See resumed.
@@ -145,6 +151,7 @@ var printings = map[string]printing{
 				`|\*(` + enPlainKinds + `)(?: (\d+))?\.\*\s+` +
 				`|` + smallTypeSup + `(` + enPlainKinds + `)(?: (\d+))?\.?\s+)`),
 		runHead: regexp.MustCompile(`^\*(` + enRunKinds + `)(?: [a-z][^*]*)?\*(?:\..*:)?\s*$`),
+		runLead: regexp.MustCompile(`^\*{0,2}(` + enRunKinds + `)\.\*{0,2}\s+\*{0,2}1\)`),
 		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:takes? up|comes? now|concludes?|` +
 			`finish(?:es)?|completes?|resumes?|returns? to)\b[^.]{0,40}?\bproof of (?:the )?(` +
 			enResumeKinds + `) (\d+)\b`),
@@ -315,6 +322,15 @@ const enPlainKinds = `Lemmas?|Remarks?|Examples?|Scholium`
 // to be a head and not a statement. Where a printing announces a run without the
 // colon the run goes unread, and that fails loudly in R01 rather than quietly in
 // the numbering, which is the way round to be wrong.
+// The same kinds are what a run lead is of, which is why the one constant
+// serves both. Topology I to IV, Topology V to X and Lie 7 to 9 open a run the
+// other way, with the kind in the plural and the first member hard after it on
+// the same line: page 27 of Topology I to IV sets "Examples. 1) In a discrete
+// space (no. 1) the set {x} alone constitutes a fundamental system of
+// neighbourhoods of the point x." That line is read as the first member and
+// always was, by the branch of pr.head that takes a plural kind and the exNumRE
+// that follows it, so runLead changes nothing about how one run is numbered. It
+// exists for the no. that prints two.
 const enRunKinds = `Examples|Remarks|Lemmas|Scholia`
 
 // enResumeKinds and frResumeKinds are the kinds a paragraph can hand the reader
