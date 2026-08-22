@@ -26,8 +26,16 @@ type printing struct {
 	// pages/. The level is part of them: the French volume sets its appendix
 	// headings smaller than its § headings and the English one does not, so
 	// they come out of extraction at different depths.
-	chapter    string
-	appendix   string // the word alone, the number is put after it
+	chapter string
+
+	// appendix is the words a volume of this printing heads an appendix with,
+	// each the word alone, with the number put after it where there is one. It
+	// is a list because the word is a choice the volume makes and not one the
+	// printing makes: Algebra VIII and Lie 7 to 9 head theirs APPENDIX, and
+	// Integration 7 to 9 heads its one ANNEX, all three in English off the same
+	// press. The page is asked which of them it carries.
+	appendix []string
+
 	historical string
 	exercises  string
 
@@ -102,23 +110,30 @@ func (p printing) unswallow(text string) string {
 	return m[1] + " " + m[2] + ". $" + rest
 }
 
-// appendixHeads is the heading over Appendix n, both ways it is numbered.
+// appendixHeads is every heading over Appendix n that a volume of this printing
+// might carry, each word it might use crossed with both ways it is numbered.
 //
-// The two English volumes disagree and neither is wrong: Algebra VIII heads its
-// four APPENDIX 1 to APPENDIX 4, Lie 7 to 9 heads its two APPENDIX I and
-// APPENDIX II. It is not a difference in language, so it is not one printing
-// against another, and it is not worth a field per volume for a choice of
-// numeral. The page is asked which it uses.
+// The English volumes disagree twice over and none of them is wrong. Algebra
+// VIII heads its four APPENDIX 1 to APPENDIX 4, Lie 7 to 9 heads its two
+// APPENDIX I and APPENDIX II, and Integration 7 to 9 heads its one ANNEX, with
+// Complements on Hilbert spaces set under it. Neither the word nor the numeral
+// is a difference in language, so neither is one printing against another, and
+// neither is worth a field per volume. The page is asked which it uses.
 // A chapter that closes with one appendix does not always number it. Chapter I
 // of Theory of Sets heads its own APPENDIX and sets CHARACTERIZATION OF TERMS
 // AND RELATIONS under it, and chapters II and III of Algebra I to III do the
 // same, so the contents gives all three the number 0 and the heading is the word
 // alone.
 func (p printing) appendixHeads(n int) []string {
-	if n == 0 {
-		return []string{p.appendix}
+	var out []string
+	for _, word := range p.appendix {
+		if n == 0 {
+			out = append(out, word)
+			continue
+		}
+		out = append(out, fmt.Sprintf("%s %d", word, n), fmt.Sprintf("%s %s", word, roman(n)))
 	}
-	return []string{fmt.Sprintf("%s %d", p.appendix, n), fmt.Sprintf("%s %s", p.appendix, roman(n))}
+	return out
 }
 
 // roman writes a small number the way a volume that numbers its appendices that
@@ -137,7 +152,7 @@ var printings = map[string]printing{
 	"en": {
 		lang:       "en",
 		chapter:    "## CHAPTER",
-		appendix:   "## APPENDIX",
+		appendix:   []string{"## APPENDIX", "## ANNEX"},
 		historical: "# HISTORICAL NOTE",
 		exercises:  "### Exercises",
 		gathered:   "# EXERCISES",
@@ -160,7 +175,7 @@ var printings = map[string]printing{
 	"fr": {
 		lang:       "fr",
 		chapter:    "## CHAPITRE",
-		appendix:   "### APPENDICE",
+		appendix:   []string{"### APPENDICE", "### ANNEXE"},
 		historical: "# NOTE HISTORIQUE",
 		exercises:  "## EXERCICES",
 		gathered:   "# EXERCICES",

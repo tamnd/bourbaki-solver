@@ -690,26 +690,64 @@ func TestCutNotes(t *testing.T) {
 // been read perfectly well.
 func TestTheMarkOfAnUnnumberedAppendix(t *testing.T) {
 	mark := runMark(corpus.Section{Appendix: true})
-	for _, line := range []string{"## APPENDIX", "### Appendix", "#### appendix.", "## APPENDICE"} {
+	// ANNEX and ANNEXE stand beside the other two because the word is a choice
+	// the volume makes and not one the language makes. Integration 7 to 9 heads
+	// its one appendix ANNEX in English, in the running head, over the opener on
+	// pdf page 284 and over the block of exercises on pdf page 300.
+	for _, line := range []string{
+		"## APPENDIX", "### Appendix", "#### appendix.", "## APPENDICE",
+		"## ANNEX", "### Annex", "#### annex.", "## ANNEXE",
+	} {
 		if !mark.MatchString(line) {
 			t.Errorf("%q is not read as the appendix mark", line)
 		}
 	}
 	// And it is still a mark and not a word in a sentence.
-	for _, line := range []string{"APPENDIX", "## Appendix I", "## Appendix to chapter I"} {
+	for _, line := range []string{"APPENDIX", "## Appendix I", "## Appendix to chapter I", "ANNEX", "## Annex to chapter IX"} {
 		if mark.MatchString(line) {
 			t.Errorf("%q is read as the mark of an unnumbered appendix", line)
 		}
 	}
 	// A numbered one is unchanged, in either numeral and at any level.
 	numbered := runMark(corpus.Section{Appendix: true, Number: 2})
-	for _, line := range []string{"## Appendix 2", "### APPENDIX II"} {
+	for _, line := range []string{"## Appendix 2", "### APPENDIX II", "## ANNEX 2", "### Annex II"} {
 		if !numbered.MatchString(line) {
 			t.Errorf("%q is not read as the mark of appendix 2", line)
 		}
 	}
 	if numbered.MatchString("## Appendix") {
 		t.Error("a chapter with two appendices reads a bare mark as the second one")
+	}
+}
+
+// The heading over the opener is looked up by the words the printing knows and
+// not by a pattern, so the two have to be kept in step. Integration 7 to 9 heads
+// its appendix ANNEX and Algebra VIII heads its four APPENDIX, both in English
+// off the same press, so a volume that prints either word has to be found.
+func TestTheHeadsOverAnAppendixCoverBothWordsAndBothNumerals(t *testing.T) {
+	for _, c := range []struct {
+		lang string
+		n    int
+		want []string
+	}{
+		{"en", 0, []string{"## APPENDIX", "## ANNEX"}},
+		{"en", 2, []string{"## APPENDIX 2", "## APPENDIX II", "## ANNEX 2", "## ANNEX II"}},
+		{"fr", 0, []string{"### APPENDICE", "### ANNEXE"}},
+		{"fr", 1, []string{"### APPENDICE 1", "### APPENDICE I", "### ANNEXE 1", "### ANNEXE I"}},
+	} {
+		same(t, printings[c.lang].appendixHeads(c.n), c.want)
+	}
+	// Every one of them is a mark the run knows, or the volume stops on a page
+	// whose heading the contents was looked up by.
+	for _, n := range []int{0, 1, 2} {
+		for _, lang := range []string{"en", "fr"} {
+			mark := runMark(corpus.Section{Appendix: true, Number: n})
+			for _, head := range printings[lang].appendixHeads(n) {
+				if !mark.MatchString(head) {
+					t.Errorf("%s heads appendix %d %q and the run mark does not read it", lang, n, head)
+				}
+			}
+		}
 	}
 }
 
