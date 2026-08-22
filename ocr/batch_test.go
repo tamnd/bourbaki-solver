@@ -674,3 +674,50 @@ func TestABoxDrivingAChromeIsStillAskedForADisplay(t *testing.T) {
 		t.Error("whitespace is not the name of a reader")
 	}
 }
+
+// The head pass in the reader guesses whether a volume prints a page label,
+// and it guesses from the fifteen contiguous pages of the batch, so it spends
+// the first eight refusing to answer and then answers from a sample nobody
+// would accept. We know. The manifest says so before an image moves.
+func TestTheVolumeGrammarIsPassedToTheReader(t *testing.T) {
+	for _, c := range []struct {
+		grammar string
+		want    string
+	}{
+		{"head-label", "LOCAL_OCR_HEAD_LABEL=1 "},
+		{"foot-number", "LOCAL_OCR_HEAD_LABEL=0 "},
+		{"head-number", "LOCAL_OCR_HEAD_LABEL=0 "},
+	} {
+		machine := &box{pid: 7, perPoll: 10}
+		work := batch(t, machine, 2)
+		work.Grammar = c.grammar
+		if _, err := work.Run(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		command := machine.commands[1]
+		if !strings.Contains(command, c.want) {
+			t.Errorf("%s: the start command has no %q in it:\n%s", c.grammar, c.want, command)
+		}
+		// In front of the launcher, or setsid gets it and the tool does not.
+		if !strings.HasPrefix(command, c.want) {
+			t.Errorf("%s: the assignment is not in front of the launcher:\n%s", c.grammar, command)
+		}
+	}
+}
+
+// A volume the manifest has not classified yet, which is what an unclassified
+// one should get: nothing said, and the reader left to its own guess.
+func TestAnUnknownGrammarSaysNothing(t *testing.T) {
+	machine := &box{pid: 7, perPoll: 10}
+	work := batch(t, machine, 2)
+	if _, err := work.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	command := machine.commands[1]
+	if strings.Contains(command, "LOCAL_OCR_HEAD_LABEL") {
+		t.Errorf("an unclassified volume told the reader something:\n%s", command)
+	}
+	if !strings.HasPrefix(command, "DISPLAY=") {
+		t.Errorf("the command no longer starts with the launcher:\n%s", command)
+	}
+}
