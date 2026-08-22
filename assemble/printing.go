@@ -159,7 +159,8 @@ var printings = map[string]printing{
 		gathered:   "# EXERCICES",
 		head: regexp.MustCompile(
 			`^(?:\*\*(` + frKinds + `)(?: (\d+))?\.\*\*|(` + frKinds + `)(?: (\d+))? \([^)]*\)\.|` +
-				smallType + `(` + frKinds + `)(?: (\d+))?\.|(` + frPlainKinds + `)(?: (\d+))?\.)\s*—\s*`),
+				smallType + `(` + frKinds + `)(?: (\d+))?\.|(` + frKinds + `)(?: (\d+))?\.` +
+				`|\*(` + frKinds + `)(?: (\d+))?\.\*)\s*—\s*`),
 		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:terminons|terminer|achevons|achever|` +
 			`reprenons|reprendre|concluons|conclure)\b[^.]{0,40}?\b(?:d[ée]monstration|preuve) ` +
 			`(?:du|de la|de l['’])\s*(` + frResumeKinds + `) (\d+)\b`),
@@ -328,15 +329,37 @@ const frResumeKinds = `d[ée]finition|proposition|th[ée]or[èe]me|lemme|scholie
 // run of remarks exactly as the English sets "Remarks. —".
 const frKinds = `D[ée]finitions?|Propositions?|Th[ée]or[èe]mes?|Lemmes?|Corollaires?|Remarques?|Exemples?|Scholie`
 
-// frPlainKinds are the kinds the French printing sets in italic rather than in
-// small capitals, and so the ones that reach here with no bold on them.
+// The last branch of the French grammar is a head with no bold on it, and it
+// takes any of the kinds.
 //
-// The English printing sets every head in bold, which is why its grammar refuses
-// an undecorated head: "Theorem 1. —" is a shape those pages never produce and
-// reading one as a head would put the grammar at the mercy of a sentence that
-// happens to open on a kind. The French printing does produce it, for these four
-// kinds and for no others: all 19 lemmas of chapter VIII are set this way, and so
-// are its 56 remarks and its 31 examples, while every Proposition, Théorème,
-// Définition and Corollaire is in small capitals. The em dash is what keeps the
-// rule honest, since a sentence opening on the word Exemple does not carry one.
-const frPlainKinds = `Lemmes?|Remarques?|Exemples?|Scholie`
+// The French printing sets Lemme, Remarque, Exemple and Scholie in italic and
+// the other four in small capitals, so for a long time this branch listed the
+// first four only. The other four reached it in bold, which the branch above
+// reads, and an undecorated Proposition was a shape the pages did not produce.
+//
+// They produce it now. The small capitals survive a reading of the text layer
+// and do not always survive a reading of the page image, and 1581 heads across
+// 18 French volumes have come back with the bold gone: 247 in Algebra I to III,
+// 218 in the French Topology I to IV, 167 in Lie II and III, and 23 in the
+// French Algebra VIII, where six § were re-read from the image and the heads on
+// them went from "**Proposition 1.**" to "Proposition 1.". Left out, those 1581
+// results are prose, they carry no permanent tag, and nothing can cite them.
+//
+// The em dash is what keeps this honest and it always was. It is the reason the
+// four italic kinds could be read undecorated in the first place, since a
+// sentence opening on the word Exemple does not carry one, and it holds the
+// other four down for the same reason: the printing puts the dash after the
+// number of a result and nowhere else, so a paragraph of prose cannot arrive at
+// this shape by accident. I read all 1581 rather than trusting that, and every
+// one of them states a result.
+//
+// The English grammar still refuses an undecorated head. That printing sets
+// every head in bold and its pages have 8 lines of this shape in the whole
+// corpus, which is not enough to say what the shape means there.
+//
+// The branch after it is the same head with the italic marked rather than lost,
+// "*Lemme 1.* — ", which is the other thing a reading of the image does with a
+// head it can see the shape of. The English grammar has had this branch for two
+// heads of Lie 7 to 9; the French pages carry 248 of them across 17 volumes, and
+// six are in the French Algebra VIII, where they are the last six statements
+// missing from it once the bold is read.

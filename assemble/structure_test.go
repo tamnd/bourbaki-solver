@@ -902,3 +902,52 @@ func TestASectionSignInACitationOpensNothing(t *testing.T) {
 		}
 	}
 }
+
+// The French printing sets Proposition, Théorème, Définition and Corollaire in
+// small capitals, and a reading of the page image does not always keep them.
+// 1584 heads across 18 French volumes have come back with the bold gone, and
+// left out they are prose with no tag and nothing can cite them. § 11 of the
+// French Algebra VIII is where it showed: six of its § were re-read from the
+// image and the volume came out 29 statements short.
+//
+// The em dash is what makes this safe to read. The printing puts one after the
+// number of a result and after nothing else, so a paragraph of prose does not
+// arrive at this shape.
+func TestStatementsReadsAFrenchHeadWithNoBoldOnIt(t *testing.T) {
+	in := blocks(
+		"### 1. Le groupe de Grothendieck",
+		"Proposition 1. — Soient A un anneau et E un A-module de longueur finie.",
+		"Définition 2. — On appelle groupe de Grothendieck de A le groupe abélien.",
+		"Corollaire 1. — Le groupe $ K_0(A) $ est engendré par les classes des modules simples.",
+		"Une proposition qui n’en est pas une, sans tiret cadratin.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 11}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"alg-viii-s11-prop-1",
+		"alg-viii-s11-def-2",
+		"alg-viii-s11-def-2-cor-1",
+	})
+}
+
+// The same head with the italic marked rather than lost, which is the other
+// thing a reading of the image does with one. The French pages carry 248 of
+// these and the six in the French Algebra VIII are the last statements missing
+// from it. The line off page 209 is the Lemme.
+func TestStatementsReadsAFrenchHeadWithTheItalicMarked(t *testing.T) {
+	in := blocks(
+		"### 1. Le groupe de Grothendieck",
+		"*Lemme 1.* — *Soient E, E' et E'' des A-modules de longueur finie et*",
+		"*Remarque.* — Notons $ \\Sigma $ l’espèce de structure de $ \\tau' $-extension.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "VIII", Section: 11}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"alg-viii-s11-lem-1",
+		"alg-viii-s11-n1-rem-1",
+	})
+}
