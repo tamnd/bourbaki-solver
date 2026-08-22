@@ -774,8 +774,9 @@ func (r *Runner) one(ctx context.Context, host Host, tasks []task) (Result, outc
 	id := batchID(r.Book, tasks)
 	work := Batch{
 		Host: host, ID: id, Prompt: r.Prompt,
-		Dest:  filepath.Join(RawDir(r.Root, r.Book), id),
-		Shell: r.Shell, Copy: r.Copy, Keep: r.Keep, Logf: r.Logf, Sleep: r.Sleep,
+		Dest:    filepath.Join(RawDir(r.Root, r.Book), id),
+		Grammar: r.grammar(tasks),
+		Shell:   r.Shell, Copy: r.Copy, Keep: r.Keep, Logf: r.Logf, Sleep: r.Sleep,
 	}
 	for _, value := range tasks {
 		work.Images = append(work.Images, value.image)
@@ -911,6 +912,23 @@ func named(result Result, host, id string, pages int, err error) Result {
 
 // batchID names a batch on the host.
 //
+// grammar is how this volume prints its page number, for the reader to be told
+// rather than have to guess.
+//
+// It comes from Expect and not from the manifest directly, deliberately: Expect
+// is what rule 4 judges the answer by, so telling the head pass anything else
+// would let the reader be repaired against one standard and marked against
+// another. A batch is one volume, so the first task answers for all of them.
+//
+// No Expect, or a volume the manifest has not classified, gives the empty
+// string, which says nothing and leaves the reader's own guess alone.
+func (r *Runner) grammar(tasks []task) string {
+	if r.Expect == nil || len(tasks) == 0 {
+		return ""
+	}
+	return string(r.Expect(tasks[0].page).Grammar)
+}
+
 // The attempt counts go into the hash on purpose. ocr-batch is run with
 // --skip-existing, so a retry that landed in the same output directory would
 // find the rejected answer already there and skip the page it was sent to read

@@ -37,6 +37,9 @@ type fleet struct {
 	// batches records every batch directory the fleet was asked to write into,
 	// which is how a test sees that a retry did not reuse a directory.
 	batches []string
+	// starts records every ocr-batch command line, which is how a test sees
+	// what the runner told the reader about the volume.
+	starts []string
 	// pushErr is what rsync says when the box is not there. A batch that cannot
 	// be pushed never reaches a host.
 	pushErr error
@@ -68,6 +71,7 @@ func (f *fleet) Run(ctx context.Context, host, command string) (string, error) {
 	switch {
 	case strings.Contains(command, "ocr-batch"):
 		f.started++
+		f.starts = append(f.starts, command)
 		return "1234\n", nil
 	case strings.Contains(command, "kill -0"):
 		if f.stopped {
@@ -1423,6 +1427,77 @@ func TestTheHostNamesTheModelAndTheRunIsOnlyTheFallback(t *testing.T) {
 	for _, c := range cases {
 		if got := runner.modelFor(c.host); got != c.want {
 			t.Errorf("%s: recorded %q, want %q", c.what, got, c.want)
+		}
+	}
+}
+
+// The head pass in the reader has to be told what rule 4 will judge its answer
+// by, or a page can be repaired against one standard and marked against
+// another. So the grammar comes from Expect and not from the manifest.
+func TestTheRunnerTellsTheReaderWhatTheVolumePrints(t *testing.T) {
+	w := newWorld(t, 4)
+	machine := newFleet(func(image string) string {
+		return page("A IV." + strings.TrimLeft(strings.TrimSuffix(filepath.Base(image), ".png"), "0"))
+	})
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runner.Do(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(machine.starts) == 0 {
+		t.Fatal("no batch was started")
+	}
+	for _, command := range machine.starts {
+		if !strings.HasPrefix(command, "LOCAL_OCR_HEAD_LABEL=1 ") {
+			t.Errorf("a head-label volume did not say so:\n%s", command)
+		}
+	}
+}
+
+func TestAVolumeWithNoExpectTellsTheReaderNothing(t *testing.T) {
+	w := newWorld(t, 4)
+	machine := newFleet(func(image string) string {
+		return page("A IV." + strings.TrimLeft(strings.TrimSuffix(filepath.Base(image), ".png"), "0"))
+	})
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	// Fill needs Expect and Do does not, so it is dropped between the two.
+	runner.Expect = nil
+	if _, err := runner.Do(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(machine.starts) == 0 {
+		t.Fatal("no batch was started")
+	}
+	for _, command := range machine.starts {
+		if strings.Contains(command, "LOCAL_OCR_HEAD_LABEL") {
+			t.Errorf("a runner that knows nothing told the reader something:\n%s", command)
+		}
+	}
+}
+
+func TestAFootNumberVolumeSaysSo(t *testing.T) {
+	w := newWorld(t, 4)
+	machine := newFleet(func(image string) string {
+		return page("A IV." + strings.TrimLeft(strings.TrimSuffix(filepath.Base(image), ".png"), "0"))
+	})
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	runner.Expect = func(n int) Expect {
+		return Expect{Book: "ens-i-iv", PDFPage: n, Grammar: pagemap.FootNumber, HasHead: true}
+	}
+	if _, err := runner.Do(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range machine.starts {
+		if !strings.HasPrefix(command, "LOCAL_OCR_HEAD_LABEL=0 ") {
+			t.Errorf("a foot-number volume did not say so:\n%s", command)
 		}
 	}
 }

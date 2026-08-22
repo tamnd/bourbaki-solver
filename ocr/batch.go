@@ -203,6 +203,10 @@ type Batch struct {
 	Prompt string
 	// Dest is the local directory the Markdown is pulled back into.
 	Dest string
+	// Grammar is how this volume prints its page number, out of the books
+	// manifest. It is passed to the reader so the head pass is told rather than
+	// left to work it out from fifteen pages. Empty says nothing.
+	Grammar string
 
 	Shell Shell
 	Copy  Copier
@@ -582,11 +586,35 @@ func (b Batch) launcher() string {
 	return "DISPLAY=" + quote(b.Host.display()) + " setsid nohup"
 }
 
+// headLabel tells the reader whether this volume prints a page label in its
+// running head, as an environment assignment in front of the launcher.
+//
+// The tool guesses when nobody says, and its guess is the weakest thing it
+// does: it learns a fact about a volume from the fifteen contiguous pages of
+// the batch, so it spends the first eight refusing to answer and then answers
+// from a sample nobody would accept. See the head pass note in tamnd/local-ocr.
+// We do not have to guess. The grammar of every volume is written in
+// manifests/books.yaml and a batch is one volume, so it is known here before a
+// single image moves.
+//
+// An empty grammar says nothing and leaves the guess alone, which is what a
+// volume the manifest has not classified yet should get.
+func (b Batch) headLabel() string {
+	switch b.Grammar {
+	case "head-label":
+		return "LOCAL_OCR_HEAD_LABEL=1 "
+	case "":
+		return ""
+	default:
+		return "LOCAL_OCR_HEAD_LABEL=0 "
+	}
+}
+
 func (b Batch) start(ctx context.Context, _, in, out, prompt, logFile string) (int, error) {
 	command := fmt.Sprintf(
-		"%s %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
+		"%s%s %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
 			"--skip-existing --recursive --timeout %d --prompt \"$(cat %s)\" >%s 2>&1 </dev/null & echo $!",
-		b.launcher(), quote(b.Host.Tool), quote(in), quote(out),
+		b.headLabel(), b.launcher(), quote(b.Host.Tool), quote(in), quote(out),
 		b.Host.lanes(), strconv.FormatFloat(b.Host.rateDelay(), 'f', -1, 64),
 		int(b.Host.pageTimeout().Seconds()), quote(prompt), quote(logFile))
 
