@@ -946,6 +946,42 @@ func TestASectionSignIsReadAsAMisreadPilcrow(t *testing.T) {
 	}
 }
 
+// A dagger is the same swap, and page 95 of Algebra 4 to 7 is where it cost
+// something: the printing opens exercises 1, 3 and 4 of § 1 with a pilcrow, the
+// reading gave all three as a dagger, and the § came out as a preamble with no
+// exercises in it at all, which stopped the whole of chapter IV assembling.
+func TestADaggerIsReadAsAMisreadPilcrow(t *testing.T) {
+	for _, line := range []string{
+		`† 1) \* When M is a subgroup of the additive group R of real numbers,`,
+		`†24) Soit $ i : A \to I $ une enveloppe injective.`,
+	} {
+		m := exNumRE.FindStringSubmatch(line)
+		if m == nil {
+			t.Errorf("%q: the marker was not read", line)
+			continue
+		}
+		_, pilcrow := marksOf(m[1])
+		if pilcrow == "" {
+			t.Errorf("%q: the exercise did not come out marked as one of the harder ones", line)
+		}
+	}
+}
+
+// And a dagger anywhere else is a footnote mark, which is what the other 66 of
+// the corpus's 130 daggers are. A footnote mark sits inside a sentence or hard
+// against the word it hangs off, never in front of a number and a bracket.
+func TestADaggerInAFootnoteMarkOpensNothing(t *testing.T) {
+	for _, line := range []string{
+		`to confusion†) will denote the set of elements $ x $`,
+		`† For more details on this exercise, see Bourbaki.`,
+		`the length of $m.$†`,
+	} {
+		if exNumRE.MatchString(line) {
+			t.Errorf("%q was read as an exercise marker", line)
+		}
+	}
+}
+
 // And a section sign in front of a number is otherwise a citation, which is what
 // 1209 lines of the corpus use it for. None of these opens an exercise.
 func TestASectionSignInACitationOpensNothing(t *testing.T) {
