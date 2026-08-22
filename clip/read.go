@@ -25,7 +25,7 @@ const DefaultBatch = 12
 // Fleet reads a directory of clips on the rented boxes.
 //
 // It is deliberately not the OCR runner. That one is built around a durable
-// queue, leases, seven validation rules and a repair conversation, because a
+// queue, leases, nine validation rules and a repair conversation, because a
 // page is expensive and a run of 734 of them has to survive a dropped laptop
 // lid. A clip run is two dozen images that either come back or do not, and the
 // answer is judged by comparing it with the extractor rather than by rules. The

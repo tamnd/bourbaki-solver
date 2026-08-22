@@ -53,6 +53,7 @@ const (
 	RuleLabel     Rule = "label"     // 6, the page label contradicts the page map
 	RuleLaTeX     Rule = "latex"     // 7, the LaTeX does not compile
 	RuleExercise  Rule = "exercise"  // 8, an exercise below the exercises head is set as a heading
+	RuleStatement Rule = "statement" // 9, a statement head came back in plain mixed case
 )
 
 // Problem is one reason a page was not accepted.
@@ -189,6 +190,11 @@ func Validate(text string, expect Expect, options Options) []Problem {
 
 	// Rule 8.
 	if problem, ok := checkAfterExercises(body); !ok {
+		problems = append(problems, problem)
+	}
+
+	// Rule 9.
+	if problem, ok := checkStatementHead(body); !ok {
 		problems = append(problems, problem)
 	}
 
@@ -364,6 +370,60 @@ func checkAfterExercises(text string) (Problem, bool) {
 			return Problem{
 				Rule:   RuleExercise,
 				Detail: fmt.Sprintf("an exercise below the exercises head is set as a heading: %q", clip(line)),
+				Line:   i + 1,
+			}, false
+		}
+	}
+	return Problem{}, true
+}
+
+// lostHeadRE is a statement head the reading set in plain mixed case: the kind,
+// a number, a period and then the statement, with no small capitals, no bold, no
+// italic and no dash.
+//
+// The four kinds are the ones no printing of the corpus sets that way. A volume
+// heads a Definition, a Proposition, a Theorem or a Corollary in small capitals
+// or in bold, and the French adds a dash after the number. Lemma, Remark,
+// Example and Scholium are left out because they are set plain on purpose: Lie 7
+// to 9 prints "Lemma 1." unemphasised 101 times and Topology I to IV opens a run
+// with "Examples. 1)", and both are read as they stand.
+//
+// The dash is what keeps the French printing out of it. "PROPOSITION 12. — Soit
+// A un anneau" loses only its small capitals when the reader sets the kind in
+// mixed case, and the dash is still there for the grammar to lean on, so the
+// statement is read and the page is not a defect. A reading that lost the dash
+// as well is one, and 8 pages of Algèbre commutative chapitre 10 are.
+var lostHeadRE = regexp.MustCompile(
+	`^(Definitions?|Propositions?|Theorems?|Corollary|Corollaries)( \d+)?\. [^—]`)
+
+// checkStatementHead is rule 9.
+//
+// A page can be a faithful transcription word for word and still be unreadable,
+// because the head of a statement is not only words. Page 44 of Topology I to IV
+// prints PROPOSITION 1 and COROLLARY 1 in small capitals with the statements in
+// italic, and the reading came back with "Proposition 1. Let f = (f_i) be a
+// mapping of a topological space Y into a product space X" in plain roman. Every
+// word is right. The assembler reads no statement there at all, because a
+// sentence can open on the word Proposition and a head cannot be told from one
+// without the case or the emphasis that the printing gives it.
+//
+// The eight rules before this one all pass such a page, which is how it went
+// unseen: it is not short, the mathematics balances, the running head is there
+// and the page label agrees with the map. The volume assembled 107 statements
+// short instead, and chapter I stopped assembling altogether when a Corollary 2
+// on page 45 found no Proposition to be numbered under, since the Proposition on
+// the page before it had been read as prose.
+//
+// Measured over every page of every volume this project has read: 308 lines on
+// 153 pages match, in six volumes, and every one of them is a statement head.
+// Nothing else in the corpus opens a line with one of these four kinds, a
+// number, a period and a space.
+func checkStatementHead(text string) (Problem, bool) {
+	for i, line := range strings.Split(text, "\n") {
+		if lostHeadRE.MatchString(line) {
+			return Problem{
+				Rule:   RuleStatement,
+				Detail: fmt.Sprintf("a statement head came back in plain mixed case, so nothing downstream can tell it from a sentence: %q", clip(line)),
 				Line:   i + 1,
 			}, false
 		}

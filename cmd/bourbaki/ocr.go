@@ -21,7 +21,7 @@ const ocrUsage = `usage: bourbaki ocr <command> [flags]
 commands:
   fill     put a job in the queue for every page of a volume that has to be read
   run      lease pages, read them on the fleet, validate what comes back
-  check    run the seven validation rules over the page files already on disk
+  check    run the nine validation rules over the page files already on disk
   repair   ask the model to fix a flagged page in the conversation that read it
   audit    ask about pages that passed the rules and may still be wrong
 
@@ -65,13 +65,13 @@ flags for fill and run:
 
 flags for check:
   -rule NAME     only report this rule: short, math, leak, head, illegible, label,
-                 latex, exercise
+                 latex, exercise, statement
   -v             print every problem, not just the counts
   -json          print one JSON object per rejected page
 
 run is the expensive command in this repo. It sends page images to rented boxes
 over ssh, reads them with chatgpt-tool ocr-batch, pulls the Markdown back and
-accepts or rejects each page against the seven rules. A page costs minutes, so
+accepts or rejects each page against the nine rules. A page costs minutes, so
 nothing is read twice: the queue is content addressed on the image and the
 prompt, and a run that is interrupted picks up where it stopped.
 
@@ -86,7 +86,7 @@ with a dollar moved and nothing else, proved rather than assumed, or it is
 thrown away and the page goes back to the image. See bourbaki ocr repair -h.
 
 audit is for the pages check says are fine. Page 51 of Algebra I passed all
-seven rules and reads i in {1, n} where the scan prints i in [1, n], which is a
+nine rules and reads i in {1, n} where the scan prints i in [1, n], which is a
 set of two elements where the book has an interval. No rule can see that. The
 detectors look for shapes this scan gets wrong, and each one becomes one
 question in the thread that produced the page, where the image still is. See
