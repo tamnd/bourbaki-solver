@@ -295,7 +295,13 @@ var (
 	// read as an unbroken run of Roman letters does not match at all, and that
 	// one line is the whole chapter structure of the volume: the map came out
 	// with 211 pages and no chapter on any of them.
-	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s+([ivxlcdm1|][ivxlcdm1| ]*?)\s*$`)
+	//
+	// The space between the word and the numeral is optional because the scan
+	// of the English Lie 1 to 3 drops it: pdf 19 opens the volume with the one
+	// line "CHAPTERI" and nothing else, so chapter I was never found and the
+	// map gave every page of it to no chapter at all. The word alone is not an
+	// opener either way, since the numeral still has to be there.
+	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s*([ivxlcdm1|][ivxlcdm1| ]*?)\s*$`)
 
 	// A French volume whose first chapter is its own book writes the numeral
 	// out: Groupes et algebres de Lie chapitre 1, Theories spectrales and

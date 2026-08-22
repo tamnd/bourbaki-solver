@@ -100,7 +100,16 @@ func (p Problem) String() string {
 //
 // The 1998 scan sets its leaders as bullets rather than periods, so the leader
 // class carries all three characters the three volumes use.
-const leader = `(?:(?:[.·•]\s*){2,}|\s{3,})`
+//
+// The third form, a single dot with a space on each side, is what a model
+// writes when it reads a contents page off the image rather than off the text
+// layer. It sees a run of leaders and gives back " . " for it, and the reading
+// of the English Lie 1 to 3 does that on two lines of § 3 of chapter III, which
+// dropped no. 1 and no. 4 of the § and renumbered every no. after them. A
+// single dot alone would be too little to go on, since a title can end in an
+// abbreviation, but a dot standing on its own between two spaces is not how a
+// sentence ends, and the page still has to be a page for the tail to match.
+const leader = `(?:(?:[.·•]\s*){2,}|\s{3,}|\s[.·•]\s)`
 
 var (
 	// The trailing punctuation is what the scanner adds after the number, not
@@ -118,8 +127,13 @@ var (
 	//
 	// The gap inside a split number is as wide as the scanner made it: the run
 	// of exercises for chapter II § 2 comes out "20   7" for 207.
+	//
+	// The bracket is the 1989 Lie 1 to 3 scan, which sets a lining 1 with a
+	// serif at each end and reads it as a square bracket. It puts the run of
+	// exercises for chapter III § 7 at "39]" for 391, and the folio of printed
+	// 392 at "I]!".
 	bareTailRe = regexp.MustCompile(
-		leader + `\s*([0-9IlOgJ|]{1,3}(?:[\s\p{Pd}]+[0-9IlOgJ|]{1,3})?)\s*[.,\-\p{Pd}']?\s*$`)
+		leader + `\s*([0-9IlOgJ|\]]{1,3}(?:[\s\p{Pd}]+[0-9IlOgJ|\]]{1,3})?)\s*[.,\-\p{Pd}']?\s*$`)
 
 	// A label is taken off the line whole and cut in readLabel rather than by
 	// the regexp, because the scanners break a label in every place there is to
@@ -190,7 +204,7 @@ var (
 // has to sit in the range the page map already fixed for its chapter, and has
 // to keep the contents in order, or it is published as a problem.
 var (
-	digitFixer = strings.NewReplacer("I", "1", "l", "1", "|", "1", "J", "1", "O", "0", "g", "9", "S", "5")
+	digitFixer = strings.NewReplacer("I", "1", "l", "1", "|", "1", "J", "1", "]", "1", "O", "0", "g", "9", "S", "5")
 	// The N is two I's the scanner ran together: the 1987 Topological Vector
 	// Spaces scan sets the label of chapter II page 12 as "n.12". No roman
 	// numeral has an N in it, so nothing legitimate is being rewritten.
@@ -1191,6 +1205,17 @@ func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
 // taking whichever reads more. The counts are not close: a volume that prints
 // "IV.13" yields no bare tails at all, because a bare tail has to start with a
 // digit and the label starts with a letter.
+//
+// The mark is decided by a margin rather than by a majority, because the two
+// counts are not the same kind of evidence. A volume that marks its §§ with a
+// pilcrow prints one for every § and nothing else prints one, so a pilcrow is
+// proof; a line at the margin that starts with a number is a § only in the 2023
+// volumes and is otherwise a no. whose indent was lost. Reading a page image
+// loses that indent all the time, and the reading of the English Lie 1 to 3
+// puts twenty eight no. lines at the margin against twenty five pilcrows, which
+// under a majority took every one of its §§ apart and turned three chapters
+// into thirty seven. The volumes that really are set in columns print no
+// pilcrow at all, or one, so the margin costs them nothing.
 func Detect(pages []string) Grammar {
 	var bare, label, pilcrow, column int
 	for _, pg := range pages {
@@ -1216,7 +1241,7 @@ func Detect(pages []string) Grammar {
 	if label > bare {
 		g.Page = Label
 	}
-	if column > pilcrow {
+	if column > 2*pilcrow {
 		g.Mark = Column
 	}
 	return g
