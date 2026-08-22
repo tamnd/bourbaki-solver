@@ -510,6 +510,16 @@ func printedNumber(f corpus.PageFile) int {
 // one "## APPENDIX I", in the same volume off the same press, so the level and
 // the case are both left out of the reading and only the word and the numeral
 // are asked for.
+//
+// Nor is the name one word. Integration 7 to 9 calls its appendix an ANNEX
+// throughout, in the running head, over the opener and over the block of
+// exercises at the end of chapter IX, and the French volumes have ANNEXE beside
+// APPENDICE for the same reason. Both words are taken here so that the page can
+// keep the word it prints.
+// appendixWord is the words a volume of the Éléments heads an appendix with, as
+// an alternation for a pattern that is already case folded. See runMark.
+const appendixWord = `(?:appendi[xc]e?|annexe?)`
+
 func runMark(s corpus.Section) *regexp.Regexp {
 	if s.Appendix {
 		// A chapter with one appendix does not number it, and the page prints
@@ -518,9 +528,9 @@ func runMark(s corpus.Section) *regexp.Regexp {
 		// finds nothing on the page that carries it and the whole volume stops
 		// assembling on a page that is perfectly well read.
 		if s.Number == 0 {
-			return regexp.MustCompile(`(?i)^#{1,4} +appendi[xc]e?\.?$`)
+			return regexp.MustCompile(`(?i)^#{1,4} +` + appendixWord + `\.?$`)
 		}
-		return regexp.MustCompile(fmt.Sprintf(`(?i)^#{1,4} +appendi[xc]e? +(?:%d|%s)\.?$`,
+		return regexp.MustCompile(fmt.Sprintf(`(?i)^#{1,4} +`+appendixWord+` +(?:%d|%s)\.?$`,
 			s.Number, roman(s.Number)))
 	}
 	return regexp.MustCompile(fmt.Sprintf(`^(?:#{1,4} +)?§\s*(?:\*\*)?%d(?:\*\*)?\.?$`, s.Number))
