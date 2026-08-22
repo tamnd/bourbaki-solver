@@ -51,6 +51,7 @@ commands:
   notin     put the stroke back on a relation sign that came back struck through
   star      write the star that marks a forward-looking passage the corpus's way
   elision   write the apostrophe of a French elision the way the corpus sets it
+  smallcaps write the kind of a statement head in capitals, as the page sets it
   folio     move the printed page number off the foot and into the front matter
   heading   set a numbered heading at the level the table of contents gives it
   opening   put back the heading that opens a chapter or a §
@@ -340,6 +341,36 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixSmallCapsUsage = `usage: bourbaki fix smallcaps [flags]
+
+Writes the kind of a statement head in capitals, the way the English printings
+set it.
+
+DEFINITION, PROPOSITION, THEOREM and COROLLARY are set in small capitals in every
+English volume of the corpus and the corpus writes small capitals as capitals,
+which is what almost every page already does. A reading that gives back
+"Proposition 1." is looking at the same type and writing it as the nearest thing
+on a keyboard, the same fault as a straight apostrophe for a typographic one, and
+it happens page by page rather than volume by volume: pdf 154 of Lie 1 to 3 gives
+"Theorem 1." and pdf 155, the page facing it, gives "COROLLARY 1".
+
+It costs more than it looks. The assembler finds a statement by its head, so a
+head in the wrong case is not a statement at all: it goes out as prose, and a
+corollary printed under it has nothing to be numbered under, which stops the
+whole chapter. Chapter II of Lie 1 to 3 is held back by the one head above.
+
+Lemma, Remark, Example and Scholium are not touched. Lie 7 to 9 sets those four
+in italic and the assembler already reads them that way, so capitals there would
+be a printing no volume has. A head in bold is not touched either, since that is
+how Algebra VIII sets it. Neither is a head followed by a dash: the dash says the
+volume is Algebra VIII and the fault is the lost bold rather than the case, and
+capitals alone would leave the dash standing at the front of the body.
+
+flags:
+  -book ID   only this volume
+  -check     say what would change and change nothing
+`
+
 const fixHeadingUsage = `usage: bourbaki fix heading [flags]
 
 Sets a numbered heading at the level the table of contents gives it.
@@ -520,6 +551,8 @@ func runFix(args []string) error {
 		return fixStar(args[1:])
 	case "elision":
 		return fixElision(args[1:])
+	case "smallcaps":
+		return fixSmallCaps(args[1:])
 	case "folio":
 		return fixFolio(args[1:])
 	case "heading":
@@ -1553,6 +1586,62 @@ func fixElision(args []string) error {
 	}
 	if changed > 0 && !*check {
 		fmt.Println("fix elision: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+func fixSmallCaps(args []string) error {
+	fs := flag.NewFlagSet("fix smallcaps", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSmallCapsUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, heads, dashed int
+	for _, b := range books.Books {
+		if b.Lang != "en" || (*book != "" && b.ID != *book) {
+			continue
+		}
+		err = eachPage(root, books, b.ID, func(path string, f *corpus.PageFile) error {
+			pages++
+			body, n, over := typography.SmallCaps(f.Body)
+			dashed += over
+			if n == 0 || body == f.Body {
+				return nil
+			}
+			changed++
+			heads += n
+			if *check {
+				fmt.Printf("%s  %d\n", rel(root, path), n)
+				return nil
+			}
+			f.Body = body
+			f.Meta.Flags = withFlag(f.Meta.Flags, string(extract.FlagPlainHead))
+			return f.Write(path)
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	verb := "wrote"
+	if *check {
+		verb = "would write"
+	}
+	fmt.Printf("fix smallcaps: %d English pages read, %s %d heads in capitals on %d of them\n",
+		pages, verb, heads, changed)
+	if dashed > 0 {
+		fmt.Printf("fix smallcaps: %d heads are followed by a dash, where the fault is the lost bold and not the case, and stay as they are\n",
+			dashed)
+	}
+	if changed > 0 && !*check {
+		fmt.Println("fix smallcaps: run bourbaki assemble")
 	}
 	return nil
 }
