@@ -671,8 +671,14 @@ var wordRE = regexp.MustCompile(`\p{L}{2,}`)
 // heading's attribute block goes, since the identifier and the class are markup
 // the translator is told to copy. What is left is the prose, and a passage with
 // no word in it has none.
+// A name written hard against a formula goes out with the formula. Chunk 23 of
+// § 17 of Algebra VIII is eight numbered displays of the reduced norm and trace
+// and nothing else, and every word in it is Pcrd, Trd or Nrd. Its translation
+// is itself. Every model asked handed it back unchanged, which is right, and
+// the rule below refused it as the English unchanged, six times over two days,
+// and killed the file at 50 chunks of 51 answered.
 func hasProse(body string) bool {
-	return wordRE.MatchString(prose(body))
+	return wordRE.MatchString(proseText(body, true))
 }
 
 // The answer has to be in the language that was asked for.

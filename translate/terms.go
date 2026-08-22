@@ -115,7 +115,44 @@ func asPrinted(en, tr string) string {
 // printed, so the English words in the title of a book are not English left in
 // the answer. Seven terms of chunk 30 of the historical note were that, and the
 // chunk was refused over them every time it was asked for.
-func prose(body string) string {
+func prose(body string) string { return proseText(body, false) }
+
+// weldedRE is a formula together with the name written hard against it, on
+// either side and with no space between.
+//
+// A functor is set upright and the extraction leaves the upright part outside
+// the dollars, so the corpus writes End$(E)$, Aut$(V)$, Hom$(E,F)$, and in § 17
+// of Algebra VIII the reduced norm and trace as Nrd$_{A/K}(a)$, Trd$_{A/K}(a)$
+// and Pcrd$_{A/K}(a;X)$. Counted over the English corpus that shape occurs 2165
+// times in 155 distinct names, and reading down the list by frequency they are
+// operators the whole way: End, Aut, Hom, ad, dim, Tr, Id, exp, Ind, pr, Nrd,
+// Pc, Trd, Res, Coind, Ker, Int, Pcrd, Alt. The two that read as ordinary words
+// are not: long is the length function long$_A$ of § 11, and the one weld of
+// Algebra is inside a citation, which stands as printed for its own reason.
+//
+// The span has to hold something, and that is what keeps a display safe. A
+// display fenced on its own lines never reaches here, because the loop takes
+// those lines out first. A display written inline does reach here, and with the
+// span allowed to be empty the two opening dollars of
+//
+//	$$\neg 0 = 1, \qquad \neg 1 = 0,$$
+//
+// are themselves a match, so the opener is eaten, the rest no longer parses as
+// mathematics, and neg and qquad are read as prose. That is the wrong answer in
+// the direction that matters: it puts a display back into the prose and refuses
+// the one translation a display has. Two tests were already standing on that
+// and they caught this on the first run.
+var weldedRE = regexp.MustCompile(`\p{L}*\$[^$\n]+\$\p{L}*`)
+
+// proseText is prose, and with welded set it also drops those names.
+//
+// Only hasProse asks for that. The terminology rule reads the other form and
+// goes on seeing every word it saw before, because the question the two are
+// asking is not the same one: hasProse asks whether there is anything here to
+// translate, and a functor is not, while the terminology rule asks whether a
+// term that was translated was translated the agreed way, and it can afford to
+// look at a word that turns out not to be one.
+func proseText(body string, welded bool) string {
 	var b strings.Builder
 	inDisplay := false
 	for _, line := range strings.Split(body, "\n") {
@@ -126,7 +163,11 @@ func prose(body string) string {
 		if inDisplay || bibEntryRE.MatchString(line) {
 			continue
 		}
-		b.WriteString(mathtex.Strip(attrRE.ReplaceAllString(line, " ")))
+		line = attrRE.ReplaceAllString(line, " ")
+		if welded {
+			line = weldedRE.ReplaceAllString(line, " ")
+		}
+		b.WriteString(mathtex.Strip(line))
 		b.WriteString("\n")
 	}
 	return b.String()

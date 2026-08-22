@@ -548,6 +548,16 @@ func TestAPassageOfPureMathematicsMayComeBackUnchanged(t *testing.T) {
 		{"one containment", "$$A' \\times B' \\subset A \\times B.$$"},
 		{"a display written between fences", "$$\n(C'|y)(B|x)A\n$$"},
 		{"a part's name and its formula", "(a) $x \\in A$"},
+		// Chunk 23 of § 17 of Algebra VIII, as it stands in the corpus. The
+		// functor is set upright, so the extraction leaves its name outside the
+		// dollars, and the only words in the chunk are the names of the reduced
+		// norm and trace. It was asked for six times over two days and refused
+		// every time as the English unchanged, and it killed the file at 50
+		// chunks of 51 answered.
+		{"numbered displays whose only words are the functors",
+			"(34) Pcrd$_{A/K}(a;a) = 0$,\n\n" +
+				"(36) Trd$_{A/K}(a+a') =$ Trd$_{A/K}(a) +$ Trd$_{A/K}(a')$,\n\n" +
+				"(38) Nrd$_{A/K}(aa') =$ Nrd$_{A/K}(a)\\cdot$ Nrd$_{A/K}(a')$,"},
 	} {
 		if got := Audit("vi", c.body, c.body); len(got) > 0 {
 			t.Errorf("%s: Audit refused an answer identical to a passage with no prose in it: %v", c.name, got)
@@ -620,6 +630,10 @@ func TestAPassageWithProseInItIsNotItsOwnTranslation(t *testing.T) {
 		"The sources are listed below.\n\n1. N. BOURBAKI, *Théorie des ensembles*, Paris (Hermann), 1954.\n",
 		"Let A be a ring and E an A-module.\n",
 		"## BIBLIOGRAPHY\n",
+		// A functor written hard against its argument is not prose and goes out
+		// with the formula, and a sentence that has one in it is still a
+		// sentence. Taking the functors out must not take the rule out too.
+		"Let $E$ be a module and End$(E)$ its ring of endomorphisms.\n",
 	} {
 		if SelfTranslation("vi", body) {
 			t.Errorf("%q was copied instead of translated", body)

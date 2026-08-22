@@ -46,10 +46,31 @@ import (
 // than a decision. Vietnamese spells nothing that way.
 //
 // The rest of what the corpus sets upright inside a formula was counted at the
-// same time and left alone: resp. six times, Card five, otherwise, i.e., odd
-// and even once each, and quotation marks. Those stand as printed today in six
-// files that are translated and current, the rules accept them there, and
-// moving them would ask for those six files again for no reader's benefit.
+// same time. What is genuinely a name stays off: resp. six times, Card five,
+// i.e. once, and the quotation marks. Those stand as printed today in files
+// that are translated and current, the rules accept them there, and moving them
+// would ask for those files again for no reader's benefit.
+//
+// otherwise, odd and even were left off with them and have since been put on,
+// because leaving a word of prose off this list does not merely permit it to
+// stand in English, it requires it to. SameMath reads a run this list does not
+// know as a name and refuses any answer that changed it. So the one display in
+// § 21 of Algebra VIII that reads
+//
+//	\begin{cases} m & \text{if } s=s',\\ 0 & \text{otherwise.}\end{cases}
+//
+// had one arm the rules insisted be translated, since if is on the list, and
+// one arm they insisted be copied. No model is going to translate half of a
+// cases block, and none did: the chunk was asked six times over two days and
+// refused every time, three for translating otherwise and one for not
+// translating if, and it died and took the file with it at 100 chunks of 101
+// answered. odd and even are the same shape in exercise 9 of § 1 of Lie VIII,
+// not yet asked for and set to fail the same way.
+//
+// The cost of putting them on was measured rather than assumed, by reading
+// every \text run in the English corpus: otherwise appears once, odd and even
+// once each, and all three are in files that have no Vietnamese yet. So nothing
+// current goes stale, which is the objection that kept them off.
 var english = map[string]bool{}
 
 func init() {
@@ -57,7 +78,7 @@ func init() {
 this which are has have let was were from but not all such where when whenever its they one on or
 thus hence therefore follows also only same each other into over under between because since
 while what who whose whom does did shall will would could might must been being had here now
-first second third these those`) {
+first second third these those otherwise odd even`) {
 		english[w] = true
 	}
 }
