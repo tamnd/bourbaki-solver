@@ -109,28 +109,33 @@ func (h Heading) Write(level int) string {
 // its first no. begin on the same page nine times out of ten and both are
 // numbered 1, so a lookup by number would call "### 1. SIGNS AND ASSEMBLIES" a §
 // on the strength of "§ 1. TERMS AND RELATIONS" being on that page. The titles
-// are what separate them, and they are matched the way toc.Verify matches them,
-// stripped to letters and digits, because the contents and the body are two
-// separate readings of two separate pieces of type.
+// are what separate them, and they are matched by flatten, because the contents
+// and the body are two separate readings of two separate pieces of type.
 //
 // A heading the contents gives as both is 0 rather than either. That cannot
 // happen in this corpus and it is not the business of a repair to decide it if
 // it ever does.
 func Level(b corpus.BookTOC, pdfPage, number int, title string) int {
-	want := normalize(title)
+	want := flatten(title)
+	if want == "" {
+		// Nothing left to agree on, so nothing to agree with. Two § of
+		// Integration VII to IX have an empty title in the contents and an
+		// empty title matches those two whatever page it is on.
+		return 0
+	}
 	section, subsection := false, false
 	for _, c := range b.Chapters {
 		for _, ss := range c.Subsections {
-			if ss.PDFPage == pdfPage && ss.Number == number && normalize(ss.Title) == want {
+			if ss.PDFPage == pdfPage && ss.Number == number && flatten(ss.Title) == want {
 				subsection = true
 			}
 		}
 		for _, s := range c.Sections {
-			if s.PDFPage == pdfPage && s.Number == number && normalize(s.Title) == want {
+			if s.PDFPage == pdfPage && s.Number == number && flatten(s.Title) == want {
 				section = true
 			}
 			for _, ss := range s.Subsections {
-				if ss.PDFPage == pdfPage && ss.Number == number && normalize(ss.Title) == want {
+				if ss.PDFPage == pdfPage && ss.Number == number && flatten(ss.Title) == want {
 					subsection = true
 				}
 			}
@@ -143,4 +148,43 @@ func Level(b corpus.BookTOC, pdfPage, number int, title string) int {
 		return 3
 	}
 	return 0
+}
+
+// controlWord is a TeX control word, the backslash and the letters after it.
+var controlWord = regexp.MustCompile(`\\[a-zA-Z]+`)
+
+// flatten reduces a title to what two readings of it can be expected to agree
+// on: its letters and digits, with the control words taken out first.
+//
+// normalize keeps only ASCII letters and digits, which is the right measure for
+// a heading set in type twice, once in the contents and once over the text. It
+// is not enough on its own for a title with mathematics in it, because the two
+// readings do not write the mathematics the same way. The contents is read as a
+// line of prose and comes out with the characters the page prints, so § 16 of
+// the French Algebra VIII has "Image inverse d'une τ -extension"; the body is
+// read as mathematics and comes out with TeX, "Image inverse d'une $ \tau
+// $-extension". normalize drops the τ, because it is not an ASCII letter, and
+// keeps the letters t, a and u out of the control word, so the two sides differ
+// by exactly that word and the heading is not found. Taking the control words
+// out first leaves both sides reading "extension" and they agree.
+//
+// Taking out the word and not the whole formula is the part that matters. The
+// contents does print the plain part of a formula: no. 10 of § 11 of Algebra
+// VIII is "Change of Rings for K0 (A)" there and "Change of Rings for $ K_0(A)
+// $" on the page, and those already agree once the dollars and the underscore
+// go, so a rule that dropped the formula would throw away the K, the 0 and the
+// A that are doing the work of telling that heading from its neighbours.
+//
+// Over the corpus this finds 62 more headings and loses none. The 112 control
+// words in them are of two kinds and both are safe to drop: markup the contents
+// does not print at all, \mathbf and \boldsymbol and \mathfrak and \mathscr and
+// \overline, 76 of the 112; or the name of a character the contents prints as
+// itself and normalize therefore drops anyway, \tau and \alpha and \Theta and
+// \infty and \geq and \times and \bigoplus. There is a third kind
+// this would be wrong for, an operator that sets its own name, \det or \log or
+// \ker, since the contents prints those letters and the page would now be
+// missing them. The corpus has none in a heading. If one ever turns up the cost
+// is that its heading is not found, which is where it stands today.
+func flatten(s string) string {
+	return normalize(controlWord.ReplaceAllString(s, " "))
 }
