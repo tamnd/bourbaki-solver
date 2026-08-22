@@ -55,10 +55,12 @@ flags for fill and run:
   -reread-protected
                  read over pages that claude or gpt-5 already read. Those stand
                  by default even when the prompt or the render moved under them,
-                 because a weaker reader writing over them has cost the corpus
-                 real mathematics twice. Ask for this after a prompt change made
-                 because the old readings were wrong, or after a deliberate
-                 re-render at a higher resolution, and not otherwise
+                 and now also when they fail the rules and no host in the run
+                 reads better than whoever wrote them, because a weaker reader
+                 writing over them has cost the corpus real mathematics three
+                 times. Ask for this after a prompt change made because the old
+                 readings were wrong, or after a deliberate re-render at a
+                 higher resolution, and not otherwise
   -dry           say what would be read and stop
 
 flags for check:

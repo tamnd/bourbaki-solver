@@ -49,7 +49,7 @@ func TestAPromptChangeDoesNotThrowAwayAStrongerReading(t *testing.T) {
 	for _, model := range []string{"claude-opus", "gpt-5", "gpt-4o", "o3-mini"} {
 		t.Run(model, func(t *testing.T) {
 			r, source := write(t, model, "old-prompt", "same-image")
-			if !r.accepted(source, "new-prompt") {
+			if r.state(source, "new-prompt") != alreadyRead {
 				t.Error("the page went back into the queue and the card would read over it")
 			}
 		})
@@ -62,7 +62,7 @@ func TestAPromptChangeStillRereadsALocalReading(t *testing.T) {
 	for _, model := range []string{"olmOCR-2-7B-1025-FP8", "MinerU2.5-2509-1.2B", ""} {
 		t.Run(model, func(t *testing.T) {
 			r, source := write(t, model, "old-prompt", "same-image")
-			if r.accepted(source, "new-prompt") {
+			if r.state(source, "new-prompt") != unread {
 				t.Error("a stale local reading was kept and the new prompt never ran")
 			}
 		})
@@ -73,7 +73,7 @@ func TestAPromptChangeStillRereadsALocalReading(t *testing.T) {
 // the behaviour that was there before the guard and has to stay.
 func TestAnUnchangedPageIsStillAccepted(t *testing.T) {
 	r, source := write(t, "olmOCR-2-7B-1025-FP8", "same-prompt", "same-image")
-	if !r.accepted(source, "same-prompt") {
+	if r.state(source, "same-prompt") != alreadyRead {
 		t.Error("a page that nothing changed about was queued again")
 	}
 }
@@ -88,7 +88,7 @@ func TestAnUnchangedPageIsStillAccepted(t *testing.T) {
 func TestAFreshRenderDoesNotThrowAwayAStrongerReading(t *testing.T) {
 	r, source := write(t, "claude-opus", "same-prompt", "the-old-render")
 	source.SHA256 = "the-new-render"
-	if !r.accepted(source, "same-prompt") {
+	if r.state(source, "same-prompt") != alreadyRead {
 		t.Error("a re-render sent a stronger reading back to the card")
 	}
 }
@@ -98,7 +98,7 @@ func TestAFreshRenderDoesNotThrowAwayAStrongerReading(t *testing.T) {
 func TestANewRenderAndANewPromptTogetherAreStillGuarded(t *testing.T) {
 	r, source := write(t, "gpt-5", "old-prompt", "the-old-render")
 	source.SHA256 = "the-new-render"
-	if !r.accepted(source, "new-prompt") {
+	if r.state(source, "new-prompt") != alreadyRead {
 		t.Error("two changed inputs got past a guard that either one alone would hit")
 	}
 }
@@ -108,7 +108,7 @@ func TestANewRenderAndANewPromptTogetherAreStillGuarded(t *testing.T) {
 func TestAFreshRenderStillRereadsALocalReading(t *testing.T) {
 	r, source := write(t, "olmOCR-2-7B-1025-FP8", "same-prompt", "the-old-render")
 	source.SHA256 = "the-new-render"
-	if r.accepted(source, "same-prompt") {
+	if r.state(source, "same-prompt") != unread {
 		t.Error("a local reading of an image that is gone was kept")
 	}
 }
@@ -119,26 +119,88 @@ func TestRereadProtectedAlsoCoversAReRender(t *testing.T) {
 	r, source := write(t, "claude-opus", "same-prompt", "the-300-dpi-image")
 	source.SHA256 = "the-600-dpi-image"
 	r.RereadProtected = true
-	if r.accepted(source, "same-prompt") {
+	if r.state(source, "same-prompt") != unread {
 		t.Error("the guard held on a re-render with RereadProtected set")
 	}
 }
 
-// The rules are still the last word. A protected reading that does not pass
-// them is work still to do, exactly as an unprotected one is, because the point
-// of the rules is that written is not the same as read.
-func TestAProtectedReadingStillHasToPassTheRules(t *testing.T) {
+// rejected puts a reading on disk that the rules will not pass, so that what
+// these tests turn on is who reads it next.
+func rejected(t *testing.T, model string) (string, Source) {
+	t.Helper()
 	root := t.TempDir()
 	if err := (corpus.PageFile{Meta: corpus.PageFrontMatter{
 		Book: "ens-i-iv", PDFPage: 116, Method: corpus.MethodOCR,
-		RunningHead: "DISTRIBUTIVITY FORMULAE", Model: "claude-opus",
+		RunningHead: "DISTRIBUTIVITY FORMULAE", Model: model,
 		PromptSHA256: "old-prompt", InputSHA256: "same-image", Lines: 1,
 	}, Body: "short"}).Write(corpus.PagePath(root, "ens-i-iv", 116)); err != nil {
 		t.Fatal(err)
 	}
-	r := &Runner{Book: "ens-i-iv", Root: root}
-	if r.accepted(Source{Page: 116, SHA256: "same-image"}, "new-prompt") {
-		t.Error("a reading that fails the rules was kept because of who wrote it")
+	return root, Source{Page: 116, SHA256: "same-image"}
+}
+
+// The rules are still the last word for a run that can do something about
+// them. A protected reading that does not pass them is work still to do,
+// exactly as an unprotected one is, because the point of the rules is that
+// written is not the same as read.
+func TestAProtectedReadingStillHasToPassTheRules(t *testing.T) {
+	root, source := rejected(t, "claude-opus")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5"}
+	if r.state(source, "new-prompt") != unread {
+		t.Error("a reading that fails the rules was kept from a reader that could improve it")
+	}
+}
+
+// The 142 pages. A run holding only the local card found a rejected page that
+// claude-opus had read, queued it because it was rejected, and wrote olmOCR
+// over the top. The page is still work and this run is still not the one to do
+// it.
+func TestARejectedReadingIsLeftToAReaderThatCanBeatIt(t *testing.T) {
+	for _, model := range []string{"claude-opus", "gpt-5", "gpt-4o", "o3-mini"} {
+		t.Run(model, func(t *testing.T) {
+			root, source := rejected(t, model)
+			r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+				Hosts: []Host{{Name: "gamingpc", Model: "olmOCR-2-7B-1025-FP8"}}}
+			if r.state(source, "new-prompt") != needsABetterReader {
+				t.Error("the card was sent a page it could only make worse")
+			}
+		})
+	}
+}
+
+// One protected host in the run is enough to queue the page, because the run
+// has somebody who can beat the reading on it. Which of the two hosts actually
+// picks it up is not decided here, and that is the gap the guard still has.
+func TestOneProtectedHostIsEnoughToQueueARejectedPage(t *testing.T) {
+	root, source := rejected(t, "claude-opus")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+		Hosts: []Host{{Name: "gamingpc", Model: "olmOCR-2-7B-1025-FP8"}, {Name: "server3"}}}
+	if r.state(source, "new-prompt") != unread {
+		t.Error("a run holding a protected host walked away from a page it could have read")
+	}
+}
+
+// A rejected local reading is work for anybody, which is the behaviour that was
+// there before and has to stay: the guard is about not going backwards, not
+// about leaving weak readings alone.
+func TestARejectedLocalReadingIsStillReadAgain(t *testing.T) {
+	root, source := rejected(t, "olmOCR-2-7B-1025-FP8")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+		Hosts: []Host{{Name: "gamingpc", Model: "olmOCR-2-7B-1025-FP8"}}}
+	if r.state(source, "new-prompt") != unread {
+		t.Error("a weak reading was left alone by a run that could redo it")
+	}
+}
+
+// RereadProtected reaches this guard too, since it is the operator saying the
+// old readings are the thing that is wrong.
+func TestRereadProtectedAlsoQueuesARejectedProtectedReading(t *testing.T) {
+	root, source := rejected(t, "claude-opus")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+		Hosts:           []Host{{Name: "gamingpc", Model: "olmOCR-2-7B-1025-FP8"}},
+		RereadProtected: true}
+	if r.state(source, "new-prompt") != unread {
+		t.Error("the guard held with RereadProtected set")
 	}
 }
 
@@ -147,7 +209,7 @@ func TestAProtectedReadingStillHasToPassTheRules(t *testing.T) {
 func TestRereadProtectedTurnsTheGuardOff(t *testing.T) {
 	r, source := write(t, "claude-opus", "old-prompt", "same-image")
 	r.RereadProtected = true
-	if r.accepted(source, "new-prompt") {
+	if r.state(source, "new-prompt") != unread {
 		t.Error("the guard held with RereadProtected set")
 	}
 }
