@@ -194,3 +194,154 @@ func TestALineWithNoLostHeadingInItIsNotOne(t *testing.T) {
 		}
 	}
 }
+
+// The contents and the body write the mathematics in a title two different
+// ways, and the difference is enough to hide a heading. § 16 of the French
+// Algebra VIII is the case: the contents reads the tau as the character the
+// page prints and the body reads it as TeX, so the body carries the letters t,
+// a and u that the contents does not, and no. 2 and no. 4 of that § stayed
+// paragraphs while their nine neighbours were found. flatten takes the control
+// word out of both sides and they agree.
+func TestAGreekLetterWrittenTwoWaysIsTheSameHeading(t *testing.T) {
+	b := corpus.BookTOC{ID: "alg-viii-fr", Chapters: []corpus.Chapter{{
+		Numeral: "VIII",
+		Sections: []corpus.Section{{
+			Number: 16, Title: "Autres descriptions du groupe de Brauer", PDFPage: 284,
+			Subsections: []corpus.Subsection{
+				{Number: 1, Title: "τ -extensions de groupes", PDFPage: 284},
+				{Number: 2, Title: "Image inverse d’une τ -extension", PDFPage: 286},
+				{Number: 4, Title: "Loi de groupe sur les classes de τ -extensions", PDFPage: 292},
+			},
+		}},
+	}}}
+	for _, c := range []struct {
+		page int
+		line string
+	}{
+		{286, "2. Image inverse d’une $ \\tau $-extension"},
+		{292, "4. Loi de groupe sur les classes de $ \\tau $-extensions"},
+	} {
+		h, ok := ParseLostHeading(c.line)
+		if !ok {
+			t.Fatalf("%q was not taken apart", c.line)
+		}
+		if got := Level(b, c.page, h.Number, h.Title); got != 3 {
+			t.Errorf("Level(%q) = %d, want 3", c.line, got)
+		}
+	}
+}
+
+// The same fault with markup rather than a character. The body sets the reals
+// in bold and the contents prints a plain R, and eleven no. of Topology I to IV
+// are written this way.
+func TestMarkupInATitleIsNotPartOfIt(t *testing.T) {
+	b := corpus.BookTOC{ID: "top-i-iv", Chapters: []corpus.Chapter{{
+		Numeral: "IV",
+		Sections: []corpus.Section{{
+			Number: 2, Title: "Topology of the rational line", PDFPage: 341,
+			Subsections: []corpus.Subsection{
+				{Number: 2, Title: "Compact subsets of R", PDFPage: 341},
+				{Number: 3, Title: "Least upper bound of a subset of R", PDFPage: 341},
+			},
+		}},
+	}}}
+	for _, line := range []string{
+		"2. COMPACT SUBSETS OF $ \\mathbf{R} $",
+		"3. LEAST UPPER BOUND OF A SUBSET OF $ \\mathbf{R} $",
+	} {
+		h, ok := ParseLostHeading(line)
+		if !ok {
+			t.Fatalf("%q was not taken apart", line)
+		}
+		if got := Level(b, 341, h.Number, h.Title); got != 3 {
+			t.Errorf("Level(%q) = %d, want 3", line, got)
+		}
+	}
+}
+
+// Dropping the control words and not the whole formula is what keeps no. 10 of
+// § 11 of Algebra VIII apart from its neighbours, since the contents prints the
+// plain part of the formula and that is most of what the title says.
+func TestThePlainPartOfAFormulaIsPartOfTheTitle(t *testing.T) {
+	b := corpus.BookTOC{ID: "alg-viii", Chapters: []corpus.Chapter{{
+		Numeral: "VIII",
+		Sections: []corpus.Section{{
+			Number: 11, Title: "K-theory", PDFPage: 200,
+			Subsections: []corpus.Subsection{
+				{Number: 10, Title: "Change of Rings for K0 (A)", PDFPage: 218},
+				{Number: 11, Title: "Change of Rings for K1 (A)", PDFPage: 219},
+			},
+		}},
+	}}}
+	if got := Level(b, 218, 10, "Change of Rings for $ K_0(A) $"); got != 3 {
+		t.Errorf("Level = %d, want 3", got)
+	}
+	if got := Level(b, 219, 10, "Change of Rings for $ K_0(A) $"); got != 0 {
+		t.Errorf("Level on the wrong page = %d, want 0", got)
+	}
+	if got := Level(b, 218, 10, "Change of Rings for $ K_1(A) $"); got != 0 {
+		t.Errorf("the neighbouring title = %d, want 0, the two differ by a digit", got)
+	}
+}
+
+// A title with nothing left in it agrees with everything, so it agrees with
+// nothing. Two § of Integration VII to IX have an empty title in the contents.
+func TestATitleThatFlattensToNothingMatchesNothing(t *testing.T) {
+	b := corpus.BookTOC{ID: "int-vii-ix", Chapters: []corpus.Chapter{{
+		Numeral:  "VII",
+		Sections: []corpus.Section{{Number: 1, Title: "", PDFPage: 12}},
+	}}}
+	if got := Level(b, 12, 1, "$ \\alpha $"); got != 0 {
+		t.Errorf("Level = %d, want 0", got)
+	}
+}
+
+// A no. the book sets as supplementary carries an asterisk in front of its
+// number. Extraction writes it escaped and six lines of the corpus write it
+// bare, and no. 13 of § 21 of the French Algebra VIII is one of them. It is
+// read either way and written back escaped, since the escaped form is the one
+// the assembler reads.
+func TestABareAsteriskIsTheSupplementaryMark(t *testing.T) {
+	b := corpus.BookTOC{ID: "alg-viii-fr", Chapters: []corpus.Chapter{{
+		Numeral: "VIII",
+		Sections: []corpus.Section{{
+			Number: 21, Title: "Représentations linéaires des groupes finis", PDFPage: 389,
+			Subsections: []corpus.Subsection{
+				{Number: 13, Title: "Représentations linéaires complexes", PDFPage: 413},
+			},
+		}},
+	}}}
+	h, ok := ParseLostHeading("*13. Représentations linéaires complexes")
+	if !ok {
+		t.Fatal("the line was not taken apart")
+	}
+	if got := Level(b, 413, h.Number, h.Title); got != 3 {
+		t.Fatalf("Level = %d, want 3", got)
+	}
+	want := `### \*13. Représentations linéaires complexes`
+	if got := h.Write(3); got != want {
+		t.Errorf("Write(3) = %q, want %q", got, want)
+	}
+}
+
+// The other two of the six are exercise statements, and nothing here decides
+// they are headings. The contents refuses them the way it refuses a numbered
+// paragraph.
+func TestAStarredExerciseIsNotPromoted(t *testing.T) {
+	b := corpus.BookTOC{ID: "ens-i-iv", Chapters: []corpus.Chapter{{
+		Numeral: "III",
+		Sections: []corpus.Section{{
+			Number: 1, Title: "Order relations", PDFPage: 134,
+			Subsections: []corpus.Subsection{
+				{Number: 3, Title: "Increasing mappings", PDFPage: 134},
+			},
+		}},
+	}}}
+	h, ok := ParseLostHeading(`*3. Let $(\mathrm{X}_i)_{1 \leqslant i \leqslant n}$ be a finite family of sets. For each subset H of the index set $[1, n]$ let`)
+	if !ok {
+		t.Fatal("the line was not taken apart")
+	}
+	if got := Level(b, 134, h.Number, h.Title); got != 0 {
+		t.Errorf("Level = %d, want 0", got)
+	}
+}
