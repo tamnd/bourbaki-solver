@@ -1047,7 +1047,7 @@ func fixOpening(args []string) error {
 		return err
 	}
 
-	var chapters, sections, unread, lost, differ int
+	var chapters, sections, numbers, unread, lost, differ int
 	for _, b := range books.Books {
 		if *book != "" && b.ID != *book {
 			continue
@@ -1061,6 +1061,10 @@ func fixOpening(args []string) error {
 		// a page in most chapters and the two repairs would otherwise write
 		// over each other.
 		edits := map[int][]string{}
+		// A page whose heading was filed as its running head has both put
+		// right, so the running head the page really prints is kept here
+		// beside the body it belongs to.
+		heads := map[int]string{}
 		read := func(pdfPage int) ([]string, bool) {
 			if lines, ok := edits[pdfPage]; ok {
 				return lines, true
@@ -1100,10 +1104,7 @@ func fixOpening(args []string) error {
 					continue
 				}
 				lines, ok := read(s.PDFPage)
-				if !ok || slices.ContainsFunc(lines, func(l string) bool {
-					return strings.HasPrefix(l, fmt.Sprintf("## § %d.", s.Number)) ||
-						strings.HasPrefix(l, fmt.Sprintf("## %d.", s.Number))
-				}) {
+				if !ok || toc.Numbered(lines, 2, s.Number) {
 					continue
 				}
 				from, to, head, done := toc.SectionOpening(lines, s.Number, s.Title)
@@ -1126,6 +1127,49 @@ func fixOpening(args []string) error {
 					fmt.Printf("%s/%04d.md  %s\n", b.ID, s.PDFPage, head)
 				}
 			}
+			// The no. come after the § and not with them, because the first
+			// no. of a § is on the same page as the § and often under the same
+			// words, and the § has to be a heading before the no. is looked
+			// for or the repair has two lines it cannot tell apart.
+			for _, s := range ch.Sections {
+				for _, ss := range s.Subsections {
+					if ss.PDFPage == 0 {
+						continue
+					}
+					lines, ok := read(ss.PDFPage)
+					if !ok || toc.Numbered(lines, 3, ss.Number) {
+						continue
+					}
+					from, to, head, done := toc.NumberOpening(lines, ss.Number, ss.Title)
+					switch {
+					case done:
+						lines = append(lines[:from], append([]string{head}, lines[to+1:]...)...)
+					default:
+						// The heading may be in the front matter rather than
+						// in the body, filed as the running head of the page.
+						// That is still a line the reading produced.
+						rh, run, ok := toc.RunningHeadOpening(runningHead(root, b.ID, ss.PDFPage), ss.Number, ss.Title)
+						if !ok {
+							lost++
+							fmt.Printf("%s chapter %s § %d no. %d: pdf page %d has no line the contents can read as its heading\n",
+								b.ID, ch.Numeral, s.Number, ss.Number, ss.PDFPage)
+							continue
+						}
+						head = rh
+						heads[ss.PDFPage] = run
+						i := 0
+						for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+							i++
+						}
+						lines = append(lines[:i], append([]string{head, ""}, lines[i:]...)...)
+					}
+					edits[ss.PDFPage] = lines
+					numbers++
+					if *check {
+						fmt.Printf("%s/%04d.md  %s\n", b.ID, ss.PDFPage, head)
+					}
+				}
+			}
 		}
 		if *check {
 			continue
@@ -1141,6 +1185,9 @@ func fixOpening(args []string) error {
 			// since the number and the title are set on lines of their own,
 			// and lines records how long the page is.
 			f.Meta.Lines = len(strings.Split(strings.TrimSpace(f.Body), "\n"))
+			if run, ok := heads[pdfPage]; ok {
+				f.Meta.RunningHead = run
+			}
 			if err := f.Write(path); err != nil {
 				return err
 			}
@@ -1151,7 +1198,8 @@ func fixOpening(args []string) error {
 	if *check {
 		verb = "would put back"
 	}
-	fmt.Printf("fix opening: %s %d chapter openings and %d § openings\n", verb, chapters, sections)
+	fmt.Printf("fix opening: %s %d chapter openings, %d § openings and %d no. openings\n",
+		verb, chapters, sections, numbers)
 	if lost > 0 {
 		fmt.Printf("fix opening: %s not on the page at all and need the page image read again\n", openings(lost))
 	}
@@ -1161,7 +1209,7 @@ func fixOpening(args []string) error {
 	if unread > 0 {
 		fmt.Printf("fix opening: %s on a page that has not been read\n", openings(unread))
 	}
-	if chapters+sections > 0 && !*check {
+	if chapters+sections+numbers > 0 && !*check {
 		fmt.Println("fix opening: run bourbaki assemble")
 	}
 	return nil
@@ -1858,6 +1906,17 @@ func mustRel(base, path string) string {
 		return path
 	}
 	return rest
+}
+
+// runningHead is what a page file records as the running head of the page, and
+// the empty string where the page is not there. fixOpening reads the body of a
+// page through read and this is the one thing it wants out of the front matter.
+func runningHead(root, book string, pdfPage int) string {
+	f, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, book, pdfPage))
+	if err != nil {
+		return ""
+	}
+	return f.Meta.RunningHead
 }
 
 // openings counts openings and agrees with itself about the verb, since these
