@@ -255,20 +255,30 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 		// run that gets the numbers. This is counted before the walk rather than
 		// decided as each head is passed, because the first head cannot know
 		// whether another one follows it in the same no.
-		if pr.runHead != nil {
-			if k := pr.runHead.FindStringSubmatch(b.text); k != nil {
-				kind, ok := corpus.KindFromHeading(k[1])
-				if !ok {
-					return fmt.Errorf("nothing in the corpus is called a %q", k[1])
-				}
-				key := corpus.Ref{Book: id.Book, Chapter: id.Chapter, Section: id.Section,
-					Kind: kind, Subsec: no}
-				seen[key]++
-				if seen[key] < runs[key] {
-					next = 0 // an earlier run of the kind, so its members are not numbered
-				} else {
-					run, next = key, 1
-				}
+		// A lead sets the same run the other way, with its first member on the
+		// line, so the block is a statement and goes on to statementAt like any
+		// other. All that is taken here is the same decision about which of two
+		// runs is the one that carries the numbering, and an earlier one is passed
+		// through as prose with its members left unnumbered under it, exactly as a
+		// head's are. § 1 of chapter I of Topology I to IV is the case: no. 3
+		// prints "Examples. 1)" twice on page 27, once for fundamental systems of
+		// neighbourhoods and once for bases, and read without this both runs
+		// number from 1 and the § has two statements called Example 1.
+		if k, carries := runOpen(b.text, pr); k != nil {
+			kind, ok := corpus.KindFromHeading(k[1])
+			if !ok {
+				return fmt.Errorf("nothing in the corpus is called a %q", k[1])
+			}
+			key := corpus.Ref{Book: id.Book, Chapter: id.Chapter, Section: id.Section,
+				Kind: kind, Subsec: no}
+			seen[key]++
+			earlier := seen[key] < runs[key]
+			if earlier {
+				next = 0 // an earlier run of the kind, so its members are not numbered
+			} else if !carries {
+				run, next = key, 1
+			}
+			if earlier || !carries {
 				if err := f(b, corpus.Ref{}, "", "", false); err != nil {
 					return err
 				}
@@ -377,7 +387,7 @@ func resumed(text string, id corpus.Ref, pr printing, passed map[corpus.Ref]bool
 // has no head of this sort, which is all of them but Theory of Sets.
 func runCount(blocks []block, id corpus.Ref, pr printing) (map[corpus.Ref]int, error) {
 	out := map[corpus.Ref]int{}
-	if pr.runHead == nil {
+	if pr.runHead == nil && pr.runLead == nil {
 		return out, nil
 	}
 	no := 0
@@ -386,7 +396,7 @@ func runCount(blocks []block, id corpus.Ref, pr printing) (map[corpus.Ref]int, e
 			no, _ = strconv.Atoi(m[1])
 			continue
 		}
-		k := pr.runHead.FindStringSubmatch(b.text)
+		k, _ := runOpen(b.text, pr)
 		if k == nil {
 			continue
 		}
@@ -398,6 +408,24 @@ func runCount(blocks []block, id corpus.Ref, pr printing) (map[corpus.Ref]int, e
 			Kind: kind, Subsec: no}]++
 	}
 	return out, nil
+}
+
+// runOpen is the match where a block opens a run of statements, by either of the
+// two ways a printing sets one, and nil where it opens none. carries says which
+// of the two it is: a head carries no member and a lead carries the first. The
+// two cannot both match, since a head is the whole line.
+func runOpen(text string, pr printing) (k []string, carries bool) {
+	if pr.runHead != nil {
+		if k := pr.runHead.FindStringSubmatch(text); k != nil {
+			return k, false
+		}
+	}
+	if pr.runLead != nil {
+		if k := pr.runLead.FindStringSubmatch(text); k != nil {
+			return k, true
+		}
+	}
+	return nil, false
 }
 
 // numbers is every number the book gives a statement of the piece, by the kind

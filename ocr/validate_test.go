@@ -480,6 +480,84 @@ letters $x_1, \ldots, x_n$, and that no other relation holds for all of them.`
 	}
 }
 
+// top returns what the page map knows about a page of Topology I to IV, which
+// prints its number at the foot like Theory of Sets does.
+func top(page int) Expect {
+	return Expect{
+		Book: "top-i-iv", PDFPage: page + 6, Grammar: pagemap.FootNumber,
+		Chapter: "I", Page: page, Confidence: pagemap.FromFoot, HasHead: false,
+	}
+}
+
+// Page 44 of Topology I to IV, as the local reader returned it. Every word is
+// right and the mathematics balances. The printing sets PROPOSITION 1 and
+// COROLLARY 1 in small capitals with the statements in italic, and neither the
+// case nor the emphasis survived, so the assembler reads two paragraphs of prose
+// where the page has two statements. See checkStatementHead.
+func TestRule9AStatementHeadInPlainMixedCase(t *testing.T) {
+	page := `If $I$ is a finite set, the construction of the product topology from the
+topologies of the factors $X_\iota$ is simpler: the elementary sets are just
+products $\prod_{\iota \in I} A_\iota$, where $A_\iota$ is any open subset of
+$X_\iota$, for each $\iota \in I$ (cf. Exercise 9).
+
+Proposition 1. Let $f = (f_\iota)$ be a mapping of a topological space $Y$ into
+a product space $X = \prod_{\iota \in I} X_\iota$. Then $f$ is continuous at a
+point $a \in Y$ if and only if $f_\iota$ is continuous at $a$ for each $\iota$.
+
+Since $f_\iota = \mathrm{pr}_\iota \circ f$, this is just a particular case of
+Proposition 4 of § 2, no. 3.`
+	problems := Validate(page, top(44), Options{})
+	if !has(problems, RuleStatement) {
+		t.Fatalf("a lost statement head was accepted: %s", Reasons(problems))
+	}
+	for _, problem := range problems {
+		if problem.Rule == RuleStatement && problem.Line != 6 {
+			t.Errorf("the head is on line 6, the rule says line %d", problem.Line)
+		}
+	}
+}
+
+// The three shapes a printing of the corpus actually sets a statement head in,
+// none of which the rule may touch.
+func TestRule9TheHeadsThePrintingsSetAreAccepted(t *testing.T) {
+	for _, head := range []string{
+		"PROPOSITION 1. *Let $f$ be a mapping of a topological space $Y$ into $X$.*",
+		"**Proposition 1.** *Let $f$ be a mapping of a topological space $Y$ into $X$.*",
+		"PROPOSITION 12. — Soit $A$ un anneau et $M$ un $A$-module de type fini.",
+		"Proposition 12. — Soit $A$ un anneau et $M$ un $A$-module de type fini.",
+	} {
+		page := head + `
+
+Since $f_\iota = \mathrm{pr}_\iota \circ f$, this is just a particular case of
+Proposition 4 of § 2, no. 3, and the proof is the one given there for the
+product topology on a finite family of topological spaces $X_\iota$.`
+		if problems := Validate(page, top(44), Options{}); has(problems, RuleStatement) {
+			t.Errorf("%q was rejected: %s", head, Reasons(problems))
+		}
+	}
+}
+
+// The kinds a printing does set plain, which is why they are not in the rule.
+// Lie 7 to 9 prints "Lemma 1." unemphasised 101 times and Topology I to IV opens
+// a run with "Examples. 1)", and the assembler reads both as they stand.
+func TestRule9TheKindsSetPlainOnPurposeStand(t *testing.T) {
+	for _, head := range []string{
+		"Lemma 1. Every infinite set contains a countable subset, and the proof of",
+		"Remark 2. The topology induced on a subspace need not be discrete, since",
+		"Examples. 1) In a discrete space the set $\\{x\\}$ alone constitutes a",
+		"Scholium. The argument above uses the axiom of choice only through Zorn's",
+	} {
+		page := head + `
+
+fundamental system of neighbourhoods of the point $x$, and the same argument
+applies to any set which is open in the product topology on $\prod X_\iota$
+for each index $\iota$ of the finite set $I$ under consideration here.`
+		if problems := Validate(page, top(44), Options{}); has(problems, RuleStatement) {
+			t.Errorf("%q was rejected: %s", head, Reasons(problems))
+		}
+	}
+}
+
 // Rule 3 against the prompt the page was read with, which is the half of the
 // rule that pages 3 and 9 of Algebra IV to VII walked through.
 func TestRuleThreeCatchesThePromptHandedBack(t *testing.T) {

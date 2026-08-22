@@ -21,13 +21,13 @@ import (
 
 // The audit pass is for the pages that passed.
 //
-// The seven rules decide whether an answer is a transcription. They catch a
+// The nine rules decide whether an answer is a transcription. They catch a
 // model that gave up, one that narrated, one that left a formula open, and they
 // are the only thing standing between the fleet and 1194 pages of nonsense. What
 // they cannot catch is a page that is a transcription and is wrong in one
 // character, because there is nothing about it to notice.
 //
-// Page 51 of Algebra I was accepted by all seven and reads i in {1, n} where the
+// Page 51 of Algebra I was accepted by all of them and reads i in {1, n} where the
 // scan prints i in [1, n]. It was found by a person looking at the image next to
 // the text, which does not scale to 1194 pages.
 //

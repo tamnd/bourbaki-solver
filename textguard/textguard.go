@@ -390,7 +390,7 @@ const EchoLength = 40
 // since been rewritten. Searching for the prompt the model was actually given
 // needs no list and cannot go stale: pages 3 and 9 of Algebra IV to VII are in
 // the corpus today carrying every rule of prompt/ocr_bourbaki.md as their body,
-// having passed all seven rules, because the text is long, it is prose, it has
+// having passed all the rules of the day, because the text is long, it is prose,
 // no unbalanced mathematics in it and its first line reads like a running head.
 //
 // Whole lines, and not phrases inside a line. A page that quotes six words of an

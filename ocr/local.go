@@ -20,7 +20,7 @@ import (
 // CLI, and it reads a page in about fifteen seconds.
 //
 // So local is a host name like any other. Everything above it is unchanged: the
-// same queue, the same content addressed job ids, the same seven rules deciding
+// same queue, the same content addressed job ids, the same nine rules deciding
 // what is accepted, the same page files. What differs is only the transport,
 // and that is what the two types below are. A batch on a rented box is ssh and
 // rsync; a batch here is sh and cp, against the same directories under the same
