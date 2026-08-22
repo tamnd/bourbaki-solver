@@ -218,7 +218,7 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var added int
+	var added, waited int
 	for _, source := range sources {
 		if source.Blank {
 			continue
@@ -226,7 +226,11 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 		if _, ok := waiting[Target(r.Book, source.Page)]; ok {
 			continue
 		}
-		if r.accepted(source, promptSHA) {
+		switch r.state(source, promptSHA) {
+		case alreadyRead:
+			continue
+		case needsABetterReader:
+			waited++
 			continue
 		}
 		job := queue.New(queue.StageOCR, Target(r.Book, source.Page), source.SHA256, promptSHA)
@@ -238,39 +242,123 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 			added++
 		}
 	}
+	if waited > 0 {
+		r.logf("%d pages do not pass the rules and came off a stronger reader than this run has, left for that reader", waited)
+	}
 	return added, nil
 }
 
-// accepted says whether a page is already on disk, passing the rules, and
-// either read from this image with this prompt or read by a stronger model than
-// the one this run would use.
+// pageState is what Fill found on disk for one page.
+type pageState int
+
+const (
+	// unread is a page with no reading this run would accept, which is work to
+	// do and goes in the queue.
+	unread pageState = iota
+	// alreadyRead is a page read well enough at these inputs, which is left
+	// alone and is not work at all.
+	alreadyRead
+	// needsABetterReader is a page whose reading does not pass the rules and
+	// came off a reader stronger than any this run has. It is work to do and
+	// this run is not the one to do it.
+	needsABetterReader
+)
+
+// state says what is on disk for a page: nothing this run would accept, an
+// acceptable reading, or a reading that fails the rules and that this run would
+// only make worse.
 //
-// The last of those is not pedantry. Pages 50 and 53 of Algebra I have been
-// sitting in the corpus failing the math rule since the pilot, and no run would
-// touch them, because a file existed with the right hashes on it. Written is
-// not the same as read: the word for a page nobody would accept is rejected,
-// and a rejected page is work still to do.
-func (r *Runner) accepted(source Source, promptSHA string) bool {
+// The rules being the last word is not pedantry. Pages 50 and 53 of Algebra I
+// have been sitting in the corpus failing the math rule since the pilot, and no
+// run would touch them, because a file existed with the right hashes on it.
+// Written is not the same as read: the word for a page nobody would accept is
+// rejected, and a rejected page is work still to do.
+//
+// Whose work it is, is the part that was missing. A rejected page went back in
+// the queue whoever had read it, so a run holding only the local card read over
+// claude-opus and gpt-5 on 142 pages, 140 of them Theory of Sets. Page 223 is
+// the plain one: the stronger reading has "¶ 16." where the printing marks a
+// harder exercise, the weaker one has "§ 16.", and the assembler stops counting
+// the exercise there. Seventy exercise files went with it, some of them
+// carrying permanent tags. The old readings were rejected for real faults, a
+// loose prime here and a straight quote there, and every one of those faults is
+// smaller than what replaced them.
+//
+// So a page a stronger reader has already read is left for that reader. It is
+// still rejected and it is still work, it is just not work a weaker reader can
+// do. Fill counts them and says so, because a run that quietly skipped a
+// hundred pages reads like a run with nothing to do.
+//
+// The guard is on the run and not on the batch, so a run holding the card and a
+// protected host together still queues the page, and whichever of the two picks
+// it up writes it. That is the case to close next; it is not the case that cost
+// the 142, which were all read by runs holding the card alone.
+func (r *Runner) state(source Source, promptSHA string) pageState {
 	file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(r.Root, r.Book, source.Page))
 	if err != nil {
-		return false
+		return unread
 	}
 	if file.Meta.Method != corpus.MethodOCR {
-		return false
+		return unread
 	}
 	// Both inputs are compared, and both are behind the same guard. A page read
 	// from a different image or under a different prompt is a stale reading and
 	// is read again, unless a stronger reader wrote it, in which case it stands.
 	stale := file.Meta.InputSHA256 != source.SHA256 || file.Meta.PromptSHA256 != promptSHA
 	if stale && !r.keepReading(file.Meta.Model) {
-		return false
+		return unread
 	}
 	expect := Expect{Book: r.Book, PDFPage: source.Page}
 	if r.Expect != nil {
 		expect = r.Expect(source.Page)
 	}
 	text := textguard.Normalise(textguard.Strip(file.Body))
-	return len(Validate(text, expect, r.options())) == 0
+	if len(Validate(text, expect, r.options())) == 0 {
+		return alreadyRead
+	}
+	if r.outranked(file.Meta.Model) {
+		return needsABetterReader
+	}
+	return unread
+}
+
+// outranked says whether a reading came off a stronger reader than any this run
+// has, which is what makes a rejected page somebody else's work.
+//
+// RereadProtected is honoured here for the same reason it is honoured in
+// keepReading: it is how an operator says the old readings are the thing that
+// is wrong.
+func (r *Runner) outranked(model string) bool {
+	if r.RereadProtected {
+		return false
+	}
+	if !protectedModel(model) {
+		return false
+	}
+	for _, name := range r.readers() {
+		if protectedModel(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// readers is every model name a page this run reads could be stamped with.
+//
+// It goes through modelFor rather than reading Host.Model directly, because a
+// box driving a browser names no model of its own and falls back to the run's
+// default, and the fallback is as much this run's reader as the named one is. A
+// run with no hosts at all is the run a test builds, and its reader is the
+// default and nothing else.
+func (r *Runner) readers() []string {
+	if len(r.Hosts) == 0 {
+		return []string{r.Model}
+	}
+	out := make([]string, 0, len(r.Hosts))
+	for _, host := range r.Hosts {
+		out = append(out, r.modelFor(host))
+	}
+	return out
 }
 
 // Protected is the readers whose work a changed input does not throw away,
@@ -324,6 +412,11 @@ func (r *Runner) keepReading(model string) bool {
 	if r.RereadProtected {
 		return false
 	}
+	return protectedModel(model)
+}
+
+// protectedModel says whether a model name is one of the readers in Protected.
+func protectedModel(model string) bool {
 	model = strings.ToLower(strings.TrimSpace(model))
 	if model == "" {
 		return false
