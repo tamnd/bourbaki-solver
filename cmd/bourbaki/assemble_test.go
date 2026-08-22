@@ -370,6 +370,86 @@ func TestAssemblePartialCarriesASkippedChapterThroughTheManifests(t *testing.T) 
 	}
 }
 
+// A chapter can be read through and still not assemble, and until this it took
+// the whole volume down with it. Integration I to VI is the case that found it:
+// chapter I and chapter II are whole, chapter III is short one no. of what the
+// contents lists, and 487 pages of reading produced nothing at all because of
+// one heading.
+//
+// Here chapter IX is read through and the contents lists a no. its pages do not
+// carry. The full run has to stop on it, since a volume with all its pages in
+// and a chapter that will not assemble is a fault to fix. The partial run has to
+// write chapter VIII, name chapter IX with the reason, and leave chapter IX's
+// accounting exactly as the run that did assemble it left it.
+func TestAssemblePartialSkipsAChapterThatWillNotAssemble(t *testing.T) {
+	root := smallCorpus(t)
+	addUnreadChapter(t, root)
+	readChapterIX(t, root)
+	t.Setenv("BOURBAKI_CORPUS", root)
+
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := corpus.LoadSections(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, _ := before.Get("alg-viii")
+
+	// The contents grows a no. 2 that no page opens, which is what a heading the
+	// reading dropped looks like from here.
+	toc, err := corpus.LoadTOC(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bt, _ := toc.Get("alg-viii")
+	nt := *bt
+	nt.Chapters = append([]corpus.Chapter{}, bt.Chapters...)
+	ix := nt.Chapters[1]
+	ix.Sections = []corpus.Section{{
+		Number: 1, Title: "Sesquilinear Forms", Page: 5, PDFPage: 22,
+		Subsections: []corpus.Subsection{
+			{Number: 1, Title: "Sesquilinear Forms", Page: 5, PDFPage: 22},
+			{Number: 2, Title: "Quadratic Forms", Page: 6, PDFPage: 23},
+		},
+	}}
+	nt.Chapters[1] = ix
+	toc.Upsert(nt)
+	if err := toc.Save(root); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err == nil {
+		t.Fatal("a full run walked past a chapter that does not assemble")
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-partial", "-q"}); err != nil {
+		t.Fatalf("one chapter that will not assemble stopped the whole volume: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "content", "en", "alg", "VIII",
+		"01_s1_artinian_modules_and_noetherian_modules.md")); err != nil {
+		t.Errorf("chapter VIII was held back by chapter IX: %v", err)
+	}
+	after, err := corpus.LoadSections(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part, _ := after.Get("alg-viii")
+	if len(part.Chapters) != 2 {
+		t.Fatalf("the partial run left %+v, want both chapters", part.Chapters)
+	}
+	if !reflect.DeepEqual(part.Chapters[1], whole.Chapters[1]) {
+		t.Errorf("chapter IX was rewritten by a run that refused it:\ngot  %+v\nwant %+v",
+			part.Chapters[1], whole.Chapters[1])
+	}
+	// The files of the refused chapter are not swept either. They are what the
+	// last good run wrote and they are still right.
+	if _, err := os.Stat(filepath.Join(root, "content", "en", "alg", "IX",
+		"01_s1_sesquilinear_forms.md")); err != nil {
+		t.Errorf("the partial run swept the chapter it refused: %v", err)
+	}
+}
+
 // An erratum is written into a manifest and stamped into the assembled file, and
 // it has to survive the assembler being run again. Written into content/ by hand
 // it would not: content/ is a pure function of the pages and the next run wipes
