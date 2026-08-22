@@ -80,6 +80,92 @@ func TestLanesFollowWhatTheBoxCanCarry(t *testing.T) {
 	}
 }
 
+// thrashed is server3 as it stood on the twenty second, at a load average of
+// 51.4 across eight cores for a day and a half of somebody else's build. Six
+// times past the mark where a box is called stuck rather than busy.
+var thrashed = fleet.Facts{Name: "server3", Cores: 8, LoadX100: 5140, MemFreeMB: 5007,
+	DiskFreeMB: 187066, Xvfb: true, Rsync: true, Tool: "t"}
+
+// A question is not a page. What follows is the difference between the two,
+// and it is a measurement rather than an opinion: in that state server3
+// answered three questions in a row, in 1m48s, 2m25s and 4m10s, and healed
+// thirteen profiles, each of which is a browser launched and a page loaded.
+// The page image batch that failed on the same box in the same hour failed on
+// a Cloudflare interstitial on the address, which the load has nothing to do
+// with.
+func TestAThrashingBoxCanStillAnswerAQuestion(t *testing.T) {
+	if lanes, why := ocrLanes(route.Route{Concurrency: 4}, thrashed); lanes != 0 {
+		t.Fatalf("a page went to a thrashing box: %d lanes, %q", lanes, why)
+	}
+	lanes, why := askLanes(route.Route{Concurrency: 4}, thrashed)
+	if lanes != 1 {
+		t.Fatalf("lanes = %d, want 1: %s", lanes, why)
+	}
+	if why != "" {
+		t.Fatalf("a host that answers should not come with a reason: %s", why)
+	}
+}
+
+// One lane and not four. The box is being given a lane, not the machine it
+// does not have, and four questions at once on eight cores under somebody
+// else's build is how the pages came back blank in the first place.
+func TestAThrashingBoxGetsOneLaneAndNotItsRouteFilesFour(t *testing.T) {
+	for _, concurrency := range []int{1, 3, 4, 16} {
+		if lanes, _ := askLanes(route.Route{Concurrency: concurrency}, thrashed); lanes != 1 {
+			t.Errorf("a route asking for %d got %d lanes on a thrashing box, want 1", concurrency, lanes)
+		}
+	}
+}
+
+// Only the load is overturned. A box that is both thrashing and out of memory
+// is still refused, and refused for the memory, because a browser that is
+// killed by the OOM reaper halfway through answers nothing however patient the
+// caller is.
+func TestTheFloorStandsForAQuestionToo(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		facts fleet.Facts
+		why   string
+	}{
+		{"out of memory", fleet.Facts{Name: "server2", Cores: 6, LoadX100: 3577, MemFreeMB: 400,
+			DiskFreeMB: 83843, Xvfb: true, Rsync: true, Tool: "t"}, "400 MB free"},
+		{"out of disk", fleet.Facts{Name: "server2", Cores: 6, LoadX100: 3577, MemFreeMB: 10898,
+			DiskFreeMB: 0, Xvfb: true, Rsync: true, Tool: "t"}, "free on disk"},
+		{"no xvfb", fleet.Facts{Name: "x", Cores: 8, LoadX100: 5140, MemFreeMB: 16000,
+			DiskFreeMB: 187066, Rsync: true, Tool: "t"}, "xvfb"},
+		// The question goes over as a file, so rsync is not optional here
+		// either. See Ask.push.
+		{"no rsync", fleet.Facts{Name: "x", Cores: 8, LoadX100: 5140, MemFreeMB: 16000,
+			DiskFreeMB: 187066, Xvfb: true, Tool: "t"}, "rsync"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			lanes, why := askLanes(route.Route{Concurrency: 4}, test.facts)
+			if lanes != 0 {
+				t.Fatalf("lanes = %d, want none", lanes)
+			}
+			if !strings.Contains(why, test.why) {
+				t.Fatalf("reason = %q, want it to mention %q", why, test.why)
+			}
+		})
+	}
+}
+
+// A fleet that is behaving gets the same answer for both, which is the check
+// that this changed one thing and not two.
+func TestAQuietFleetIsUnchanged(t *testing.T) {
+	for _, facts := range []fleet.Facts{server3, server2, server1} {
+		for _, concurrency := range []int{0, 1, 3, 4, 16} {
+			asked := route.Route{Concurrency: concurrency}
+			want, wantWhy := ocrLanes(asked, facts)
+			got, gotWhy := askLanes(asked, facts)
+			if got != want || gotWhy != wantWhy {
+				t.Errorf("%s at %d: a question got %d (%q) and a page got %d (%q)",
+					facts.Name, concurrency, got, gotWhy, want, wantWhy)
+			}
+		}
+	}
+}
+
 // The cap only ever takes lanes away. A box with room for four that is asked
 // for three reads three, because the route file is also allowed to be the
 // cautious one.
