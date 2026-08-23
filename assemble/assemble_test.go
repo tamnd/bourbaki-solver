@@ -924,3 +924,30 @@ func TestPrintedNumber(t *testing.T) {
 		t.Errorf("a page that prints no number is %d, want 0", got)
 	}
 }
+
+func TestSameTitle(t *testing.T) {
+	same := []struct{ head, entry string }{
+		{" DUAL OF A FRÉCHET SPACE", "Dual of a Fréchet space"},
+		{" GEOMETRIC REPRESENTATION OF A COXETER GROUP", "The geometric representation of a Coxeter group"},
+		{" FORM ASSOCIATED TO A COXETER GROUP", "The form associated to a Coxeter group"},
+		{" The contragredient representation", "Contragredient representation"},
+		{" REPRÉSENTATION GÉOMÉTRIQUE D'UN GROUPE DE COXETER", "La représentation géométrique d'un groupe de Coxeter"},
+		{" REPRÉSENTATIONS LINÉAIRES", "Les représentations linéaires"},
+	}
+	for _, c := range same {
+		if !sameTitle(c.head, c.entry) {
+			t.Errorf("sameTitle(%q, %q) is false, want true", c.head, c.entry)
+		}
+	}
+	apart := []struct{ head, entry string }{
+		{" DUAL OF A FRECHET SPACE", "Dual of a Fréchet space"},
+		{" THEOREMS OF DENSITY", "Orems of density"},
+		{" REFLECTIONS", "Pseudo-reflections"},
+		{" A COXETER GROUP", "A Coxeter system"},
+	}
+	for _, c := range apart {
+		if sameTitle(c.head, c.entry) {
+			t.Errorf("sameTitle(%q, %q) is true, want false", c.head, c.entry)
+		}
+	}
+}

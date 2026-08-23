@@ -290,7 +290,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 			// with the title set under it. See titleUnder.
 			title = titleUnder(pages[s.PDFPage].Body, off)
 		}
-		if got, want := flat(title), flat(s.Title); got != want {
+		if !sameTitle(title, s.Title) {
 			return nil, nil, fmt.Errorf("chapter %s %s: pdf page %d titles it %q, the table of contents calls it %q",
 				ch.Numeral, name(s), s.PDFPage, title, s.Title)
 		}
@@ -663,6 +663,28 @@ func flat(s string) string {
 // texWord is the name of a TeX command, which is a word in the source and no
 // part of the title: \mathfrak sets the letters after it, it does not add an M.
 var texWord = regexp.MustCompile(`\\[a-zA-Z]+`)
+
+// sameTitle says whether a heading and a contents entry name the same piece.
+//
+// The two are compared on what flat leaves of them, and failing that on what is
+// left when each has dropped a leading article. Chapter V of Lie 4 to 6 heads
+// its fourth section "§ 4. GEOMETRIC REPRESENTATION OF A COXETER GROUP" and its
+// table of contents lists the same section as "The geometric representation of a
+// Coxeter group". Both are printed and neither is a misreading, so the article
+// is a matter of setting rather than of naming, the same way the capitals are.
+func sameTitle(head, entry string) bool {
+	if flat(head) == flat(entry) {
+		return true
+	}
+	return flat(leadArticle.ReplaceAllString(head, "")) ==
+		flat(leadArticle.ReplaceAllString(entry, ""))
+}
+
+// leadArticle is an article standing at the head of a title, in either of the
+// two languages the corpus holds. It is only ever dropped from both sides at
+// once, and only after the titles have already failed to agree as they stand,
+// so a title that really begins with one of these words is not shortened by it.
+var leadArticle = regexp.MustCompile(`^[\s*_]*(?i:the|an|a|les|le|la|l['’]|une|un)\b['’]?[\s*_]*`)
 
 // headingText is the heading line beginning at off.
 func headingText(body string, off int) string {
