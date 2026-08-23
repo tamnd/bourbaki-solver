@@ -288,6 +288,7 @@ func ocrRun(args []string) error {
 	// resolution. It is spelled out rather than implied by a re-render, because
 	// a re-render happens by accident whenever the images directory is swept.
 	reread := fs.Bool("reread-protected", false, "read over readings by a stronger model too")
+	salvage := fs.Bool("salvage", false, "on the last attempt, write a page whose only faults a fix pass can put right")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -337,7 +338,7 @@ func ocrRun(args []string) error {
 		Shell: ocr.LocalShell{Remote: fleet.SSH{Timeout: 2 * time.Minute}},
 		Copy:  ocr.LocalCopy{Remote: ocr.Rsync{Timeout: 30 * time.Minute}},
 		Batch: *batch, Limit: *limit, Keep: *keep,
-		First: *first, Last: *last, RereadProtected: *reread,
+		First: *first, Last: *last, RereadProtected: *reread, Salvage: *salvage,
 		Expect: state.expect, RetryDPI: render.RetryDPI,
 		Rerender: rerender(state),
 		Logf:     logf,

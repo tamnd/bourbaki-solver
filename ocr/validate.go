@@ -56,6 +56,44 @@ const (
 	RuleStatement Rule = "statement" // 9, a statement head came back in plain mixed case
 )
 
+// Salvageable says whether a page that failed only these rules is still a
+// transcription of the page it was read from.
+//
+// The nine rules do two different jobs and the difference only matters on the
+// last attempt. Four of them say the answer is not this page at all: it is too
+// short to be a page, it is a refusal or the prompt handed back, it is more
+// unreadable spots than a damaged scan accounts for, or its printed label
+// belongs to a different page than the one that was sent. Nothing can be done
+// with any of those and the right end for them is dead.
+//
+// The other five say the answer is this page with something wrong in the
+// Markdown. A statement head in mixed case is what fix smallcaps is for, an
+// unclosed dollar is what fix dollars and fix math are for, a first line that
+// does not read as a running head is what fix folio and fix heading are for, an
+// exercise set as a heading is a mark in the wrong place, and LaTeX that does
+// not compile is a fragment to mend. Throwing those away leaves a hole in the
+// corpus where a page of mathematics should be, and the hole is worse than the
+// fault: page 128 of Algebra I to III died on the statement rule and took
+// chapter I § 8 out of the assembly with it, and page 90 of Algebre commutative
+// chapitres 8 et 9 has burned twelve readings on one unclosed dollar.
+//
+// So on the last attempt a page that failed only these is written with the
+// fault in it and a flag saying so, which is what a raw corpus is for. Anything
+// in the first group, on its own or mixed in, still fails.
+func Salvageable(rules []Rule) bool {
+	if len(rules) == 0 {
+		return false
+	}
+	for _, rule := range rules {
+		switch rule {
+		case RuleStatement, RuleMath, RuleHead, RuleExercise, RuleLaTeX:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // Problem is one reason a page was not accepted.
 type Problem struct {
 	Rule   Rule

@@ -499,6 +499,15 @@ func hostOf(job Job) string {
 // the call site than a bare false.
 func (q *Queue) Fail(job Job, reason string) (State, error) { return q.Finish(job, false, reason) }
 
+// LastAttempt says whether failing this job now would kill it.
+//
+// A caller that wants to do something other than give up on a page it cannot
+// read has to know that before it calls Fail, because Fail has already moved
+// the job by the time it returns the state. The ocr runner uses it to decide
+// whether to write a page with a fault in it rather than leave the corpus with
+// a hole where the page should be.
+func (q *Queue) LastAttempt(job Job) bool { return job.Attempts >= q.maxAttempts() }
+
 // Release hands a leased job back without spending the attempt.
 //
 // Fail is for a page that was read and came back wrong. This is for a batch

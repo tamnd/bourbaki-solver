@@ -41,6 +41,19 @@ flags for fill and run:
   -queue PATH    queue directory
   -keep          leave the page images on the hosts, for debugging
   -no-repair     reject a failed page instead of asking about it in its thread
+  -salvage       on the attempt that would kill a page, write it anyway when the
+                 only things wrong with it are things a fix pass can put right.
+                 Five of the nine rules are like that: a statement head in mixed
+                 case is what fix smallcaps is for, an unclosed dollar is what
+                 fix dollars is for, a first line that does not read as a running
+                 head is what fix folio and fix heading are for, an exercise set
+                 as a heading is a mark in the wrong place, and LaTeX that does
+                 not compile is a fragment to mend. The other four say the answer
+                 is not that page at all and no flag makes it one. A salvaged
+                 page carries a flag naming what is still wrong with it, so the
+                 corpus never claims it is clean. Page 128 of Algebra I to III
+                 died on the statement rule and took chapter I § 8 out of the
+                 assembly with it, which is the case this is for
   -lanes N       override how many pages a host reads at once
   -wait DUR      wait this long for a box with a spare core rather than fail
   -flagged       only the pages a native extraction could not read, which is the
