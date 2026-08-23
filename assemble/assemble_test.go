@@ -353,6 +353,33 @@ func TestChapterRefusesAHeadingTheContentsDisagreesWith(t *testing.T) {
 	}
 }
 
+// Chapter VI of Lie 4 to 6 sets the heading of its § 2 near the foot of page
+// 185 and its contents lists the § at 186, which is where the § 's first no. is
+// listed as well. The contents is giving the page the § is read on rather than
+// the page its heading is set on. Assembly has to take the heading where the
+// printing put it, and the § and its first no. standing on the same page of the
+// contents is what says the entry is that kind.
+func TestChapterTakesASectionHeadingFromTheFootOfThePageBefore(t *testing.T) {
+	ch, pages := smallChapter()
+	ch.Sections[0].PDFPage = 19
+	ch.Sections[0].Subsections[0].PDFPage = 19
+	got, err := Chapter("alg", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got[1].Body, "## § 1. ARTINIAN MODULES AND NOETHERIAN MODULES") {
+		t.Errorf("the § did not open on the page its heading is on:\n%.80s", got[1].Body)
+	}
+
+	// The same entry with the first no. listed earlier than the § is an entry
+	// about the § itself, and a § the page it names does not carry is an error.
+	ch, pages = smallChapter()
+	ch.Sections[0].PDFPage = 19
+	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+		t.Fatal("a § on the wrong page should be an error")
+	}
+}
+
 // Chapter I of Theory of Sets, cut down to four pages. It heads its § by the
 // number alone, "2. THEOREMS", where the other volumes print the sign, and it
 // closes on an appendix that carries no number, the word on one line and the
