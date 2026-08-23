@@ -453,6 +453,34 @@ func TestChapterRefusesABareSectionHeadingTheContentsDisagreesWith(t *testing.T)
 	}
 }
 
+// Not every appendix is given a title. Chapter IX of Algebre commutative
+// chapitres 8 et 9 closes on one that prints APPENDICE centred and alone, with
+// the heading of no. 1 as the next thing on the page and nothing in the contents
+// after the word. Looking under the word for a title there picks up the no. and
+// refuses a volume the contents already agreed with.
+func TestChapterReadsAnAppendixWithNoTitle(t *testing.T) {
+	ch, pages := setsChapter()
+	ch.Sections[1].Title = ""
+	pages[23] = page(23, "", false, strings.Join([]string{
+		"## APPENDIX",
+		"### 1. SIGNS AND WORDS",
+		"Let the signs be given in some order.",
+	}, "\n\n"))
+	got, err := Chapter("ens", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d pieces, want the front matter, § 2 and the appendix", len(got))
+	}
+	if name := got[2].Name(); name != "Appendix 0" {
+		t.Errorf("the third piece is %q, want the appendix", name)
+	}
+	if !strings.Contains(got[2].Body, "Let the signs be given in some order.") {
+		t.Errorf("the appendix does not carry its text: %q", got[2].Body)
+	}
+}
+
 // Assembly reads the pages and never the PDF, so a page it has not been given
 // is an error rather than a gap to write out.
 func TestChapterRefusesAMissingPage(t *testing.T) {
