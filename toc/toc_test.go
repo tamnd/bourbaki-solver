@@ -993,3 +993,50 @@ func TestAHeadThatIsNothingButTheWordTableAnnouncesTheContents(t *testing.T) {
 		})
 	}
 }
+
+// The French Groupes et algebres de Lie chapitre 1 prints its contents over two
+// pages and heads the second one ALGÈBRES DE LIE, which is set flush left and in
+// capitals exactly as a part heading is. Reading it as a part closed chapter I
+// on the first line of the page and threw away §§ 5, 6 and 7 along with all
+// seven exercise runs, and the volume came out with four §§ where it prints
+// seven, with nothing reported.
+func TestContentsRunningHeadDoesNotCloseTheChapter(t *testing.T) {
+	first := `TABLE DES MATIÈRES
+
+CHAPITRE I. — Algèbres de Lie ............................ 1
+
+§ 4. Algèbres de Lie nilpotentes ......................... 5
+    1. Définition des algèbres de Lie nilpotentes ....... 5
+    2. Le théorème d’Engel .............................. 7
+`
+	second := `ALGÈBRES DE LIE
+
+3. Le plus grand idéal de nilpotence d’une représentation.. 8
+
+§ 5. Algèbres de Lie résolubles ......................... 11
+    1. Définition des algèbres de Lie résolubles ....... 12
+
+Exercices du § 4......................................... 18
+`
+	res, err := Parse([]string{first, second}, testMapFor("I"),
+		Options{Book: "test", Chapters: []string{"I"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Chapters) != 1 {
+		t.Fatalf("got %d chapters, want 1", len(res.Chapters))
+	}
+	c := res.Chapters[0]
+	if len(c.Sections) != 2 {
+		t.Fatalf("chapter I got %d §, want 2", len(c.Sections))
+	}
+	if got := len(c.Sections[0].Subsections); got != 3 {
+		t.Errorf("§ 4 got %d no., want 3", got)
+	}
+	if got := len(c.Sections[1].Subsections); got != 1 {
+		t.Errorf("§ 5 got %d no., want 1", got)
+	}
+	if c.Sections[0].Exercises == nil || c.Sections[0].Exercises.Page != 18 {
+		t.Errorf("§ 4 exercises = %v, want page 18", c.Sections[0].Exercises)
+	}
+}

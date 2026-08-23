@@ -753,10 +753,16 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		// English Algebra I moves it nine columns for the second half of the
 		// nos of chapter III § 8.
 		runIndent = -1
+		// atTop is set on the first line of the page that carries anything,
+		// which is where the running head sits when the page came from a reading
+		// of the image rather than from the text layer.
+		atTop := true
 		for _, line := range mend(strings.Split(pg, "\n"), g) {
 			if strings.TrimSpace(line) == "" {
 				continue
 			}
+			top := atTop
+			atTop = false
 			want := ""
 			if cur != nil {
 				want = cur.Numeral
@@ -775,6 +781,24 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 					exp = e.numeral
 				}
 				text, t, hasPage, e = noLeaderLabel(line, text, e, g.Mark, exp)
+			}
+			// The running head over a page of the table of contents is set flush
+			// left and in capitals, which is exactly how a part heading is set,
+			// and closing the chapter on it throws away every entry on the page
+			// it heads. Two of those heads are known by their wording, the one
+			// that says CONTENTS and the one that carries the folio, and both are
+			// turned away in isPart. The French Groupes et algebres de Lie
+			// chapitre 1 prints a third that neither test catches: ALGÈBRES DE
+			// LIE over the second of its two contents pages, which took §§ 5, 6
+			// and 7 of chapter I and all seven of its exercise runs out of the
+			// volume and left nobody a message saying so.
+			//
+			// What separates a head from a part is where it sits and what it
+			// carries. A part heading of a table of contents names a part that
+			// begins somewhere and prints the page it begins on; a running head
+			// prints none and stands alone at the top of the page.
+			if e.kind == kindPart && top && !hasPage {
+				continue
 			}
 			if e.kind == kindSubsection && nested(line, runIndent, e.number, lastNo, nestNum) {
 				nestNum = e.number
