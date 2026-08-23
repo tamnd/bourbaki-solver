@@ -1098,3 +1098,36 @@ func TestTwoMappedChaptersImplyNothing(t *testing.T) {
 		t.Error("a contents that yielded no chapters was not reported")
 	}
 }
+
+// A label with no leaders in front of it also comes in pieces, because the
+// scanners break a label wherever there is a place to break one. The old French
+// Topologie generale sets no. 6 of chapter I § 8 with the title running the
+// width of the line and the label in two pieces after it, and eleven more
+// entries of that volume and of Topologie generale chapitres 5 a 10 go the same
+// way. Read as one piece the pattern took the page on its own, which names no
+// chapter, and the entry was lost.
+func TestALabelWithNoLeadersComesInPieces(t *testing.T) {
+	const line = "    6. Limites dans les espaces produits et les espaces quotients. I. 51"
+	text, tl, ok, got := noLeaderLabel(line, line, classify(line, Pilcrow), Pilcrow, "I")
+	if !ok || tl.chapter != "I" || tl.page != 51 {
+		t.Fatalf("noLeaderLabel(%q) = %+v %v, want I.51", line, tl, ok)
+	}
+	if got.number != 6 || got.kind != kindSubsection {
+		t.Errorf("the line stopped being no. 6: %+v", got)
+	}
+	if !strings.HasSuffix(text, "quotients.") {
+		t.Errorf("the label was left on the title: %q", text)
+	}
+	// The same volume sets no. 4 of chapter I § 10 with no punctuation at all
+	// between the title and the label.
+	const bare = "    4. Image d'un espace compact par une application continue I. 62"
+	if _, tl, ok, _ := noLeaderLabel(bare, bare, classify(bare, Pilcrow), Pilcrow, "I"); !ok || tl.page != 62 {
+		t.Errorf("noLeaderLabel(%q) = %+v %v, want I.62", bare, tl, ok)
+	}
+	// A title whose last words could be pieced together into something is still
+	// not a label, because what is pieced together has to name the chapter.
+	const other = "    3. Sous-groupes et groupes quotients d'un groupe quotient"
+	if _, _, ok, _ := noLeaderLabel(other, other, classify(other, Pilcrow), Pilcrow, "III"); ok {
+		t.Errorf("the end of %q was read as a label", other)
+	}
+}

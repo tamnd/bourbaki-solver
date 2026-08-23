@@ -434,9 +434,16 @@ func noLeader(line, text string, e entry, mark SectionMark) (string, tail, bool,
 	return cut, tail{page: p}, true, got
 }
 
-// labelNoLeaderRe is a label at the end of a line with nothing but a space in
-// front of it.
-var labelNoLeaderRe = regexp.MustCompile(`\s([A-Za-z0-9.,\-|·]{2,8})\s*$`)
+// labelPieceRe is one piece of a label that was set with no leaders in front of
+// it. A piece is short and holds nothing but the characters a label and the
+// scanner's misreadings of one are made of.
+var labelPieceRe = regexp.MustCompile(`^[A-Za-z0-9.,\-|·]{1,8}$`)
+
+// labelPieces is how many space separated pieces a label with no leaders may be
+// put back together from. The 2003 scan sets V.10 as "V1. 10" and the old
+// French Topologie generale sets I.51 as "I. 51", so two is the common break
+// and three is the most any volume produces.
+const labelPieces = 3
 
 // noLeaderLabel is noLeader for the volumes that number their pages by chapter.
 // The 2004 Integration sets three of its contents lines with no leaders at all,
@@ -447,24 +454,47 @@ var labelNoLeaderRe = regexp.MustCompile(`\s([A-Za-z0-9.,\-|·]{2,8})\s*$`)
 // to see where there is none: as well as having to announce itself and to go on
 // announcing the same thing once the label is off, the label has to name the
 // chapter the line is already known to be in.
+//
+// The label is put back together from the right, one piece at a time, because
+// the scanners break a label wherever there is a place to break one and the old
+// French scans break it at the separator more often than not. Topologie
+// generale chapitres 1 a 4 sets no. 6 of chapter I § 8 as "6. Limites dans les
+// espaces produits et les espaces quotients. I. 51", with no leaders at all and
+// the label in two pieces. Taking the pieces from the right is what keeps the
+// last words of a long title out of the label: a pattern that reads the line
+// from the left finds "SPACES IX.l" at the end of the chapter IX line of the
+// English Integration before it finds "IX.l".
 func noLeaderLabel(line, text string, e entry, mark SectionMark, want string) (string, tail, bool, entry) {
 	if want == "" {
 		return text, tail{}, false, e
 	}
-	m := labelNoLeaderRe.FindStringSubmatchIndex(line)
-	if m == nil {
-		return text, tail{}, false, e
+	rest, tok := strings.TrimRight(line, " \t"), ""
+	for range labelPieces {
+		i := strings.LastIndexAny(rest, " \t")
+		if i < 0 {
+			break
+		}
+		piece := strings.TrimLeft(rest[i:], " \t")
+		if !labelPieceRe.MatchString(piece) {
+			break
+		}
+		if tok == "" {
+			tok = piece
+		} else {
+			tok = piece + " " + tok
+		}
+		rest = strings.TrimRight(rest[:i], " \t")
+		ch, p, ok := readLabel(tok, want)
+		if !ok || ch != want {
+			continue
+		}
+		got := classify(rest, mark)
+		if got.kind != e.kind || got.number != e.number || got.numeral != e.numeral {
+			return text, tail{}, false, e
+		}
+		return rest, tail{chapter: ch, page: p}, true, got
 	}
-	ch, p, ok := readLabel(line[m[2]:m[3]], want)
-	if !ok || ch != want {
-		return text, tail{}, false, e
-	}
-	cut := strings.TrimRight(line[:m[0]], " \t")
-	got := classify(cut, mark)
-	if got.kind != e.kind || got.number != e.number || got.numeral != e.numeral {
-		return text, tail{}, false, e
-	}
-	return cut, tail{chapter: ch, page: p}, true, got
+	return text, tail{}, false, e
 }
 
 // kind is what a contents line announces.
