@@ -1040,3 +1040,61 @@ Exercices du § 4......................................... 18
 		t.Errorf("§ 4 exercises = %v, want page 18", c.Sections[0].Exercises)
 	}
 }
+
+// A volume of one chapter names no chapter in its contents, because the chapter
+// is the volume. The French Integration chapter IX opens straight at § 1 and
+// the numeral IX is nowhere on the page, and every § used to be dropped for
+// want of a chapter to hang it on, which left the volume with no contents at
+// all. The page map found the chapter, and when it found exactly one there is
+// nothing to decide.
+func TestASingleChapterVolumeNeedsNoChapterLine(t *testing.T) {
+	headless := strings.Replace(contents,
+		"CHAPTER VIII SEMISIMPLE MODULES AND RINGS . . . . . . . . . . . . . 1\n\n", "", 1)
+	res, err := Parse([]string{headless}, testMap(),
+		Options{Book: "test", Chapters: []string{"VIII"}, Title: "Semisimple Modules and Rings"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) > 0 {
+		t.Errorf("problems: %v", res.Problems)
+	}
+	c, ok := res.Get("VIII")
+	if !ok {
+		t.Fatal("the chapter the page map found was not opened")
+	}
+	if c.Title != "SEMISIMPLE MODULES AND RINGS" {
+		t.Errorf("title = %q, want the volume title in capitals", c.Title)
+	}
+	if c.Page != 1 || c.PDFPage != 3 {
+		t.Errorf("chapter starts printed %d pdf %d, want 1 and 3", c.Page, c.PDFPage)
+	}
+	if len(c.Sections) != 3 {
+		t.Errorf("%d sections, want the same 2 § and 1 appendix the chapter line gave", len(c.Sections))
+	}
+	if c.Historical == nil {
+		t.Error("the historical note was lost")
+	}
+}
+
+// With two chapters mapped the contents alone cannot say where the first ends,
+// so a § with no chapter over it is still dropped and the volume is still
+// reported as yielding nothing. Guessing here would put every § of the volume
+// into whichever chapter happened to be first.
+func TestTwoMappedChaptersImplyNothing(t *testing.T) {
+	headless := strings.Replace(contents,
+		"CHAPTER VIII SEMISIMPLE MODULES AND RINGS . . . . . . . . . . . . . 1\n\n", "", 1)
+	pm := testMap()
+	pm.Chapters = append(pm.Chapters, pagemap.Span{
+		Chapter: "IX", FirstPDF: 23, LastPDF: 30, FirstPage: 21, LastPage: 28})
+	res, err := Parse([]string{headless}, pm,
+		Options{Book: "test", Chapters: []string{"VIII", "IX"}, Title: "Two Chapters"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Chapters) != 0 {
+		t.Fatalf("%d chapters were invented", len(res.Chapters))
+	}
+	if len(res.Problems) == 0 {
+		t.Error("a contents that yielded no chapters was not reported")
+	}
+}

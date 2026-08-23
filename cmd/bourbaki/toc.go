@@ -101,7 +101,7 @@ func tocBuild(args []string) error {
 			return fmt.Errorf("%s: %w", b.ID, err)
 		}
 		res, err := toc.Parse(pages, pm, toc.Options{
-			Book: b.ID, Chapters: b.Chapters})
+			Book: b.ID, Chapters: b.Chapters, Title: b.Title})
 		if err != nil {
 			fmt.Printf("%s  %v\n", b.ID, err)
 			failed++

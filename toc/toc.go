@@ -64,6 +64,10 @@ func (g Grammar) String() string { return string(g.Mark) + "/" + string(g.Page) 
 type Options struct {
 	Book     string
 	Chapters []string
+	// Title is what the manifest calls this volume. It is only used for a
+	// volume of one chapter, whose contents names no chapter at all and whose
+	// one chapter therefore has no title to read. See openImplied.
+	Title string
 	// Grammar is detected when nil.
 	Grammar *Grammar
 }
@@ -663,6 +667,39 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	// a list that runs over onto the next page.
 	runIndent, lastNo, nestNum := -1, 0, 0
 
+	// openImplied opens the chapter a one chapter volume never names.
+	//
+	// Such a volume prints no chapter line in its contents, because the chapter
+	// is the volume and the cover has already said which one it is: the French
+	// Integration chapter IX opens its contents at "§ 1. Prémesures et mesures
+	// sur un espace topologique" and the numeral IX appears nowhere on the page.
+	// Every § then arrives with no chapter open and is dropped, and the volume
+	// comes out with no chapters at all.
+	//
+	// The page map is what settles it. When it found exactly one chapter there
+	// is nothing to decide, every § in the contents belongs to that one, so the
+	// chapter is opened here on the § that would otherwise be lost. With two or
+	// more chapters mapped the contents alone cannot say where one ends and the
+	// next starts, so the § is still dropped and validate still reports a
+	// contents that yielded no chapters, which is the honest answer.
+	//
+	// The title is the volume's, because the contents page does not carry one.
+	// It is a starting point and not a reading: the chapter opening page prints
+	// the real title, and once that page is read the title in the manifest is
+	// corrected by hand and KeepTitles holds on to the correction across every
+	// later rebuild.
+	openImplied := func(page int) bool {
+		if len(pm.Chapters) != 1 {
+			return false
+		}
+		res.Chapters = append(res.Chapters, corpus.Chapter{
+			Book: opt.Book, Numeral: pm.Chapters[0].Chapter,
+			Title: strings.ToUpper(opt.Title), Page: page})
+		cur = &res.Chapters[len(res.Chapters)-1]
+		curSec, underNote = nil, false
+		return true
+	}
+
 	commit := func(e entry, t tail) {
 		switch e.kind {
 		case kindChapter:
@@ -671,7 +708,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			cur = &res.Chapters[len(res.Chapters)-1]
 			curSec, underNote = nil, false
 		case kindSection, kindAppendix:
-			if cur == nil {
+			if cur == nil && !openImplied(t.page) {
 				return
 			}
 			if cur.Page == 0 {
