@@ -277,24 +277,30 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 		if s.Appendix {
 			want = pr.appendixHeads(s.Number)
 		}
-		off, prefix, err := find(pages, s.PDFPage, want...)
+		page := s.PDFPage
+		off, prefix, err := find(pages, page, want...)
+		if err != nil && firstNoIsWhereTheContentsPoints(s) {
+			if o, p, e := find(pages, page-1, want...); e == nil {
+				page, off, prefix, err = page-1, o, p, nil
+			}
+		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, name(s), err)
 		}
 		// The heading and the contents entry are compared on what survives
 		// both of them. See flat.
-		head := headingText(pages[s.PDFPage].Body, off)
+		head := headingText(pages[page].Body, off)
 		title := strings.TrimPrefix(head, prefix)
 		if flat(title) == "" {
 			// An appendix whose heading is the word and the numeral alone,
 			// with the title set under it. See titleUnder.
-			title = titleUnder(pages[s.PDFPage].Body, off)
+			title = titleUnder(pages[page].Body, off)
 		}
 		if !sameTitle(title, s.Title) {
 			return nil, nil, fmt.Errorf("chapter %s %s: pdf page %d titles it %q, the table of contents calls it %q",
-				ch.Numeral, name(s), s.PDFPage, title, s.Title)
+				ch.Numeral, name(s), page, title, s.Title)
 		}
-		open(Piece{Section: s}, s.PDFPage, off)
+		open(Piece{Section: s}, page, off)
 	}
 	if ch.Historical != nil {
 		off, _, err := find(pages, ch.Historical.PDFPage, pr.historical)
@@ -617,6 +623,21 @@ func find(pages map[int]corpus.PageFile, page int, prefixes ...string) (int, str
 		return 0, "", fmt.Errorf("pdf page %d carries no heading %q", page, prefixes[0])
 	}
 	return 0, "", fmt.Errorf("pdf page %d carries no heading, of %q", page, prefixes)
+}
+
+// firstNoIsWhereTheContentsPoints says whether a section and its first no. are
+// listed on the same page, which is what an entry looks like when the contents
+// has given the page the section's text starts on rather than the page its
+// heading is set on.
+//
+// Section 2 of chapter VI of Lie 4 to 6 is listed at page 186 and so is its
+// no. 1, and page 186 opens on the no. 1 heading with the § heading and the
+// paragraph that introduces the § over on 185. Both entries are pointing at the
+// same thing, and only one of them is a heading, so the § has to be looked for
+// on the page before as well. A section whose first no. is listed on an earlier
+// page has an entry that is about the section itself and is left alone.
+func firstNoIsWhereTheContentsPoints(s corpus.Section) bool {
+	return len(s.Subsections) > 0 && s.Subsections[0].PDFPage == s.PDFPage
 }
 
 // findLine is where on a page the first line the reader accepts begins.

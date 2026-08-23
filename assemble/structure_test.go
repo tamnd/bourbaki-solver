@@ -533,6 +533,24 @@ func TestVerifyChecksTheContents(t *testing.T) {
 	if err := moved.Verify(); err == nil {
 		t.Error("a no. on the wrong page should be an error")
 	}
+	// A heading set at the foot of the page before the one the contents gives.
+	// See the note in Verify.
+	early := p
+	early.Subsections = []corpus.Subsection{
+		{Number: 1, Title: "Modules", PDFPage: 18},
+		{Number: 2, Title: "Rings", PDFPage: 20},
+	}
+	if err := early.Verify(); err != nil {
+		t.Errorf("a no. whose heading is a page before the contents gives should verify: %v", err)
+	}
+	earlier := p
+	earlier.Subsections = []corpus.Subsection{
+		{Number: 1, Title: "Modules", PDFPage: 18},
+		{Number: 2, Title: "Rings", PDFPage: 19},
+	}
+	if err := earlier.Verify(); err == nil {
+		t.Error("a no. two pages before the contents gives should be an error")
+	}
 }
 
 // The text layer sets the pilcrow and the number of an exercise as mathematics,
