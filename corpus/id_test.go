@@ -72,6 +72,17 @@ func TestLabelRoundTrip(t *testing.T) {
 			ParentKind: KindTheorem, ParentNumber: 1}, "alg-viii-s5-thm-1-cor-2"},
 		{Ref{Book: "alg", Chapter: "VIII", Section: 2, Appendix: true, Kind: KindCorollary, Number: 1,
 			ParentKind: KindProposition, ParentNumber: 3}, "alg-viii-a2-prop-3-cor-1"},
+		// A number the printing gave twice. § 3 of chapter III of Groupes et
+		// algebres de Lie prints Definition 7 at no. 7 and again at no. 12, and
+		// the later one carries the mark so that the first keeps the label every
+		// citation of def. 7 means. The mark goes at the far end of the label
+		// whatever shape the label has.
+		{Ref{Book: "lie", Chapter: "III", Section: 3, Kind: KindDefinition, Number: 7,
+			Repeated: true}, "lie-iii-s3-def-7-bis"},
+		{Ref{Book: "lie", Chapter: "III", Section: 3, Kind: KindCorollary, Number: 2,
+			ParentKind: KindTheorem, ParentNumber: 1, Repeated: true}, "lie-iii-s3-thm-1-cor-2-bis"},
+		{Ref{Book: "lie", Chapter: "III", Section: 3, Kind: KindRemark, Subsec: 4, Number: 1,
+			Repeated: true}, "lie-iii-s3-n4-rem-1-bis"},
 	}
 	for _, c := range cases {
 		if got := c.ref.Label(); got != c.label {

@@ -167,6 +167,29 @@ func (p Piece) Verify() error {
 // keeping track of here is the Corollary, which is numbered under the statement
 // it hangs from, so the last numbered Definition, Proposition, Theorem, Lemma
 // or Scholium is carried along as the run goes.
+// repeats are the statements a printing numbered twice, each one written as the
+// label the two would share and the pdf page the later of them is printed on.
+//
+// Two statements at one label is normally a fault and is meant to fail loudly:
+// it caught the run of Remarques that Bourbaki restarts inside a no., and it
+// caught the head grammar reading a French statement in capitals as prose. Both
+// were real bugs that no audit rule would have found, so the check stays as it
+// is, and a printing that really does repeat a number is written down here one
+// entry at a time rather than being let through by a rule.
+//
+// Each entry is a page somebody has looked at. The page is part of the key for
+// the same reason: a reader that misreads a number produces the same collision,
+// and pinning the exception to the page it was verified on means a re-reading
+// that moves the statement fails loudly again instead of inheriting the excuse.
+//
+// lie-iii-s3-def-7 is the one entry so far. § 3 of chapter III of Groupes et
+// algebres de Lie prints Definition 7 at no. 7 and DEFINITION 7 again at no. 12,
+// and then Definition 8. See corpus.Ref.Repeated for the citations that settle
+// which of the two the volume means when it says def. 7.
+var repeats = map[string]int{
+	"lie-iii-s3-def-7": 151,
+}
+
 func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.Statement, error) {
 	taken, err := numbers(blocks, id, pr)
 	if err != nil {
@@ -181,6 +204,10 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 			return nil
 		}
 		label := r.Label()
+		if seen[label] && repeats[label] == b.page {
+			r.Repeated = true
+			label = r.Label()
+		}
 		if seen[label] {
 			return fmt.Errorf("two statements are labelled %s", label)
 		}
@@ -219,6 +246,8 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 	next := 0                       // the number the next member of that run would carry
 	passed := map[corpus.Ref]bool{} // the numbered statements printed so far
 	occ := map[corpus.Ref]int{}
+	high := map[corpus.Ref]int{} // the highest number a run of the kind has reached in this no.
+	off := map[corpus.Ref]int{}  // what a restarted run adds to the number it prints. See restart
 	runs, err := runCount(blocks, id, pr) // how many runs of each kind the no. prints
 	if err != nil {
 		return err
@@ -308,7 +337,7 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 				queue = slices.Insert(queue, i+1, t)
 			}
 		}
-		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, taken, pr)
+		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, high, off, taken, pr)
 		if err != nil {
 			return err
 		}
@@ -503,7 +532,7 @@ func heading(r corpus.Ref, label, name string, pr printing) string {
 // one. body is the statement with the head taken off, and name is the name the
 // head gave it, empty where it gave it none.
 func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, next int,
-	occ map[corpus.Ref]int, taken map[corpus.Ref]map[int]bool, pr printing,
+	occ, high, off map[corpus.Ref]int, taken map[corpus.Ref]map[int]bool, pr printing,
 ) (corpus.Ref, string, string, bool, error) {
 	// Extraction writes the dangerous bend at the head of the passage it marks,
 	// and a marked passage often opens on a statement: the French printing marks
@@ -535,6 +564,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		}
 		key := bucket(r.Kind)
 		occ[key] = max(occ[key], r.Number)
+		high[key] = max(high[key], r.Number)
 	}
 	text = pr.unswallow(text)
 	m := pr.head.FindStringSubmatch(text)
@@ -542,7 +572,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		// A paragraph opening on the number the open run is up to is the next
 		// member of that run.
 		num, marker, tail, ok := runItem(text)
-		if next == 0 || !ok || num != strconv.Itoa(next) {
+		if next == 0 || !ok || num != strconv.Itoa(next-off[bucket(run.Kind)]) {
 			return corpus.Ref{}, "", "", false, nil
 		}
 		r := run
@@ -589,6 +619,7 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		// "Remarks. — 2)" is Remark 2 and the head carries no number of its own.
 		if i := exNumRE.FindStringSubmatch(rest); i != nil {
 			num, rest = i[2], afterMarker(i[0], rest[markerLen(i):])
+			num = restart(num, bucket(kind), high, off)
 		}
 	}
 	// The mark that opens a passage in small type stands in front of the head and
@@ -632,6 +663,50 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		r.ParentKind, r.ParentNumber = parent.Kind, parent.Number
 	}
 	return r, name, body(strings.TrimSpace(rest)), true, nil
+}
+
+// restart is the number a run of remarks or examples carries in a label, which
+// is the number it prints except where a second run of the same kind opens in
+// the same no. and starts again at one.
+//
+// A no. can print two runs and Bourbaki numbers each of them from one. No. 3 of
+// § 5 of the French Groupes et algebres de Lie chapitre 1 does it: Definition 3
+// is followed by "Remarques. — 1)", "2)", "3)", then Lemme 1, Corollaire 1 and
+// Corollaire 2, and then a second "Remarques. — 1)", "2)" on the page after. So
+// the no. prints two Remarque 1 and two Remarque 2, and read literally the
+// second pair takes the labels of the first pair and the chapter does not
+// assemble. No. 4 of § 5 of Algebre commutative chapitres 8 et 9 prints two runs
+// of Exemples the same way.
+//
+// The number in the second run belongs to the book and the label belongs to this
+// corpus, so it is the label that gives way: the second run carries on from where
+// the first left off, and its printed 1 and 2 are Remarque 4 and Remarque 5. A
+// citation of "no. 3, remarque 2" then lands on the second member of the first
+// run, which is what the volume means by it. Page 64 of that chapter says so
+// itself, inside the third member of the first run: "s est contenu dans le
+// radical r de g d'apres la remarque 2".
+//
+// The alternative was the rule Theory of Sets gets, where the last run carries
+// the numbering and the earlier ones are left as the prose they are printed as.
+// That rule was written on the evidence of three citations in that volume, all
+// of which point at the second run, and it loses the members of the first. Here
+// the one citation in the chapter points the other way, and nothing is lost by
+// carrying on, so this is the rule for the printings that have no run head.
+//
+// The offset is kept rather than the shifted number alone, because the members
+// after the lead are found by the number they print and not by the number they
+// are labelled with. Without it the second run's "2)" would be looked for as a
+// "5)" and the run would end at its first member.
+func restart(num string, key corpus.Ref, high, off map[corpus.Ref]int) string {
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return num
+	}
+	off[key] = 0
+	if n <= high[key] {
+		off[key] = high[key]
+	}
+	return strconv.Itoa(n + off[key])
 }
 
 // anchorExercises gives the block of exercises an anchor, so that a reference
@@ -1070,8 +1145,19 @@ var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])(?:no|nos|p|pp|cf|fig|chap|
 // sentenceEnd reports whether the text before a number is the end of a
 // sentence, with the marks the book closes a passage with, and the mark it
 // opens one with, taken off.
+//
+// A line break counts as space here and not as anything else. The preamble of a
+// run and the first exercise under it land in the one block whenever the page
+// was read without a blank line between them, and the French Lie chapter I is
+// read that way: "Les conventions du § 4 restent valables, sauf mention
+// contraire." and "1) Soient g une algebre de Lie nilpotente" are one block
+// with a newline in the middle. Trimming only spaces left the full stop behind
+// the newline, so the sentence did not read as ended, exercise 1 was never
+// found, and every exercise after it was passed over too, since the reader
+// looks for one number and one only. That § prints 27 exercises and the volume
+// reported none of them.
 func sentenceEnd(s string) bool {
-	s = strings.TrimRight(pilcrowBefore.ReplaceAllString(s, ""), " $*")
+	s = strings.TrimRight(pilcrowBefore.ReplaceAllString(s, ""), " \t\n$*")
 	if shortened.MatchString(s) {
 		return false
 	}

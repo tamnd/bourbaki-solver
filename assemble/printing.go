@@ -180,9 +180,9 @@ var printings = map[string]printing{
 		exercises:  "## EXERCICES",
 		gathered:   "# EXERCICES",
 		head: regexp.MustCompile(
-			`^(?:\*\*(` + frKinds + `)(?: (\d+))?\.\*\*|(` + frKinds + `)(?: (\d+))?(?: \([^)]*\))+\.|` +
-				smallType + `(` + frKinds + `)(?: (\d+))?\.|(` + frKinds + `)(?: (\d+))?\.` +
-				`|\*(` + frKinds + `)(?: (\d+))?\.\*)\s*—\s*`),
+			`^(?:\*\*(` + frAnyKinds + `)(?: (\d+))?\.\*\*|(` + frAnyKinds + `)(?: (\d+))?(?: \([^)]*\))+\.|` +
+				smallType + `(` + frAnyKinds + `)(?: (\d+))?\.|(` + frAnyKinds + `)(?: (\d+))?\.` +
+				`|\*(` + frAnyKinds + `)(?: (\d+))?\.\*)\s*—\s*`),
 		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:terminons|terminer|achevons|achever|` +
 			`reprenons|reprendre|concluons|conclure)\b[^.]{0,40}?\b(?:d[ée]monstration|preuve) ` +
 			`(?:du|de la|de l['’])\s*(` + frResumeKinds + `) (\d+)\b`),
@@ -368,6 +368,37 @@ const frResumeKinds = `d[ée]finition|proposition|th[ée]or[èe]me|lemme|scholie
 // are the volume's own and the plurals are too: it sets "Remarques. —" over a
 // run of remarks exactly as the English sets "Remarks. —".
 const frKinds = `D[ée]finitions?|Propositions?|Th[ée]or[èe]mes?|Lemmes?|Corollaires?|Remarques?|Exemples?|Scholie`
+
+// frCapKinds are the same words as they arrive when the small capitals the
+// French printing sets four of its kinds in are read as capitals rather than as
+// bold. The English grammar has had a branch for this since Lie 7 to 9 was
+// read; the French grammar had none, and the pages have carried the shape all
+// along.
+//
+// It is not a rare reading. 2033 heads across the French volumes arrive in full
+// capitals, and the count is led by 349 "COROLLAIRE. —", 225 "COROLLAIRE 2. —",
+// 190 "COROLLAIRE 1. —" and 122 "COROLLAIRE 3. —", with the propositions and
+// the theorems behind them. Every one of those was read as prose. What that
+// costs is not only the statement itself: § 6 of chapter I of the French Lie
+// says it plainly, where THÉORÈME 4, DÉFINITION 5 and PROPOSITION 7 all went
+// unread, so the parent of a corollary never advanced past Proposition 5 and
+// the two corollaries printed pages apart under two different results were both
+// labelled lie-i-s6-prop-5-cor-1 and the volume would not assemble.
+//
+// The kinds go in as an alternative to the ordinary spelling rather than as
+// branches of their own, because a head is a head whichever case it comes back
+// in, and the five shapes the French grammar already reads are the five shapes
+// it comes back in: bold, a name in parentheses, small type, undecorated, and
+// italic. All five carry the em dash and the dash is what holds them down, the
+// same as for the lower-case spellings. Twelve heads in the corpus arrive in
+// capitals with no dash after them, some of them with a hyphen or a colon where
+// the dash should be, and those are a reading that dropped a character rather
+// than a printing that sets no dash. They are a page repair and not a rule.
+const frCapKinds = `D[ÉE]FINITIONS?|PROPOSITIONS?|TH[ÉE]OR[ÈE]MES?|LEMMES?|COROLLAIRES?|REMARQUES?|EXEMPLES?|SCHOLIE`
+
+// frAnyKinds is either spelling, which is what every branch of the French head
+// grammar takes.
+const frAnyKinds = frKinds + `|` + frCapKinds
 
 // The last branch of the French grammar is a head with no bold on it, and it
 // takes any of the kinds.
