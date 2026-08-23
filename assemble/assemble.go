@@ -291,9 +291,17 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 		// both of them. See flat.
 		head := headingText(pages[page].Body, off)
 		title := strings.TrimPrefix(head, prefix)
-		if flat(title) == "" {
+		if flat(title) == "" && flat(s.Title) != "" {
 			// An appendix whose heading is the word and the numeral alone,
 			// with the title set under it. See titleUnder.
+			//
+			// Only where the contents says there is a title to find. Chapter IX
+			// of Algebre commutative chapitres 8 et 9 closes on an appendix that
+			// has none: the page prints APPENDICE centred and alone, the next
+			// thing on it is the heading of no. 1, and the contents entry is the
+			// word with nothing after it. Looking under the word there picks up
+			// "1. Limite inductive d'anneaux locaux" and refuses the volume for
+			// disagreeing with a contents entry that agreed already.
 			title = titleUnder(pages[page].Body, off)
 		}
 		if !sameTitle(title, s.Title) {
