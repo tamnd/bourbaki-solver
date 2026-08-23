@@ -233,6 +233,30 @@ type Ref struct {
 	// name is Euclid's lemma.
 	Div bool
 
+	// Repeated says the printing gave this statement a number it had already
+	// given to an earlier statement of the same kind in the same §, and that this
+	// is the later of the two.
+	//
+	// It is a misprint and not a second numbering, which is what tells it apart
+	// from Div. § 3 of chapter III of Groupes et algebres de Lie prints Definition
+	// 7 at no. 7, on page 139 of the volume, and prints DEFINITION 7 again at no.
+	// 12, on page 153, and then goes on to Definition 8. Both page images say so.
+	// Nothing in the volume cites the second one, and the two citations that
+	// matter point the other way: page 140 cites "la condition a) de la def. 7",
+	// which is the first one, and page 153 cites "le cas general de la def. 8",
+	// which is the one after the repeat. So the numbering the book uses to cite by
+	// is 1 to 8 with no gap, and the second Definition 7 sits outside it.
+	//
+	// The label is what gives way, since the heading has to keep printing what the
+	// page prints. The first statement keeps lie-iii-s3-def-7 and the later one is
+	// lie-iii-s3-def-7-bis, so no citation moves, Definition 8 stays where it is,
+	// and the repeated one is still addressable and still carries a tag.
+	//
+	// Shifting the later one to 8 and everything after it up by one was the other
+	// way, and it is wrong here: it would take the label lie-iii-s3-def-8 off the
+	// statement page 153 cites by that name.
+	Repeated bool
+
 	Kind   Kind
 	Number int // 0 when the statement is unnumbered
 
@@ -263,6 +287,7 @@ type Ref struct {
 //	alg-viii-s1-n3-cor-1      the first unnumbered Corollary in no. 3
 //	alg-viii-a2-prop-3        a numbered Proposition of Appendix 2
 //	alg-vi-s1-div-prop-11     Proposition 11 (DIV) of § 1
+//	lie-iii-s3-def-7-bis      the second statement the printing numbered 7
 //
 // The label says where the book puts the statement and nothing about where the
 // file puts it, so it survives re-extraction, re-assembly and any amount of
@@ -272,21 +297,30 @@ type Ref struct {
 // because that is where it belongs: it is a second numbering inside the § and
 // not a property of the one statement, so every label under it, the Corollary
 // as much as the Proposition it hangs from, sits inside the same div.
+//
+// The repeat mark goes at the far end for the opposite reason: it is a property
+// of the one statement, it says nothing about anything numbered under it, and
+// putting it last leaves every other label in the § exactly as it was. See
+// Ref.Repeated.
 func (r Ref) Label() string {
 	base := r.SectionLabel()
 	if r.Div {
 		base += "-div"
 	}
+	bis := ""
+	if r.Repeated {
+		bis = "-bis"
+	}
 	if r.Number == 0 {
-		return fmt.Sprintf("%s-n%d-%s-%d", base, r.Subsec, r.Kind, r.Occurrence)
+		return fmt.Sprintf("%s-n%d-%s-%d%s", base, r.Subsec, r.Kind, r.Occurrence, bis)
 	}
 	if r.ParentKind != "" {
-		return fmt.Sprintf("%s-%s-%d-%s-%d", base, r.ParentKind, r.ParentNumber, r.Kind, r.Number)
+		return fmt.Sprintf("%s-%s-%d-%s-%d%s", base, r.ParentKind, r.ParentNumber, r.Kind, r.Number, bis)
 	}
 	if r.Subsec > 0 {
-		return fmt.Sprintf("%s-n%d-%s-%d", base, r.Subsec, r.Kind, r.Number)
+		return fmt.Sprintf("%s-n%d-%s-%d%s", base, r.Subsec, r.Kind, r.Number, bis)
 	}
-	return fmt.Sprintf("%s-%s-%d", base, r.Kind, r.Number)
+	return fmt.Sprintf("%s-%s-%d%s", base, r.Kind, r.Number, bis)
 }
 
 // SectionLabel is the label of the section the statement sits in, which is what
@@ -303,12 +337,16 @@ var (
 	// The optional div group is the divisibility numbering of chapter VI of
 	// Algebra 4 to 7. It cannot be confused with a kind, because a kind is
 	// always followed by a number and div never is.
+	//
+	// The optional bis group at the end is a number the printing gave twice, and
+	// it cannot be confused with anything either: it is the one part of a label
+	// that is not followed by a number. See Ref.Repeated.
 	numberedLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-(?P<kind>[a-z]+)-(?P<num>\d+)(?P<bis>-bis)?$`)
 	childLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-(?P<pkind>[a-z]+)-(?P<pnum>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-(?P<pkind>[a-z]+)-(?P<pnum>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)(?P<bis>-bis)?$`)
 	subsecLabelRe = regexp.MustCompile(
-		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-n(?P<no>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)$`)
+		`^(?P<book>[a-z0-9]+)-(?P<ch>[ivxlcdm]+)-(?P<in>[sa])(?P<sec>\d+)(?P<div>-div)?-n(?P<no>\d+)-(?P<kind>[a-z]+)-(?P<num>\d+)(?P<bis>-bis)?$`)
 )
 
 // ParseLabel is the inverse of Ref.Label.
@@ -330,6 +368,7 @@ func ParseLabel(label string) (Ref, error) {
 			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
 			Div:        m[5] != "",
 			ParentKind: Kind(m[6]), ParentNumber: pnum, Kind: Kind(m[8]), Number: num,
+			Repeated: m[10] != "",
 		}, nil
 	}
 	if m := subsecLabelRe.FindStringSubmatch(label); m != nil {
@@ -338,7 +377,7 @@ func ParseLabel(label string) (Ref, error) {
 		n, _ := strconv.Atoi(m[8])
 		r := Ref{
 			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
-			Div: m[5] != "", Kind: Kind(m[7]), Subsec: no,
+			Div: m[5] != "", Kind: Kind(m[7]), Subsec: no, Repeated: m[9] != "",
 		}
 		if r.Kind.Scope() == ScopeSubsec {
 			r.Number = n
@@ -352,7 +391,7 @@ func ParseLabel(label string) (Ref, error) {
 		num, _ := strconv.Atoi(m[7])
 		return Ref{
 			Book: m[1], Chapter: strings.ToUpper(m[2]), Appendix: m[3] == "a", Section: sec,
-			Div: m[5] != "", Kind: Kind(m[6]), Number: num,
+			Div: m[5] != "", Kind: Kind(m[6]), Number: num, Repeated: m[8] != "",
 		}, nil
 	}
 	return Ref{}, fmt.Errorf("malformed label: %q", label)

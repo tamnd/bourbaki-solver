@@ -278,7 +278,8 @@ func TestANameCarriesItsFootnoteMark(t *testing.T) {
 	text := `Théorème 2 (Shelah[^2]). — Soit X un espace polonais connexe et localement connexe par arcs.`
 	occ := map[corpus.Ref]int{}
 	id := corpus.Ref{Book: "ta", Chapter: "IV", Section: 2}
-	r, name, body, ok, err := statementAt(text, id, 1, corpus.Ref{}, corpus.Ref{}, 0, occ, nil, printings["fr"])
+	r, name, body, ok, err := statementAt(text, id, 1, corpus.Ref{}, corpus.Ref{}, 0, occ,
+		map[corpus.Ref]int{}, map[corpus.Ref]int{}, nil, printings["fr"])
 	if err != nil || !ok {
 		t.Fatalf("statementAt() = %v, %v, want a Théorème", ok, err)
 	}
@@ -462,6 +463,33 @@ func TestThePreambleIsNotPartOfExerciseOne(t *testing.T) {
 	out := cutExercises(in, 1, false, printings["en"])
 	if len(out) != 3 || !strings.HasPrefix(out[1].text, "The notations") {
 		t.Errorf("the preamble did not stay in the section: %v", texts(out))
+	}
+}
+
+// The preamble and the first exercise land in the one block when the page was
+// read with no blank line between them, which is how the French Lie chapter I
+// prints the exercises of its § 4. The full stop that ends the preamble then has
+// a newline after it, and the reader used to trim spaces off the end and nothing
+// else, so the sentence did not read as ended and exercise 1 was never found.
+// Losing 1 loses the whole run, since the reader looks for one number and one
+// only, and that § prints 27 exercises.
+func TestThePreambleAndExerciseOneInOneBlock(t *testing.T) {
+	in := blocks("### Exercises",
+		"Les conventions du § 4 restent valables, sauf mention contraire.\n"+
+			"1) Soient g une algèbre de Lie nilpotente, p le plus petit entier tel que $C^p g = 0$.\n"+
+			"2) Soit g un produit semi-direct d’une algèbre h de dimension 1.")
+	got, err := exercises(in, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("read %d exercises, want 2", len(got))
+	}
+	if strings.Contains(got[0].Body, "Les conventions") {
+		t.Errorf("the preamble went into exercise 1: %q", got[0].Body)
+	}
+	if !strings.Contains(got[1].Body, "produit semi-direct") {
+		t.Errorf("exercise 2 is not the second exercise: %q", got[1].Body)
 	}
 }
 
@@ -1060,6 +1088,74 @@ func TestStatementsReadsAFrenchHeadWithTheItalicMarked(t *testing.T) {
 	same(t, labels(got), []string{
 		"alg-viii-s11-lem-1",
 		"alg-viii-s11-n1-rem-1",
+	})
+}
+
+// § 3 of chapter III of Groupes et algebres de Lie numbers a statement twice.
+// It prints Definition 7 at no. 7 and DEFINITION 7 again at no. 12, and both
+// page images say so. The later one takes the bis mark, so the first keeps the
+// label every citation of def. 7 means, and Definition 8 after it is untouched.
+//
+// The page is part of the key, so a collision anywhere else still fails, which
+// is what the second half of this checks: the same two statements one page over
+// from the one that was verified are a fault and are reported as one.
+func TestStatementsMarksANumberThePrintingGaveTwice(t *testing.T) {
+	in := []block{
+		{text: "### 7. Algèbre de Lie d’un groupe de Lie", page: 137, label: "LIE III.139"},
+		{text: "Définition 7. — Soient X une variété de classe $ C^r $, g une algèbre de Lie normable.", page: 137, label: "LIE III.139"},
+		{text: "### 12. Représentation adjointe", page: 151, label: "LIE III.153"},
+		{text: "DÉFINITION 7. — La représentation Ad de G dans L(G) s’appelle la représentation adjointe de G.", page: 151, label: "LIE III.153"},
+		{text: "Définition 8. — Soient G un groupe de Lie, M une variété de classe $ C^r $.", page: 160, label: "LIE III.162"},
+	}
+	id := corpus.Ref{Book: "lie", Chapter: "III", Section: 3}
+	_, got, err := statements(in, id, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"lie-iii-s3-def-7",
+		"lie-iii-s3-def-7-bis",
+		"lie-iii-s3-def-8",
+	})
+
+	in[3].page, in[3].label = 152, "LIE III.154"
+	if _, _, err := statements(in, id, printings["fr"]); err == nil {
+		t.Error("a collision on a page nobody verified was let through")
+	}
+}
+
+// The same head again with the small capitals read as capitals rather than as
+// bold, which is what 2033 heads across the French volumes came back as. Read as
+// prose they take the whole chapter down with them and not only themselves: this
+// is § 6 of chapter I of the French Groupes et algebres de Lie, where THEOREME 4
+// and DEFINITION 5 went unread, so the parent of a corollary never advanced past
+// Proposition 5 and the two corollaries under two different results were both
+// labelled lie-i-s6-prop-5-cor-1.
+func TestStatementsReadsAFrenchHeadInCapitals(t *testing.T) {
+	in := blocks(
+		"### 3. Représentations semi-simples",
+		"PROPOSITION 5. — Soient $ g $ une algèbre de Lie, $ r $ son radical.",
+		"COROLLAIRE 1. — Soient $ g $ une algèbre de Lie, $ a $ un idéal de $ g $.",
+		"THÉORÈME 4. — *Soient g une algèbre de Lie, r son radical, $\\rho$ une représentation de g*.",
+		"COROLLAIRE. — *Soient g, g' des algèbres de Lie, s le radical nilpotent de g*.",
+		"DÉFINITION 5. — Soient $ g $ une algèbre de Lie, $ h $ une sous-algèbre de Lie de $ g $.",
+		"**PROPOSITION 6.** — Soient $ g $ une algèbre de Lie, $ h $ une sous-algèbre réductive.",
+		"THÉORÈME 5 (Levi). — *Soit g une algèbre de Lie de dimension finie*.",
+		"REMARQUES. — 1) La sous-algèbre $ h $ n’est pas unique.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "lie", Chapter: "I", Section: 6}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"lie-i-s6-prop-5",
+		"lie-i-s6-prop-5-cor-1",
+		"lie-i-s6-thm-4",
+		"lie-i-s6-n3-cor-1",
+		"lie-i-s6-def-5",
+		"lie-i-s6-prop-6",
+		"lie-i-s6-thm-5",
+		"lie-i-s6-n3-rem-1",
 	})
 }
 
