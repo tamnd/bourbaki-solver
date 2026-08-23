@@ -1,6 +1,9 @@
 package toc
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // Every line in these tests is off a page of the corpus, and every title is
 // what manifests/toc.yaml gives for the chapter or the § it belongs to.
@@ -161,6 +164,39 @@ func TestASectionInBoldIsToldFromItsOwnFirstNo(t *testing.T) {
 		t.Errorf("rewrote line %d, want the § and not the no. on line 2", from)
 	}
 	if want := "## 10. PROPER MAPPINGS"; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestBoldRoundTheTitleAloneDoesNotSurviveIntoTheHeading(t *testing.T) {
+	// Page 137 of Algebre commutative chapitres 8 et 9 has the number outside
+	// the bold and the title inside it, where page 103 of Topology I to IV has
+	// the whole line in bold. Only the second was written down at first, so the
+	// closing pair came off the end, the opening one stayed on the front of the
+	// title, and the heading went back as "### 3. **Existence et unicité des
+	// $ p $-anneaux" with one half of a pair of asterisks on it.
+	body := []string{"3. **Existence et unicité des $ p $-anneaux**"}
+	_, _, head, ok := NumberOpening(body, 3, "Existence et unicité des p-anneaux")
+	if !ok {
+		t.Fatal("the contents opens no. 3 on that page")
+	}
+	if want := "### 3. Existence et unicité des $ p $-anneaux"; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+	if strings.Count(head, "**")%2 != 0 {
+		t.Errorf("the heading carries half a pair of asterisks: %q", head)
+	}
+}
+
+// Bold inside a title is the title's own and is left where it is. What comes
+// off is a pair that wraps the whole of it.
+func TestBoldInsideATitleIsLeftAlone(t *testing.T) {
+	body := []string{"4. The **plat** condition"}
+	_, _, head, ok := NumberOpening(body, 4, "The plat condition")
+	if !ok {
+		t.Fatal("the contents opens no. 4 on that page")
+	}
+	if want := "### 4. The **plat** condition"; head != want {
 		t.Errorf("got %q, want %q", head, want)
 	}
 }

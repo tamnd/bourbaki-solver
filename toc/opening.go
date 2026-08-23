@@ -108,7 +108,17 @@ func plainLine(s string) bool {
 // "§1. CONSTRUCTION OF A HAAR MEASURE" on page 7 and every one of its thirteen
 // § openings is set that way, so requiring the space refused the lot of them and
 // left the volume unassembled. What goes back is normalised, see sectionSign.
-var lostSection = regexp.MustCompile(`^(\*\*)?(§ *)?([0-9A-Za-z]{1,4})\. +(.+?)(\*\*)?$`)
+//
+// The bold is allowed in two places because the reading puts it in two places.
+// Page 103 of Topology I to IV has "**10. PROPER MAPPINGS**", the whole line in
+// bold, and page 137 of Algebre commutative chapitres 8 et 9 has
+// "3. **Existence et unicité des $ p $-anneaux**", the title alone. Only the
+// outer pair was written down at first, and since the comparison against the
+// contents throws away everything that is not a letter or a digit, the second
+// shape matched anyway: the closing pair was taken off the end and the opening
+// one stayed on the front of the title, and the heading that went back carried
+// one half of a pair of asterisks. Both are stripped now.
+var lostSection = regexp.MustCompile(`^(\*\*)?(§ *)?([0-9A-Za-z]{1,4})\. +(?:\*\*)?(.+?)(\*\*)?$`)
 
 // sectionSign is what goes in front of the number of a § heading, given what the
 // page had in front of it.
