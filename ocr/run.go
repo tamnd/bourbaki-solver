@@ -100,6 +100,15 @@ type Runner struct {
 	RereadProtected bool
 	// Keep leaves the page images on the hosts.
 	Keep bool
+	// Salvage writes a page on its last attempt when the only things wrong with
+	// it are things a later fix pass can put right. See Salvageable for which
+	// rules those are and why the line is drawn where it is.
+	//
+	// Off by default, because the ordinary run wants a clean corpus and a page
+	// that fails a rule is a page to read again. It is for the sweep that wants
+	// every page on disk whatever state it is in, which is the sweep that comes
+	// before the fixing rather than after it.
+	Salvage bool
 	// Limit stops the run after this many pages have been read, for a pilot. Zero
 	// is the whole volume.
 	Limit int
@@ -467,6 +476,10 @@ type Report struct {
 	// alone. They are out of the rate for the same reason a refusal is: the run
 	// never judged a reading of them. See settled.
 	Kept int `json:"kept,omitempty"`
+	// Salvaged is pages written on their last attempt with a fault still on
+	// them. They are part of Accepted, since the corpus has the page, and they
+	// are counted again here because they are the work list for the fix passes.
+	Salvaged int `json:"salvaged,omitempty"`
 	// Faces is every letter that changed typeface against the native reading a
 	// repaired page replaced. It is a list to read and not a count to watch: the
 	// model is wrong about a face more often than the extractor is and neither
@@ -494,6 +507,9 @@ func (r Report) Summary() string {
 		r.Book, r.Accepted, r.Rejected, r.Dead, elapsed, r.Rate())
 	if r.Repaired > 0 {
 		fmt.Fprintf(&out, "  %d of the accepted pages were repaired in their own thread rather than read again\n", r.Repaired)
+	}
+	if r.Salvaged > 0 {
+		fmt.Fprintf(&out, "  %d of the accepted pages were out of attempts and are kept with a fault on them, flagged, for a fix pass\n", r.Salvaged)
 	}
 	if r.Released > 0 {
 		fmt.Fprintf(&out, "  %d pages went back to the queue untouched, their batch never reached a host\n", r.Released)
@@ -672,6 +688,7 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 				report.Refused += outcome.refused
 				report.Refusals = append(report.Refusals, outcome.refusals...)
 				report.Kept += outcome.kept
+				report.Salvaged += outcome.salvaged
 				// The pages went back, so they are not read and the next host
 				// may still get them.
 				read -= outcome.released + outcome.refused
@@ -731,6 +748,9 @@ type task struct {
 	// matter, because a page that was mended is a page a reader should be told
 	// about even though it passes every rule now.
 	repaired string
+	// salvaged names the rules a page was written in spite of, on the attempt
+	// that would otherwise have killed it. Empty on every page that passed.
+	salvaged []Rule
 }
 
 // lease claims up to n pages for a host.
@@ -822,6 +842,11 @@ type outcome struct {
 	// kept is pages a person had already repaired by hand, which this run left
 	// exactly as it found them. See settled.
 	kept int
+	// salvaged is pages written on their last attempt with a fault still on
+	// them, which are counted in accepted as well: the corpus has the page. They
+	// are named apart because a run that salvaged forty pages has forty pages
+	// for the fix passes to look at.
+	salvaged int
 	// repaired is how many of the accepted pages needed a follow up first. They
 	// are counted apart because a run where a third of the pages had to be
 	// repaired is not a healthy run, and the accepted count alone hides that.
@@ -1159,13 +1184,19 @@ func (r *Runner) file(ctx context.Context, host Host, dest string, value task, o
 	}
 	if problems := Validate(text, expect, r.options()); len(problems) > 0 {
 		fixed, ok := r.mend(ctx, thread, value.page, text, problems)
-		if !ok {
+		switch {
+		case ok:
+			text = fixed
+			out.repaired++
+			value.repaired = Reasons(problems)
+		case r.salvages(value.job, Rules(problems)):
+			value.salvaged = Rules(problems)
+			out.salvaged++
+			r.logf("page %d: out of attempts, written with %s still on it", value.page, ruleList(value.salvaged))
+		default:
 			r.reject(value, out, Rules(problems), Reasons(problems))
 			return
 		}
-		text = fixed
-		out.repaired++
-		value.repaired = Reasons(problems)
 	}
 	changes, err := r.write(host, value, text)
 	if err != nil {
@@ -1247,6 +1278,24 @@ func (r *Runner) refuse(host Host, value task, out *outcome, reason string) {
 	r.logf("page %d: %s on %s, handed back unread with its attempts intact", value.page, RefusedMark, host.Name)
 }
 
+// salvages says whether this page is written in spite of what is wrong with it.
+//
+// Only on the attempt that would kill it, and only for the rules a later fix
+// pass can put right. A page with attempts left is read again, because the next
+// attempt lands on a different host and that is usually all it takes.
+func (r *Runner) salvages(job queue.Job, rules []Rule) bool {
+	return r.Salvage && r.Queue.LastAttempt(job) && Salvageable(rules)
+}
+
+// ruleList names rules for a log line or a flag, in the order they were found.
+func ruleList(rules []Rule) string {
+	names := make([]string, len(rules))
+	for i, rule := range rules {
+		names[i] = string(rule)
+	}
+	return strings.Join(names, ", ")
+}
+
 func (r *Runner) reject(value task, out *outcome, rules []Rule, reason string) {
 	state, err := r.Queue.Fail(value.job, reason)
 	if err != nil {
@@ -1304,6 +1353,11 @@ func (r *Runner) write(host Host, value task, text string) (changes []FaceChange
 	}
 	if value.repaired != "" {
 		meta.Flags = append(meta.Flags, "repaired in its own thread: "+value.repaired)
+	}
+	if len(value.salvaged) > 0 {
+		meta.Flags = append(meta.Flags, fmt.Sprintf(
+			"read %d times and never came back clean, so it is kept with the faults rule %s names still on it, see bourbaki ocr check",
+			value.job.Attempts, ruleList(value.salvaged)))
 	}
 	path := corpus.PagePath(r.Root, r.Book, value.page)
 	replaced, native := carry(&meta, path)

@@ -1512,3 +1512,111 @@ func TestAFootNumberVolumeSaysSo(t *testing.T) {
 		}
 	}
 }
+
+// A page that fails a rule a fix pass can put right is written on the attempt
+// that would otherwise kill it, rather than leaving the corpus with a hole.
+//
+// Page 128 of Algebra I to III is the case. Six readings of it came back with
+// "Definition 5." in plain mixed case, which is what fix smallcaps exists for,
+// and every one of them was thrown away. The page is not in the corpus, and
+// chapter I § 8 of that volume does not assemble because of it.
+func TestSalvageWritesAPageOutOfAttemptsWithARepairableFault(t *testing.T) {
+	w := newWorld(t, 2)
+	// Page 1 always comes back with the statement head in plain mixed case.
+	machine := newFleet(func(image string) string {
+		if strings.HasSuffix(image, "0001.png") {
+			return strings.Replace(page("A IV.1"), "**Proposition 4.** —", "Proposition 4.", 1)
+		}
+		return page("A IV.2")
+	})
+	runner := w.runner(t, machine)
+	runner.Salvage = true
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Accepted != 2 {
+		t.Errorf("accepted %d, want both pages: %s", report.Accepted, report.Summary())
+	}
+	if report.Salvaged != 1 {
+		t.Errorf("salvaged %d, want the one page that never came back clean", report.Salvaged)
+	}
+	if report.Dead != 0 {
+		t.Errorf("dead %d, want none: a salvaged page is not a dead one", report.Dead)
+	}
+	// Two attempts failed and the third was salvaged, so the page is on disk.
+	file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(w.root, "alg-iv-vii", 1))
+	if err != nil {
+		t.Fatalf("the salvaged page is not in the corpus: %v", err)
+	}
+	if !strings.Contains(file.Body, "Proposition 4.") {
+		t.Errorf("the salvaged page lost its statement:\n%s", file.Body)
+	}
+	// And it says so. A corpus that keeps a bad page quietly is worse than one
+	// that drops it.
+	var said bool
+	for _, flag := range file.Meta.Flags {
+		if strings.Contains(flag, "statement") {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("the salvaged page does not name what is wrong with it: %q", file.Meta.Flags)
+	}
+}
+
+// A refusal is not a page. Salvage does not turn one into a page however many
+// attempts have gone by.
+func TestSalvageLeavesAPageThatIsNotAReadingAlone(t *testing.T) {
+	w := newWorld(t, 2)
+	machine := newFleet(func(image string) string {
+		if strings.HasSuffix(image, "0001.png") {
+			return "I'm sorry, I can't transcribe this image."
+		}
+		return page("A IV.2")
+	})
+	runner := w.runner(t, machine)
+	runner.Salvage = true
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Salvaged != 0 {
+		t.Errorf("salvaged %d, want none: an apology is not a transcription", report.Salvaged)
+	}
+	if report.Dead != 1 {
+		t.Errorf("dead %d, want the one page nothing can be done with: %s", report.Dead, report.Summary())
+	}
+	if _, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(w.root, "alg-iv-vii", 1)); err == nil {
+		t.Errorf("the apology was written into the corpus")
+	}
+}
+
+// Salvage is off unless it is asked for, because the ordinary run wants a clean
+// corpus and a page that fails a rule is a page to read again.
+func TestSalvageIsOffByDefault(t *testing.T) {
+	w := newWorld(t, 2)
+	machine := newFleet(func(image string) string {
+		if strings.HasSuffix(image, "0001.png") {
+			return strings.Replace(page("A IV.1"), "**Proposition 4.** —", "Proposition 4.", 1)
+		}
+		return page("A IV.2")
+	})
+	runner := w.runner(t, machine)
+	if _, err := runner.Fill(w.pages); err != nil {
+		t.Fatal(err)
+	}
+	report, err := runner.Do(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.Salvaged != 0 || report.Dead != 1 {
+		t.Errorf("salvaged %d and killed %d, want 0 and 1: %s", report.Salvaged, report.Dead, report.Summary())
+	}
+}
