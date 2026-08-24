@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tamnd/bourbaki-solver/assemble"
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/extract"
 	"github.com/tamnd/bourbaki-solver/footnote"
@@ -497,6 +498,36 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixFenceUsage = `usage: bourbaki fix fence [flags]
+
+Puts back the blank line between a display and the statement head under it.
+
+A display closes on a line holding nothing but two dollars, and what follows it
+is a new paragraph. Eight pages of the corpus run the two together: page 314 of
+Algebra I to III closes the display defining the mapping pi and then writes
+"**Proposition 7.** *The Z-linear mapping (7) is bijective.*" on the very next
+line, with no blank line anywhere between them.
+
+Markdown reads that as one block and so does the assembler, which looks for a
+head at the start of a block and finds a display. Proposition 7 was therefore
+prose, its Corollary 1 was hung on Proposition 6, and chapter II would not
+assemble at all: two statements at alg-ii-s6-prop-6-cor-1, one of them the real
+corollary of Proposition 6 two pages earlier.
+
+What counts as a head here is assemble.StatesAResult, which is the assembler's
+own grammar and not a second opinion about it. The repair exists to hand the
+assembler something it can read, so anything else would be repairing pages on a
+guess.
+
+Eight pages across six volumes carry this, in both languages, and they are all
+the same fault in the same place. Nothing else is touched: a line after a fence
+that does not state a result is left where the reading put it.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
 const fixSealUsage = `usage: bourbaki fix seal [flags]
 
 Writes content_sha256 over a section file whose body no longer hashes to it.
@@ -561,6 +592,8 @@ func runFix(args []string) error {
 		return fixOpening(args[1:])
 	case "footnote":
 		return fixFootnote(args[1:])
+	case "fence":
+		return fixFence(args[1:])
 	case "seal":
 		return fixSeal(args[1:])
 	}
@@ -1711,6 +1744,92 @@ func fixSmallCaps(args []string) error {
 		fmt.Println("fix smallcaps: run bourbaki assemble")
 	}
 	return nil
+}
+
+// fixFence puts back the blank line between a closing display and the head
+// under it.
+//
+// The head is decided by assemble.StatesAResult, which is the assembler's own
+// grammar. See fixFenceUsage.
+func fixFence(args []string) error {
+	fs := flag.NewFlagSet("fix fence", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFenceUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+	// eachPage hands the callback a path and a page and nothing else, and there
+	// is a grammar for each language rather than one for the corpus, so the
+	// language has to be carried in from the manifest. It is on the volume and
+	// not on the page.
+	lang := map[string]string{}
+	for _, b := range books.Books {
+		lang[b.ID] = b.Lang
+	}
+
+	var pages, parted, changed int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		lines := strings.Split(f.Body, "\n")
+		out := make([]string, 0, len(lines)+4)
+		here := 0
+		for i, line := range lines {
+			out = append(out, line)
+			if strings.TrimSpace(line) != "$$" || i+1 >= len(lines) {
+				continue
+			}
+			next := lines[i+1]
+			if strings.TrimSpace(next) == "" {
+				continue
+			}
+			if !assemble.StatesAResult(lang[f.Meta.Book], next) {
+				continue
+			}
+			here++
+			fmt.Printf("%s  %s\n", rel(root, path), opening(next))
+			out = append(out, "")
+		}
+		if here == 0 {
+			return nil
+		}
+		parted += here
+		changed++
+		if *check {
+			return nil
+		}
+		f.Body = strings.Join(out, "\n")
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	verb := "parted"
+	if *check {
+		verb = "would part"
+	}
+	fmt.Printf("fix fence: %d pages read, %s a head from the display above it on %d of them, %d heads in all\n",
+		pages, verb, changed, parted)
+	if changed > 0 && !*check {
+		fmt.Println("fix fence: run bourbaki assemble")
+	}
+	return nil
+}
+
+// opening is the head as it goes into the report, short enough to read a run of
+// them down a terminal and long enough to say which statement it is.
+func opening(line string) string {
+	line = strings.TrimSpace(line)
+	r := []rune(line)
+	if len(r) <= 64 {
+		return line
+	}
+	return string(r[:64]) + "..."
 }
 
 // fixSeal writes content_sha256 over the body it no longer describes.

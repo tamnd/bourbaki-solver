@@ -173,9 +173,9 @@ var printings = map[string]printing{
 		gathered:   "# EXERCISES",
 		head: regexp.MustCompile(
 			`^(?:(?:\*\*(` + enKinds + `)(?: (\d+))?\.\*\*|(` + enKinds + `)(?: (\d+))?(?: \([^)]*\))+\.|` +
-				smallType + `(` + enKinds + `)(?: (\d+))?\.)\s*—\s*` +
+				smallType + `(` + enKinds + `)(?: (\d+))?\.|(` + enKinds + `)(?: (\d+))?\.)\s*—\s*` +
 				`|(` + enCapKinds + `)(?: (\d+))?(?: \([^)]*\))*\.\s*` +
-				`|(` + enPlainKinds + `)(?: (\d+))?\.\s+` +
+				`|(` + enKinds + `)(?: (\d+))?\.\s+` +
 				`|\*\*(` + enKinds + `)(?: (\d+))?(?:\.\*\*|\*\* \([^)]*\)\.)\s+` +
 				`|\*\*(` + enCapKinds + `)(?: (\d+))?\.\*\*\s*` +
 				`|\*(` + enPlainKinds + `)(?: (\d+))?\.\*\s+` +
@@ -213,6 +213,28 @@ func printingOf(lang string) (printing, error) {
 		return printing{}, fmt.Errorf("nothing describes how the %q printing is laid out", lang)
 	}
 	return p, nil
+}
+
+// StatesAResult says whether a line opens a statement in a printing, and it is
+// exported for one caller: the repair that puts back the blank line a display
+// swallowed. See fixFence.
+//
+// It is the grammar itself and not a copy of it, because a copy is a thing that
+// drifts. The repair exists to hand the assembler a head it can read, so a shape
+// the repair thinks is a head and the assembler does not is a page changed for
+// no reason, and a shape the assembler reads and the repair does not is a head
+// left glued to a fence. Asking the same regexp both times makes both of those
+// impossible rather than unlikely.
+//
+// A language nothing describes has no heads, which is the honest answer: the
+// caller walks every page of the corpus and two of the volumes are in a
+// printing this file does not describe yet.
+func StatesAResult(lang, line string) bool {
+	pr, err := printingOf(lang)
+	if err != nil {
+		return false
+	}
+	return pr.head.MatchString(strings.TrimSpace(line))
 }
 
 // smallType is the mark that opens a passage set in small type.
@@ -307,6 +329,34 @@ const enKinds = `Definitions?|Propositions?|Theorems?|Lemmas?|Corollary|Corollar
 // words a sentence can open on and the period after the number is all that stands
 // between a head and a sentence. Nothing in small capitals is a word a sentence
 // opens on, so nothing is being traded away there.
+//
+// The undecorated branch now takes every kind and not only these four, and the
+// reason it took only these four is gone. It was written when the English pages
+// carried 8 lines of the shape, which is not enough to say what the shape means.
+// They carry 283 now, spread over nine volumes and both printings, and the
+// difference is what a reading of a page image does to a head the type sets in
+// small capitals: it comes back bold most of the time and undecorated the rest,
+// and which of the two it is has nothing to do with the head. Page 312 of
+// Algebra I to III is the whole case in one page. It prints Proposition 6 and
+// two Corollaries between Proposition 5 on page 311 and COROLLARY 2 on page
+// 313, and the reading lost the mark on all three of them, so the grammar read
+// Proposition 6 as prose, hung its corollaries on Proposition 5, and the volume
+// would not assemble: two statements at alg-ii-s6-prop-5-cor-2, the one on 313
+// and Corollary 2 of Proposition 7 on 315.
+//
+// I read all 283 rather than trusting the shape. Every one states a result.
+// There is not a citation or a sentence of prose among them, and the reason is
+// the same one the four kinds already leaned on: the period follows the number
+// immediately. A citation writes "Proposition 2 of § 3" or "(§ 3, no. 1,
+// Proposition 1)" and prose writes "Theorem 1 follows from this statement",
+// none of which is this shape. The four kinds this adds are also the four a
+// sentence is least likely to open on, so the trade the comment above worries
+// about is smaller here than where it was already accepted.
+//
+// 101 of the 283 carry an em dash after the period, which is Algebra 4 to 7 and
+// Algebra VIII losing the bold off a dashed head, and those go in the first
+// group where the dash is eaten with the rest of the head. The other 182 have
+// no dash and go here.
 const enCapKinds = `DEFINITIONS?|PROPOSITIONS?|THEOREMS?|LEMMAS?|COROLLARY|COROLLARIES|REMARKS?|EXAMPLES?|SCHOLIUM`
 
 // enPlainKinds are the kinds Lie 7 to 9 sets in italic, and the last branch of
@@ -439,9 +489,10 @@ const frAnyKinds = frKinds + `|` + frCapKinds
 // this shape by accident. I read all 1581 rather than trusting that, and every
 // one of them states a result.
 //
-// The English grammar still refuses an undecorated head. That printing sets
-// every head in bold and its pages have 8 lines of this shape in the whole
-// corpus, which is not enough to say what the shape means there.
+// The English grammar reads an undecorated head too now, and for the same
+// reason this branch was written: the count moved. See the note on enCapKinds
+// for the 283 English heads and for the page of Algebra I to III that would not
+// assemble without them.
 //
 // The branch after it is the same head with the italic marked rather than lost,
 // "*Lemme 1.* — ", which is the other thing a reading of the image does with a
