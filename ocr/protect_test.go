@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -355,5 +356,94 @@ func TestARunThatGuardedNothingReportsNothing(t *testing.T) {
 	r := &Runner{Book: "ens-i-iv", Root: t.TempDir(), Model: "gpt-5"}
 	if left := r.leftBehind(); left != nil {
 		t.Errorf("a run with no guarded pages reported %v", left)
+	}
+}
+
+// salvagedPage puts a reading on disk that was kept with a fault on it, which
+// is what the third attempt writes when Salvage is on.
+func salvagedPage(t *testing.T, model string) string {
+	t.Helper()
+	root := t.TempDir()
+	if err := (corpus.PageFile{Meta: corpus.PageFrontMatter{
+		Book: "lie-i-iii", PDFPage: 252, Method: corpus.MethodOCR,
+		RunningHead: "LIE GROUPS", Model: model,
+		PromptSHA256: "old-prompt", InputSHA256: "same-image", Lines: 40,
+		Flags: []string{
+			"rendered at 300 dpi on attempt 3",
+			"read 3 times and never came back clean, so it is kept with the faults rule statement names still on it, see bourbaki ocr check",
+		},
+	}, Body: "short"}).Write(corpus.PagePath(root, "lie-i-iii", 252)); err != nil {
+		t.Fatal(err)
+	}
+	return root
+}
+
+// The pass that came twenty minutes after lie-i-iii was committed. The card
+// salvaged 21 pages, the next run found them still failing the rules, read 18
+// of them again on the same images and lost mathematics doing it.
+func TestASalvagedPageIsNotReadAgainByTheSameClassOfReader(t *testing.T) {
+	root := salvagedPage(t, "olmOCR-2-7B-1025-FP8")
+	r := &Runner{Book: "lie-i-iii", Root: root, Model: "olmOCR-2-7B-1025-FP8",
+		Hosts: []Host{weakHost}}
+	if r.state(Source{Page: 252, SHA256: "same-image"}, "old-prompt") != needsABetterReader {
+		t.Error("the card was sent back to a page it had already had three goes at")
+	}
+}
+
+// And the batch guard says the same thing, so a mixed run does not hand it to
+// the card either.
+func TestASalvagedPageIsNotOfferedToTheWeakHost(t *testing.T) {
+	root := salvagedPage(t, "olmOCR-2-7B-1025-FP8")
+	r := &Runner{Book: "lie-i-iii", Root: root, Model: "gpt-5",
+		Hosts: []Host{weakHost, strongHost}}
+	if r.strongEnough(weakHost, "lie-i-iii/0252") {
+		t.Error("a salvaged page was offered to the reader that salvaged it")
+	}
+	if !r.strongEnough(strongHost, "lie-i-iii/0252") {
+		t.Error("a salvaged page was kept from the reader that could actually improve it")
+	}
+}
+
+// A better reader is the whole point of leaving it alone, so a run that has one
+// still queues the page.
+func TestASalvagedPageIsQueuedForABetterReader(t *testing.T) {
+	root := salvagedPage(t, "olmOCR-2-7B-1025-FP8")
+	r := &Runner{Book: "lie-i-iii", Root: root, Model: "gpt-5",
+		Hosts: []Host{weakHost, strongHost}}
+	if r.state(Source{Page: 252, SHA256: "same-image"}, "old-prompt") != unread {
+		t.Error("a run holding a stronger reader walked away from a salvaged page")
+	}
+}
+
+// A page that was written because it read clean is not salvaged and carries no
+// such flag, so nothing here applies to it.
+func TestAnOrdinaryRejectedPageIsUnaffectedBySalvageGuard(t *testing.T) {
+	root, source := rejected(t, "olmOCR-2-7B-1025-FP8")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "olmOCR-2-7B-1025-FP8",
+		Hosts: []Host{weakHost}}
+	if r.state(source, "old-prompt") != unread {
+		t.Error("a plain rejected reading was treated as salvaged")
+	}
+}
+
+// RereadProtected reaches this guard like it reaches the other three.
+func TestRereadProtectedReadsASalvagedPageAgain(t *testing.T) {
+	root := salvagedPage(t, "olmOCR-2-7B-1025-FP8")
+	r := &Runner{Book: "lie-i-iii", Root: root, Model: "olmOCR-2-7B-1025-FP8",
+		Hosts: []Host{weakHost}, RereadProtected: true}
+	if r.state(Source{Page: 252, SHA256: "same-image"}, "old-prompt") != unread {
+		t.Error("the guard held with RereadProtected set")
+	}
+}
+
+// The flag written by write and the mark read by salvagedReading have to stay
+// in step, so the wording that is actually emitted is checked against it rather
+// than a copy of it.
+func TestTheSalvageFlagCarriesTheMarkThatIsMatched(t *testing.T) {
+	flag := fmt.Sprintf(
+		"read %d times and never came back clean, so it is kept with the faults rule %s names still on it, see bourbaki ocr check",
+		3, ruleList([]Rule{RuleStatement}))
+	if !salvagedReading(corpus.PageFrontMatter{Flags: []string{flag}}) {
+		t.Errorf("the flag write emits does not match the mark salvagedReading looks for: %q", flag)
 	}
 }

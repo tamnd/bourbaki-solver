@@ -330,7 +330,7 @@ func (r *Runner) state(source Source, promptSHA string) pageState {
 	if len(Validate(text, expect, r.options())) == 0 {
 		return alreadyRead
 	}
-	if r.outranked(file.Meta.Model) {
+	if r.outranked(file.Meta.Model) || r.resalvaging(file.Meta) {
 		return needsABetterReader
 	}
 	return unread
@@ -351,6 +351,62 @@ func (r *Runner) outranked(model string) bool {
 	}
 	for _, name := range r.readers() {
 		if protectedModel(name) {
+			return false
+		}
+	}
+	return true
+}
+
+// salvageMark is how a later run recognises a page that was salvaged.
+//
+// It is a substring and not a prefix because the flag leads with the number of
+// attempts and ends with the rules that were still on the page, and neither of
+// those is fixed. This part of it is, and the pages already in the corpus carry
+// it, so matching here does not want a rewrite of what is committed.
+const salvageMark = "never came back clean"
+
+// salvagedReading says whether a page was written on a last attempt with a
+// known fault on it rather than because it read clean.
+func salvagedReading(meta corpus.PageFrontMatter) bool {
+	for _, flag := range meta.Flags {
+		if strings.Contains(flag, salvageMark) {
+			return true
+		}
+	}
+	return false
+}
+
+// resalvaging says whether reading this page again would only roll the dice
+// that produced it.
+//
+// A salvaged page is not an accident. The run had three goes at it, kept the
+// third with the fault named in the front matter, and wrote a flag saying so,
+// because a hole in the corpus where a page of mathematics should be is worse
+// than a statement head in the wrong case. What it is not is an invitation to
+// try again, and that is what it was being read as: the page still fails the
+// rules, so state calls it unread on the very next pass and the same model
+// reads it a fourth time.
+//
+// It measurably does not help. The 21 pages of lie-i-iii were salvaged and
+// committed, and the pass that followed twenty minutes later rewrote 18 of
+// them with the same reader on the same images. The diff is not an improvement
+// and not noise either: it lost mathematics. "Let $ G $ be a Lie group germ"
+// came back as "Let G be a Lie group germ", and "the mappings $ u \mapsto ug,\
+// v \mapsto vg^{-1} $" lost its markup down the paragraph. Three passes, three
+// different answers, and nothing in the run able to tell which was best.
+//
+// So a salvaged page waits for a reader that beats the one that salvaged it.
+// Same class is not enough, because same class is the dice. RereadProtected
+// turns this off with the rest of the guard.
+func (r *Runner) resalvaging(meta corpus.PageFrontMatter) bool {
+	if r.RereadProtected {
+		return false
+	}
+	if !salvagedReading(meta) {
+		return false
+	}
+	for _, name := range r.readers() {
+		if protectedModel(name) && !protectedModel(meta.Model) {
 			return false
 		}
 	}
@@ -402,7 +458,11 @@ func (r *Runner) strongEnough(host Host, target string) bool {
 	if file.Meta.Method != corpus.MethodOCR {
 		return true
 	}
-	if !protectedModel(file.Meta.Model) {
+	// Two kinds of reading have to be beaten rather than merely replaced: one a
+	// protected reader wrote, and one that was salvaged. See resalvaging for why
+	// the second belongs here. Both come down to the same test, since the only
+	// thing that beats a salvaged local reading is a protected one.
+	if !protectedModel(file.Meta.Model) && !salvagedReading(file.Meta) {
 		return true
 	}
 	if protectedModel(r.modelFor(host)) {
