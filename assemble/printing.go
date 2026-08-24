@@ -215,6 +215,19 @@ func printingOf(lang string) (printing, error) {
 	return p, nil
 }
 
+// HistoricalNoteHead is the line a chapter's historical note is headed by in a
+// printing, and it is exported for the same one reason StatesAResult is: the
+// repair that puts the line back has to ask what the assembler reads rather
+// than keep a copy of the answer, or the two drift and the repair writes a line
+// nothing looks for.
+func HistoricalNoteHead(lang string) (string, bool) {
+	pr, err := printingOf(lang)
+	if err != nil {
+		return "", false
+	}
+	return pr.historical, true
+}
+
 // StatesAResult says whether a line opens a statement in a printing, and it is
 // exported for one caller: the repair that puts back the blank line a display
 // swallowed. See fixFence.

@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	iofs "io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/assemble"
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -448,18 +452,46 @@ FORMAL MATHEMATICS. A line the join does not need is left where it stands, so
 "(Elementary Theory)" under the title of chapter III of Topology I to IV stays a
 line of the page.
 
-An opening the reading dropped altogether is not put back. Seven § in this
-corpus are in that state, page 54 of Algebra I to III among them, where the page
-begins at the first no. and § 4 is nowhere on it. There is nothing there for the
-contents to agree with, and writing the heading in would mean putting a line on
-a page that no reading of it ever produced. Those are named and left, and what
-they need is a re-reading of the page image.
+An opening the reading dropped altogether is not put back from the page, because
+there is nothing there for the contents to agree with and writing the heading in
+would mean putting a line on a page that no reading of it ever produced. Twenty
+six openings in this corpus are in that state.
+
+-text-layer asks a second reading about those. Every one of these volumes was
+scanned by its publisher and most of the PDFs carry the text layer that scan
+left, which is a reading of the same paper by a different hand. It is a far
+worse reading than the one that made the corpus: page 213 of Algebre I a III has
+"5 2. MODULES D'APPLICATIONS LINGAIRES." where the book prints "§ 2. MODULES
+D'APPLICATIONS LINÉAIRES.", with the section sign read as a five and an accented
+E read as a G. So its words are not words to write down. What it can settle is
+whether the heading is on the paper at all, and that is all it is asked.
+
+The number is the whole of the test, as it is everywhere else in this command. A
+running head carries the title and no number, which is what keeps this off the
+head of page 177 of Topologie generale V a X and on to the real § 6 two lines
+below it. The first no. of a § carries the number 1. A wrong match needs a line
+numbered as the § is numbered and titled as the § is titled, on the one page the
+contents opens that § on.
+
+What gets written is the number and the title the contents gives, set in the
+sign and the case the volume sets its other § headings in, which is counted off
+the volume rather than guessed: Algebra I to III sets 31 of them with a sign and
+in capitals, Groupes et algebres de Lie IV a VI sets 11 with a sign and none in
+capitals. A volume with no § heading anywhere in it is left alone and said so,
+since there is nothing there to be consistent with. The page is flagged, because
+no reading of that page produced that line and somebody going back to the page
+image should know it before trusting the wording.
+
+11 of the 26 come back this way. The other 15 are a heading the text layer lost
+as well, a page with no text layer at all, or a contents entry pointing at the
+wrong page, and those still need the page image read again.
 
 Run bourbaki assemble afterwards, or the section files still hold the old text.
 
 flags:
-  -book ID   only this volume, default every volume the contents covers
-  -check     say what would change and change nothing
+  -book ID      only this volume, default every volume the contents covers
+  -text-layer   ask the text layer about an opening that is not on the page
+  -check        say what would change and change nothing
 `
 
 const fixFootnoteUsage = `usage: bourbaki fix footnote [flags]
@@ -1148,11 +1180,129 @@ func added(before, after []string) string {
 	return ""
 }
 
+// sectionStyle is how a volume sets a § heading: whether it prints the section
+// sign, and whether it sets the title in capitals. Both vary by volume and
+// neither varies inside one.
+//
+// It is here because a heading put back from the contents has no page line to
+// copy either from. The corpus was counted for it: Algebra I to III sets 31 of
+// them, all with a sign and all in capitals, Algebre I a III 26 the same way,
+// Groupes et algebres de Lie IV a VI 11 with a sign and none in capitals, and
+// Integration IX 6 the same. Topologie generale V a X is the one volume that is
+// not unanimous, 13 in capitals against 4 not, and the majority carries it.
+type sectionStyle struct {
+	sign  bool
+	upper bool
+	// known says the volume has a § heading somewhere in it to learn from. A
+	// volume that has none tells us nothing and gets no heading written.
+	known bool
+}
+
+// heading is the line the assembler reads, with the number from the contents.
+func (s sectionStyle) heading(number int, title string) string {
+	if s.upper {
+		title = upperOutsideMath(title)
+	}
+	sign := ""
+	if s.sign {
+		sign = "§ "
+	}
+	return "## " + sign + strconv.Itoa(number) + ". " + title
+}
+
+// upperOutsideMath capitalises the prose of a title and leaves the mathematics
+// alone. § 3 of chapter VII of Topologie generale V a X is titled "Sommes
+// infinies dans les groupes $ \mathbf{R}^n $", and upper casing the whole of
+// that gives \MATHBF, which is not a command.
+func upperOutsideMath(title string) string {
+	parts := strings.Split(title, "$")
+	for i := 0; i < len(parts); i += 2 {
+		parts[i] = strings.ToUpper(parts[i])
+	}
+	return strings.Join(parts, "$")
+}
+
+// setSection is a § heading as this corpus writes one.
+var setSection = regexp.MustCompile(`^## (§ ?)?[0-9]{1,3}\. +(.+?)\s*$`)
+
+func sectionStyleOf(root, book string) sectionStyle {
+	paths, err := filepath.Glob(filepath.Join(corpus.PagesDir(root, book), "*.md"))
+	if err != nil {
+		return sectionStyle{}
+	}
+	var sign, plain, upper, lower int
+	for _, path := range paths {
+		f, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+		if err != nil {
+			continue
+		}
+		for _, line := range strings.Split(f.Body, "\n") {
+			m := setSection.FindStringSubmatch(line)
+			if m == nil {
+				continue
+			}
+			if m[1] != "" {
+				sign++
+			} else {
+				plain++
+			}
+			if capitals(m[2]) {
+				upper++
+			} else {
+				lower++
+			}
+		}
+	}
+	if sign+plain == 0 {
+		return sectionStyle{}
+	}
+	return sectionStyle{sign: sign >= plain, upper: upper >= lower, known: true}
+}
+
+// capitals says a title is set in capitals. The mathematics in it is not
+// counted, since a title that is half a formula carries lower case letters in
+// the formula whatever the press did with the words.
+func capitals(title string) bool {
+	parts := strings.Split(title, "$")
+	letters := false
+	for i := 0; i < len(parts); i += 2 {
+		for _, r := range parts[i] {
+			if unicode.IsLower(r) {
+				return false
+			}
+			if unicode.IsLetter(r) {
+				letters = true
+			}
+		}
+	}
+	return letters
+}
+
+// openAt puts a heading at the top of a page, under whatever blank lines the
+// body opens with.
+func openAt(lines []string, head string) []string {
+	i := 0
+	for i < len(lines) && strings.TrimSpace(lines[i]) == "" {
+		i++
+	}
+	return append(lines[:i:i], append([]string{head, ""}, lines[i:]...)...)
+}
+
+// headingFromContents is what a page written this way is flagged with, for the
+// same reason folioFromMap exists: a line that came from somewhere other than
+// the reading of the page in front of you is worth saying so on the page. The
+// text layer witnessed that the heading is printed there, and the words are the
+// book's own from its contents pages, but no reading of this page produced this
+// line and a person going back to the page image should know that before
+// trusting the wording.
+const headingFromContents = "heading from the contents, printed on the page and dropped by this reading, witnessed by the text layer"
+
 func fixOpening(args []string) error {
 	fs := flag.NewFlagSet("fix opening", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixOpeningUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
+	layer := fs.Bool("text-layer", false, "ask the text layer about an opening that is not on the page")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -1165,7 +1315,61 @@ func fixOpening(args []string) error {
 		return err
 	}
 
-	var chapters, sections, numbers, appendices, unread, lost, differ int
+	// The text layer of a volume and the way that volume sets a § heading, both
+	// read once and both read only when a heading turns out to be lost. The
+	// first is a pdftotext run over the whole document and the second is a walk
+	// of every page of it, and most volumes need neither.
+	text := map[string][]string{}
+	style := map[string]sectionStyle{}
+	layerPage := func(b corpus.Book, pdfPage int) (string, error) {
+		if !*layer || b.TextLayer == "none" {
+			return "", nil
+		}
+		pages, ok := text[b.ID]
+		if !ok {
+			var err error
+			if pages, err = volumeText(context.Background(), root, &b); err != nil {
+				return "", err
+			}
+			text[b.ID] = pages
+			style[b.ID] = sectionStyleOf(root, b.ID)
+		}
+		if pdfPage < 1 || pdfPage > len(pages) {
+			return "", nil
+		}
+		return pages[pdfPage-1], nil
+	}
+	witness := func(b corpus.Book, pdfPage, number int, title string) (string, string, error) {
+		page, err := layerPage(b, pdfPage)
+		if err != nil || page == "" {
+			return "", "", err
+		}
+		words, ok := toc.WitnessSection(page, number, title)
+		if !ok {
+			return "", "", nil
+		}
+		st := style[b.ID]
+		if !st.known {
+			// The volume has no § heading anywhere in it for this to be set
+			// like, and a heading written in one of the two styles at random
+			// would be a guess about the printing on a page nobody has looked
+			// at. The witness is reported and the heading is not written.
+			return words, "", nil
+		}
+		head := st.heading(number, title)
+		if b.Lang == "fr" {
+			// The contents manifest sets the apostrophe of an elision straight
+			// in 201 of its titles and the French pages set it typographic, so
+			// a title carried over as it stands puts a fault on the page that
+			// fix elision would then have to come back for. It is the same
+			// rule and the same call, made before the line is written rather
+			// than after.
+			head, _, _ = typography.Apostrophes(head)
+		}
+		return words, head, nil
+	}
+
+	var chapters, sections, numbers, appendices, notes, unread, lost, differ, told int
 	for _, b := range books.Books {
 		if *book != "" && b.ID != *book {
 			continue
@@ -1183,6 +1387,9 @@ func fixOpening(args []string) error {
 		// right, so the running head the page really prints is kept here
 		// beside the body it belongs to.
 		heads := map[int]string{}
+		// A page whose heading came from the contents rather than from any
+		// reading of the page, which is flagged when it is written.
+		witnessed := map[int]bool{}
 		read := func(pdfPage int) ([]string, bool) {
 			if lines, ok := edits[pdfPage]; ok {
 				return lines, true
@@ -1215,6 +1422,72 @@ func fixOpening(args []string) error {
 					if *check {
 						fmt.Printf("%s/%04d.md  %s\n", b.ID, ch.PDFPage, out[0])
 					}
+				}
+			}
+			// The historical note at the end of a chapter is headed by two
+			// words and nothing else, which is the shortest head in the book
+			// and the one the reading is likeliest to take for a line of
+			// display type it should skip. Nine of them are gone in this
+			// corpus and each one stops its volume dead, since assemble looks
+			// for the line and there is no other way in to the note.
+			if n := ch.Historical; n != nil && n.PDFPage > 0 {
+				if err := func() error {
+					head, hok := assemble.HistoricalNoteHead(b.Lang)
+					if !hok {
+						return nil
+					}
+					lines, ok := read(n.PDFPage)
+					if !ok {
+						unread++
+						return nil
+					}
+					if slices.Contains(lines, head) {
+						return nil
+					}
+					if at, rest := toc.HistoricalNote(lines); at >= 0 {
+						// The words are on the page and only the level was
+						// lost, which is the same fault the § and the no.
+						// have and takes the same repair. A parenthetical
+						// set on the same line stays on it, under the head,
+						// because it is a line of the note in the page's own
+						// words and there is nowhere else for it to go.
+						words := strings.TrimSpace(lines[at])
+						lines = slices.Clone(lines)
+						lines[at] = head
+						if rest != "" {
+							lines = slices.Insert(lines, at+1, "", rest)
+						}
+						edits[n.PDFPage] = lines
+						notes++
+						fmt.Printf("%s/%04d.md  %s   the page has %q\n", b.ID, n.PDFPage, head, words)
+						return nil
+					}
+					page, err := layerPage(b, n.PDFPage)
+					if err != nil {
+						return err
+					}
+					rest, ok := toc.WitnessHistorical(page)
+					if !ok {
+						lost++
+						fmt.Printf("%s chapter %s historical note: pdf page %d has no line the contents can read as its head\n",
+							b.ID, ch.Numeral, n.PDFPage)
+						return nil
+					}
+					edits[n.PDFPage] = openAt(lines, head)
+					witnessed[n.PDFPage] = true
+					notes++
+					told++
+					fmt.Printf("%s/%04d.md  %s   the text layer has it\n", b.ID, n.PDFPage, head)
+					if rest != "" {
+						// The layer is too poor a reading to write into a
+						// page, so what the head carries after the words is
+						// named here and left for somebody to put back.
+						fmt.Printf("%s chapter %s historical note: the head on pdf page %d also carries %q, which this does not write\n",
+							b.ID, ch.Numeral, n.PDFPage, rest)
+					}
+					return nil
+				}(); err != nil {
+					return err
 				}
 			}
 			for _, s := range ch.Sections {
@@ -1284,10 +1557,26 @@ func fixOpening(args []string) error {
 						differ++
 						fmt.Printf("%s chapter %s § %d: pdf page %d calls it %q, the table of contents calls it %q\n",
 							b.ID, ch.Numeral, s.Number, s.PDFPage, got, s.Title)
-					} else {
+					} else if words, put, err := witness(b, s.PDFPage, s.Number, s.Title); err != nil {
+						return err
+					} else if put == "" {
 						lost++
-						fmt.Printf("%s chapter %s § %d: pdf page %d has no line the contents can read as its heading\n",
-							b.ID, ch.Numeral, s.Number, s.PDFPage)
+						switch {
+						case words != "":
+							fmt.Printf("%s chapter %s § %d: pdf page %d prints %q in the text layer, and this volume has no § heading anywhere to set it like\n",
+								b.ID, ch.Numeral, s.Number, s.PDFPage, words)
+						default:
+							fmt.Printf("%s chapter %s § %d: pdf page %d has no line the contents can read as its heading\n",
+								b.ID, ch.Numeral, s.Number, s.PDFPage)
+						}
+					} else {
+						head = put
+						lines = openAt(lines, head)
+						edits[s.PDFPage] = lines
+						witnessed[s.PDFPage] = true
+						sections++
+						told++
+						fmt.Printf("%s/%04d.md  %s   text layer: %s\n", b.ID, s.PDFPage, head, words)
 					}
 					continue
 				}
@@ -1359,6 +1648,9 @@ func fixOpening(args []string) error {
 			if run, ok := heads[pdfPage]; ok {
 				f.Meta.RunningHead = run
 			}
+			if witnessed[pdfPage] {
+				f.Meta.Flags = withFlag(f.Meta.Flags, headingFromContents)
+			}
 			if err := f.Write(path); err != nil {
 				return err
 			}
@@ -1369,8 +1661,11 @@ func fixOpening(args []string) error {
 	if *check {
 		verb = "would put back"
 	}
-	fmt.Printf("fix opening: %s %d chapter openings, %d § openings, %d no. openings and %d appendix openings\n",
-		verb, chapters, sections, numbers, appendices)
+	fmt.Printf("fix opening: %s %d chapter openings, %d § openings, %d no. openings, %d appendix openings and %d historical notes\n",
+		verb, chapters, sections, numbers, appendices, notes)
+	if told > 0 {
+		fmt.Printf("fix opening: %d of the openings were not on the page at all and came from the contents, with the text layer as the witness that the page prints them\n", told)
+	}
 	if lost > 0 {
 		fmt.Printf("fix opening: %s not on the page at all and need the page image read again\n", openings(lost))
 	}
@@ -1380,7 +1675,7 @@ func fixOpening(args []string) error {
 	if unread > 0 {
 		fmt.Printf("fix opening: %s on a page that has not been read\n", openings(unread))
 	}
-	if chapters+sections+numbers+appendices > 0 && !*check {
+	if chapters+sections+numbers+appendices+notes > 0 && !*check {
 		fmt.Println("fix opening: run bourbaki assemble")
 	}
 	return nil
