@@ -747,3 +747,49 @@ func TestTheCaseOfTheNumberSignIsNotACitation(t *testing.T) {
 		t.Fatalf("the other spelling of the number sign was refused: %v", ps)
 	}
 }
+
+// A Vietnamese word that ends in p is not a page citation.
+//
+// Go's \b is the ASCII one, so a letter outside ASCII counts as the space in
+// front of a word. In English that never shows, because a citation stands after
+// a bracket or a comma. In Vietnamese it shows constantly: tập is set, the
+// corpus writes bài tập for exercise, and "bài tập. 2)" is an ASCII p followed
+// by a full stop and a number, which \bp\.\s*\d+ read as a citation to page 2.
+//
+// Two sections died of it. § 4 of Espaces vectoriels topologiques III and § 6 of
+// Lie V were both refused on every pass with "cites 1 things the English does
+// not: p.2", with every chunk of both answered and accepted and only the audit
+// of the joined file refusing them. The English has no such citation for the
+// answer to be missing, so nothing a model could have written would have passed.
+func TestAVietnameseWordEndingInPIsNotAPage(t *testing.T) {
+	const enRef = "This is not necessary (IV, p. 23, cor. to prop. 2 and p. 58, exerc. 2)."
+	const viRef = "Điều này là không cần (IV, p. 23, hệ quả của mệnh đề 2 và p. 58, bài tập. 2)."
+	if ps := Audit("vi", enRef, viRef); len(ps) != 0 {
+		t.Fatalf("the word tập was read as a citation: %v", ps)
+	}
+	// The other half. A citation that really is dropped is still reported, and
+	// the sentence it is dropped from is the same one.
+	bad := strings.Replace(viRef, "p. 58", "trang 58", 1)
+	if ps := Audit("vi", enRef, bad); len(ps) != 1 {
+		t.Fatalf("%d problems, want the citation the answer wrote in its own words: %v", len(ps), ps)
+	}
+}
+
+// The same for the other two marks, and for a digit in front of a mark.
+func TestACitationHasToStartAWord(t *testing.T) {
+	for _, c := range []struct {
+		name, body string
+		want       int
+	}{
+		{"a page after a bracket", "(V, § 4, p. 20)", 3},
+		{"a page after a Vietnamese letter", "bài tập. 20", 0},
+		{"a number sign after a Vietnamese letter", "phépno. 4", 0},
+		{"a number sign on its own", "xem no. 4", 1},
+		{"a chapter after a Vietnamese word", "Chương IV, § 2", 2},
+		{"a digit in front of a page", "3p. 20", 0},
+	} {
+		if got := len(refs(c.body)); got != c.want {
+			t.Errorf("%s: refs(%q) found %d, want %d: %v", c.name, c.body, got, c.want, refs(c.body))
+		}
+	}
+}
