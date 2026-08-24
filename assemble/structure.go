@@ -280,8 +280,8 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 	next := 0                       // the number the next member of that run would carry
 	passed := map[corpus.Ref]bool{} // the numbered statements printed so far
 	occ := map[corpus.Ref]int{}
-	high := map[corpus.Ref]int{} // the highest number a run of the kind has reached in this no.
-	off := map[corpus.Ref]int{}  // what a restarted run adds to the number it prints. See restart
+	high := map[corpus.Ref]int{}          // the highest number a run of the kind has reached in this no.
+	off := map[corpus.Ref]int{}           // what a restarted run adds to the number it prints. See restart
 	runs, err := runCount(blocks, id, pr) // how many runs of each kind the no. prints
 	if err != nil {
 		return err
