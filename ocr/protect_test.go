@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/queue"
 )
 
 // A page that reads clean, so that what these tests turn on is the guard and
@@ -170,7 +171,8 @@ func TestARejectedReadingIsLeftToAReaderThatCanBeatIt(t *testing.T) {
 
 // One protected host in the run is enough to queue the page, because the run
 // has somebody who can beat the reading on it. Which of the two hosts actually
-// picks it up is not decided here, and that is the gap the guard still has.
+// picks it up is decided in lease, by strongEnough, and the tests for that are
+// at the bottom of this file.
 func TestOneProtectedHostIsEnoughToQueueARejectedPage(t *testing.T) {
 	root, source := rejected(t, "claude-opus")
 	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
@@ -211,5 +213,147 @@ func TestRereadProtectedTurnsTheGuardOff(t *testing.T) {
 	r.RereadProtected = true
 	if r.state(source, "new-prompt") != unread {
 		t.Error("the guard held with RereadProtected set")
+	}
+}
+
+// The other half of the guard, the one that decides who writes.
+//
+// state runs once while the queue is being filled and asks about the run.
+// strongEnough runs once per host per lease and asks about the host, which is
+// the question the write actually turns on. The two tests above leave a
+// rejected gpt-5 page queued for a run holding gamingpc and server3 together;
+// these say which of them is allowed to have it.
+
+// gamingpc is the weak host in all of this: a card serving olmOCR, which is
+// what wrote over Theory of Sets.
+var weakHost = Host{Name: "gamingpc", Model: "olmOCR-2-7B-1025-FP8"}
+
+// server3 carries no model of its own and takes the run's, which is gpt-5.
+var strongHost = Host{Name: "server3"}
+
+// The whole point of the change. The page is queued because the run has a
+// reader that can beat it, and the card is not that reader.
+func TestTheWeakHostIsNotOfferedAPageAStrongReaderWrote(t *testing.T) {
+	for _, model := range []string{"claude-opus", "gpt-5", "gpt-4o", "o3-mini"} {
+		t.Run(model, func(t *testing.T) {
+			root, _ := rejected(t, model)
+			r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+				Hosts: []Host{weakHost, strongHost}}
+			if r.strongEnough(weakHost, "ens-i-iv/0116") {
+				t.Error("the card was offered a page it could only make worse")
+			}
+		})
+	}
+}
+
+// And the page is not stranded by that. The host the queue was filled for gets
+// it, which is why refusing the card is safe: LeasePart leaves a target its
+// predicate turns down in pending for the next host to ask.
+func TestTheStrongHostIsOfferedThatSamePage(t *testing.T) {
+	root, _ := rejected(t, "claude-opus")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+		Hosts: []Host{weakHost, strongHost}}
+	if !r.strongEnough(strongHost, "ens-i-iv/0116") {
+		t.Error("the page was kept from the reader the run queued it for")
+	}
+}
+
+// A weak reading is work for anybody, the same way it is in state. The guard is
+// about not going backwards, not about leaving pages alone.
+func TestAWeakReadingIsOfferedToTheWeakHost(t *testing.T) {
+	root, _ := rejected(t, "olmOCR-2-7B-1025-FP8")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+		Hosts: []Host{weakHost, strongHost}}
+	if !r.strongEnough(weakHost, "ens-i-iv/0116") {
+		t.Error("the card was refused a page nothing better had read")
+	}
+}
+
+// A page with no file behind it is a page nobody has read, and reading it
+// cannot be a downgrade. This is most of what a sweep does and it must not slow
+// down for the guard.
+func TestAPageWithNoFileIsOfferedToTheWeakHost(t *testing.T) {
+	root, _ := rejected(t, "claude-opus")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+		Hosts: []Host{weakHost, strongHost}}
+	if !r.strongEnough(weakHost, "ens-i-iv/0400") {
+		t.Error("an unread page was held back from the only host reading anything")
+	}
+}
+
+// A page whose text came out of the PDF rather than off an image is not an OCR
+// reading and has no model to rank, so the guard has nothing to say about it.
+func TestANativePageIsOfferedToTheWeakHost(t *testing.T) {
+	root := t.TempDir()
+	if err := (corpus.PageFile{Meta: corpus.PageFrontMatter{
+		Book: "ens-i-iv", PDFPage: 116, Method: corpus.MethodNative,
+		RunningHead: "DISTRIBUTIVITY FORMULAE", Lines: 1,
+	}, Body: "short"}).Write(corpus.PagePath(root, "ens-i-iv", 116)); err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5", Hosts: []Host{weakHost}}
+	if !r.strongEnough(weakHost, "ens-i-iv/0116") {
+		t.Error("a native page was ranked as though a reader had written it")
+	}
+}
+
+// RereadProtected reaches this guard like it reaches the other two, because it
+// is the operator saying the old readings are the thing that is wrong.
+func TestRereadProtectedOffersTheProtectedPageToTheWeakHost(t *testing.T) {
+	root, _ := rejected(t, "claude-opus")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5",
+		Hosts: []Host{weakHost}, RereadProtected: true}
+	if !r.strongEnough(weakHost, "ens-i-iv/0116") {
+		t.Error("the guard held with RereadProtected set")
+	}
+}
+
+// A target the guard cannot read is passed through rather than held, so that a
+// malformed job fails where malformed jobs already fail, in one, with a reason
+// written on it. Holding it here would leave it in pending with nothing ever
+// looking at it again.
+func TestAMalformedTargetIsNotHeldByTheGuard(t *testing.T) {
+	root, _ := rejected(t, "claude-opus")
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5", Hosts: []Host{weakHost}}
+	for _, target := range []string{"ens-i-iv", "ens-i-iv/", "ens-i-iv/cover", "ens-i-iv/0000"} {
+		if !r.strongEnough(weakHost, target) {
+			t.Errorf("target %q was left in the queue for nobody", target)
+		}
+	}
+}
+
+// The accounting. A page the card was refused is normally read by the stronger
+// host in the same run, so it must not turn up in the report as work left
+// undone. The run works that out by asking the queue at the end, and this is
+// both halves of the answer: the page still pending is named, the page that
+// went through is not.
+func TestOnlyTheGuardedPagesStillInTheQueueAreReported(t *testing.T) {
+	root, _ := rejected(t, "claude-opus")
+	q, err := queue.Open(filepath.Join(root, "work", "queue"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{Book: "ens-i-iv", Root: root, Model: "gpt-5", Queue: q,
+		Hosts: []Host{weakHost, strongHost}}
+
+	// Page 116 is still waiting, page 200 was read by somebody and is gone.
+	if _, err := q.Add(queue.New(queue.StageOCR, Target("ens-i-iv", 116), "same-image", "old-prompt")); err != nil {
+		t.Fatal(err)
+	}
+	r.passOver(Target("ens-i-iv", 116))
+	r.passOver(Target("ens-i-iv", 200))
+
+	left := r.leftBehind()
+	if len(left) != 1 || left[0] != 116 {
+		t.Fatalf("the run reported %v left behind, wanted just page 116", left)
+	}
+}
+
+// A run that guarded nothing says nothing, and does not go to the queue to find
+// that out.
+func TestARunThatGuardedNothingReportsNothing(t *testing.T) {
+	r := &Runner{Book: "ens-i-iv", Root: t.TempDir(), Model: "gpt-5"}
+	if left := r.leftBehind(); left != nil {
+		t.Errorf("a run with no guarded pages reported %v", left)
 	}
 }

@@ -129,6 +129,11 @@ type Runner struct {
 	// local reader will not return is a page the fleet reads without complaint,
 	// and a run holding both hosts should still send it to the other one.
 	refused map[string]map[string]bool
+	// guarded is pages strongEnough held back from at least one host, so the run
+	// can say at the end which of them nobody in it was good enough to read.
+	// Per run rather than per host, because the question the report answers is
+	// whether the page got read at all and not by whom it was passed over.
+	guarded map[string]bool
 }
 
 // refuseHere records that a host will not read a page.
@@ -352,6 +357,110 @@ func (r *Runner) outranked(model string) bool {
 	return true
 }
 
+// strongEnough says whether this host may write over what is already on a page.
+//
+// It is the same question outranked asks, asked where the write happens. state
+// asks it of the run, once, while the queue is being filled: is there a
+// protected name anywhere among this run's readers. That is not the question
+// the write turns on. A run holding gamingpc and a protected host together
+// answers yes, the page is queued, and then whichever host reaches it first
+// writes it, which on a mixed sweep is olmOCR writing over gpt-5.
+//
+// One pass over ens-i-iv rewrote 77 pages, 49 of them read by gpt-5, and
+// deleted 74 printed folios. That volume is foot-number and the folio is the one
+// thing on the page its page map is fitted from, so the loss was not cosmetic.
+// It survived only because the files were still uncommitted.
+//
+// So the guard moves to the batch. A page whose reading came off a protected
+// reader is offered only to a host whose own model is protected, and stays
+// pending for anyone else. That is what leaving it for a stronger reader means
+// here: LeasePart passes over a target its predicate refuses and leaves the job
+// where it is, so the stronger host in the same run picks it up on its own
+// lease.
+//
+// Nothing goes quiet as a result. A run with no protected reader at all never
+// reaches this, because outranked already returns true for it and Fill counts
+// the page as needsABetterReader and says so. The case this adds is the mixed
+// run, where the page is still read, just not by the weaker half.
+//
+// A page with no file, a page that is not an OCR reading, and a page no
+// protected reader has touched are all free for any host. RereadProtected turns
+// this off with the rest of the guard, because it is the operator saying the
+// old readings are the thing that is wrong.
+func (r *Runner) strongEnough(host Host, target string) bool {
+	if r.RereadProtected {
+		return true
+	}
+	page, err := pageOf(target)
+	if err != nil {
+		return true
+	}
+	file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(r.Root, r.Book, page))
+	if err != nil {
+		return true
+	}
+	if file.Meta.Method != corpus.MethodOCR {
+		return true
+	}
+	if !protectedModel(file.Meta.Model) {
+		return true
+	}
+	if protectedModel(r.modelFor(host)) {
+		return true
+	}
+	r.passOver(target)
+	return false
+}
+
+// passOver records that the guard held a page back from a host.
+//
+// It is not a count of pages left unread. The point of the guard is that the
+// stronger host in the same run picks the page up on its own lease, and that is
+// the normal case, so the run works out at the end which of these are still in
+// the queue and reports only those. Counting here instead would print a scary
+// number for a run that read every page it was given.
+func (r *Runner) passOver(target string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.guarded == nil {
+		r.guarded = map[string]bool{}
+	}
+	r.guarded[target] = true
+}
+
+// leftBehind is the pages the guard held back that are still in the queue when
+// the run stops, which is the run saying plainly that it did not read them and
+// that a stronger reader has to.
+func (r *Runner) leftBehind() []int {
+	r.mu.Lock()
+	targets := make([]string, 0, len(r.guarded))
+	for target := range r.guarded {
+		targets = append(targets, target)
+	}
+	r.mu.Unlock()
+	if len(targets) == 0 {
+		return nil
+	}
+	waiting, err := r.Queue.Outstanding(queue.StageOCR)
+	if err != nil {
+		r.logf("could not check what the guard left behind: %v", err)
+		return nil
+	}
+	var out []int
+	for _, target := range targets {
+		if _, still := waiting[target]; !still {
+			continue
+		}
+		page, err := pageOf(target)
+		if err != nil {
+			continue
+		}
+		out = append(out, page)
+	}
+	sort.Ints(out)
+	return out
+}
+
 // readers is every model name a page this run reads could be stamped with.
 //
 // It goes through modelFor rather than reading Host.Model directly, because a
@@ -476,6 +585,14 @@ type Report struct {
 	// alone. They are out of the rate for the same reason a refusal is: the run
 	// never judged a reading of them. See settled.
 	Kept int `json:"kept,omitempty"`
+	// Guarded is pages still in the queue at the end because every host that
+	// asked for them reads worse than what is already on them, and GuardedPages
+	// is which ones. They are out of the rate like a refusal, since no reading
+	// was judged, and they are named because they are a work list: run those
+	// pages again on a host that beats the model in their front matter. See
+	// strongEnough.
+	Guarded      int   `json:"guarded,omitempty"`
+	GuardedPages []int `json:"guarded_pages,omitempty"`
 	// Salvaged is pages written on their last attempt with a fault still on
 	// them. They are part of Accepted, since the corpus has the page, and they
 	// are counted again here because they are the work list for the fix passes.
@@ -520,6 +637,10 @@ func (r Report) Summary() string {
 	}
 	if r.Kept > 0 {
 		fmt.Fprintf(&out, "  %d pages somebody had already repaired by hand, left exactly as they were\n", r.Kept)
+	}
+	if r.Guarded > 0 {
+		fmt.Fprintf(&out, "  %d pages left in the queue because no host here beats the reader already on them: %s\n",
+			r.Guarded, pageList(r.GuardedPages))
 	}
 	hosts := make([]string, 0, len(r.PerHost))
 	for host := range r.PerHost {
@@ -709,6 +830,8 @@ func (r *Runner) Do(ctx context.Context) (Report, error) {
 	group.Wait()
 
 	report.Finished = r.now()
+	report.GuardedPages = r.leftBehind()
+	report.Guarded = len(report.GuardedPages)
 	sort.Ints(report.Refusals)
 	sort.Slice(report.Failures, func(i, j int) bool { return report.Failures[i].Page < report.Failures[j].Page })
 	sort.Slice(report.Batches, func(i, j int) bool { return report.Batches[i].ID < report.Batches[j].ID })
@@ -779,7 +902,12 @@ func (r *Runner) lease(host Host, n int) ([]task, error) {
 	// this the release below puts the page straight back in pending, the next
 	// batch leases it, and the run spends a minute a page refusing the same
 	// twenty five pages until the queue is otherwise empty.
-	wanted := func(target string) bool { return r.inRange(target) && r.takes(host.Name, target) }
+	// strongEnough is the third test and it is here rather than in Fill for the
+	// reason written on it: a page read by gpt-5 is left in pending for a host
+	// that can beat it instead of going to whichever host asked first.
+	wanted := func(target string) bool {
+		return r.inRange(target) && r.takes(host.Name, target) && r.strongEnough(host, target)
+	}
 	for len(out) < n {
 		job, err := r.Queue.LeasePart(queue.StageOCR, host.Name, r.Book, wanted, expected)
 		if errors.Is(err, queue.ErrEmpty) {
