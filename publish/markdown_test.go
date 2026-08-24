@@ -199,7 +199,7 @@ func TestARelativeLinkIsResolvedAgainstTheChapter(t *testing.T) {
 // character somewhere in the middle of a formula and nothing says so.
 func TestMaskingLosesNothing(t *testing.T) {
 	body := "Let $a$ and $b$ be in\n\n$$\nE\\otimes F\n$$\n\nand write $c$ for the rest."
-	masked, spans, err := mask(body)
+	masked, spans, err := Renderer{}.mask(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,5 +218,26 @@ func TestMaskingLosesNothing(t *testing.T) {
 	})
 	if back != body {
 		t.Errorf("round trip changed the body:\ngot  %q\nwant %q", back, body)
+	}
+}
+
+// An unclosed span used to be reported as a bare body line number, which is a
+// line in no file: the body starts under the front matter, so the number is not
+// the file's own, and every content file in the corpus was a candidate for it.
+// Finding the one file behind such a message took a scan of the whole tree.
+func TestAnUnclosedSpanNamesItsFile(t *testing.T) {
+	body := "A closed $a$ span.\n\nAnd an open $b one."
+	r := Renderer{File: "content/en/ac/VI/06_s6_absolute_values.md", Line: 12}
+	if _, _, err := r.mask(body); err == nil {
+		t.Fatal("an unclosed span was let through")
+	} else if got, want := err.Error(), "content/en/ac/VI/06_s6_absolute_values.md:14"; !strings.Contains(got, want) {
+		t.Errorf("error is %q, want it to name %s", got, want)
+	}
+	// With no file to name it still says what is wrong, which is what the unit
+	// tests and anything rendering a body from memory get.
+	if _, _, err := (Renderer{}).mask(body); err == nil {
+		t.Fatal("an unclosed span was let through")
+	} else if !strings.Contains(err.Error(), "never closes") {
+		t.Errorf("error is %q, want it to say the span never closes", err)
 	}
 }

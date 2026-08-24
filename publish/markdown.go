@@ -40,10 +40,18 @@ import (
 // The placeholder is built from NUL, which cannot occur in the corpus: the
 // files are UTF-8 text out of a PDF and a NUL in one would fail the audit long
 // before it reached here. Nothing downstream escapes it or breaks a line at it.
-func mask(body string) (string, []mathtex.Span, error) {
+//
+// It is a method for the sake of the one error it returns. A span that opens
+// and never closes used to be reported as a bare body line number, which is a
+// line in nothing: the body starts under the front matter, so the number is not
+// the file's, and twenty thousand files were candidates for it. The renderer
+// already carries the path and the offset for exactly this, and the refusal
+// path already uses them, so this uses them too and the message names a file
+// somebody can open.
+func (r Renderer) mask(body string) (string, []mathtex.Span, error) {
 	spans, unclosed := mathtex.Split(body)
 	if unclosed != nil {
-		return "", nil, fmt.Errorf("line %d: a math span opens and never closes", unclosed.Line)
+		return "", nil, fmt.Errorf("%s: a math span opens and never closes", r.at(unclosed.Line))
 	}
 	rs := []rune(body)
 	var b strings.Builder
@@ -249,7 +257,7 @@ type Renderer struct {
 
 // HTML renders one body.
 func (r Renderer) HTML(body string) (string, error) {
-	masked, spans, err := mask(body)
+	masked, spans, err := r.mask(body)
 	if err != nil {
 		return "", err
 	}
