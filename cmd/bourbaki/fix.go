@@ -486,6 +486,28 @@ image should know it before trusting the wording.
 as well, a page with no text layer at all, or a contents entry pointing at the
 wrong page, and those still need the page image read again.
 
+The § mark inside a block of gathered exercises is put back too, and it is put
+back on different authority. A chapter that gathers its exercises at the end of
+itself writes its Exercises heading once and then marks off each § with the sign
+and the number on a line of their own. That line is the least ink on the page and
+the reading drops it: fourteen of them are gone here, and unlike the openings the
+text layer has only one of them back, since a scan that loses a mark on the paper
+loses it again on the second reading.
+
+What stands in for the witness is the block. The contents says which page the §
+opens its exercises on, the chapter marks every other § it gathers, and the mark
+for this one is on no page of the block. A mark written at the top of that page
+contradicts nothing any page says and stands where the printing's own numbering
+puts it. The form is copied off the chapter's remaining marks rather than chosen,
+since Groupes et algebres de Lie IV a VI sets a stop after the number in chapters
+V and VI and none in chapter IV. Where the mark turns up on some other page of
+the block the contents is wrong about the page, and that is named and left alone
+rather than repaired by writing a second mark.
+
+Those pages carry a flag of their own, worded to say that no second reading is
+behind the line. It is a weaker claim than the one the openings make and the page
+says so.
+
 Run bourbaki assemble afterwards, or the section files still hold the old text.
 
 flags:
@@ -1297,6 +1319,13 @@ func openAt(lines []string, head string) []string {
 // trusting the wording.
 const headingFromContents = "heading from the contents, printed on the page and dropped by this reading, witnessed by the text layer"
 
+// markFromContents is what a page gets when the § mark inside a block of
+// gathered exercises was put back with no second reading behind it. The flag is
+// separate from headingFromContents and worded differently on purpose: that one
+// can say the text layer saw the ink and this one cannot, and the difference is
+// the whole of what a person going back to the page image needs to know.
+const markFromContents = "§ mark from the contents, placed where the chapter's other marks put it, with no second reading of the page behind it"
+
 func fixOpening(args []string) error {
 	fs := flag.NewFlagSet("fix opening", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixOpeningUsage) }
@@ -1369,7 +1398,7 @@ func fixOpening(args []string) error {
 		return words, head, nil
 	}
 
-	var chapters, sections, numbers, appendices, notes, unread, lost, differ, told int
+	var chapters, sections, numbers, appendices, notes, marks, unread, lost, differ, told int
 	for _, b := range books.Books {
 		if *book != "" && b.ID != *book {
 			continue
@@ -1390,6 +1419,9 @@ func fixOpening(args []string) error {
 		// A page whose heading came from the contents rather than from any
 		// reading of the page, which is flagged when it is written.
 		witnessed := map[int]bool{}
+		// A page whose § mark came from the contents with no second reading
+		// behind it, which is flagged differently and says so.
+		inferred := map[int]bool{}
 		read := func(pdfPage int) ([]string, bool) {
 			if lines, ok := edits[pdfPage]; ok {
 				return lines, true
@@ -1587,6 +1619,120 @@ func fixOpening(args []string) error {
 					fmt.Printf("%s/%04d.md  %s\n", b.ID, s.PDFPage, head)
 				}
 			}
+			// A chapter that gathers its exercises at the end of itself marks
+			// off each § inside the block with the sign and the number on a
+			// line of their own, and that line is the whole of what the
+			// assembler has to open the §'s run on. It is two or three
+			// characters of display type standing alone in white space, which
+			// is the least ink on the page, and the reading drops it the way it
+			// drops the head of a historical note.
+			//
+			// The text layer is next to no help here. Fourteen of these marks
+			// are gone in this corpus and the layer carries one of them, since
+			// a scan that loses a mark on the page loses it again on the second
+			// reading. What stands in for the witness is the block itself: the
+			// contents says which page the § opens its exercises on, the
+			// chapter marks every other § it gathers, and the mark for this one
+			// is on no page of the block. A mark written there contradicts
+			// nothing the pages say and is where the printing's own numbering
+			// puts it.
+			//
+			// The form is taken from the chapter rather than chosen. Groupes et
+			// algebres de Lie IV a VI sets a stop after the number in chapters
+			// V and VI and none in chapter IV, and both are copied here from
+			// the marks the chapter still has, so the page ends up carrying the
+			// printing's mark and not this program's idea of one.
+			if err := func() error {
+				head, hok := assemble.ExercisesHead(b.Lang)
+				if !hok {
+					return nil
+				}
+				type block struct {
+					section corpus.Section
+					page    int
+				}
+				var blocks []block
+				for _, s := range ch.Sections {
+					if x := s.Exercises; !s.Appendix && x != nil && x.PDFPage > 0 {
+						blocks = append(blocks, block{s, x.PDFPage})
+					}
+				}
+				stops, plain := 0, 0
+				var missing []block
+				for _, bl := range blocks {
+					lines, ok := read(bl.page)
+					if !ok {
+						continue
+					}
+					// A § whose exercises the printing heads in the ordinary
+					// way is not gathered and is no evidence either way.
+					if slices.Contains(lines, head) {
+						continue
+					}
+					at := slices.IndexFunc(lines, assemble.SectionMark(bl.section).MatchString)
+					if at < 0 {
+						missing = append(missing, bl)
+						continue
+					}
+					if strings.HasSuffix(strings.TrimSpace(lines[at]), ".") {
+						stops++
+					} else {
+						plain++
+					}
+				}
+				if stops+plain == 0 {
+					// The chapter marks nothing, so a page with no mark on it
+					// is a page with nothing missing.
+					return nil
+				}
+				for _, bl := range missing {
+					// The mark may be on some other page of the block, in which
+					// case the contents is wrong about the page and writing a
+					// second mark is the wrong repair either way.
+					re := assemble.SectionMark(bl.section)
+					elsewhere := 0
+					for _, other := range blocks {
+						if other.page == bl.page {
+							continue
+						}
+						if lines, ok := read(other.page); ok && slices.ContainsFunc(lines, re.MatchString) {
+							elsewhere = other.page
+						}
+					}
+					if elsewhere > 0 {
+						lost++
+						fmt.Printf("%s chapter %s § %d: the contents opens its exercises on pdf page %d and the mark is on pdf page %d\n",
+							b.ID, ch.Numeral, bl.section.Number, bl.page, elsewhere)
+						continue
+					}
+					lines, ok := read(bl.page)
+					if !ok {
+						continue
+					}
+					mark := "§ " + strconv.Itoa(bl.section.Number)
+					if stops > plain {
+						mark += "."
+					}
+					page, err := layerPage(b, bl.page)
+					if err != nil {
+						return err
+					}
+					edits[bl.page] = openAt(lines, mark)
+					marks++
+					why := "the block marks every other §"
+					if toc.WitnessMark(page, bl.section.Number) {
+						why = "the text layer has it"
+						witnessed[bl.page] = true
+						told++
+					} else {
+						inferred[bl.page] = true
+					}
+					fmt.Printf("%s/%04d.md  %s   %s\n", b.ID, bl.page, mark, why)
+				}
+				return nil
+			}(); err != nil {
+				return err
+			}
 			// The no. come after the § and not with them, because the first
 			// no. of a § is on the same page as the § and often under the same
 			// words, and the § has to be a heading before the no. is looked
@@ -1651,6 +1797,9 @@ func fixOpening(args []string) error {
 			if witnessed[pdfPage] {
 				f.Meta.Flags = withFlag(f.Meta.Flags, headingFromContents)
 			}
+			if inferred[pdfPage] {
+				f.Meta.Flags = withFlag(f.Meta.Flags, markFromContents)
+			}
 			if err := f.Write(path); err != nil {
 				return err
 			}
@@ -1661,8 +1810,8 @@ func fixOpening(args []string) error {
 	if *check {
 		verb = "would put back"
 	}
-	fmt.Printf("fix opening: %s %d chapter openings, %d § openings, %d no. openings, %d appendix openings and %d historical notes\n",
-		verb, chapters, sections, numbers, appendices, notes)
+	fmt.Printf("fix opening: %s %d chapter openings, %d § openings, %d no. openings, %d appendix openings, %d historical notes and %d § marks in gathered exercises\n",
+		verb, chapters, sections, numbers, appendices, notes, marks)
 	if told > 0 {
 		fmt.Printf("fix opening: %d of the openings were not on the page at all and came from the contents, with the text layer as the witness that the page prints them\n", told)
 	}
@@ -1675,7 +1824,7 @@ func fixOpening(args []string) error {
 	if unread > 0 {
 		fmt.Printf("fix opening: %s on a page that has not been read\n", openings(unread))
 	}
-	if chapters+sections+numbers+appendices+notes > 0 && !*check {
+	if chapters+sections+numbers+appendices+notes+marks > 0 && !*check {
 		fmt.Println("fix opening: run bourbaki assemble")
 	}
 	return nil

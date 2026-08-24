@@ -97,6 +97,35 @@ func WitnessHistorical(page string) (string, bool) {
 	return rest, at >= 0
 }
 
+// WitnessMark says whether the text layer of a page prints the mark a § is
+// marked off by inside a chapter's gathered exercises, which is the sign and the
+// number on a line of their own.
+//
+// It is the narrowest of the three witnesses and it has to be. The mark is two
+// or three characters of display type standing alone in white space, so a bad
+// layer loses it altogether more often than it mangles it, and what it does give
+// back is the same shape as a hundred other short lines in a block of exercises:
+// a formula number, a page number, a footnote marker. So the sign is required.
+// Page 671 of Algebra I to III gives "§II" with no space and the 1s read as
+// capital I, which sectionNumber already folds, and that is as far as this
+// stretches.
+func WitnessMark(page string, number int) bool {
+	for _, line := range strings.Split(page, "\n") {
+		m := witnessMark.FindStringSubmatch(strings.TrimSpace(line))
+		if m != nil && sectionNumber(m[1], number) {
+			return true
+		}
+	}
+	return false
+}
+
+// witnessMark is the sign and the number alone on a line, with the sign read the
+// way an old scan reads it and the spacing left open. The sign class is the one
+// witnessSection uses less the characters that are digits or read as digits: a
+// bare "5" or "9" on a line of a layer is a number, not a sign, and there is no
+// title after it here to say otherwise.
+var witnessMark = regexp.MustCompile(`^(?:\*\*)?[§$SsG]\s*([0-9IlO]{1,4})\s*\.?\s*(?:\*\*)?$`)
+
 // historicalHead says whether a line is nothing but the words a historical note
 // is headed by, and gives back the parenthetical the line carries after them.
 //

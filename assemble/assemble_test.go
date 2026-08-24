@@ -775,6 +775,30 @@ func TestTheMarkOfAnUnnumberedAppendix(t *testing.T) {
 	}
 }
 
+// The mark of a § inside a block of gathered exercises is display type, and the
+// reading sets display type bold. The bold was allowed for around the number and
+// not around the whole mark, which is where page 583 of Algebre I a III puts it,
+// and chapter III of that volume stopped assembling on a page carrying both of
+// the marks it was said to be missing.
+func TestTheMarkOfASectionIsReadThroughBold(t *testing.T) {
+	mark := SectionMark(corpus.Section{Number: 9})
+	for _, line := range []string{"§ 9", "§9", "§ 9.", "## § 9", "**§ 9**", "§ **9**", "#### § 9."} {
+		if !mark.MatchString(line) {
+			t.Errorf("%q is not read as the mark of § 9", line)
+		}
+	}
+	// And it is still the sign and the number alone. The block is full of short
+	// lines that are a number and nothing else.
+	for _, line := range []string{"9", "§ 90", "**9**", "§ 9. ANNEAUX", "(§ 9)", "voir § 9"} {
+		if mark.MatchString(line) {
+			t.Errorf("%q is read as the mark of § 9", line)
+		}
+	}
+	if SectionMark(corpus.Section{Number: 10}).MatchString("**§ 9**") {
+		t.Error("the mark of § 10 reads the mark of § 9")
+	}
+}
+
 // The heading over the opener is looked up by the words the printing knows and
 // not by a pattern, so the two have to be kept in step. Integration 7 to 9 heads
 // its appendix ANNEX and Algebra VIII heads its four APPENDIX, both in English

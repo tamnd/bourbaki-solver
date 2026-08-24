@@ -547,8 +547,21 @@ func runMark(s corpus.Section) *regexp.Regexp {
 		return regexp.MustCompile(fmt.Sprintf(`(?i)^#{1,4} +`+appendixWord+` +(?:%d|%s)\.?$`,
 			s.Number, roman(s.Number)))
 	}
-	return regexp.MustCompile(fmt.Sprintf(`^(?:#{1,4} +)?§\s*(?:\*\*)?%d(?:\*\*)?\.?$`, s.Number))
+	// The mark is display type and the reading sets display type bold often
+	// enough that the bold has to be allowed for. It was already allowed for
+	// around the number and not around the whole mark, which is the other place
+	// it lands: page 583 of Algebre I a III writes "**§ 9**" and "**§ 10**", and
+	// those two lines are the only ones in the corpus the narrower pattern
+	// refuses. Refusing them stopped chapter III of that volume on a page that
+	// carries both marks plainly enough for a person to read at a glance.
+	return regexp.MustCompile(fmt.Sprintf(`^(?:#{1,4} +)?(?:\*\*)?§\s*(?:\*\*)?%d(?:\*\*)?\.?(?:\*\*)?$`, s.Number))
 }
+
+// SectionMark is the line a printing marks off a § with inside a block of
+// exercises it gathers, and it is exported for the same reason
+// HistoricalNoteHead is: the repair that puts a dropped mark back has to ask
+// what the assembler looks for rather than keep its own copy of the answer.
+func SectionMark(s corpus.Section) *regexp.Regexp { return runMark(s) }
 
 // openRun writes the corpus's own exercises heading at the head of a gathered
 // block and takes the volume's mark out of it.

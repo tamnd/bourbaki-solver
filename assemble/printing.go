@@ -228,6 +228,19 @@ func HistoricalNoteHead(lang string) (string, bool) {
 	return pr.historical, true
 }
 
+// ExercisesHead is the line a printing heads a §'s block of exercises with, and
+// it is exported alongside HistoricalNoteHead and for the same reason. A volume
+// that gathers its exercises writes this line once for the chapter and marks the
+// § inside the block instead, so a page that carries neither is a page the
+// assembler cannot open a run on.
+func ExercisesHead(lang string) (string, bool) {
+	pr, err := printingOf(lang)
+	if err != nil {
+		return "", false
+	}
+	return pr.exercises, true
+}
+
 // StatesAResult says whether a line opens a statement in a printing, and it is
 // exported for one caller: the repair that puts back the blank line a display
 // swallowed. See fixFence.
