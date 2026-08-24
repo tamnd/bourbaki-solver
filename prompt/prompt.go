@@ -25,6 +25,9 @@ func OCR() string { return strings.TrimSpace(ocrBourbaki) + "\n" }
 //go:embed ocr_ens.md
 var ocrENS string
 
+//go:embed ocr_foot.md
+var ocrFoot string
+
 // volumeNote is what a Book adds to the scanned prompt, by book id.
 //
 // The prompt above was written against Algebra and says so, and a Book that
@@ -36,8 +39,21 @@ var ocrENS string
 //
 // A Book with nothing to add gets the shared prompt byte for byte, so its pages
 // do not go stale for a note about a volume it has no part in.
+// A volume that prints its page number at the foot and has no text layer behind
+// it gets the foot note, because those two together are what leave a volume with
+// no page number anywhere. Six volumes are foot-number and four of them carry a
+// text layer, so pdftotext reads the foot off that and the reading never has to.
+// The two here are the ones where the reading is the only chance at it, and they
+// are the two the page map cannot fit.
+//
+// ens-i-iv is foot-number as well and is deliberately not here. It has a text
+// layer, and its own note already says where the folio sits, so adding this one
+// would move its hash and put 416 read pages back in the queue for a rule that
+// changes nothing about them.
 var volumeNote = map[string]string{
 	"ens-i-iv": ocrENS,
+	"ac-i-vii": ocrFoot,
+	"top-v-x":  ocrFoot,
 }
 
 // OCRFor is the prompt for reading a page of one scanned volume.

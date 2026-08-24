@@ -182,12 +182,53 @@ func TestAVolumeNoteIsAddedAndChangesNoOtherVolume(t *testing.T) {
 	if OCRForSHA256("ens-i-iv") == OCRSHA256() {
 		t.Error("the note did not change the hash, so nothing would be re-read")
 	}
-	for _, book := range []string{"alg-i-iii", "alg-x-fr", "top-v-x", "ac-i-vii"} {
+	for _, book := range []string{"alg-i-iii", "alg-x-fr", "top-i-iv", "lie-i-iii"} {
 		if OCRFor(book) != OCR() {
 			t.Errorf("%s no longer reads the shared prompt", book)
 		}
 		if OCRForSHA256(book) != OCRSHA256() {
 			t.Errorf("%s went stale for a note about another volume", book)
 		}
+	}
+}
+
+// The two volumes that print the page number at the foot and have no text layer
+// behind them are the two the page map cannot fit, because the shared prompt
+// asks for the running head and never for the foot. Measured over what is read
+// now, the number is on the last line of 1 of 640 pages of ac-i-vii and 0 of 367
+// of top-v-x, against 42% of ac-i-iv-fr, which prints it in the head and maps.
+func TestTheVolumesNumberedAtTheFootAreAskedForTheFoot(t *testing.T) {
+	for _, book := range []string{"ac-i-vii", "top-v-x"} {
+		got := OCRFor(book)
+		if !strings.HasPrefix(got, OCR()) {
+			t.Errorf("%s: the shared prompt is not the head of the volume prompt", book)
+		}
+		for _, want := range []string{
+			"page number printed at the foot as the last line",
+			"Where the page prints no number at the foot, write nothing",
+			"no text layer",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: the foot note does not say %q", book, want)
+			}
+		}
+		if OCRForSHA256(book) == OCRSHA256() {
+			t.Errorf("%s: the note did not change the hash, so nothing would be re-read", book)
+		}
+	}
+	if OCRFor("ac-i-vii") != OCRFor("top-v-x") {
+		t.Error("the two foot-numbered volumes are read with different prompts")
+	}
+}
+
+// ens-i-iv is foot-number too and is deliberately left on its own note. It has a
+// text layer, so pdftotext reads the foot off that and the reading never has to,
+// and moving its hash would put 416 read pages back in the queue for nothing.
+func TestTheFootNoteIsKeptOffTheVolumeThatHasATextLayer(t *testing.T) {
+	if strings.Contains(OCRFor("ens-i-iv"), "no text layer") {
+		t.Error("ens-i-iv picked up the foot note and its pages would all go stale")
+	}
+	if OCRFor("ens-i-iv") == OCRFor("ac-i-vii") {
+		t.Error("ens-i-iv is being read with the foot note rather than its own")
 	}
 }
