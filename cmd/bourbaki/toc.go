@@ -37,7 +37,7 @@ func tocBuild(args []string) error {
 	verbose := fs.Bool("v", false, "print every § and no. of every chapter")
 	retitle := fs.Bool("retitle", false, "take the titles the volume now reads, over the ones the manifest carries")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki toc build [-book <id>] [flags]\n\nReads each volume's table of contents into manifests/toc.yaml.\n\nA title already in the manifest is kept, because for a scanned volume the\ncontents page is OCR and its titles get corrected against the printing by\nhand. Every one kept is printed with what the volume now reads beside it,\nand counted in the summary. -retitle takes the new readings instead.\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki toc build [-book <id>] [flags]\n\nReads each volume's table of contents into manifests/toc/.\n\nA title already in the manifest is kept, because for a scanned volume the\ncontents page is OCR and its titles get corrected against the printing by\nhand. Every one kept is printed with what the volume now reads beside it,\nand counted in the summary. -retitle takes the new readings instead.\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -156,7 +156,7 @@ func tocBuild(args []string) error {
 		if err := man.Save(root); err != nil {
 			return err
 		}
-		fmt.Printf("written to %s\n", corpus.TOCPath(root))
+		fmt.Printf("written to %s\n", corpus.TOCDir(root))
 	}
 	if failed > 0 {
 		return fmt.Errorf("%d volumes have contents problems and were not written", failed)
@@ -307,7 +307,7 @@ func tocShow(args []string) error {
 	if *chapter != "" {
 		c, ok := man.Chapter(*chapter)
 		if !ok {
-			return fmt.Errorf("no chapter %q in %s", *chapter, corpus.TOCPath(root))
+			return fmt.Errorf("no chapter %q in %s", *chapter, corpus.TOCDir(root))
 		}
 		printChapter(*c)
 		return nil
@@ -356,7 +356,7 @@ func tocVerify(args []string) error {
 	book := fs.String("book", "", "book id, or empty for every book in the manifest")
 	all := fs.Bool("a", false, "list every miss, not only the ones found on another page")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki toc verify [-book <id>] [-a]\n\nOpens every page manifests/toc.yaml points at and looks for the heading\nthat is supposed to be printed there.\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki toc verify [-book <id>] [-a]\n\nOpens every page manifests/toc/ points at and looks for the heading\nthat is supposed to be printed there.\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -383,7 +383,7 @@ func tocVerify(args []string) error {
 		}
 		b, ok := books.Get(bt.ID)
 		if !ok {
-			return fmt.Errorf("%s is in %s but not in %s", bt.ID, corpus.TOCPath(root), corpus.BooksPath(root))
+			return fmt.Errorf("%s is in %s but not in %s", bt.ID, corpus.TOCPath(root, bt.ID), corpus.BooksPath(root))
 		}
 		pages, err := volumeText(ctx, root, b)
 		if err != nil {

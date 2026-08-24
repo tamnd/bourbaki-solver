@@ -170,7 +170,7 @@ func glossaryExtract(args []string) error {
 // nothing in content/en yet, carrying that chapter's titles and no body.
 //
 // The titles are the § and no. headings the volume prints, taken off
-// manifests/toc.yaml, which is where the printed table of contents was read to.
+// manifests/toc/, which is where the printed table of contents was read to.
 // They are the same strings the section files would give once the volume is
 // assembled, and they are the source the miner rates highest, so a Book can have
 // its terminology settled while its pages are still being read.
@@ -209,7 +209,7 @@ func unassembledTOCDocs(root string, have []glossary.Doc) ([]glossary.Doc, error
 		}
 		for _, ch := range bt.Chapters {
 			d := glossary.Doc{
-				Path:   "manifests/toc.yaml",
+				Path:   "manifests/toc/" + b.ID + ".yaml",
 				Titles: []string{ch.Title},
 			}
 			for _, s := range ch.Sections {

@@ -381,7 +381,7 @@ reading decides by that and on Theory of Sets it decided wrong eight times, all
 in the same direction: a no. written as a §. Chapter III, § 1 then carried
 twelve no. where the contents lists thirteen, and the assembler stopped there.
 
-manifests/toc.yaml is the authority. It gives every § and every no. with the
+manifests/toc/ is the authority. It gives every § and every no. with the
 page it begins on, so the heading is looked up rather than guessed at. Both the
 number and the title have to agree with it: a § and its first no. begin on the
 same page in most §§ and both are numbered 1, so the number alone would make
@@ -431,7 +431,7 @@ NEIGHBOURHOODS, CLOSED SETS" on page 23 of the same volume is § 1 with the digi
 read as the letter it is shaped like, and page 113 has "II. CONNECTEDNESS",
 which is § 11 read that way twice.
 
-manifests/toc.yaml is the authority, as it is for fix heading. It gives every
+manifests/toc/ is the authority, as it is for fix heading. It gives every
 chapter and every § with the page it opens on, and the number and the title both
 have to agree with it. That is what tells a § from its own first no. on page 103,
 and it is what keeps this off page 16 of the same volume, where "I. THEORY OF

@@ -6,7 +6,7 @@ import (
 )
 
 // Every line in these tests is off a page of the corpus, and every title is
-// what manifests/toc.yaml gives for the chapter or the § it belongs to.
+// what manifests/toc/ gives for the chapter or the § it belongs to.
 
 func TestAChapterTitleBrokenAcrossTwoLinesIsOneHeading(t *testing.T) {
 	// Page 22 of Theory of Sets. The press broke the title at the measure and

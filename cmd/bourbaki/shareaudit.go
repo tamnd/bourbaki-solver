@@ -87,7 +87,7 @@ func shareAudit(args []string) error {
 	bt, ok := man.Get(*book)
 	if !ok {
 		return fmt.Errorf("%s has no contents in %s, so there is nothing to hold the import against (run bourbaki toc build first)",
-			*book, corpus.TOCPath(root))
+			*book, corpus.TOCPath(root, *book))
 	}
 
 	files, err := importFiles(filepath.Join(root, share.Dir, *name))

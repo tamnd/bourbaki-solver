@@ -21,7 +21,7 @@ commands:
   version          print the version and exit
   books            add, list and verify the source PDFs in manifests/books.yaml
   pagemap          map PDF pages to the page numbers Bourbaki printed
-  toc              read each volume's table of contents into manifests/toc.yaml
+  toc              read each volume's table of contents into manifests/toc/
   render           rasterise a scanned volume to the page images OCR reads
   extract          read the pages of a volume into Markdown
   clip             cut a page out of a volume as a picture and have a model read it

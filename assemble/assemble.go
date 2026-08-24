@@ -7,7 +7,7 @@
 // numbered from one on every page it appears on. This is where that is undone.
 //
 // Nothing here reads the PDF, and that is the contract rather than an accident:
-// assembly is a pure function of pages/ and manifests/toc.yaml, so it runs in CI
+// assembly is a pure function of pages/ and manifests/toc/, so it runs in CI
 // where the PDFs are not and cannot be, and running it twice over the same pages
 // gives the same bytes. Everything it needs that only the PDF knows is written
 // into the page front matter by extraction, which is why a page carries

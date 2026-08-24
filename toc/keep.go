@@ -6,7 +6,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
-// The titles in manifests/toc.yaml are read off the volume's own contents page,
+// The titles in manifests/toc/ are read off the volume's own contents page,
 // and for a scanned volume that page is OCR nobody should trust. Thirteen
 // titles of the Theory of Sets came out as "Met?ods .of proof", "ConjunctIon",
 // "Complement ofa set" and the like, and were corrected against the printed
