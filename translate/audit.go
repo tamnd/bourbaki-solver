@@ -31,6 +31,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
@@ -633,14 +634,43 @@ func auditRefs(en, tr string) []Problem {
 // would fail sections for nothing.
 func refs(body string) []string {
 	var out []string
-	for _, m := range refRE.FindAllStringSubmatch(body, -1) {
-		if m[1] != "" {
-			out = append(out, tighten(m[1]), tighten(m[2]))
+	for _, loc := range refRE.FindAllStringSubmatchIndex(body, -1) {
+		if !opensAWord(body, loc[0]) {
 			continue
 		}
-		out = append(out, spelt(tighten(m[0])))
+		if loc[2] >= 0 {
+			out = append(out, tighten(body[loc[2]:loc[3]]), tighten(body[loc[4]:loc[5]]))
+			continue
+		}
+		out = append(out, spelt(tighten(body[loc[0]:loc[1]])))
 	}
 	return out
+}
+
+// opensAWord says whether the character in front of position i is one that a
+// word can start after.
+//
+// The regexp says \b and \b in Go is the ASCII one, so a letter outside ASCII
+// counts as the space in front of a word. In English that never shows, because
+// what stands in front of a citation is a bracket or a comma. In Vietnamese it
+// shows constantly: tập is set and the corpus writes bài tập for exercise, so
+// "bài tập. 2)" ends in an ASCII p, a full stop and a number, and \bp\.\s*\d+
+// reads it as a citation to page 2. Two sections died of that, § 4 of Espaces
+// vectoriels topologiques III and § 6 of Lie V, both refused with "cites 1
+// things the English does not: p.2" on every pass, with every chunk answered
+// and accepted and the whole file audit refusing the join of them. The English
+// has no such citation to be missing, so nothing a model could have written
+// would have passed.
+//
+// It is asked here rather than written into the regexp because Go has no
+// lookbehind, and putting the preceding character inside the match would eat it
+// and could hide a citation that follows one immediately.
+func opensAWord(body string, i int) bool {
+	if i == 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(body[:i])
+	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 
 func tighten(s string) string { return strings.Join(strings.Fields(s), "") }
