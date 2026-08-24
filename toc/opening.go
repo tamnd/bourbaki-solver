@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/tamnd/bourbaki-solver/typography"
 )
 
 // A chapter opens under two headings and a § opens under one, and they are the
@@ -64,17 +66,29 @@ func ChapterWord(lang string) string {
 // sets "Topological Groups" and "(Elementary Theory)" under it, the contents
 // calls that chapter "Topological Groups", so the subtitle stays a line of the
 // page rather than being taken into a heading the book does not give.
+//
+// The word may still be on the page. Pages 8, 56 and 141 of Groupes et algebres
+// de Lie IV a VI open on "CHAPITRE IV", "CHAPITRE V" and "CHAPITRE VI" set as
+// plain lines with the title under them, which is the same fault one line
+// higher: the reading kept the words of both lines and the level of neither. So
+// a first line that is the word and this chapter's own numeral and nothing else
+// is read past and then written over, rather than left standing above the
+// heading where it would be the only page in the volume carrying the word twice.
 func ChapterOpening(body []string, lang, numeral, title string) ([]string, bool) {
 	if numeral == "" {
 		return body, false
 	}
-	i := blank(body, 0)
+	at := blank(body, 0)
+	i := at
+	if i < len(body) && plainLine(body[i]) && normalize(body[i]) == normalize(ChapterWord(lang)+numeral) {
+		i = blank(body, i+1)
+	}
 	j, head, ok := titleRun(body, i, title)
 	if !ok {
 		return body, false
 	}
 	out := make([]string, 0, len(body)+2)
-	out = append(out, body[:i]...)
+	out = append(out, body[:at]...)
 	out = append(out, "## "+ChapterWord(lang)+" "+numeral, "", "# "+head)
 	out = append(out, body[j+1:]...)
 	return out, true
@@ -104,15 +118,14 @@ func blank(body []string, i int) int {
 // it, so the run stops at the title and the subtitle stays a line of the page
 // rather than being taken into a heading the book does not give.
 func titleRun(body []string, i int, title string) (int, string, bool) {
-	want := flatten(title)
-	if want == "" {
+	if flatten(title) == "" {
 		return 0, "", false
 	}
 	var run []string
 	for j := i; j < len(body) && strings.TrimSpace(body[j]) != "" && plainLine(body[j]); j++ {
 		run = append(run, strings.TrimSpace(body[j]))
-		if flatten(strings.Join(run, " ")) == want {
-			return j, strings.Join(run, " "), true
+		if joined := strings.Join(run, " "); same(title, joined) {
+			return j, joined, true
 		}
 	}
 	return 0, "", false
@@ -322,7 +335,7 @@ const titleFloor = 0.85
 // "The isomorphisms" before the mathematics starts, and that is the part either
 // reading can be trusted on.
 func titleScore(want, got string) float64 {
-	if flatten(want) == flatten(got) {
+	if same(want, got) {
 		return 1
 	}
 	w, g := mathless(want), mathless(got)
@@ -380,6 +393,34 @@ const titleClose = 0.95
 // about the length than about the words, so those titles are held to the exact
 // rule they were always held to.
 const titleEnough = 8
+
+// same says whether a title a page prints and a title the contents gives are
+// the same title. This is the exact test, and everything titleScore does below
+// it is a matter of degree that only a no. is held to.
+//
+// It used to be flatten equality, and two habits of the press defeated it. A
+// footnote hangs off the end of a heading, and flatten throws away the dollars
+// and the caret around the marker while keeping the digit, so the two sides come
+// out differing by a 1 that is no part of either title. A French printing sets
+// the preposition "à" as a bare capital A, and flatten throws an accented letter
+// away outright rather than folding it, so the accented a of the contents entry
+// vanished while the plain A the page prints in its place stayed. Three openings
+// in this corpus were refused over one or the other and all three were on their
+// pages and correct.
+//
+// Both are set aside here and neither is touched on the page. The marker is ink
+// and the heading that goes back keeps it.
+func same(want, got string) bool {
+	return flatten(clean(want)) == flatten(clean(got))
+}
+
+// clean is a title with the two things a printing varies freely in one set
+// aside. See the typography package for what they are and why they are there
+// rather than here: the assembler compares a heading against the same contents
+// entry, on a flattening of its own, and runs into both of them too.
+func clean(s string) string {
+	return typography.Accentless(typography.Footless(s))
+}
 
 // dollars is a run of mathematics as the reading writes it.
 var dollars = regexp.MustCompile(`\$[^$]*\$`)
