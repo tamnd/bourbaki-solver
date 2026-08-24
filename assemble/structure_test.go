@@ -1163,6 +1163,31 @@ func TestStatementsTakesARepeatFromEitherPrinting(t *testing.T) {
 	}
 }
 
+// § 3 of chapter III of Commutative Algebra numbers a Definition twice, once at
+// no. 1 where it says what an m-good filtration is and again at no. 3 where it
+// says what a defining ideal of a topology is. Only the English volume is in the
+// corpus, so the exception carries the one page, and a collision anywhere else
+// in the § is still a fault.
+func TestStatementsTakesTheCommutativeAlgebraRepeat(t *testing.T) {
+	id := corpus.Ref{Book: "ac", Chapter: "III", Section: 3}
+	in := []block{
+		{text: "### 1. Good filtrations", page: 215, label: "195"},
+		{text: "DEFINITION 1. Let $ A $ be a commutative ring and $ m $ an ideal of $ A $.", page: 216, label: "196"},
+		{text: "### 3. Zariski rings", page: 221, label: "201"},
+		{text: "DEFINITION 1. Let $ A $ be a topological ring.", page: 221, label: "201"},
+	}
+	_, got, err := statements(in, id, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"ac-iii-s3-def-1", "ac-iii-s3-def-1-bis"})
+
+	in[3].page, in[3].label = 226, "206"
+	if _, _, err := statements(in, id, printings["en"]); err == nil {
+		t.Error("a collision on a page nobody verified was let through")
+	}
+}
+
 // The same head again with the small capitals read as capitals rather than as
 // bold, which is what 2033 heads across the French volumes came back as. Read as
 // prose they take the whole chapter down with them and not only themselves: this

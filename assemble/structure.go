@@ -209,11 +209,19 @@ func (p Piece) Verify() error {
 // chapter VI of Integration prints Definition 5 at no. 5 on pdf page 43 and
 // Definition 5 again at no. 8 on pdf page 50, both in the French, and the
 // English translation numbers the second of them Definition 6.
+//
+// ac-iii-s3-def-1 is the fifth. § 3 of chapter III of Commutative Algebra
+// prints Definition 1 at no. 1 on pdf page 216, where it says what it is for a
+// filtration to be m-good, and Definition 1 again at no. 3 on pdf page 221,
+// where it says what it is for an ideal to be a defining ideal of a topology.
+// Both page images were read and both print the number as 1, so the § really
+// does number two definitions the same and neither is a misreading.
 var repeats = map[string][]int{
 	"lie-iii-s3-def-7": {151},
 	"evt-ii-s6-def-2":  {81, 82},
 	"lie-vi-s1-lem-3":  {168},
 	"int-vi-s2-def-5":  {50},
+	"ac-iii-s3-def-1":  {221},
 }
 
 func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.Statement, error) {
