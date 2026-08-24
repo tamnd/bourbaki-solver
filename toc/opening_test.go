@@ -65,6 +65,79 @@ func TestASubtitleUnderAChapterTitleIsNotPartOfIt(t *testing.T) {
 	}
 }
 
+func TestAChapterWordLeftAsProseIsWrittenOver(t *testing.T) {
+	// Page 8 of Groupes et algebres de Lie IV a VI. The reading kept the word,
+	// the numeral and the two lines of the title and put a level on none of
+	// them, so the word is read past to find the title and then written over.
+	body := []string{
+		"",
+		"CHAPITRE IV",
+		"GROUPES DE COXETER",
+		"ET SYSTÈMES DE TITS",
+		"",
+		"## § 1. Groupes de Coxeter",
+	}
+	out, ok := ChapterOpening(body, "fr", "IV", "Groupes de Coxeter et systèmes de Tits")
+	if !ok {
+		t.Fatal("the page carries the word and the title and neither was read")
+	}
+	want := []string{
+		"",
+		"## CHAPITRE IV",
+		"",
+		"# GROUPES DE COXETER ET SYSTÈMES DE TITS",
+		"",
+		"## § 1. Groupes de Coxeter",
+	}
+	if len(out) != len(want) {
+		t.Fatalf("got %d lines, want %d: %q", len(out), len(want), out)
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("line %d is %q, want %q", i, out[i], want[i])
+		}
+	}
+}
+
+func TestAChapterWordForAnotherChapterIsNotReadPast(t *testing.T) {
+	// The word has to carry this chapter's own numeral. A page that names some
+	// other chapter is a page this is not looking at, and reading past the line
+	// anyway would let the title of whatever follows it be taken.
+	body := []string{
+		"",
+		"CHAPITRE V",
+		"GROUPES DE COXETER",
+		"ET SYSTÈMES DE TITS",
+	}
+	if _, ok := ChapterOpening(body, "fr", "IV", "Groupes de Coxeter et systèmes de Tits"); ok {
+		t.Fatal("the page opens chapter V and the heading for chapter IV was written over it")
+	}
+}
+
+func TestAChapterTitleWithAFootnoteOnItIsFound(t *testing.T) {
+	// Page 263 of Espaces vectoriels topologiques I a V. The chapter has a
+	// footnote and the marker hangs off the end of its title, which the
+	// contents entry does not carry. The marker is ink, so it stays in the
+	// heading and only the comparison sets it aside.
+	body := []string{
+		"",
+		"Espaces hilbertiens $ ^1 $",
+		"(théorie élémentaire)",
+		"",
+		"## § 1. ESPACES PRÉHILBERTIENS ET ESPACES HILBERTIENS",
+	}
+	out, ok := ChapterOpening(body, "fr", "V", "ESPACES HILBERTIENS (THÉORIE ÉLÉMENTAIRE)")
+	if !ok {
+		t.Fatal("the page carries the title with a footnote marker after it")
+	}
+	if out[1] != "## CHAPITRE V" {
+		t.Errorf("the word is %q, want \"## CHAPITRE V\"", out[1])
+	}
+	if want := "# Espaces hilbertiens $ ^1 $ (théorie élémentaire)"; out[3] != want {
+		t.Errorf("the title is %q, want %q", out[3], want)
+	}
+}
+
 func TestAChapterWhosePageHasLostItsTitleIsRefused(t *testing.T) {
 	// Nothing at the top of this page says which chapter it is, so there is
 	// nothing for the contents to agree with and the heading is not written.
@@ -303,6 +376,45 @@ func TestATitleThePageAndTheContentsSpellDifferentlyIsNamed(t *testing.T) {
 	}
 	if want := "IDENTITY ELEMENT; CANCELABLE ELEMENTS; INVERTIBLE ELEMENTS"; got != want {
 		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestAPrepositionSetAsABareCapitalIsTheSameTitle(t *testing.T) {
+	// Page 38 of Algebre I a III. The press set the preposition as a bare
+	// capital A and kept the acute on OPÉRATEURS four words along, so the page
+	// and the contents are the same title and the heading goes back in the
+	// page's own words.
+	body := []string{"§ 4. GROUPES ET GROUPES A OPÉRATEURS"}
+	_, _, head, ok := SectionOpening(body, 4, "Groupes et groupes à opérateurs")
+	if !ok {
+		t.Fatal("the page heads § 4 with the title the contents gives it")
+	}
+	if want := "## § 4. GROUPES ET GROUPES A OPÉRATEURS"; head != want {
+		t.Errorf("the heading is %q, want %q", head, want)
+	}
+}
+
+func TestATitleThatLostAnAccentIsStillNamedAndNotWritten(t *testing.T) {
+	// One accent folds and no others do. A heading that dropped the acute on
+	// FRÉCHET is a reading somebody should look at, and it stays a report.
+	body := []string{"§ 3. DUAL OF A FRECHET SPACE"}
+	if _, _, _, ok := SectionOpening(body, 3, "Dual of a Fréchet space"); ok {
+		t.Fatal("the page lost an accent and the heading was written anyway")
+	}
+}
+
+func TestAFootnoteMarkerOnASectionTitleIsSetAsideAndKept(t *testing.T) {
+	// Page 69 of Groupes et algebres de Lie IX. The § has a footnote and the
+	// marker hangs off the end of its title, where the contents entry has
+	// nothing. The marker is on the paper, so the heading that goes back keeps
+	// it and only the comparison sets it aside.
+	body := []string{"§ 7. REPRÉSENTATIONS IRRÉDUCTIBLES DES GROUPES DE LIE COMPACTS CONNEXES $ ^1 $"}
+	_, _, head, ok := SectionOpening(body, 7, "Représentations irréductibles des groupes de Lie compacts connexes")
+	if !ok {
+		t.Fatal("the page heads § 7 with the title the contents gives it and a footnote marker after it")
+	}
+	if want := "## § 7. REPRÉSENTATIONS IRRÉDUCTIBLES DES GROUPES DE LIE COMPACTS CONNEXES $ ^1 $"; head != want {
+		t.Errorf("the heading is %q, want %q", head, want)
 	}
 }
 

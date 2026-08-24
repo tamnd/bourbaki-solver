@@ -1031,6 +1031,17 @@ func TestSameTitle(t *testing.T) {
 		{" The contragredient representation", "Contragredient representation"},
 		{" REPRÉSENTATION GÉOMÉTRIQUE D'UN GROUPE DE COXETER", "La représentation géométrique d'un groupe de Coxeter"},
 		{" REPRÉSENTATIONS LINÉAIRES", "Les représentations linéaires"},
+		// Page 38 of Algebre I a III sets the preposition as a bare capital and
+		// keeps the acute on the last word, so the grave is a matter of setting
+		// the way the capitals are.
+		{" GROUPES ET GROUPES A OPÉRATEURS", "Groupes et groupes à opérateurs"},
+		// Page 69 of Groupes et algebres de Lie IX hangs a footnote marker off
+		// the end of the heading and the contents entry does not carry one.
+		{" REPRÉSENTATIONS IRRÉDUCTIBLES DES GROUPES DE LIE COMPACTS CONNEXES $ ^1 $",
+			"Représentations irréductibles des groupes de Lie compacts connexes"},
+		// Page 263 of Espaces vectoriels topologiques I a V does the same over
+		// a chapter, with the marker inside the title rather than after it.
+		{" Espaces hilbertiens $ ^1 $ (théorie élémentaire)", "ESPACES HILBERTIENS (THÉORIE ÉLÉMENTAIRE)"},
 	}
 	for _, c := range same {
 		if !sameTitle(c.head, c.entry) {

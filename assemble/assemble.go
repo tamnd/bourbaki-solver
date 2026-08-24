@@ -30,6 +30,7 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/mathtex"
+	"github.com/tamnd/bourbaki-solver/typography"
 )
 
 // Piece is one assembled file: the opening of a chapter, one § or appendix, or
@@ -692,9 +693,16 @@ func findLine(pages map[int]corpus.PageFile, page int, ok func(string) bool) (in
 // since the capitals stop at the formula and the flattening does not, so what is
 // compared is what is left when both are taken away. It is still enough to say
 // the reading landed on the right page, which is all this check is for.
+// The one accent a printing of this corpus is known to drop comes off first.
+// Upper casing does not take it off, since an accented small letter upper cases
+// to an accented capital, and page 38 of Algebre I a III prints "GROUPES ET
+// GROUPES A OPERATEURS" for a § its own table of contents lists with a grave on
+// the a. Every other accent is still compared as it stands, which is what keeps
+// a heading that lost one from passing for the heading it came from. See
+// typography.Accentless.
 func flat(s string) string {
 	var b strings.Builder
-	for _, r := range texWord.ReplaceAllString(s, "") {
+	for _, r := range typography.Accentless(texWord.ReplaceAllString(s, "")) {
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(unicode.ToUpper(r))
 		}
@@ -714,7 +722,15 @@ var texWord = regexp.MustCompile(`\\[a-zA-Z]+`)
 // table of contents lists the same section as "The geometric representation of a
 // Coxeter group". Both are printed and neither is a misreading, so the article
 // is a matter of setting rather than of naming, the same way the capitals are.
+// The footnote markers come off both sides before anything else. A printing
+// hangs one off the end of a heading where the § or the chapter has a note on
+// it, and the contents entry never carries it: page 69 of Groupes et algebres de
+// Lie IX heads § 7 that way and page 263 of Espaces vectoriels topologiques I a
+// V heads chapter V that way. flat keeps the digit out of the marker, so the two
+// sides came out differing by a 1 and the volume stopped. See
+// typography.Footless.
 func sameTitle(head, entry string) bool {
+	head, entry = typography.Footless(head), typography.Footless(entry)
 	if flat(head) == flat(entry) {
 		return true
 	}
