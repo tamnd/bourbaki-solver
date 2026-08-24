@@ -1101,6 +1101,20 @@ func fixHeading(args []string) error {
 // and asking what is wrong with it. The contents knows where a chapter and a §
 // begin, so the page is opened because the contents sends the repair to it, and
 // a volume whose contents has not been read yet has no openings to put back.
+// added is the first line a repair put into a body that was not in it before,
+// which is the line worth showing under -check. It is written this way rather
+// than having the repair hand the heading back because the repairs put their
+// heading in three different places and a caller that wants to see it should
+// not have to know which.
+func added(before, after []string) string {
+	for i, line := range after {
+		if i >= len(before) || before[i] != line {
+			return strings.TrimSpace(line)
+		}
+	}
+	return ""
+}
+
 func fixOpening(args []string) error {
 	fs := flag.NewFlagSet("fix opening", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixOpeningUsage) }
@@ -1118,7 +1132,7 @@ func fixOpening(args []string) error {
 		return err
 	}
 
-	var chapters, sections, numbers, unread, lost, differ int
+	var chapters, sections, numbers, appendices, unread, lost, differ int
 	for _, b := range books.Books {
 		if *book != "" && b.ID != *book {
 			continue
@@ -1171,7 +1185,60 @@ func fixOpening(args []string) error {
 				}
 			}
 			for _, s := range ch.Sections {
-				if s.PDFPage == 0 || s.Appendix {
+				if s.PDFPage == 0 {
+					continue
+				}
+				// An appendix is opened by its word rather than by a sign and
+				// a number, so it takes a repair of its own. Thirty nine of
+				// them are in the contents of this corpus and fifteen are not
+				// marked on the page, which is what stops the assembler on
+				// nine volumes.
+				if s.Appendix {
+					// The gathered exercises of an appendix are headed by the
+					// same word over again, and the reading loses the level
+					// there for the same reason it loses it over the opening.
+					// Page 449 of Algebra I to III is the exercises of the
+					// appendix to chapter II and has the word standing as a
+					// plain line in the middle of them.
+					//
+					// Nothing is read from the running head here. Every page
+					// of an appendix carries the word as its running head, so
+					// the front matter of an exercises page says only that the
+					// page is inside the appendix, which is not the same thing
+					// as the page opening something.
+					if x := s.Exercises; x != nil && x.PDFPage > 0 {
+						if lines, ok := read(x.PDFPage); ok && !toc.Appendix(lines) {
+							if out, _, done := toc.AppendixOpening(lines, "", "", s.Number); done {
+								edits[x.PDFPage] = out
+								appendices++
+								if *check {
+									fmt.Printf("%s/%04d.md  %s\n", b.ID, x.PDFPage, added(lines, out))
+								}
+							}
+						}
+					}
+					lines, ok := read(s.PDFPage)
+					if !ok || toc.Appendix(lines) {
+						continue
+					}
+					out, drop, done := toc.AppendixOpening(lines, runningHead(root, b.ID, s.PDFPage), s.Title, s.Number)
+					if !done {
+						lost++
+						fmt.Printf("%s chapter %s appendix %d: pdf page %d has no line the contents can read as its heading\n",
+							b.ID, ch.Numeral, s.Number, s.PDFPage)
+						continue
+					}
+					edits[s.PDFPage] = out
+					// The word is the whole of what the page prints over an
+					// appendix, so where the reading filed it as the running
+					// head there is no running head left to keep.
+					if drop {
+						heads[s.PDFPage] = ""
+					}
+					appendices++
+					if *check {
+						fmt.Printf("%s/%04d.md  %s\n", b.ID, s.PDFPage, added(lines, out))
+					}
 					continue
 				}
 				lines, ok := read(s.PDFPage)
@@ -1269,8 +1336,8 @@ func fixOpening(args []string) error {
 	if *check {
 		verb = "would put back"
 	}
-	fmt.Printf("fix opening: %s %d chapter openings, %d § openings and %d no. openings\n",
-		verb, chapters, sections, numbers)
+	fmt.Printf("fix opening: %s %d chapter openings, %d § openings, %d no. openings and %d appendix openings\n",
+		verb, chapters, sections, numbers, appendices)
 	if lost > 0 {
 		fmt.Printf("fix opening: %s not on the page at all and need the page image read again\n", openings(lost))
 	}
@@ -1280,7 +1347,7 @@ func fixOpening(args []string) error {
 	if unread > 0 {
 		fmt.Printf("fix opening: %s on a page that has not been read\n", openings(unread))
 	}
-	if chapters+sections+numbers > 0 && !*check {
+	if chapters+sections+numbers+appendices > 0 && !*check {
 		fmt.Println("fix opening: run bourbaki assemble")
 	}
 	return nil

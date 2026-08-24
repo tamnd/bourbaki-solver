@@ -423,3 +423,186 @@ func TestARunningHeadWithNoNumberIsNotAHeading(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAppendixWhoseWordIsInTheBodyIsMarked(t *testing.T) {
+	// Page 635 of Algebra I to III. The word is on the page and the level is
+	// gone, which is the same fault SectionOpening repairs one level up.
+	body := []string{
+		"When $ E = K^n $, we sometimes write $ G_{n,p}(K) $.",
+		"",
+		"APPENDIX",
+	}
+	out, drop, ok := AppendixOpening(body, "APPENDIX", "", 0)
+	if !ok {
+		t.Fatal("the word is on the page and no heading was put back")
+	}
+	if drop {
+		t.Error("the body had the word, so the running head was not the source and stays")
+	}
+	if want := "## APPENDIX"; out[2] != want {
+		t.Errorf("got %q, want %q", out[2], want)
+	}
+	if len(out) != len(body) {
+		t.Errorf("got %d lines, want %d", len(out), len(body))
+	}
+}
+
+func TestAnAppendixThatIsOnlyARunningHeadIsWrittenIntoTheBody(t *testing.T) {
+	// Page 402 of Algebra I to III. The word is the whole of what the page
+	// prints over the appendix, so the reading filed it as the running head
+	// and the body opens on the title with nothing above it.
+	body := []string{"", "PSEUDOMODULES", "", "### 1. ADJUNCTION OF A UNIT ELEMENT"}
+	out, drop, ok := AppendixOpening(body, "APPENDIX", "", 0)
+	if !ok {
+		t.Fatal("the front matter has the word and no heading was put back")
+	}
+	if !drop {
+		t.Error("the running head is spent and should go")
+	}
+	want := []string{"", "## APPENDIX", "", "PSEUDOMODULES", "", "### 1. ADJUNCTION OF A UNIT ELEMENT"}
+	if len(out) != len(want) {
+		t.Fatalf("got %d lines, want %d: %q", len(out), len(want), out)
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("line %d is %q, want %q", i, out[i], want[i])
+		}
+	}
+}
+
+func TestAFrenchAppendixOpensOnItsOwnWord(t *testing.T) {
+	// Page 225 of Topological Vector Spaces in French, and page 94 of
+	// Integration IX, which calls the same thing an ANNEXE. A repair that
+	// insisted on one word would leave the other volume unassembled.
+	for _, c := range []struct{ running, want string }{
+		{"APPENDICE", "## APPENDICE"},
+		{"ANNEXE", "## ANNEXE"},
+	} {
+		body := []string{"", "Points fixes", "des groupes de transformations affines"}
+		out, drop, ok := AppendixOpening(body, c.running, "Points fixes des groupes de transformations affines", 0)
+		if !ok || !drop {
+			t.Fatalf("%q was not read as the opening of an appendix", c.running)
+		}
+		if out[1] != c.want {
+			t.Errorf("got %q, want %q", out[1], c.want)
+		}
+	}
+}
+
+func TestANumberedAppendixKeepsTheNumberTheContentsGives(t *testing.T) {
+	// Chapter IX of Topology V to X has two appendices and the contents
+	// numbers both. The page may set the number as a digit or as a roman
+	// numeral and the heading that goes back is written the corpus way.
+	for _, had := range []string{"APPENDIX 2", "APPENDIX II", "**APPENDIX II.**"} {
+		out, _, ok := AppendixOpening([]string{had, "", "Some text."}, "", "", 2)
+		if !ok {
+			t.Fatalf("%q is the opening of appendix 2 and was refused", had)
+		}
+		if want := "## APPENDIX 2"; out[0] != want {
+			t.Errorf("%q gave %q, want %q", had, out[0], want)
+		}
+	}
+}
+
+func TestAnAppendixNumberThatDoesNotAgreeIsRefused(t *testing.T) {
+	// The number has to be the contents' own in both directions. A chapter
+	// with one appendix does not number it, so a number on the page belongs to
+	// something else, and a chapter with two will not take the other one.
+	for _, c := range []struct {
+		line   string
+		number int
+	}{
+		{"APPENDIX 2", 0},
+		{"APPENDIX", 1},
+		{"APPENDIX 1", 2},
+		{"APPENDIX I", 2},
+	} {
+		if _, _, ok := AppendixOpening([]string{c.line}, "", "", c.number); ok {
+			t.Errorf("%q was taken as appendix %d", c.line, c.number)
+		}
+	}
+}
+
+func TestAnAppendixThatIsNotOnThePageIsRefused(t *testing.T) {
+	// Page 106 of Lie IX, whose second appendix the contents gives no page at
+	// all. Nothing on the page and nothing in the front matter says the word,
+	// so there is nothing for the contents to agree with.
+	body := []string{"### 1. THE HAAR MEASURE", "", "Let G be a Lie group."}
+	if _, _, ok := AppendixOpening(body, "STRUCTURE DES GROUPES", "", 0); ok {
+		t.Fatal("a heading was written onto a page that does not carry the word")
+	}
+}
+
+func TestASentenceThatMentionsAnAppendixIsNotAHeading(t *testing.T) {
+	// The word alone is the whole of what a page prints over an appendix, so
+	// nothing else is allowed on the line. Otherwise a cross reference in the
+	// body would be marked as the opening.
+	body := []string{"These results are proved in the Appendix to this chapter.", "", "> see the appendix"}
+	if _, _, ok := AppendixOpening(body, "", "", 0); ok {
+		t.Fatal("a sentence about an appendix was marked as one")
+	}
+}
+
+func TestAnAppendixThatIsAlreadyMarkedIsLeftAlone(t *testing.T) {
+	// Algebra VIII sets the word, the number and the title of the appendix all
+	// on one line, and Integration VII to IX calls the same thing an ANNEX.
+	// Both are already headings and neither wants a second one written over
+	// it. The last two are the shapes the repair is for and are not marked.
+	for _, c := range []struct {
+		line   string
+		marked bool
+	}{
+		{"## APPENDIX 1 ALGEBRAS WITHOUT UNIT ELEMENT", true},
+		{"## APPENDIX", true},
+		{"### Appendice", true},
+		{"## ANNEX 2.", true},
+		{"APPENDIX", false},
+		{"## PSEUDOMODULES", false},
+		{"## APPENDED REMARKS", false},
+	} {
+		if got := Appendix([]string{"", c.line, ""}); got != c.marked {
+			t.Errorf("Appendix(%q) is %v, want %v", c.line, got, c.marked)
+		}
+	}
+}
+
+func TestTheTitleUnderAnAppendixWordIsMadeAHeading(t *testing.T) {
+	// Page 402 of Algebra I to III. The word is set over a title in its own
+	// type, so the reading loses the level on two lines and not one, and the
+	// assembler reads the title from under the word.
+	body := []string{"", "PSEUDOMODULES", "", "### 1. ADJUNCTION OF A UNIT ELEMENT"}
+	out, drop, ok := AppendixOpening(body, "APPENDIX", "Pseudomodules", 0)
+	if !ok || !drop {
+		t.Fatal("the front matter has the word and no heading was put back")
+	}
+	want := []string{"", "## APPENDIX", "", "# PSEUDOMODULES", "", "### 1. ADJUNCTION OF A UNIT ELEMENT"}
+	if len(out) != len(want) {
+		t.Fatalf("got %d lines, want %d: %q", len(out), len(want), out)
+	}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("line %d is %q, want %q", i, out[i], want[i])
+		}
+	}
+}
+
+func TestAnAppendixTheContentsGivesNoTitleTakesNothingUnderIt(t *testing.T) {
+	// Chapter IX of Algebre commutative chapitres 8 et 9 closes on an appendix
+	// the contents gives no title. The page prints the word alone and the next
+	// thing on it is the heading of its first no., which is not a title and
+	// must not be taken as one.
+	body := []string{"APPENDICE", "", "### 1. Limite inductive d'anneaux locaux"}
+	out, _, ok := AppendixOpening(body, "", "", 0)
+	if !ok {
+		t.Fatal("the word is on the page and no heading was put back")
+	}
+	want := []string{"## APPENDICE", "", "### 1. Limite inductive d'anneaux locaux"}
+	for i := range want {
+		if out[i] != want[i] {
+			t.Errorf("line %d is %q, want %q", i, out[i], want[i])
+		}
+	}
+	if len(out) != len(want) {
+		t.Errorf("got %d lines, want %d", len(out), len(want))
+	}
+}
