@@ -51,26 +51,32 @@ import (
 // that are translated and current, the rules accept them there, and moving them
 // would ask for those files again for no reader's benefit.
 //
-// otherwise, odd and even were left off with them and have since been put on,
-// because leaving a word of prose off this list does not merely permit it to
-// stand in English, it requires it to. SameMath reads a run this list does not
-// know as a name and refuses any answer that changed it. So the one display in
-// § 21 of Algebra VIII that reads
+// otherwise, odd and even were left off with them and have since been put on.
+// At the time, leaving a word of prose off this list did not merely permit it to
+// stand in English, it required it to, because SameMath read a run this list did
+// not know as a name and refused any answer that changed it. So the one display
+// in § 21 of Algebra VIII that reads
 //
 //	\begin{cases} m & \text{if } s=s',\\ 0 & \text{otherwise.}\end{cases}
 //
-// had one arm the rules insisted be translated, since if is on the list, and
-// one arm they insisted be copied. No model is going to translate half of a
-// cases block, and none did: the chunk was asked six times over two days and
-// refused every time, three for translating otherwise and one for not
-// translating if, and it died and took the file with it at 100 chunks of 101
-// answered. odd and even are the same shape in exercise 9 of § 1 of Lie VIII,
-// not yet asked for and set to fail the same way.
+// had one arm the rules insisted be translated, since if is on the list, and one
+// arm they insisted be copied. No model is going to translate half of a cases
+// block, and none did: the chunk was asked six times over two days and refused
+// every time, three for translating otherwise and one for not translating if,
+// and it died and took the file with it at 100 chunks of 101 answered. odd and
+// even are the same shape in exercise 9 of § 1 of Lie VIII.
 //
-// The cost of putting them on was measured rather than assumed, by reading
-// every \text run in the English corpus: otherwise appears once, odd and even
-// once each, and all three are in files that have no Vietnamese yet. So nothing
+// The cost of putting them on was measured rather than assumed, by reading every
+// \text run in the English corpus: otherwise appears once, odd and even once
+// each, and all three are in files that have no Vietnamese yet. So nothing
 // current goes stale, which is the objection that kept them off.
+//
+// That coupling is gone. What may be rewritten inside a formula is decided by
+// IsMathName now, off a list of names rather than off the absence of a word from
+// this list, and the reasoning is written out there. This list decides only what
+// must be rewritten, so a word missing from it permits an English run to stand
+// and no longer requires it to. The three words stay on: a run holding one of
+// them is prose either way and the corpus reads better for saying so.
 var english = map[string]bool{}
 
 func init() {
