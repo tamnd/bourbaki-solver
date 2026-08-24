@@ -443,7 +443,7 @@ func l06(c *Corpus) ([]Finding, error) {
 func prose(body string) string {
 	var b strings.Builder
 	inDisplay := false
-	for _, line := range strings.Split(body, "\n") {
+	for _, line := range strings.Split(mathtex.BlankDisplays(body), "\n") {
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "$$" {
 			inDisplay = !inDisplay
@@ -707,7 +707,7 @@ func paragraphs(body string) []para {
 		}
 	}
 	inDisplay := false
-	for i, line := range strings.Split(body, "\n") {
+	for i, line := range strings.Split(mathtex.BlankDisplays(body), "\n") {
 		trimmed := strings.TrimSpace(line)
 		switch {
 		case trimmed == "$$":

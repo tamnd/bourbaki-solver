@@ -694,6 +694,43 @@ func StackedRows(body string) []string {
 	return stackedRowRE.FindAllString(body, -1)
 }
 
+// displayRE is a display block, from its opening $$ to its closing $$, wherever
+// the two stand.
+var displayRE = regexp.MustCompile(`(?s)\$\$.*?\$\$`)
+
+// BlankDisplays takes the display mathematics out of a body and leaves every
+// line where it was.
+//
+// Three rules split a body into prose and displays and all three did it the same
+// way, by walking the lines and toggling on a line that is nothing but $$. That
+// reads the corpus correctly, because the extraction fences a display on its own
+// lines, and it does not read a model's answer correctly, because a model
+// reflows. § 3 of Topology IV came back with
+//
+//	Cụ thể, ta có $$
+//	\left| \frac{1}{x} - \frac{1}{y} \right| = \frac{|x-y|}{xy}
+//	$$; tồn tại một số nguyên m > 0 sao cho
+//
+// where the opening fence is welded to the prose before it and the closing one
+// to the prose after. Neither line is nothing but $$, so the toggle never fired,
+// the middle line has no dollar on it at all for Strip to catch, and \left and
+// \right were read as the English words left and right. The glossary has a row
+// for each, so the terminology rule asked for trái and phải to be written inside
+// a formula, and the chunk was refused five times and the section died.
+//
+// The count of newlines is kept, because two of the three callers report a line
+// number and a rule that moves the lines under the reader is worse than the
+// rule it replaces.
+//
+// A one line display, $$ x = y $$, is not this function's business and never
+// was: Strip reads $$ as one delimiter rather than two and takes it out along
+// with the inline spans. It goes out here as well now, which changes nothing.
+func BlankDisplays(body string) string {
+	return displayRE.ReplaceAllStringFunc(body, func(d string) string {
+		return strings.Repeat("\n", strings.Count(d, "\n"))
+	})
+}
+
 // Strip takes the mathematics out of a line and leaves the prose.
 //
 // What comes back is not TeX and is not meant to be read as any: the spans

@@ -155,7 +155,10 @@ var weldedRE = regexp.MustCompile(`\p{L}*\$[^$\n]+\$\p{L}*`)
 func proseText(body string, welded bool) string {
 	var b strings.Builder
 	inDisplay := false
-	for _, line := range strings.Split(body, "\n") {
+	// A display whose fences are welded to the prose either side of them is
+	// taken out first, because the loop below cannot see one. The loop stays for
+	// a fence with no partner, which the toggle handles and a regexp does not.
+	for _, line := range strings.Split(mathtex.BlankDisplays(body), "\n") {
 		if strings.TrimSpace(line) == "$$" {
 			inDisplay = !inDisplay
 			continue
