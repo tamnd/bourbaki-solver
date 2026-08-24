@@ -1252,3 +1252,24 @@ func TestTheNumberOfADisplayedFormulaIsNotAMemberOfAnOpenRun(t *testing.T) {
 		t.Errorf("the numbered display did not stay in the prose: %v", texts(out))
 	}
 }
+
+// The exercise before this one ends on a display, and a display closes on two
+// dollars. Reading the second of the two as the dollar that opens the marker's
+// span cuts the delimiter in half: the exercise before is left with one dollar
+// and a formula that never closes, and afterMarker then takes the marker for a
+// span left open and deletes the next real dollar out of this exercise to close
+// it. Exercises 30, 31 and 32 of § 1 of chapter III of Functions of a Real
+// Variable are the case that found it.
+func TestItemStartDoesNotCutADisplayDelimiterInHalf(t *testing.T) {
+	text := "a) Show that\n$$\n\\int_0^{+\\infty} f = \\pi.\n$$\n31) If $ l_{m,n} $ is a primitive of $ g $, show that"
+	i, m := itemStart(text, 31)
+	if i < 0 {
+		t.Fatal("exercise 31 was not found")
+	}
+	if before := text[:i]; !strings.HasSuffix(before, "$$") {
+		t.Errorf("the exercise before ends %q, so its display no longer closes", first(before[len(before)-8:], 8))
+	}
+	if got := afterMarker(m[0], text[i+markerLen(m):]); !strings.HasPrefix(got, "If $ l_{m,n} $") {
+		t.Errorf("exercise 31 begins %q", first(got, 40))
+	}
+}

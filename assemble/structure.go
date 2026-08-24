@@ -1096,6 +1096,22 @@ func itemStart(text string, n int) (int, []string) {
 			return -1, nil
 		}
 		at := off + loc[0] + 1 // the byte matched before the number is not part of it
+		// A display closes on two dollars and the byte the pattern allows
+		// itself to match in front of the number can be the first of the pair.
+		// The second one then lands where the marker's own opening dollar
+		// would, and everything downstream believes it: the exercise before
+		// keeps one dollar of the two, so its display never closes, and
+		// afterMarker reads the marker as a span left open and deletes the
+		// next real dollar out of the body of this exercise to close it.
+		// Both halves belong to the page in front of the number, so a dollar
+		// standing next to another dollar is not where an exercise begins.
+		// Exercises 30 to 32 of § 1 of chapter III of Functions of a Real
+		// Variable are the case: three of them lost a delimiter and two came
+		// out with a formula that swallowed the prose after it.
+		if at < len(text) && text[at] == '$' && text[off+loc[0]] == '$' {
+			off = at
+			continue
+		}
 		got, _ := strconv.Atoi(text[off+loc[2] : off+loc[3]])
 		if got == n && sentenceEnd(text[:at]) {
 			// A pilcrow in front of the number is part of the marker and is
