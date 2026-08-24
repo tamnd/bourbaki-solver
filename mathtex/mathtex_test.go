@@ -520,3 +520,33 @@ func TestStripTakesADisplayWrittenOnOneLine(t *testing.T) {
 		}
 	}
 }
+
+// BlankDisplays takes a display out wherever its fences stand, and every line
+// after it is still the line it was.
+func TestBlankDisplaysKeepsTheLineNumbering(t *testing.T) {
+	for _, c := range []struct{ name, body, want string }{
+		{"fenced on its own lines",
+			"before\n$$\na = b\n$$\nafter",
+			"before\n\n\n\nafter"},
+		{"welded to the prose either side",
+			"we have $$\na = b\n$$; and so",
+			"we have \n\n; and so"},
+		{"opened and closed on one line",
+			"before\n$$ a = b $$\nafter",
+			"before\n\nafter"},
+		{"two of them",
+			"one\n$$\na\n$$\ntwo\n$$\nb\n$$\nthree",
+			"one\n\n\n\ntwo\n\n\n\nthree"},
+		{"a fence with no partner is left alone",
+			"before\n$$\nafter",
+			"before\n$$\nafter"},
+	} {
+		got := BlankDisplays(c.body)
+		if got != c.want {
+			t.Errorf("%s: BlankDisplays(%q) = %q, want %q", c.name, c.body, got, c.want)
+		}
+		if a, b := strings.Count(got, "\n"), strings.Count(c.body, "\n"); a != b {
+			t.Errorf("%s: %d newlines out of %d in, and the line numbers moved", c.name, a, b)
+		}
+	}
+}

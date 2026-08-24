@@ -143,3 +143,40 @@ func TestOnlyATermThatWasAskedForIsReported(t *testing.T) {
 		t.Errorf("a run with no glossary reported %v", problems)
 	}
 }
+
+// A display whose fences are welded to the prose either side of them is still a
+// display.
+//
+// § 3 of Topology IV, chunk 3, which the run refused five times over. The
+// English fences its display on its own lines and the answer did not: it wrote
+// the opening $$ at the end of the sentence that introduces the formula and the
+// closing one at the start of the sentence that carries on from it, which is
+// perfectly good Markdown and reads the same way in a browser. The middle line
+// then has no dollar on it at all, so nothing took \left and \right out, the
+// glossary has a row for each of those two English words, and the rule asked for
+// them to be translated inside a formula. No model was going to do that and none
+// did.
+func TestADisplayWeldedToTheProseIsStillADisplay(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{
+		{EN: "left", VI: "trái"},
+		{EN: "right", VI: "phải"},
+		{EN: "uniformly continuous", VI: "liên tục đều"},
+	}}
+	const en = "We shall establish that $1/x$ is *uniformly continuous*. Precisely, we have $$\n" +
+		"\\left| \\frac{1}{x} - \\frac{1}{y} \\right| = \\frac{|x-y|}{xy}\n" +
+		"$$; there is an integer $m > 0$ such that $|x| \\geq 1/m$."
+	const vi = "Chúng ta sẽ thiết lập rằng $1/x$ là *liên tục đều*. Cụ thể, ta có $$\n" +
+		"\\left| \\frac{1}{x} - \\frac{1}{y} \\right| = \\frac{|x-y|}{xy}\n" +
+		"$$; tồn tại một số nguyên $m > 0$ sao cho $|x| \\geq 1/m$."
+	if problems := AuditTerms("vi", g, en, vi); len(problems) != 0 {
+		t.Errorf("the welded display was read as prose: %v", problems)
+	}
+	// And the rule still works on the prose around it. The term that is really
+	// there in English is still reported.
+	const kept = "Chúng ta sẽ thiết lập rằng $1/x$ is uniformly continuous. Cụ thể, ta có $$\n" +
+		"\\left| \\frac{1}{x} - \\frac{1}{y} \\right| = \\frac{|x-y|}{xy}\n" +
+		"$$; tồn tại một số nguyên $m > 0$ sao cho $|x| \\geq 1/m$."
+	if problems := AuditTerms("vi", g, en, kept); len(problems) != 1 {
+		t.Errorf("%d problems, want the one term left standing: %v", len(problems), problems)
+	}
+}
