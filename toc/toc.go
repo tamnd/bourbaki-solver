@@ -464,6 +464,18 @@ const labelPieces = 3
 // last words of a long title out of the label: a pattern that reads the line
 // from the left finds "SPACES IX.l" at the end of the chapter IX line of the
 // English Integration before it finds "IX.l".
+//
+// A line that announced nothing gets a reading too, where a title is being held
+// waiting for its page. noLeader refuses that case, and refuses it for a good
+// reason: on the second line of a wrapped title there is nothing left saying the
+// line is an entry, so a bare number at the end of it is as likely to be the
+// last word of a title as a page. A label is not, because it has to name the
+// chapter the entry is already known to be in, and a title whose last word is
+// the open chapter's numeral and a page number joined by a period is not a thing
+// the Éléments contains. The French Algèbre chapitres 1 à 3 wraps no. 4 of
+// chapter II § 3 over three lines, the homomorphism Hom(E1,F1) tensor Hom(E2,F2)
+// to Hom(E1 tensor E2, F1 tensor F2), and sets II.79 on the third of them with
+// no leaders in front of it.
 func noLeaderLabel(line, text string, e entry, mark SectionMark, want string) (string, tail, bool, entry) {
 	if want == "" {
 		return text, tail{}, false, e
@@ -839,7 +851,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			if !hasPage && e.kind != kindNone && g.Page == Bare {
 				text, t, hasPage, e = noLeader(line, text, e, g.Mark)
 			}
-			if !hasPage && e.kind != kindNone && g.Page == Label {
+			if !hasPage && g.Page == Label && (e.kind != kindNone || pend != nil) {
 				// A chapter line carries its own numeral, and it is the
 				// chapter about to open rather than the one still open that
 				// its label names.
