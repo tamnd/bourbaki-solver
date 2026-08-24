@@ -574,3 +574,77 @@ func TestRedoSmallAsksAgainOnlyForWhatTheSmallModelAnswered(t *testing.T) {
 		}
 	}
 }
+
+// A file is written when every chunk of it is in hand, so the work left on it is
+// the chunks still outstanding. That is not the size of the file, and on the
+// Vietnamese sections the two came apart far enough to stop the run: a file of
+// eighty three chunks with one left is one question from done and a file of ten
+// chunks with ten left is a morning's work.
+func TestChunksOutstandingCountsWhatIsLeftAndNotTheFile(t *testing.T) {
+	root := t.TempDir()
+	const prompt = "83b0139f"
+	j := job{
+		source: "content/en/ens/III/07_s7_inverse_limits_and_direct_limits.md",
+		terms:  "terms",
+		chunks: []translate.Chunk{
+			{Index: 1, Of: 3, Body: "The first paragraph."},
+			{Index: 2, Of: 3, Body: "The second paragraph."},
+			{Index: 3, Of: 3, Body: "The third paragraph."},
+		},
+	}
+	if got := chunksOutstanding(root, "vi", prompt, j, false); got != 3 {
+		t.Errorf("chunksOutstanding() on a file nothing has answered = %d, want 3", got)
+	}
+
+	put := func(c translate.Chunk, text, model, promptHash string) {
+		t.Helper()
+		if err := writeAccepted(root, "vi", accepted{
+			Source: j.source, Chunk: c.Index, Of: c.Of,
+			Input: chunkInput(c.Body, j.terms), Prompt: promptHash,
+			Model: model, Text: text,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	put(j.chunks[0], "Đoạn thứ nhất.", "gpt-5-6", prompt)
+	put(j.chunks[1], "Đoạn thứ hai.", "gpt-5-6", prompt)
+	if got := chunksOutstanding(root, "vi", prompt, j, false); got != 1 {
+		t.Errorf("chunksOutstanding() with two answers in hand = %d, want 1", got)
+	}
+
+	// An answer made under other instructions is not an answer to this
+	// question, which is the same test plan makes before it asks.
+	put(j.chunks[2], "Đoạn thứ ba.", "gpt-5-6", "an older prompt")
+	if got := chunksOutstanding(root, "vi", prompt, j, false); got != 1 {
+		t.Errorf("chunksOutstanding() with a stale prompt hash = %d, want 1", got)
+	}
+	put(j.chunks[2], "Đoạn thứ ba.", "gpt-5-6", prompt)
+	if got := chunksOutstanding(root, "vi", prompt, j, false); got != 0 {
+		t.Errorf("chunksOutstanding() with every answer in hand = %d, want 0", got)
+	}
+
+	// -redo-small passes over what a cut down model wrote, and the count has to
+	// see the same thing the run will.
+	put(j.chunks[1], "Đoạn thứ hai.", "gpt-5-6-mini", prompt)
+	if got := chunksOutstanding(root, "vi", prompt, j, true); got != 1 {
+		t.Errorf("chunksOutstanding() under -redo-small = %d, want 1", got)
+	}
+	if got := chunksOutstanding(root, "vi", prompt, j, false); got != 0 {
+		t.Errorf("chunksOutstanding() without -redo-small = %d, want 0", got)
+	}
+
+	// An answer today's rules refuse is not an answer either. This one has lost
+	// the formula the English carries.
+	maths := job{source: "content/en/alg/I/01_s1.md", terms: "terms",
+		chunks: []translate.Chunk{{Index: 1, Of: 1, Body: "The ring $A$ is commutative."}}}
+	if err := writeAccepted(root, "vi", accepted{
+		Source: maths.source, Chunk: 1, Of: 1,
+		Input: chunkInput(maths.chunks[0].Body, maths.terms), Prompt: prompt,
+		Model: "gpt-5-6", Text: "Vành A là giao hoán.",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := chunksOutstanding(root, "vi", prompt, maths, false); got != 1 {
+		t.Errorf("chunksOutstanding() on an answer the audit refuses = %d, want 1", got)
+	}
+}
