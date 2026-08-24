@@ -785,12 +785,31 @@ func TestTheHeadsOverAnAppendixCoverBothWordsAndBothNumerals(t *testing.T) {
 		n    int
 		want []string
 	}{
-		{"en", 0, []string{"## APPENDIX", "## ANNEX"}},
-		{"en", 2, []string{"## APPENDIX 2", "## APPENDIX II", "## ANNEX 2", "## ANNEX II"}},
-		{"fr", 0, []string{"### APPENDICE", "### ANNEXE"}},
-		{"fr", 1, []string{"### APPENDICE 1", "### APPENDICE I", "### ANNEXE 1", "### ANNEXE I"}},
+		{"en", 0, []string{"APPENDIX", "ANNEX"}},
+		{"en", 2, []string{"APPENDIX 2", "APPENDIX II", "ANNEX 2", "ANNEX II"}},
+		{"fr", 0, []string{"APPENDICE", "ANNEXE"}},
+		{"fr", 1, []string{"APPENDICE 1", "APPENDICE I", "ANNEXE 1", "ANNEXE I"}},
 	} {
-		same(t, printings[c.lang].appendixHeads(c.n), c.want)
+		// The level is crossed in as well as the word and the numeral. An
+		// appendix is marked at whatever level extraction read off the size of
+		// the type and that is not one level even inside a volume, so asking
+		// for the word at the one level the printing was written down with
+		// misses a page that read the type a size larger or smaller.
+		var want []string
+		for _, level := range []string{"#", "##", "###", "####"} {
+			for _, w := range c.want {
+				want = append(want, level+" "+w)
+			}
+		}
+		got := printings[c.lang].appendixHeads(c.n)
+		if len(got) != len(want) {
+			t.Errorf("%s appendix %d has %d heads, want %d: %q", c.lang, c.n, len(got), len(want), got)
+		}
+		for _, w := range want {
+			if !slices.Contains(got, w) {
+				t.Errorf("%s appendix %d does not offer %q", c.lang, c.n, w)
+			}
+		}
 	}
 	// Every one of them is a mark the run knows, or the volume stops on a page
 	// whose heading the contents was looked up by.
