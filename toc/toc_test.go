@@ -1131,3 +1131,70 @@ func TestALabelWithNoLeadersComesInPieces(t *testing.T) {
 		t.Errorf("the end of %q was read as a label", other)
 	}
 }
+
+// wrappedLabel is a contents that numbers its pages by chapter and wraps one of
+// its entries over three lines, setting the label on the last of them with no
+// leaders in front of it. It is the French Algebre chapitres 1 a 3, no. 4 of
+// chapter II § 3, cut down to one chapter and two §.
+const wrappedLabel = `                              TABLE DES MATIÈRES
+
+CHAPITRE II. — ALGÈBRE LINÉAIRE . . . . . . . . . . . . . . . . . II.1
+
+§ 1. Modules . . . . . . . . . . . . . . . . . . . . . . . . . . . II.1
+   1. Modules; applications linéaires . . . . . . . . . . . . . . II.1
+§ 2. Produits tensoriels . . . . . . . . . . . . . . . . . . . . . II.60
+   1. Produit tensoriel de deux modules . . . . . . . . . . . . . II.60
+   2. Produit tensoriel de deux applications linéaires . . . . . . II.65
+   3. Changement de l'anneau de base . . . . . . . . . . . . . . . II.72
+   4. L'homomorphisme
+      Hom_C (E_1, F_1) $ \otimes_C $ Hom_C (E_2, F_2)
+      $ \to $ Hom_C (E_1 $ \otimes_C $ E_2, F_1 $ \otimes_C $ F_2) II.79
+`
+
+// wrappedLabelMap is chapter II of 90 printed pages at a constant offset of 2.
+func wrappedLabelMap() *pagemap.Map {
+	m := &pagemap.Map{Book: "test", PDFPages: 92,
+		Chapters: []pagemap.Span{{Chapter: "II", FirstPDF: 3, LastPDF: 92, FirstPage: 1, LastPage: 90}}}
+	for i := 1; i <= 92; i++ {
+		e := pagemap.Entry{PDFPage: i, Confidence: pagemap.Unknown}
+		if i >= 3 {
+			e.Chapter, e.Page, e.Confidence = "II", i-2, pagemap.FromHead
+		}
+		m.Entries = append(m.Entries, e)
+	}
+	return m
+}
+
+func TestAWrappedEntryFindsALabelWithNoLeaders(t *testing.T) {
+	res, err := Parse([]string{wrappedLabel}, wrappedLabelMap(),
+		Options{Book: "test", Chapters: []string{"II"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) > 0 {
+		t.Fatalf("problems: %v", res.Problems)
+	}
+	c, ok := res.Get("II")
+	if !ok {
+		t.Fatal("no chapter II")
+	}
+	var s *corpus.Section
+	for i := range c.Sections {
+		if c.Sections[i].Number == 2 {
+			s = &c.Sections[i]
+		}
+	}
+	if s == nil {
+		t.Fatal("no § 2")
+	}
+	if len(s.Subsections) != 4 {
+		t.Fatalf("§ 2 has %d no., want 4", len(s.Subsections))
+	}
+	last := s.Subsections[3]
+	if last.Number != 4 || last.Page != 79 {
+		t.Errorf("no. 4 = no. %d printed %d, want no. 4 printed 79", last.Number, last.Page)
+	}
+	if !strings.HasPrefix(last.Title, "L'homomorphisme") || strings.Contains(last.Title, "II.79") {
+		t.Errorf("title = %q, want the wrapped title with the label off it", last.Title)
+	}
+}
