@@ -77,7 +77,8 @@ about a fifth of the words.
   -hosts LIST    comma separated route names
   -routes PATH   route file
   -dry           print the first question and stop, without asking anything
-  -stale         list what needs translating and why, and ask nothing
+  -stale         list what needs translating, how many chunks of it are still
+                 to ask for and why, fewest chunks first, and ask nothing
   -check-glossary  hold the translations already on disk to the glossary, term
                  by term, and ask nothing
   -all           with -check-glossary, every term and not only the missed ones
@@ -262,7 +263,7 @@ func runTranslate(args []string) error {
 		return err
 	}
 	if *stale {
-		return reportStale(jobs, skipped, *lang)
+		return reportStale(root, *lang, promptHash, jobs, skipped, *redoSmall)
 	}
 	if len(jobs) == 0 {
 		fmt.Printf("translate: nothing to do, %d files are already translated and current\n", skipped)
@@ -422,9 +423,32 @@ func checkGlossaryOnDisk(root, lang, book, chapter, file string, all bool) error
 	return nil
 }
 
-func reportStale(jobs []job, skipped int, lang string) error {
+// reportStale lists the files a run would ask about, fewest chunks outstanding
+// first, with the count of chunks it would have to ask for beside each one.
+//
+// The order is the point. A run writes a file only when every chunk of it is in
+// hand, and the chunks an earlier pass answered are kept, so the work left on a
+// file is the chunks still outstanding and not the size of the file. Those two
+// come apart badly. Measured on the Vietnamese sections as this was written, a
+// hundred and two files had a chunk outstanding, and of those seventeen were one
+// chunk from done, including two files of three hundred chunks each. A list
+// ordered by file size put both of them past the eightieth line, behind eighty
+// files needing forty chunks apiece, on lanes turning about one chunk an hour.
+// They would not have been reached this month.
+//
+// Ordered this way the same lanes write seventeen files first and then go on to
+// the rest, which is the same total work in an order that produces finished
+// files rather than nearly finished ones.
+func reportStale(root, lang, promptHash string, jobs []job, skipped int, redoSmall bool) error {
+	left := make(map[string]int, len(jobs))
 	for _, j := range jobs {
-		fmt.Printf("%-64s %s\n", j.source, j.why)
+		left[j.source] = chunksOutstanding(root, lang, promptHash, j, redoSmall)
+	}
+	sort.SliceStable(jobs, func(a, b int) bool {
+		return left[jobs[a].source] < left[jobs[b].source]
+	})
+	for _, j := range jobs {
+		fmt.Printf("%-64s %4d of %-4d %s\n", j.source, left[j.source], len(j.chunks), j.why)
 	}
 	fmt.Printf("translate: %d files need %s, %d are current\n", len(jobs), lang, skipped)
 	return nil

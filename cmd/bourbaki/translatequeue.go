@@ -216,6 +216,27 @@ func chunkOf(j job, item queue.Job) (int, translate.Chunk, bool) {
 	return 0, translate.Chunk{}, false
 }
 
+// chunksOutstanding is how many chunks of one file a run would still have to ask
+// for, which is the file's chunks less the ones with an answer already in hand.
+//
+// It asks the same question plan asks and asks it the same way, through
+// readAccepted and the audit, so the count here is the count a run would meet.
+// What it does not do is touch the queue: plan supersedes ids and resets jobs as
+// it goes, which is right when a run is about to start and wrong when the only
+// thing being done is counting. So this reads the archive and nothing else, and
+// a chunk that is leased or dead counts as outstanding, which is what it is.
+func chunksOutstanding(root, lang, promptHash string, j job, redoSmall bool) int {
+	left := 0
+	for _, c := range j.chunks {
+		a, ok := readAccepted(root, lang, j.source, c.Index, chunkInput(c.Body, j.terms), promptHash)
+		if ok && !(redoSmall && quality.SmallModel(a.Model)) && len(translate.Audit(lang, c.Body, a.Text)) == 0 {
+			continue
+		}
+		left++
+	}
+	return left
+}
+
 // plan decides, for every chunk of one section, whether the answer is in hand,
 // whether the chunk goes on the queue, and whether it is out of attempts.
 //
