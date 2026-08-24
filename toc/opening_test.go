@@ -438,6 +438,71 @@ func TestANumberedHeadingWithNoLevelIsPutBack(t *testing.T) {
 	}
 }
 
+func TestAStarredNoKeepsItsStar(t *testing.T) {
+	// Page 222 of Espaces vectoriels topologiques I a V. The star opens a
+	// passage the reader may leave until later, the page image shows it set in
+	// the same bold as the number, and the English printing of the same no. is
+	// already in the corpus at level as "### \*4.".
+	body := []string{"*4. Cas des espaces de fonctions continues bornées"}
+	_, _, head, ok := NumberOpening(body, 4, "Cas des espaces de fonctions continues bornées")
+	if !ok {
+		t.Fatal("the contents opens no. 4 on this page under this title")
+	}
+	if want := `### \*4. Cas des espaces de fonctions continues bornées`; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestAStarTheReadingAlreadyEscapedIsNotEscapedTwice(t *testing.T) {
+	body := []string{`\*5. Enveloppe convexe d’un ensemble faiblement compact`}
+	_, _, head, ok := NumberOpening(body, 5, "Enveloppe convexe d’un ensemble faiblement compact")
+	if !ok {
+		t.Fatal("the contents opens no. 5 on this page under this title")
+	}
+	if want := `### \*5. Enveloppe convexe d’un ensemble faiblement compact`; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestBoldIsStillReadAsBoldAndNotAsAStar(t *testing.T) {
+	// The two openings are told apart by how many asterisks there are, so the
+	// line that stopped being matched when the star was allowed would be this
+	// one. Page 103 of Topology I to IV.
+	_, _, head, ok := NumberOpening([]string{"**10. PROPER MAPPINGS**"}, 10, "Proper mappings")
+	if !ok {
+		t.Fatal("the contents opens no. 10 on this page under this title")
+	}
+	if want := "### 10. PROPER MAPPINGS"; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestANoWhoseContentsLeftItsFormulaeUnmarkedIsFound(t *testing.T) {
+	// Page III.16 of Espaces vectoriels topologiques I a V, which is pdf page
+	// 151. The page marks its formulae and the contents of the same volume
+	// writes them as bare letters, and on top of that the press is a letter
+	// apart from itself, "Relations" on the page against "Relation" in the
+	// contents. Both readings are faithful and both page images say so.
+	body := []string{`3. Relations entre $ \mathcal{L}(E ; F) $ et $ \mathcal{L}(\hat{E} ; F) $`}
+	_, _, head, ok := NumberOpening(body, 3, "Relation entre L (E ; F) et L (Ê ; F)")
+	if !ok {
+		t.Fatal("the contents opens no. 3 on this page under this title")
+	}
+	if want := `### 3. Relations entre $ \mathcal{L}(E ; F) $ et $ \mathcal{L}(\hat{E} ; F) $`; head != want {
+		t.Errorf("got %q, want %q", head, want)
+	}
+}
+
+func TestTwoTitlesThatShareOnlyTheirFormulaeAreNotOneTitle(t *testing.T) {
+	// The letters inside the formulae are read now, so a pair that agrees on
+	// nothing else must still be refused. Both of these are titles this corpus
+	// gives a no. of Espaces vectoriels topologiques.
+	body := []string{`3. Parties équicontinues de $ \mathcal{L}(E ; F) $`}
+	if _, _, _, ok := NumberOpening(body, 3, "Le complété d’un espace localement convexe"); ok {
+		t.Fatal("two unlike titles were taken for one")
+	}
+}
+
 func TestASectionIsNotReadAsOneOfItsOwnNo(t *testing.T) {
 	// Page 10 of Algebra IV to VII prints the sign over the § and over
 	// nothing else, so a line that carries one is not a no.
