@@ -162,7 +162,30 @@ func plainLine(s string) bool {
 // shape matched anyway: the closing pair was taken off the end and the opening
 // one stayed on the front of the title, and the heading that went back carried
 // one half of a pair of asterisks. Both are stripped now.
-var lostSection = regexp.MustCompile(`^(\*\*)?(§ *)?([0-9A-Za-z]{1,4})\. +(?:\*\*)?(.+?)(\*\*)?$`)
+//
+// The single asterisk in front is not bold and is not stripped. It is the star
+// Bourbaki opens a passage with that the reader may leave until later, it is
+// printed on the paper, and it belongs to the no. rather than to the title.
+// Page 222 of Espaces vectoriels topologiques I a V sets "*4. Cas des espaces de
+// fonctions continues bornees" and its page image shows the star in the same
+// bold as the number. The corpus already writes six of these at level, page 218
+// of the English printing of that volume among them, and writes them "### \*4."
+// with the star escaped so that Markdown does not read it as the start of an
+// emphasis. See star for what goes back.
+var lostSection = regexp.MustCompile(`^(?:(\*\*)|(\\?\*))?(§ *)?([0-9A-Za-z]{1,4})\. +(?:\*\*)?(.+?)(\*\*)?$`)
+
+// star is what goes in front of the number of a heading the printing starred,
+// given what the page had in front of it.
+//
+// The star goes back escaped whether or not the page escaped it, for the same
+// reason the section sign goes back spaced: the assembler reads one shape, which
+// is the shape the corpus already holds. See assemble.subsecRE.
+func star(had string) string {
+	if had == "" {
+		return ""
+	}
+	return `\*`
+}
 
 // sectionSign is what goes in front of the number of a § heading, given what the
 // page had in front of it.
@@ -267,18 +290,18 @@ func opening(body []string, number int, title, level string, sign, loose bool) (
 			continue
 		}
 		m := lostSection.FindStringSubmatch(line)
-		if m == nil || !sectionNumber(m[3], number) {
+		if m == nil || !sectionNumber(m[4], number) {
 			continue
 		}
-		if m[2] != "" && !sign {
+		if m[3] != "" && !sign {
 			continue
 		}
-		run := []string{m[4]}
+		run := []string{m[5]}
 		for j := i; ; j++ {
 			joined := strings.Join(run, " ")
 			if s := titleScore(title, joined); s > best {
 				best, from, to = s, i, j
-				head = level + sectionSign(m[2]) + strconv.Itoa(number) + ". " + joined
+				head = level + star(m[2]) + sectionSign(m[3]) + strconv.Itoa(number) + ". " + joined
 			}
 			if j+1 >= len(body) || strings.TrimSpace(body[j+1]) == "" || !plainLine(body[j+1]) {
 				break
@@ -377,10 +400,33 @@ func titleScore(want, got string) float64 {
 	if len(wp) >= titleEnough && strings.HasPrefix(g, wp) {
 		return titleClose
 	}
-	if len(w) < titleEnough || len(g) < titleEnough {
-		return 0
+	// How alike the two are, read twice. Once with the formulae taken out, which
+	// is the reading the tests above are built on, and once with the letters
+	// inside the formulae left standing.
+	//
+	// The second reading is there for the pair where only one side marked its
+	// formulae up at all. mathless takes a formula out of the side that marked
+	// it and leaves the other side's letters where they are, so the two come out
+	// unlike each other over a difference that is no part of either title. Page
+	// III.16 of Espaces vectoriels topologiques I a V heads no. 3 "Relations
+	// entre $ \mathcal{L}(E ; F) $ et $ \mathcal{L}(\hat{E} ; F) $" and the
+	// contents of that same volume lists it "Relation entre L (E ; F) et
+	// L (Ê ; F)", so the press is a letter apart from itself and everything else
+	// the title says is in the formulae. Read as letters the two are two edits
+	// apart. Read mathless they are six, and the six are the formulae the
+	// contents did not mark.
+	//
+	// The better of the two wins because each is blind to something the other
+	// sees, and the floor is what turns away the pairs that are neither.
+	s := 0.0
+	if len(w) >= titleEnough && len(g) >= titleEnough {
+		s = ratio(w, g)
 	}
-	return ratio(w, g)
+	wf, gf := flatten(clean(want)), flatten(clean(got))
+	if len(wf) >= titleEnough && len(gf) >= titleEnough {
+		s = max(s, ratio(wf, gf))
+	}
+	return s
 }
 
 // titleClose is what the two tests that are about part of a title score. It is
@@ -685,16 +731,16 @@ func roman(n int) string {
 // swallowed whole are all cases where the heading is not in the file at all.
 func RunningHeadOpening(runningHead string, number int, title string) (string, string, bool) {
 	m := lostSection.FindStringSubmatch(strings.TrimSpace(runningHead))
-	if m == nil || m[2] != "" || !sectionNumber(m[3], number) {
+	if m == nil || m[3] != "" || !sectionNumber(m[4], number) {
 		return "", "", false
 	}
 	// The same comparison the body gets, and for the same reason: two of the
 	// thirteen no. this repair was refusing had their heading in the running
 	// head all along, and were turned away over the wording. See titleScore.
-	if titleScore(title, m[4]) < titleFloor {
+	if titleScore(title, m[5]) < titleFloor {
 		return "", "", false
 	}
-	return "### " + strconv.Itoa(number) + ". " + m[4], m[4], true
+	return "### " + strconv.Itoa(number) + ". " + m[5], m[5], true
 }
 
 // numbered is a heading that opens on a number, with whatever the printing
@@ -737,8 +783,8 @@ func SectionTitle(body []string, number int) (string, bool) {
 		if !plainLine(line) {
 			continue
 		}
-		if m := lostSection.FindStringSubmatch(line); m != nil && sectionNumber(m[3], number) {
-			return m[4], true
+		if m := lostSection.FindStringSubmatch(line); m != nil && sectionNumber(m[4], number) {
+			return m[5], true
 		}
 	}
 	return "", false

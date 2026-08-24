@@ -305,7 +305,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 			// disagreeing with a contents entry that agreed already.
 			title = titleUnder(pages[page].Body, off)
 		}
-		if !sameTitle(title, s.Title) {
+		if !sameTitle(title, s.Title) && !slices.Contains(differs[pages[page].Meta.Book], page) {
 			return nil, nil, fmt.Errorf("chapter %s %s: pdf page %d titles it %q, the table of contents calls it %q",
 				ch.Numeral, name(s), page, title, s.Title)
 		}
@@ -722,6 +722,32 @@ var texWord = regexp.MustCompile(`\\[a-zA-Z]+`)
 // table of contents lists the same section as "The geometric representation of a
 // Coxeter group". Both are printed and neither is a misreading, so the article
 // is a matter of setting rather than of naming, the same way the capitals are.
+// differs are the openings a volume gives two titles, written as the volume and
+// the pdf page the heading is on.
+//
+// A heading that does not say what the contents says is normally a misreading of
+// one of the two and is meant to stop the volume, since the page and the entry
+// come off different pages of the same book and the reading of either can go
+// wrong. sameTitle above is the whole of what a printing is allowed to vary
+// without an entry here, and every line of it is a habit of the press rather
+// than a difference in the words.
+//
+// This is for the words. A printing that heads a section one way and lists it
+// another in its own table of contents is disagreeing with itself, no rule can
+// tell which of the two it meant, and the corpus keeps both: the page keeps its
+// own heading and the manifest keeps the contents entry. So the entry here is
+// only the page, and it is one somebody has looked at twice, once at the heading
+// and once at the contents line.
+//
+// lie-i-iii is the one entry so far. Page 337 of Lie Groups and Lie Algebras
+// chapters 1 to 3, which is pdf page 355, heads its eighth section "§ 8. LIE
+// GROUPS OVER R AND Q_p", and page xv of the same volume lists that section as
+// "§ 8. Lie groups over R or Q_p". Both page images are plain and both readings
+// are right.
+var differs = map[string][]int{
+	"lie-i-iii": {355},
+}
+
 // The footnote markers come off both sides before anything else. A printing
 // hangs one off the end of a heading where the § or the chapter has a note on
 // it, and the contents entry never carries it: page 69 of Groupes et algebres de

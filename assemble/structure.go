@@ -168,7 +168,7 @@ func (p Piece) Verify() error {
 // it hangs from, so the last numbered Definition, Proposition, Theorem, Lemma
 // or Scholium is carried along as the run goes.
 // repeats are the statements a printing numbered twice, each one written as the
-// label the two would share and the pdf page the later of them is printed on.
+// label the two would share and the pdf pages the later of them is printed on.
 //
 // Two statements at one label is normally a fault and is meant to fail loudly:
 // it caught the run of Remarques that Bourbaki restarts inside a no., and it
@@ -177,17 +177,43 @@ func (p Piece) Verify() error {
 // is, and a printing that really does repeat a number is written down here one
 // entry at a time rather than being let through by a rule.
 //
-// Each entry is a page somebody has looked at. The page is part of the key for
-// the same reason: a reader that misreads a number produces the same collision,
-// and pinning the exception to the page it was verified on means a re-reading
-// that moves the statement fails loudly again instead of inheriting the excuse.
+// Each page listed is a page somebody has looked at. The page is part of the
+// test for the same reason: a reader that misreads a number produces the same
+// collision, and pinning the exception to the page it was verified on means a
+// re-reading that moves the statement fails loudly again instead of inheriting
+// the excuse.
 //
-// lie-iii-s3-def-7 is the one entry so far. § 3 of chapter III of Groupes et
+// The pages come as a list because a label names the book and not the volume, so
+// the two printings of a book that this corpus holds in both languages arrive at
+// the same label on different pages. Nothing else is loosened by that: a page
+// still has to be one of the pages written down.
+//
+// lie-iii-s3-def-7 was the first entry. § 3 of chapter III of Groupes et
 // algebres de Lie prints Definition 7 at no. 7 and DEFINITION 7 again at no. 12,
 // and then Definition 8. See corpus.Ref.Repeated for the citations that settle
 // which of the two the volume means when it says def. 7.
-var repeats = map[string]int{
-	"lie-iii-s3-def-7": 151,
+//
+// evt-ii-s6-def-2 is the second. § 6 of chapter II of Espaces vectoriels
+// topologiques prints Definition 2 twice, once at no. 2 on the page the running
+// head calls TVS II.42, where it puts two vector spaces in duality by a bilinear
+// form, and again at no. 3 on TVS II.44, where it defines the polar of a set.
+// Both are on the paper in both printings, at pdf page 81 of the English and 82
+// of the French.
+//
+// lie-vi-s1-lem-3 is the third, and only the French printing has it. § 1 of
+// chapter VI of Groupes et algebres de Lie prints Lemme 3 at no. 7 and Lemme 3
+// again at no. 11, on pdf pages 159 and 168. The English translation of the same
+// § numbers the second of them Lemma 4, so the two printings disagree and the
+// French page image settles what the French volume says.
+// int-vi-s2-def-5 is the fourth and is the same shape as the third. § 2 of
+// chapter VI of Integration prints Definition 5 at no. 5 on pdf page 43 and
+// Definition 5 again at no. 8 on pdf page 50, both in the French, and the
+// English translation numbers the second of them Definition 6.
+var repeats = map[string][]int{
+	"lie-iii-s3-def-7": {151},
+	"evt-ii-s6-def-2":  {81, 82},
+	"lie-vi-s1-lem-3":  {168},
+	"int-vi-s2-def-5":  {50},
 }
 
 func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.Statement, error) {
@@ -204,7 +230,7 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 			return nil
 		}
 		label := r.Label()
-		if seen[label] && repeats[label] == b.page {
+		if seen[label] && slices.Contains(repeats[label], b.page) {
 			r.Repeated = true
 			label = r.Label()
 		}

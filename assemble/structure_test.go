@@ -1124,6 +1124,45 @@ func TestStatementsMarksANumberThePrintingGaveTwice(t *testing.T) {
 	}
 }
 
+// § 6 of chapter II of Espaces vectoriels topologiques numbers a Definition
+// twice and both printings of the volume do it, once at no. 2 under the weak
+// topologies and again at no. 3 under the polar sets. A label names the book and
+// not the volume, so the English and the French arrive at the same label on
+// different pages, 81 and 82, and the exception carries a page for each.
+func TestStatementsTakesARepeatFromEitherPrinting(t *testing.T) {
+	id := corpus.Ref{Book: "evt", Chapter: "II", Section: 6}
+	want := []string{"evt-ii-s6-def-2", "evt-ii-s6-def-2-bis"}
+
+	english := []block{
+		{text: "### 2. Weak topologies", page: 79, label: "TVS II.42"},
+		{text: "DEFINITION 2. — Let F and G be two vector spaces put in duality by the bilinear form B.", page: 79, label: "TVS II.42"},
+		{text: "### 3. Polar sets and orthogonal subspaces", page: 81, label: "TVS II.44"},
+		{text: "Definition 2. — Let F and G be two (real) vector spaces in duality.", page: 81, label: "TVS II.44"},
+	}
+	_, got, err := statements(english, id, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), want)
+
+	french := []block{
+		{text: "### 2. Topologies faibles", page: 80, label: "EVT II.42"},
+		{text: "DÉFINITION 2. — Soient F et G deux espaces vectoriels mis en dualité par la forme bilinéaire B.", page: 80, label: "EVT II.42"},
+		{text: "### 3. Ensembles polaires et sous-espaces orthogonaux", page: 82, label: "EVT II.44"},
+		{text: "Définition 2. — Soient F et G deux espaces vectoriels en dualité.", page: 82, label: "EVT II.44"},
+	}
+	_, got, err = statements(french, id, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), want)
+
+	english[3].page, english[3].label = 83, "TVS II.46"
+	if _, _, err := statements(english, id, printings["en"]); err == nil {
+		t.Error("a collision on a page nobody verified was let through")
+	}
+}
+
 // The same head again with the small capitals read as capitals rather than as
 // bold, which is what 2033 heads across the French volumes came back as. Read as
 // prose they take the whole chapter down with them and not only themselves: this
