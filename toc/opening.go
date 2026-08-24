@@ -2,6 +2,7 @@ package toc
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -64,27 +65,57 @@ func ChapterWord(lang string) string {
 // calls that chapter "Topological Groups", so the subtitle stays a line of the
 // page rather than being taken into a heading the book does not give.
 func ChapterOpening(body []string, lang, numeral, title string) ([]string, bool) {
-	want := flatten(title)
-	if want == "" || numeral == "" {
+	if numeral == "" {
 		return body, false
 	}
-	i := 0
+	i := blank(body, 0)
+	j, head, ok := titleRun(body, i, title)
+	if !ok {
+		return body, false
+	}
+	out := make([]string, 0, len(body)+2)
+	out = append(out, body[:i]...)
+	out = append(out, "## "+ChapterWord(lang)+" "+numeral, "", "# "+head)
+	out = append(out, body[j+1:]...)
+	return out, true
+}
+
+// blank is the first line at or after i that has anything on it, or the end of
+// the body where nothing does.
+func blank(body []string, i int) int {
 	for i < len(body) && strings.TrimSpace(body[i]) == "" {
 		i++
+	}
+	return i
+}
+
+// titleRun is the run of plain lines starting at i that together say what the
+// contents says the title is. It gives the line the run ends on and the title
+// as one line.
+//
+// The lines are joined with a space. A press breaks a title at the measure and
+// the reading keeps the break, so the title of a chapter is often two lines and
+// neither of them says what the contents says while the two together do. The
+// comparison is flattened on both sides, which is what lets a page that sets
+// the title in capitals agree with a contents that sets it in mixed case.
+//
+// A line the join does not need is left where it stands. Page 225 of Topology I
+// to IV sets a subtitle under the chapter title and the contents does not have
+// it, so the run stops at the title and the subtitle stays a line of the page
+// rather than being taken into a heading the book does not give.
+func titleRun(body []string, i int, title string) (int, string, bool) {
+	want := flatten(title)
+	if want == "" {
+		return 0, "", false
 	}
 	var run []string
 	for j := i; j < len(body) && strings.TrimSpace(body[j]) != "" && plainLine(body[j]); j++ {
 		run = append(run, strings.TrimSpace(body[j]))
-		if flatten(strings.Join(run, " ")) != want {
-			continue
+		if flatten(strings.Join(run, " ")) == want {
+			return j, strings.Join(run, " "), true
 		}
-		out := make([]string, 0, len(body)+2)
-		out = append(out, body[:i]...)
-		out = append(out, "## "+ChapterWord(lang)+" "+numeral, "", "# "+strings.Join(run, " "))
-		out = append(out, body[j+1:]...)
-		return out, true
 	}
-	return body, false
+	return 0, "", false
 }
 
 // plainLine is a line with no markup at the front of it, which is what a
@@ -215,6 +246,192 @@ func opening(body []string, number int, title, level string, sign bool) (int, in
 		}
 	}
 	return 0, 0, "", false
+}
+
+// appendixLine is the word a volume heads an appendix with, standing alone on a
+// line, with the number after it where a chapter has more than one appendix and
+// numbers them.
+//
+// The words are the four assemble reads, since the volume chooses. Integration
+// VII to IX calls its appendix an ANNEX throughout and the French volumes set
+// ANNEXE beside APPENDICE, and a repair that insisted on one word would leave
+// the other five volumes unassembled.
+//
+// The bold is allowed because the reading puts it there, and the full stop
+// because some printings set one. Nothing else is allowed on the line: the word
+// alone is the whole of what a page prints over an appendix, and requiring that
+// is what keeps this off the sentence in a preface that happens to mention one.
+var appendixLine = regexp.MustCompile(`(?i)^ *(?:\*\*)? *(appendi[xc]e?|annexe?)\.? *(\d+|[ivxIVX]+)? *\.? *(?:\*\*)? *$`)
+
+// AppendixOpening puts back the heading over an appendix whose page kept the
+// word but lost the level, or whose reading filed the word as the running head.
+// It gives the body with the heading in it and whether the running head is now
+// spent and should be dropped.
+//
+// Thirty nine appendices are in the contents of this corpus and twenty four of
+// them are marked. The other fifteen fail in two ways and this repairs both.
+// Seven have the word standing as a plain line in the body, which is the same
+// fault SectionOpening repairs one shape up: the reading kept the words and
+// dropped the hashes, so the words are still there to agree with. Seven more
+// have it only in the running head, which happens because the word is the whole
+// of what the page prints over an appendix and a reading that files the top
+// line of a page as its running head takes the heading with it. Page 402 of
+// Algebra I to III is one: the front matter has APPENDIX and the body opens on
+// the title of the appendix with nothing above it.
+//
+// The running head goes when it is used, and that is the part worth arguing
+// for. A running head is what a page prints at the top of every page of a run,
+// and a word printed once over the opening of an appendix is not that. Leaving
+// it in both places would put the word on the page twice, once as the heading
+// the assembler reads and once as a running head no other page of the appendix
+// carries.
+//
+// The number has to agree with the contents where the contents gives one. Nine
+// of the fifteen are the only appendix of their chapter and are unnumbered, and
+// the assembler reads an unnumbered appendix by the word alone, so a number on
+// the page where the contents gives none is a line this does not touch. Where
+// there is a number the page may set it as a digit or as a roman numeral and
+// both are read, since Topology V to X numbers its two appendices in one
+// printing and Lie IX in another.
+//
+// An appendix whose word is nowhere on the page and nowhere in the front matter
+// is not put back, for the reason the head of this file gives: there would be
+// nothing for the contents to agree with, and writing the word in would mean
+// putting a line on a page that no reading of it ever produced.
+func AppendixOpening(body []string, running, title string, number int) ([]string, bool, bool) {
+	for i, line := range body {
+		if !plainLine(line) {
+			continue
+		}
+		m := appendixLine.FindStringSubmatch(line)
+		if m == nil || !appendixNumber(m[2], number) {
+			continue
+		}
+		out := slices.Clone(body)
+		out[i] = "## " + appendixHead(m[1], number)
+		return under(out, i+1, title), false, true
+	}
+	m := appendixLine.FindStringSubmatch(strings.TrimSpace(running))
+	if m == nil || !appendixNumber(m[2], number) {
+		return body, false, false
+	}
+	i := blank(body, 0)
+	out := make([]string, 0, len(body)+2)
+	out = append(out, body[:i]...)
+	out = append(out, "## "+appendixHead(m[1], number), "")
+	out = append(out, body[i:]...)
+	return under(out, i+2, title), true, true
+}
+
+// under puts the title of an appendix under the heading that was just written
+// over it, where the page carries the title as a plain line and the contents
+// agrees with it.
+//
+// An appendix is headed by its word alone and the title is set under the word
+// in its own type, so the reading loses the level on two lines rather than one.
+// The assembler reads the title from under the word and wants a heading there:
+// page 402 of Algebra I to III has the word in the running head and
+// PSEUDOMODULES as the first plain line of the body, and marking the word alone
+// gets as far as the assembler saying the page titles the appendix nothing
+// while the contents calls it Pseudomodules.
+//
+// Where there is no title to find the body comes back as it was, which is the
+// case that has to keep working. Chapter IX of Algebre commutative chapitres 8
+// et 9 closes on an appendix the contents gives no title at all: the page
+// prints the word centred and alone and the next thing on it is the heading of
+// its first no. Reading a title there would take that heading.
+func under(body []string, i int, title string) []string {
+	i = blank(body, i)
+	j, head, ok := titleRun(body, i, title)
+	if !ok {
+		return body
+	}
+	out := make([]string, 0, len(body))
+	out = append(out, body[:i]...)
+	out = append(out, "# "+head)
+	out = append(out, body[j+1:]...)
+	return out
+}
+
+// appendixMark is the heading the assembler reads over an appendix, and it is
+// laxer than appendixLine on purpose. The repair asks for the word standing
+// alone because that is what an unmarked page prints and anything else on the
+// line means the line is something other than a heading. This asks whether the
+// page is already marked, and a page that is already marked has whatever the
+// volume's own hand put there: Algebra VIII sets the word, the number and the
+// title of the appendix all on one line, and four of its appendices came back
+// as unmarked when this was written the strict way.
+//
+// The number is not checked here for the same reason the assembler does not
+// check it: a chapter with one appendix has one heading over it and a heading
+// with the word in it is that heading whatever follows the word.
+var appendixMark = regexp.MustCompile(`(?i)^#{1,4} +(?:\*\*)? *` + appendixWord + `\b`)
+
+// appendixWord is the four words a volume of this corpus heads an appendix
+// with. It is the same list the assembler reads, since a repair that put back a
+// word the assembler does not read would leave the volume unassembled.
+const appendixWord = `(?:appendi[xc]e?|annexe?)`
+
+// Appendix is whether the body already opens an appendix, which is the test
+// that keeps the repair from writing a second heading onto a page that has one.
+// Twenty four of the thirty nine appendices in this corpus are already marked
+// and every one of them has to come through untouched.
+func Appendix(body []string) bool {
+	return slices.ContainsFunc(body, appendixMark.MatchString)
+}
+
+// appendixHead is the heading that goes back, which is the word the page prints
+// and the number the contents gives.
+//
+// The word is upper cased because that is how the corpus sets the twenty four
+// appendices that are already marked, and because the page prints it that way
+// in every one of the fifteen this repairs. The number is the contents' own,
+// written as a digit, since assemble reads either and one of the two has to be
+// chosen for the corpus to be consistent with itself.
+func appendixHead(word string, number int) string {
+	head := strings.ToUpper(word)
+	if number > 0 {
+		head += " " + strconv.Itoa(number)
+	}
+	return head
+}
+
+// appendixNumber is whether what the page sets after the word is the number the
+// contents gives the appendix.
+//
+// The empty case is the common one and it has to be exact in both directions. A
+// chapter with one appendix does not number it and the contents gives it no
+// number either, so nothing after the word is right and a number after it is a
+// line that belongs to something else. A chapter with two numbers both and the
+// page may set the number as a digit or as a roman numeral.
+func appendixNumber(had string, number int) bool {
+	if had == "" {
+		return number == 0
+	}
+	if number == 0 {
+		return false
+	}
+	if n, err := strconv.Atoi(had); err == nil {
+		return n == number
+	}
+	return strings.EqualFold(had, roman(number))
+}
+
+// roman is a number written the way a printing sets the number of an appendix.
+// Nothing in this corpus numbers more than two, so the table stops where the
+// evidence does rather than where a general algorithm would.
+func roman(n int) string {
+	switch n {
+	case 1:
+		return "I"
+	case 2:
+		return "II"
+	case 3:
+		return "III"
+	case 4:
+		return "IV"
+	}
+	return ""
 }
 
 // RunningHeadOpening is the heading a reading filed as the running head of the
