@@ -70,7 +70,7 @@ func sharePromote(args []string) error {
 	bt, ok := man.Get(*book)
 	if !ok {
 		return fmt.Errorf("%s has no contents in %s, so an import of it cannot be placed (run bourbaki toc build first)",
-			*book, corpus.TOCPath(root))
+			*book, corpus.TOCPath(root, *book))
 	}
 	books, err := corpus.LoadBooks(root)
 	if err != nil {

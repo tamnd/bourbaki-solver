@@ -13,7 +13,7 @@ import (
 
 // A corpus of one volume, one chapter, one §, three pages. It is the smallest
 // thing the stage can be run against end to end, and it is run against the same
-// three files a real run is: manifests/books.yaml, manifests/toc.yaml and
+// three files a real run is: manifests/books.yaml, manifests/toc/ and
 // pages/.
 func smallCorpus(t *testing.T) string {
 	t.Helper()

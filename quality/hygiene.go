@@ -101,6 +101,13 @@ func h02(c *Corpus) ([]Finding, error) {
 // to a §, whose size does not grow with the corpus: the largest of the
 // twenty-six is 42 KB. The limit is left where spec 08 put it, and it holds a
 // generated manifest to the same size as anything else, which is the point.
+//
+// The table of contents went the same way and for the same reason, at 587 KB
+// with twenty-eight of the forty volumes read. It is now one file to a volume
+// under manifests/toc/, and the largest of those is under 60 KB. Two generated
+// manifests have now hit this rule and both were answered by splitting the file
+// along the grain of what generates it, which is the shape to reach for when a
+// third one does.
 const trackedMax = 512 << 10
 
 // H03. No tracked file over 512 KB.

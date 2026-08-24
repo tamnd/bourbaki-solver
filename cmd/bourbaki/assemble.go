@@ -16,7 +16,7 @@ import (
 )
 
 // assemble is the stage that turns five hundred page files into twenty-six
-// chapter files. It reads pages/ and manifests/toc.yaml and nothing else, so it
+// chapter files. It reads pages/ and manifests/toc/ and nothing else, so it
 // runs anywhere the repository is checked out, PDFs or no PDFs, and it writes
 // content/, manifests/sections.yaml, and a line per section to the terminal.
 //
@@ -164,7 +164,7 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	bt, ok := toc.Get(book)
 	if !ok || len(bt.Chapters) == 0 {
 		return nil, nil, sum, fmt.Errorf("no table of contents for %q in %s: run bourbaki toc build first",
-			book, corpus.TOCPath(root))
+			book, corpus.TOCPath(root, book))
 	}
 	pages, err := readPages(root, book)
 	if err != nil {
