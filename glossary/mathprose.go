@@ -38,9 +38,9 @@ import (
 //
 // It answers yes to a span whose words were translated and no to a span where
 // anything else moved, including a word that was never prose. Which is which is
-// decided by the English side: a run holding an English word is prose and may
-// be rewritten, and a run holding none is a name the printing sets upright,
-// Card or resp. or a quotation mark, and has to come back as it went.
+// decided by the English side, by IsMathName: a run of names is a name the
+// printing sets upright, Card or resp. or tr. deg or a quotation mark, and has
+// to come back as it went, and every other run is prose and may be rewritten.
 //
 // Byte for byte means byte for byte, and a formula that was only re-spaced is
 // refused here like any other. That is not because the spacing matters to what
@@ -57,7 +57,7 @@ func SameMath(en, tr string) bool {
 	// as many of one as of the other.
 	e, t := mathtex.TextRuns(en), mathtex.TextRuns(tr)
 	for i := range e {
-		if EnglishWords(e[i].Text) == 0 && t[i].Text != e[i].Text {
+		if IsMathName(e[i].Text) && t[i].Text != e[i].Text {
 			return false
 		}
 	}
