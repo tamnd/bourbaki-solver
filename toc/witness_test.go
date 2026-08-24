@@ -167,6 +167,50 @@ func TestHistoricalNoteReadsItThroughBold(t *testing.T) {
 	}
 }
 
+// The mark that opens a § inside a block of gathered exercises is the sign and
+// the number alone. Page 671 of Algebra I to III is the one page in this corpus
+// whose text layer still has a mark the reading dropped, and it gives "§II",
+// with no space and both 1s read as capital I.
+func TestWitnessMarkReadsTheSignAndTheNumberAlone(t *testing.T) {
+	for _, c := range []struct {
+		page   string
+		number int
+	}{
+		{"                                     §II\n", 11},
+		{"EXERCISES\n\n§ 8\n\n1) Soit G = SU(2, C).\n", 8},
+		{"$ 3.\n", 3},
+		{"**§ 2**\n", 2},
+		{"S 10\n", 10},
+	} {
+		if !WitnessMark(c.page, c.number) {
+			t.Errorf("WitnessMark(%q, %d) = false, want the mark found", c.page, c.number)
+		}
+	}
+}
+
+// A block of exercises is full of short lines that are a number and nothing
+// else, and none of them is a mark. The sign is what tells them apart, so a line
+// with no sign on it is refused however well the number matches, and a five or a
+// nine standing alone is a number and not a sign the scan misread.
+func TestWitnessMarkRefusesALineWithNoSign(t *testing.T) {
+	for _, c := range []struct {
+		page   string
+		number int
+	}{
+		{"11\n", 11},
+		{"(3)\n", 3},
+		{"5 2\n", 2},
+		{"9 4\n", 4},
+		{"§ 7\n", 8},
+		{"§ 6. ESPACES POLONAIS\n", 6},
+		{"see § 4 below\n", 4},
+	} {
+		if WitnessMark(c.page, c.number) {
+			t.Errorf("WitnessMark(%q, %d) = true, want refused", c.page, c.number)
+		}
+	}
+}
+
 // A title the page does not carry is not witnessed by a number on its own.
 func TestWitnessSectionRefusesAnotherTitle(t *testing.T) {
 	if got, ok := WitnessSection("§ 7. TENSOR ALGEBRAS\n", 7, "Exterior algebras"); ok {
