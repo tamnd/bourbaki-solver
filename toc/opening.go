@@ -197,7 +197,7 @@ func sectionSign(had string) string {
 // Algebra IV to VII print it, Theory of Sets and Topology I to IV set the
 // number alone, and the assembler reads either.
 func SectionOpening(body []string, number int, title string) (int, int, string, bool) {
-	return opening(body, number, title, "## ", true)
+	return opening(body, number, title, "## ", true, false)
 }
 
 // NumberOpening puts back the heading over a no. whose page kept the title and
@@ -211,18 +211,44 @@ func SectionOpening(body []string, number int, title string) (int, int, string, 
 // the title to do the telling, which is what they do everywhere else in this
 // file. Where the § has already been put back it is a heading by then and no
 // heading is looked at twice.
+//
+// The comparison against the contents is the loose one and the § above it keeps
+// the exact one. That is not an inconsistency, it is where the person is. A § a
+// page and the contents spell differently is reported by name, both spellings
+// given, and somebody settles it: see the differ count in fix.go. A no. has no
+// such branch. It is reported as having no line the contents can read as its
+// heading, which on all thirteen no. of Algebra I to III that it refused was not
+// true, since every one of those headings was on its page and was turned away
+// over a plural, a dropped article, a misread letter or a formula set two ways.
+// A refusal that is a dead end has to be right about more than a refusal that is
+// a question, and this one was not.
+//
+// Nothing is written that the page did not print either way. The heading goes
+// back in the page's own words and the contents only settles the number and the
+// level, which is the rule this whole file works by.
 func NumberOpening(body []string, number int, title string) (int, int, string, bool) {
-	return opening(body, number, title, "### ", false)
+	return opening(body, number, title, "### ", false, true)
 }
 
 // opening is the run of lines a heading was set on and the heading that goes
 // back over them. level is the hashes the assembler reads it at, and sign is
 // whether the printing is allowed to set § in front of the number.
-func opening(body []string, number int, title, level string, sign bool) (int, int, string, bool) {
-	want := flatten(title)
-	if want == "" {
+//
+// The run that scores best wins rather than the first run that agrees. An exact
+// agreement scores 1 and nothing beats it, so a page that used to match still
+// matches on the same line as before, and the search only carries on past a run
+// that is merely close. Taking the first close run instead would let a one line
+// run at 0.86 beat the two line run at 0.99 that is the actual heading, since
+// the press broke long titles at the measure and the reading kept them broken.
+func opening(body []string, number int, title, level string, sign, loose bool) (int, int, string, bool) {
+	if flatten(title) == "" {
 		return 0, 0, "", false
 	}
+	floor := 1.0
+	if loose {
+		floor = titleFloor
+	}
+	best, from, to, head := 0.0, 0, 0, ""
 	for i, line := range body {
 		if !plainLine(line) {
 			continue
@@ -236,8 +262,10 @@ func opening(body []string, number int, title, level string, sign bool) (int, in
 		}
 		run := []string{m[4]}
 		for j := i; ; j++ {
-			if flatten(strings.Join(run, " ")) == want {
-				return i, j, level + sectionSign(m[2]) + strconv.Itoa(number) + ". " + strings.Join(run, " "), true
+			joined := strings.Join(run, " ")
+			if s := titleScore(title, joined); s > best {
+				best, from, to = s, i, j
+				head = level + sectionSign(m[2]) + strconv.Itoa(number) + ". " + joined
 			}
 			if j+1 >= len(body) || strings.TrimSpace(body[j+1]) == "" || !plainLine(body[j+1]) {
 				break
@@ -245,7 +273,165 @@ func opening(body []string, number int, title, level string, sign bool) (int, in
 			run = append(run, strings.TrimSpace(body[j+1]))
 		}
 	}
-	return 0, 0, "", false
+	if best < floor {
+		return 0, 0, "", false
+	}
+	return from, to, head, true
+}
+
+// titleFloor is how close a title on a page has to be to the title in the
+// contents before the two are taken for the same title.
+//
+// 0.85 is measured rather than chosen. The thirteen no. of Algebra I to III
+// that fix opening refused are all of them headings that are on their pages and
+// were refused for the wording, and under the rules below they score 0.88, 0.89,
+// 0.96, 0.97, 0.97, 0.97 and 1.00 six times. The floor sits under the lowest of
+// those with room to spare and well above what an unrelated title scores.
+//
+// What makes a low floor safe here is that it is not the only test. The line has
+// already had to carry the number the contents gives, on a page the contents
+// opens that no. on, and a § sign disqualifies a no. outright. A wrong match
+// needs a differently titled line numbered the same on the one page the contents
+// points at, and that is a page with two headings on it, not a near miss.
+const titleFloor = 0.85
+
+// titleScore is how far a title a page prints agrees with the title the contents
+// gives, from 0 to 1. Anything the old exact rule accepted scores 1.
+//
+// The old rule was flatten equality both ways, and every one of the thirteen
+// refusals in Algebra I to III fails it for a reason that has nothing to do with
+// the page being wrong. They fall in three groups.
+//
+// The page prints different words for the same thing. The contents has "Change
+// of the ring of scalars" and page 245 prints CHANGE OF RING OF SCALARS; the
+// contents has "Tensor product of vector spaces" and page 330 prints TENSOR
+// PRODUCTS, plural. Neither is a defect anybody should fix, because a contents
+// and a page really do word a title differently, and the reading of one of them
+// is not more right than the reading of the other.
+//
+// One of the two readings has a typo in it. Page 594 prints FUNCTIORIAL for
+// functorial, and the contents entry for page 453 reads Subaigebras, which is
+// SUBALGEBRAS with the l read as an i. A single letter should not cost a
+// heading.
+//
+// The title is mostly mathematics and the two sides set the mathematics
+// differently. The contents entry for page 291 came off the contents pages as
+// "HomB(E 0A F, G)-+ HomA(F, HomB(E, G))" and the page sets the same thing as
+// LaTeX. Flattening cannot bring those together and no threshold on the whole
+// string will either, which is what the prose test below is for: both sides say
+// "The isomorphisms" before the mathematics starts, and that is the part either
+// reading can be trusted on.
+func titleScore(want, got string) float64 {
+	if flatten(want) == flatten(got) {
+		return 1
+	}
+	w, g := mathless(want), mathless(got)
+	// Everything below scores under 1 and never at it, so that an exact
+	// agreement further down the page always wins. The press broke long titles
+	// at the measure and the reading kept them broken, so the first line of a
+	// two line heading is a strict prefix of the whole, and a rule that scored
+	// it 1 would stop the search on half a title. That is what
+	// "5. INFINITE SUMS" over "IN COMMUTATIVE GROUPS" is.
+	//
+	// A title that is a title plus a word or two. Page 521 prints DEFINITION OF
+	// THE SYMMETRIC ALGEBRA OF A MODULE over a no. the contents lists as
+	// "Symmetric algebra of a module", so one side contains the other whole.
+	if len(w) >= titleEnough && len(g) >= titleEnough && (strings.Contains(w, g) || strings.Contains(g, w)) {
+		return titleClose
+	}
+	// The prose in front of the mathematics, which is the part of a title full
+	// of formulae that both readings get right.
+	wp, gp := prose(want), prose(got)
+	if len(wp) >= titleEnough && wp == gp {
+		return titleClose
+	}
+	// The same test where only one side marks its mathematics up. The contents
+	// of Algebra I to III came off the contents pages with the formulae as run
+	// together letters and no dollars in them, so no. 1 of chapter II § 4 reads
+	// "The isomorphisms HomB(E 0A F, G)-+ ..." there and the page sets the same
+	// no. as THE ISOMORPHISMS and then LaTeX. Nothing above brings those
+	// together: the page's key loses everything between the dollars and the
+	// contents key keeps its own mangled version of it, so they share the prose
+	// and disagree on all the rest.
+	//
+	// The prose is still the whole of what both readings can be held to, and on
+	// the side that marks its mathematics it is a prefix of the title rather
+	// than the title. So the test is prefix rather than equality, one way round
+	// only, and against the other side's letters.
+	if len(gp) >= titleEnough && strings.HasPrefix(w, gp) {
+		return titleClose
+	}
+	if len(wp) >= titleEnough && strings.HasPrefix(g, wp) {
+		return titleClose
+	}
+	if len(w) < titleEnough || len(g) < titleEnough {
+		return 0
+	}
+	return ratio(w, g)
+}
+
+// titleClose is what the two tests that are about part of a title score. It is
+// under 1 so an exact agreement beats it and over the floor so it stands on its
+// own when there is no exact agreement to be had.
+const titleClose = 0.95
+
+// titleEnough is the shortest run of letters worth comparing loosely. Below it
+// a single letter is a large part of the string and the comparison says more
+// about the length than about the words, so those titles are held to the exact
+// rule they were always held to.
+const titleEnough = 8
+
+// dollars is a run of mathematics as the reading writes it.
+var dollars = regexp.MustCompile(`\$[^$]*\$`)
+
+// mathless is flatten with the mathematics taken out as well as the control
+// words, so that a title comparison is over the words of the title.
+func mathless(s string) string {
+	return flatten(dollars.ReplaceAllString(s, " "))
+}
+
+// mathStart is where the mathematics of a title begins.
+var mathStart = regexp.MustCompile(`\$|\\[a-zA-Z]`)
+
+// prose is the words a title sets before its first formula.
+func prose(s string) string {
+	if i := mathStart.FindStringIndex(s); i != nil {
+		s = s[:i[0]]
+	}
+	return normalize(s)
+}
+
+// ratio is how alike two strings are, 1 for the same and 0 for nothing in
+// common, taken as the edit distance against the longer of the two.
+func ratio(a, b string) float64 {
+	x, y := []rune(a), []rune(b)
+	n := max(len(x), len(y))
+	if n == 0 {
+		return 0
+	}
+	return 1 - float64(distance(x, y))/float64(n)
+}
+
+// distance is the Levenshtein distance, over two rows rather than the whole
+// table because the titles are short and only the last row is wanted.
+func distance(a, b []rune) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			sub := prev[j-1]
+			if a[i-1] != b[j-1] {
+				sub++
+			}
+			cur[j] = min(min(prev[j]+1, cur[j-1]+1), sub)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
 }
 
 // appendixLine is the word a volume heads an appendix with, standing alone on a
@@ -461,7 +647,10 @@ func RunningHeadOpening(runningHead string, number int, title string) (string, s
 	if m == nil || m[2] != "" || !sectionNumber(m[3], number) {
 		return "", "", false
 	}
-	if flatten(m[4]) != flatten(title) {
+	// The same comparison the body gets, and for the same reason: two of the
+	// thirteen no. this repair was refusing had their heading in the running
+	// head all along, and were turned away over the wording. See titleScore.
+	if titleScore(title, m[4]) < titleFloor {
 		return "", "", false
 	}
 	return "### " + strconv.Itoa(number) + ". " + m[4], m[4], true

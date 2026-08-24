@@ -1,6 +1,7 @@
 package toc
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -604,5 +605,62 @@ func TestAnAppendixTheContentsGivesNoTitleTakesNothingUnderIt(t *testing.T) {
 	}
 	if len(out) != len(want) {
 		t.Errorf("got %d lines, want %d", len(out), len(want))
+	}
+}
+
+// The thirteen no. of Algebra I to III that fix opening was refusing. Every one
+// of them has its heading on its page and was turned away over the wording, and
+// they are here as the four shapes that wording takes.
+//
+// The heading that goes back is in the page's own words in all four. The
+// contents settles the number and the level and nothing else, which is the rule
+// the rest of this file works by, so a loose comparison cannot put a word on a
+// page that the page did not print.
+func TestANoWhosePageWordsItDifferentlyIsStillRepaired(t *testing.T) {
+	for _, c := range []struct {
+		why      string
+		number   int
+		contents string
+		page     string
+	}{
+		// Page 245. The contents has an article the page does not.
+		{"a dropped article", 13, "Change of the ring of scalars", "CHANGE OF RING OF SCALARS"},
+		// Page 330. The page sets the first word plural.
+		{"a plural", 7, "Tensor product of vector spaces", "TENSOR PRODUCTS OF VECTOR SPACES"},
+		// Page 453. The contents entry came off the contents page with the l of
+		// subalgebras read as an i.
+		{"a misread letter", 2, "Subaigebras. Ideals. Quotient algebras", "SUBALGEBRAS. IDEALS. QUOTIENT ALGEBRAS"},
+		// Page 521. The page names the no. at more length than the contents.
+		{"a longer heading", 1, "Symmetric algebra of a module", "DEFINITION OF THE SYMMETRIC ALGEBRA OF A MODULE"},
+	} {
+		body := []string{strconv.Itoa(c.number) + ". " + c.page}
+		_, _, head, ok := NumberOpening(body, c.number, c.contents)
+		if !ok {
+			t.Errorf("%s: the heading is on the page and was refused", c.why)
+			continue
+		}
+		if !strings.Contains(head, c.page) {
+			t.Errorf("%s: the heading is %q, which is not what the page printed", c.why, head)
+		}
+	}
+}
+
+// The loose comparison is only loose about wording, and these are the two ways
+// it has to stay strict.
+//
+// A different title under the same number is still refused, because that is the
+// one case where a wrong match writes a wrong heading. And the § keeps the exact
+// rule it had, because a § the page and the contents spell differently is
+// reported by name for a person to settle and that report is worth more than the
+// repair.
+func TestTheLooseComparisonStaysStrictAboutTheThingsItHasTo(t *testing.T) {
+	body := []string{"2. QUOTIENT GROUPS AND QUOTIENT RINGS"}
+	if _, _, _, ok := NumberOpening(body, 2, "Tensor product of vector spaces"); ok {
+		t.Error("a no. numbered the same but titled something else was taken for a match")
+	}
+	// Page 36 of Algebra I to III, the one letter the § test above pins.
+	section := []string{"§ 2. IDENTITY ELEMENT; CANCELABLE ELEMENTS; INVERTIBLE ELEMENTS"}
+	if _, _, _, ok := SectionOpening(section, 2, "Identity element; cancellable elements; invertible elements"); ok {
+		t.Error("the § comparison went loose, and the differ report it feeds is gone")
 	}
 }
