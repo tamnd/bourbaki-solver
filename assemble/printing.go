@@ -124,14 +124,29 @@ func (p printing) unswallow(text string) string {
 // AND RELATIONS under it, and chapters II and III of Algebra I to III do the
 // same, so the contents gives all three the number 0 and the heading is the word
 // alone.
+//
+// The level is crossed in as well, for the reason runMark gives and this used
+// not to honour. An appendix is marked at whatever heading level extraction read
+// off the size of the type, and that is not one level even inside one volume:
+// chapter VII of Lie 7 to 9 marks its two at three hashes and chapter IX marks
+// its one at two, off the same press. So the word was being asked for at the
+// one level the printing was written down with, and a page that read the type a
+// size larger or smaller went unfound. The French printing asked for three
+// hashes and the repair that puts an unmarked appendix back writes two, which
+// is how this came to light: page 73 of Integration VI in French carried the
+// word, at a level, and the volume still would not assemble.
 func (p printing) appendixHeads(n int) []string {
 	var out []string
 	for _, word := range p.appendix {
-		if n == 0 {
-			out = append(out, word)
-			continue
+		bare := strings.TrimLeft(word, "# ")
+		for _, level := range []string{"#", "##", "###", "####"} {
+			word := level + " " + bare
+			if n == 0 {
+				out = append(out, word)
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s %d", word, n), fmt.Sprintf("%s %s", word, roman(n)))
 		}
-		out = append(out, fmt.Sprintf("%s %d", word, n), fmt.Sprintf("%s %s", word, roman(n)))
 	}
 	return out
 }
