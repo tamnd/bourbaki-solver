@@ -171,7 +171,7 @@ func TestAnchorsKeepTheDominantPrefixOnly(t *testing.T) {
 		"TS I.144         FONCTIONS CONTINUES\nbody\n",
 		"cf. TG I.4 et la prop. 3                          A I.99\nbody\n",
 	}
-	as, prefix := readAnchorsPrefix(pages, HeadLabel, []string{"I"})
+	as, prefix := readAnchorsPrefix(pages, nil, HeadLabel, []string{"I"})
 	if prefix != "TS" {
 		t.Fatalf("prefix = %q, want TS", prefix)
 	}
@@ -542,6 +542,33 @@ func TestTheFirstChapterOfAFrenchVolumeWritesItsNumeralOut(t *testing.T) {
 	}
 }
 
+func TestAnOpenerIsReadAsAHeadingAndWithItsFootnoteMark(t *testing.T) {
+	// A scanned volume is read out of its page files, and the corpus writes the
+	// opener there as the heading it is. Commutative Algebra also hangs a
+	// footnote on five of its seven chapters and prints "CHAPTER I(*)".
+	pages := []string{
+		head("CONTENTS"),
+		head("## CHAPTER I(*)"),
+		head("1.  DIAGRAMS"),
+		head("## CHAPTER II"),
+		head("## CHAPITRE PREMIER"),
+	}
+	starts := readChapterStarts(pages, []string{"I", "II"})
+	if len(starts) != 2 || starts[2] != "I" || starts[4] != "II" {
+		t.Errorf("chapter starts = %v, want pdf 2 opening I and pdf 4 opening II", starts)
+	}
+	// The line that opens a French first chapter takes the hashes too, and the
+	// numeral it stands for is still I.
+	if starts := readChapterStarts(pages[4:], []string{"I"}); len(starts) != 1 || starts[1] != "I" {
+		t.Errorf("chapter starts = %v, want pdf 1 opening I", starts)
+	}
+	// A contents line still is not an opener, hashes or no hashes.
+	contents := []string{head("## CHAPTER I. ALGEBRAIC STRUCTURES ......... 1")}
+	if starts := readChapterStarts(contents, []string{"I"}); len(starts) != 0 {
+		t.Errorf("chapter starts = %v, want none", starts)
+	}
+}
+
 func TestDetectPrefersTheGrammarThatReadsMore(t *testing.T) {
 	if g := Detect(perChapterVolume(), []string{"IV"}); g != HeadLabel {
 		t.Errorf("Detect = %s, want %s", g, HeadLabel)
@@ -549,6 +576,84 @@ func TestDetectPrefersTheGrammarThatReadsMore(t *testing.T) {
 	footOnly := []string{foot("I  ALGEBRAIC STRUCTURES", "1"), foot("§1.2", "2"), foot("§1.3", "3")}
 	if g := Detect(footOnly, []string{"I"}); g != FootNumber {
 		t.Errorf("Detect = %s, want %s", g, FootNumber)
+	}
+}
+
+func TestAFolioIsAnAnchorWhereTheBodyKeptNoNumber(t *testing.T) {
+	// Commutative Algebra, whose reader dropped the foot number on 641 of its
+	// 642 pages. The numbers were read off the page images afterwards and
+	// written into the front matter, and this is what makes them count.
+	pages := []string{
+		head("CONTENTS"),
+		head("CHAPTER I"),
+		head("1.  DIAGRAMS"),
+		head("2.  EXACT SEQUENCES"),
+		head("3.  FLAT MODULES"),
+	}
+	folios := []int{0, 0, 2, 3, 4}
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"I"},
+		Folios: folios, Grammar: FootNumber, Pagination: Continuous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []Entry{
+		{PDFPage: 3, Chapter: "I", Page: 2, Confidence: FromFolio},
+		{PDFPage: 4, Chapter: "I", Page: 3, Confidence: FromFolio},
+		{PDFPage: 5, Chapter: "I", Page: 4, Confidence: FromFolio},
+	} {
+		got := m.Entries[want.PDFPage-1]
+		if got.Page != want.Page || got.Confidence != want.Confidence {
+			t.Errorf("pdf %d = page %d %s, want page %d %s",
+				want.PDFPage, got.Page, got.Confidence, want.Page, want.Confidence)
+		}
+	}
+	// The same volume with nothing in the front matter is the volume as it was:
+	// no anchor anywhere, so nothing is mapped at all.
+	m, err = Build(pages, Options{Book: "mini", Chapters: []string{"I"},
+		Grammar: FootNumber, Pagination: Continuous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range m.Entries {
+		if e.Confidence != Unknown {
+			t.Errorf("pdf %d came out %s with no folios to read", e.PDFPage, e.Confidence)
+		}
+	}
+}
+
+func TestAFolioAndAFootNumberOnOnePageCountOnce(t *testing.T) {
+	// The two are the same number read twice, so a page carrying both must not
+	// weigh twice as much in the fit as the pages that carry one.
+	pages := []string{foot("§1.1", "1"), foot("§1.2", "2"), foot("§1.3", "3")}
+	as := readAnchors(pages, []int{1, 0, 3}, FootNumber, []string{"I"})
+	if len(as) != 3 {
+		t.Fatalf("got %d anchors, want one per page", len(as))
+	}
+	want := []Confidence{FromFolio, FromFoot, FromFolio}
+	for i, a := range as {
+		if a.src != want[i] {
+			t.Errorf("pdf %d read %s, want %s", a.pdfPage, a.src, want[i])
+		}
+	}
+}
+
+func TestAFolioDoesNotDecideALabelledVolume(t *testing.T) {
+	// In a labelled volume the folio is the page within its chapter, so an
+	// anchor made of it says nothing about which chapter, and a volume whose
+	// folios somebody filled in must not stop reading its own labels.
+	pages := perChapterVolume()
+	folios := make([]int, len(pages))
+	for i := range folios {
+		folios[i] = i + 1
+	}
+	if g := Detect(pages, []string{"IV"}); g != HeadLabel {
+		t.Errorf("Detect = %s, want %s", g, HeadLabel)
+	}
+	as := readAnchors(pages, folios, HeadLabel, []string{"IV"})
+	for _, a := range as {
+		if a.src == FromFolio {
+			t.Errorf("pdf %d took a folio for a label", a.pdfPage)
+		}
 	}
 }
 

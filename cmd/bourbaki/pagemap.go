@@ -86,11 +86,31 @@ func pagemapBuild(args []string) error {
 		if err != nil {
 			return err
 		}
+		folios, err := pageFolios(root, b)
+		if err != nil {
+			return err
+		}
+		// What the manifest already says the volume does, unless the flag
+		// overrules it. Detection is a guess made from the reading, and the
+		// reading changes: Commutative Algebra is a foot-number volume whose
+		// reader kept no foot numbers, so it detects as labelled off its
+		// section titles and every rebuild of its map would quietly overturn
+		// the line in books.yaml that says otherwise. The manifest is where a
+		// settled answer lives, so a settled answer is used, and -grammar is
+		// how it gets settled the first time or changed after.
+		g, p := *grammar, *pagination
+		if g == "" {
+			g = b.Grammar
+		}
+		if p == "" {
+			p = b.Pagination
+		}
 		pm, err := pagemap.Build(pages, pagemap.Options{
 			Book:       b.ID,
 			Chapters:   b.Chapters,
-			Grammar:    pagemap.Grammar(*grammar),
-			Pagination: pagemap.Pagination(*pagination),
+			Folios:     folios,
+			Grammar:    pagemap.Grammar(g),
+			Pagination: pagemap.Pagination(p),
 			MinRun:     *minRun,
 			FirstPage:  b.FirstPage,
 			Restarts:   b.Restarts,
@@ -319,6 +339,27 @@ func pageText(ctx context.Context, root string, b corpus.Book) ([]string, error)
 		return readPageFiles(root, b)
 	}
 	return volumeText(ctx, root, &b)
+}
+
+// pageFolios is the folio every page file of a volume records, in page order,
+// with a zero where the page has not been read or does not say.
+//
+// It reads the page files whether or not the volume has a text layer, because
+// the folio lives in the front matter either way and pageText goes to the PDF
+// for a volume that has one.
+func pageFolios(root string, b corpus.Book) ([]int, error) {
+	folios := make([]int, b.Pages)
+	for page := 1; page <= b.Pages; page++ {
+		file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, b.ID, page))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		folios[page-1] = file.Meta.Folio
+	}
+	return folios, nil
 }
 
 // readPageFiles is the body of every page file of a volume, in page order, with

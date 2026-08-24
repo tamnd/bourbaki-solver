@@ -78,6 +78,16 @@ const (
 	FromHead Confidence = "head"
 	// FromFoot was read off the foot of the page.
 	FromFoot Confidence = "foot"
+	// FromFolio was taken from the folio the page's front matter records.
+	//
+	// It is separate from FromFoot because the two are read by different
+	// readers. FromFoot is this package finding a bare number on the last line
+	// of the body, which is only there when the reader that read the page kept
+	// it; FromFolio is the number written in the front matter, which is where a
+	// page number goes once anybody has established it, whoever established it.
+	// Telling them apart is worth a word in the map, since a run of one and a
+	// run of the other are worth different amounts of doubt.
+	FromFolio Confidence = "folio"
 	// Interpolated was not printed on the page, or was misread, and follows
 	// from the fitted offset of the pages around it.
 	Interpolated Confidence = "interpolated"
@@ -88,7 +98,9 @@ const (
 
 // Printed reports whether the number was read off the page rather than worked
 // out from its neighbours.
-func (c Confidence) Printed() bool { return c == FromHead || c == FromFoot }
+func (c Confidence) Printed() bool {
+	return c == FromHead || c == FromFoot || c == FromFolio
+}
 
 // Entry is one PDF page.
 type Entry struct {
@@ -206,6 +218,23 @@ type Options struct {
 	Chapters   []string // the chapters this volume contains, in printed order
 	Grammar    Grammar
 	Pagination Pagination
+	// Folios is the number each page's front matter records as the one the
+	// volume prints on it, one entry per PDF page in file order, zero where the
+	// page does not say.
+	//
+	// It is here because the corpus has a field for the printed page number and
+	// the fit used to ignore it, so a volume whose reader dropped the foot
+	// number could never be mapped even after somebody put the numbers back.
+	// Commutative Algebra is the volume that made the point: 642 scanned pages,
+	// no text layer, and a reading that kept the number on one page of the 642,
+	// which left the fit with one anchor and nothing to fit.
+	//
+	// A folio counts for the two grammars that print a bare number and not for
+	// the labelled one, because in a labelled volume the folio is the page
+	// within its chapter and an anchor that does not say which chapter cannot
+	// be placed. Those volumes lose nothing: the label carries both halves and
+	// is read off the head already.
+	Folios []int
 	// MinRun is how many consecutive anchors have to agree on a new offset
 	// before the fitter believes the printing stepped rather than the OCR
 	// slipped. Zero means DefaultMinRun.
@@ -280,6 +309,11 @@ func SplitPages(text string) []string {
 // the pages whose section mark the scan turned into a digit.
 const headGapMin = "2"
 
+// openerMark is the footnote reference a chapter opener may carry after its
+// numeral, written the four ways the printings write it. It is optional and it
+// is not captured, since it says nothing about which chapter the line opens.
+const openerMark = `(?:\(\*\)|\*|†|\(\d\))?\s*`
+
 var (
 	// The opener prints the words on a line of their own. The table of contents
 	// prints "CHAPTER I. ALGEBRAIC STRUCTURES ..... 1" on one line, so
@@ -301,14 +335,27 @@ var (
 	// line "CHAPTERI" and nothing else, so chapter I was never found and the
 	// map gave every page of it to no chapter at all. The word alone is not an
 	// opener either way, since the numeral still has to be there.
-	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s*([ivxlcdm1|][ivxlcdm1| ]*?)\s*$`)
+	//
+	// The hashes in front are the corpus writing the line as the heading it is.
+	// A volume that carries a text layer is read out of the PDF, where the line
+	// stands bare, and a scanned volume is read out of its page files, where the
+	// corpus writes "## CHAPTER I". Both are the same line and the pattern has
+	// to take both, or a scanned volume's own openers are invisible to the one
+	// reader that wants them. Commutative Algebra is the volume that shows it:
+	// 642 scanned pages, seven openers, and no chapter on any page of the map.
+	//
+	// The mark at the end is the reference to the footnote the chapter opens
+	// with. Commutative Algebra hangs one on five of its seven chapters and
+	// prints the head "CHAPTER I(*)", which is the whole of what stopped those
+	// five from matching once the hashes were allowed.
+	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*#*\s*chap(?:ter|itre)\s*([ivxlcdm1|][ivxlcdm1| ]*?)\s*` + openerMark + `$`)
 
 	// A French volume whose first chapter is its own book writes the numeral
 	// out: Groupes et algebres de Lie chapitre 1, Theories spectrales and
 	// Topologie algebrique all open CHAPITRE PREMIER and none of them opens
 	// CHAPITRE I. Without this the numeral pattern finds no opener anywhere in
 	// those volumes and the map comes out with no chapter on any page.
-	firstOpenerRe = regexp.MustCompile(`(?i)^\s*chap(?:ter|itre)\s+premier\s*$`)
+	firstOpenerRe = regexp.MustCompile(`(?i)^\s*#*\s*chap(?:ter|itre)\s+premier\s*` + openerMark + `$`)
 
 	// The 1998 scan reads the digit 1 as a capital I or a lower case l often
 	// enough to matter: page 111 comes out "Ill", 251 comes out "25I" and 616
@@ -637,8 +684,8 @@ func (a anchor) fits(off int) bool {
 // readAnchors pulls one candidate page number per page. chapters restricts
 // which Roman numerals count, so that a cross-reference to another volume in a
 // running head does not become an anchor.
-func readAnchors(pages []string, g Grammar, chapters []string) []anchor {
-	as, _ := readAnchorsPrefix(pages, g, chapters)
+func readAnchors(pages []string, folios []int, g Grammar, chapters []string) []anchor {
+	as, _ := readAnchorsPrefix(pages, folios, g, chapters)
 	return as
 }
 
@@ -653,7 +700,7 @@ func readAnchors(pages []string, g Grammar, chapters []string) []anchor {
 // it is what lets a head citing another Book be rejected: the alternative is
 // accepting any letters, and then "TG I.4" in a cross-reference inside a running
 // head of Algebra is an anchor.
-func readAnchorsPrefix(pages []string, g Grammar, chapters []string) ([]anchor, string) {
+func readAnchorsPrefix(pages []string, folios []int, g Grammar, chapters []string) ([]anchor, string) {
 	want := map[string]bool{}
 	for _, c := range chapters {
 		want[strings.ToUpper(c)] = true
@@ -662,6 +709,14 @@ func readAnchorsPrefix(pages []string, g Grammar, chapters []string) ([]anchor, 
 	prefixes := map[string]int{}
 	for i, pg := range pages {
 		n := i + 1
+		// The folio comes first where there is one, and it stands instead of
+		// the line rather than beside it. The two are the same number read
+		// twice, so a page that has both would otherwise put two anchors into
+		// the fit and count double against the pages that have one.
+		if g != HeadLabel && i < len(folios) && folios[i] != 0 {
+			as = append(as, anchor{pdfPage: n, page: folios[i], src: FromFolio})
+			continue
+		}
 		switch g {
 		case HeadLabel:
 			for _, l := range headLines(pg, 2) {
@@ -774,10 +829,18 @@ func readChapterStarts(pages []string, chapters []string) map[int]string {
 // line, so it finds something on many pages of a volume that is really printed
 // one of the other two ways. It only wins where the other two find almost
 // nothing.
+//
+// The folios the front matter records are not read here, though the fit reads
+// them. How a volume prints its page number is a fact about the printing, and a
+// number somebody wrote into the front matter says nothing about where on the
+// paper it was printed: counting them would hand the volume to whichever
+// bare-number reading they were offered to, and a labelled volume whose folios
+// have been filled in would stop reading its own labels. So the grammar is
+// settled on what is on the page and the folios are then read under it.
 func Detect(pages []string, chapters []string) Grammar {
-	head := len(readAnchors(pages, HeadLabel, chapters))
-	foot := len(readAnchors(pages, FootNumber, chapters))
-	headNum := len(readAnchors(pages, HeadNumber, chapters))
+	head := len(readAnchors(pages, nil, HeadLabel, chapters))
+	foot := len(readAnchors(pages, nil, FootNumber, chapters))
+	headNum := len(readAnchors(pages, nil, HeadNumber, chapters))
 	best, n := FootNumber, foot
 	if headNum > n {
 		best, n = HeadNumber, headNum
@@ -1077,6 +1140,12 @@ func Build(pages []string, opt Options) (*Map, error) {
 		read[i] = pages[p-1]
 	}
 	pages = read
+	folios := make([]int, len(pages))
+	for i, p := range order {
+		if p-1 < len(opt.Folios) {
+			folios[i] = opt.Folios[p-1]
+		}
+	}
 	declared := opt.Restarts
 	restarts := make([]int, 0, len(declared))
 	for _, r := range declared {
@@ -1094,7 +1163,7 @@ func Build(pages []string, opt Options) (*Map, error) {
 		opt.MinRun = DefaultMinRun
 	}
 
-	as, prefix := readAnchorsPrefix(pages, opt.Grammar, opt.Chapters)
+	as, prefix := readAnchorsPrefix(pages, folios, opt.Grammar, opt.Chapters)
 	if opt.Pagination == "" {
 		// A grammar that prints no chapter on the page cannot be numbering by
 		// chapter, because there would be no way to tell two page 40s apart. The
