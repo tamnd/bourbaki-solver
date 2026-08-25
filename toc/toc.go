@@ -351,20 +351,52 @@ func indentOf(line string) int {
 // nested says a numbered line is a list inside an entry rather than a no. of
 // its own. Chapter VII of the English Integration 7 to 9 lists no. 3 of § 3 as
 // "Examples: 1. General linear group" and sets its other seven examples on
-// their own lines, indented far past the nos around them. A no. is set at the
-// same indent as the rest of its run, give or take the width of its own
-// number, so anything pushed much further in belongs to the entry above it.
+// their own lines, indented past the nos around them. A no. is set at the same
+// indent as the rest of its run, give or take the width of its own number, so
+// anything pushed much further in belongs to the entry above it.
 //
 // The indent is only worth reading against the rest of the page it is on, and
 // that list runs over onto the next one, where there is nothing above it to
 // read it against. What carries it over is the numbering: examples 6, 7 and 8
 // go on from example 5 rather than from no. 3, which is where the § itself had
 // got to.
-const nestIndent = 8
+//
+// How far past the run a nested line is set is a fact about the printing and
+// not a constant. The French Integration 7 and 8 lists the same eight examples
+// as the English volume, in the same place, and sets them four columns past the
+// run where the English sets them fifteen. Measured over the text the parser
+// reads, 2232 numbered contents lines in the library, 97.3 per cent sit between
+// four columns short of the run indent and one past it, which is the width of
+// their own numbers set against a column that is aligned on the right. Five sit
+// two past, ten sit four or more past, and nothing at all sits three past. So
+// the bar goes in that empty column.
+//
+// Three columns is not on its own enough to call a line nested, because a run
+// whose § line the reading lost also opens further in than the run above it:
+// the French General Topology 5 to 10 and the French Algebra 1 to 3 both do
+// that, at four columns and two. The numbering separates them. A run either
+// opens at no. 1 or goes on from the no. before it, and a nested list does
+// neither, because it restarts the count inside an entry that has already been
+// counted. Both example lists open on their example 2 after the § reached its
+// no. 3, example 1 having been printed on no. 3's own line.
+const (
+	nestIndent = 8
+	nearIndent = 3
+)
 
 func nested(line string, runIndent, num, lastNo, nestNum int) bool {
-	if runIndent >= 0 && indentOf(line) >= runIndent+nestIndent {
-		return true
+	if runIndent >= 0 {
+		switch past := indentOf(line) - runIndent; {
+		case past >= nestIndent:
+			return true
+		case past < nearIndent:
+		case nestNum > 0:
+			// The list is already open, so the only question is whether this
+			// line goes on with it.
+			return num == nestNum+1
+		default:
+			return num != 1 && num != lastNo+1
+		}
 	}
 	return nestNum > 0 && num == nestNum+1 && num != lastNo+1
 }
