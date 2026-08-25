@@ -323,7 +323,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 			// disagreeing with a contents entry that agreed already.
 			title = titleUnder(pages[page].Body, off)
 		}
-		if !sameTitle(title, s.Title) && !slices.Contains(differs[pages[page].Meta.Book], page) {
+		if !sameTitle(title, s.Title) && !Differs(pages[page].Meta.Book, page) {
 			return nil, nil, fmt.Errorf("chapter %s %s: pdf page %d titles it %q, the table of contents calls it %q",
 				ch.Numeral, name(s), page, title, s.Title)
 		}
@@ -763,7 +763,22 @@ var texWord = regexp.MustCompile(`\\[a-zA-Z]+`)
 // "§ 8. Lie groups over R or Q_p". Both page images are plain and both readings
 // are right.
 var differs = map[string][]int{
+	"alg-x-fr":  {67},
 	"lie-i-iii": {355},
+	"var-fr":    {29},
+}
+
+// Differs is whether the opening on this page of this volume is one the volume
+// gives two titles, recorded above.
+//
+// It is asked outside the assembler by fix opening, which refuses to write a
+// heading the contents does not agree with and is right to: a disagreement is a
+// misreading of one side or the other far more often than it is the printing.
+// Where the disagreement is recorded, the question has been settled already,
+// and the repair is then the ordinary one. The page keeps its own words, since
+// that is the whole of what the record says.
+func Differs(book string, page int) bool {
+	return slices.Contains(differs[book], page)
 }
 
 // The footnote markers come off both sides before anything else. A printing
