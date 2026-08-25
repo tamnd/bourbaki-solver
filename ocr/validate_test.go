@@ -68,6 +68,27 @@ func TestRule1ShortPages(t *testing.T) {
 	if !has(Validate("I'm sorry, I can't help with that.", expect, Options{}), RuleLeak) {
 		t.Error("a refusal on a sparse page was accepted")
 	}
+	// Nor an opening leaf, whatever its ink says. Sparse is measured from the
+	// render manifest and a scanned cover measures ten times a born digital
+	// one for the same amount of text, so the ink test misses these and the
+	// leaf number cannot.
+	for page := 1; page <= FrontLeaves; page++ {
+		expect = Expect{Book: "top-v-x", PDFPage: page, Grammar: pagemap.FootNumber}
+		if has(Validate("General Topology\n\nChapters 5 to 10", expect, Options{}), RuleShort) {
+			t.Errorf("leaf %d was rejected for being short", page)
+		}
+	}
+	// The leaf after them is a page of the book and is held to the rule again.
+	expect = Expect{Book: "top-v-x", PDFPage: FrontLeaves + 1, Grammar: pagemap.FootNumber}
+	if !has(Validate("General Topology\n\nChapters 5 to 10", expect, Options{}), RuleShort) {
+		t.Error("a short page past the front matter was accepted")
+	}
+	// A caller that does not set PDFPage leaves it zero, and that must not read
+	// as front matter and turn the rule off for every page it validates.
+	expect = Expect{Book: "top-v-x", Grammar: pagemap.FootNumber}
+	if !has(Validate("General Topology\n\nChapters 5 to 10", expect, Options{}), RuleShort) {
+		t.Error("an unset PDFPage turned rule 1 off")
+	}
 }
 
 func TestRule2MathDelimiters(t *testing.T) {
