@@ -171,7 +171,7 @@ func TestAnchorsKeepTheDominantPrefixOnly(t *testing.T) {
 		"TS I.144         FONCTIONS CONTINUES\nbody\n",
 		"cf. TG I.4 et la prop. 3                          A I.99\nbody\n",
 	}
-	as, prefix := readAnchorsPrefix(pages, nil, HeadLabel, []string{"I"})
+	as, prefix := readAnchorsPrefix(pages, nil, nil, HeadLabel, []string{"I"})
 	if prefix != "TS" {
 		t.Fatalf("prefix = %q, want TS", prefix)
 	}
@@ -625,7 +625,7 @@ func TestAFolioAndAFootNumberOnOnePageCountOnce(t *testing.T) {
 	// The two are the same number read twice, so a page carrying both must not
 	// weigh twice as much in the fit as the pages that carry one.
 	pages := []string{foot("§1.1", "1"), foot("§1.2", "2"), foot("§1.3", "3")}
-	as := readAnchors(pages, []int{1, 0, 3}, FootNumber, []string{"I"})
+	as := readAnchors(pages, []int{1, 0, 3}, nil, FootNumber, []string{"I"})
 	if len(as) != 3 {
 		t.Fatalf("got %d anchors, want one per page", len(as))
 	}
@@ -649,7 +649,7 @@ func TestAFolioDoesNotDecideALabelledVolume(t *testing.T) {
 	if g := Detect(pages, []string{"IV"}); g != HeadLabel {
 		t.Errorf("Detect = %s, want %s", g, HeadLabel)
 	}
-	as := readAnchors(pages, folios, HeadLabel, []string{"IV"})
+	as := readAnchors(pages, folios, nil, HeadLabel, []string{"IV"})
 	for _, a := range as {
 		if a.src == FromFolio {
 			t.Errorf("pdf %d took a folio for a label", a.pdfPage)
@@ -1144,5 +1144,110 @@ func TestTwoLoneAnchorsInTheSameGapAreBothMisreads(t *testing.T) {
 	_, outliers := fitOffsets(as, DefaultMinRun)
 	if len(outliers) != 2 {
 		t.Errorf("outliers are %v, want both readings thrown away", outliers)
+	}
+}
+
+// The label the front matter carries beats the text the fit was handed, because
+// the two are not readings of the same thing. The text of a scan is the layer
+// the scanner left in the PDF and the front matter was written by a reader that
+// saw the image, so where the layer is silent or wrong the label is the only
+// reading there is. Measured over the nineteen labelled volumes, the layer
+// yields an anchor on 5,045 pages and the front matter on 6,623.
+func TestAFrontMatterLabelIsAnAnchor(t *testing.T) {
+	// A volume whose text says nothing at all, which is what ac-x-fr and
+	// alg-x-fr amount to: their labels live in the front matter and never in
+	// the body, so the fit had 14 anchors of 180 and none of 222.
+	pages := make([]string, 6)
+	for i := range pages {
+		pages[i] = head("PROFONDEUR, REGULARITE, DUALITE")
+	}
+	labels := []string{"AC X.1", "AC X.2", "AC X.3", "AC X.4", "AC X.5", "AC X.6"}
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"X"},
+		Grammar: HeadLabel, Pagination: PerChapter, Labels: labels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Prefix != "AC" {
+		t.Errorf("prefix %q, want AC", m.Prefix)
+	}
+	for i, e := range m.Entries {
+		if e.Page != i+1 || e.Chapter != "X" {
+			t.Errorf("pdf %d is %s.%d, want X.%d", e.PDFPage, e.Chapter, e.Page, i+1)
+		}
+		if e.Confidence != FromLabel {
+			t.Errorf("pdf %d came from %s, want %s", e.PDFPage, e.Confidence, FromLabel)
+		}
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("the map does not validate: %v", probs)
+	}
+}
+
+// A label is held to the same two tests a label found on the page is. Neither
+// check is new, and both have to keep applying through the new door: pdf 171 of
+// ac-x-fr records "C X.172", the A dropped by the reader, and a volume that took
+// it would fit its whole back matter to a Book it is not.
+func TestAFrontMatterLabelIsCheckedLikeAnyOther(t *testing.T) {
+	pages := make([]string, 4)
+	for i := range pages {
+		pages[i] = head("PROFONDEUR, REGULARITE, DUALITE")
+	}
+	as, prefix := readAnchorsPrefix(pages,
+		nil,
+		[]string{"AC X.1", "AC X.2", "C X.3", "AC XI.4"},
+		HeadLabel, []string{"X"})
+	if prefix != "AC" {
+		t.Fatalf("prefix %q, want AC", prefix)
+	}
+	if len(as) != 2 {
+		t.Fatalf("%d anchors, want 2: %v", len(as), as)
+	}
+	for _, a := range as {
+		if a.prefix != "AC" || a.chapter != "X" {
+			t.Errorf("pdf %d anchored on %s %s.%d", a.pdfPage, a.prefix, a.chapter, a.page)
+		}
+	}
+}
+
+// A leaf the printing never numbered belongs to neither side of the crack it
+// sits in. Handing it to the left cover numbers it, and then two pdf pages claim
+// the same printed page: pdf 360 of top-i-iv-fr is the bibliography at IV.89,
+// pdf 361 is unnumbered, and pdf 362 is labelled IV.90.
+func TestAnUnnumberedLeafIsNotGivenAPrintedPage(t *testing.T) {
+	pages := make([]string, 6)
+	for i := range pages {
+		pages[i] = head("TOPOLOGIE GENERALE")
+	}
+	// pdf 5 carries no label and is the leaf the printing skipped, so 6 is
+	// printed 5 and not 6.
+	labels := []string{"TG IV.1", "TG IV.2", "TG IV.3", "TG IV.4", "", "TG IV.5"}
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"IV"},
+		Grammar: HeadLabel, Pagination: PerChapter, Labels: labels})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := m.Entries[4].Page; got != 0 {
+		t.Errorf("pdf 5 was given printed page %d, and the printing gave it none", got)
+	}
+	if got := m.Entries[5].Page; got != 5 {
+		t.Errorf("pdf 6 is printed %d, want 5", got)
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("the map does not validate: %v", probs)
+	}
+}
+
+// And the arithmetic that is right for one leaf is wrong for eight. A rise that
+// large is a fascicule starting its own numbering, not eight blank leaves, and
+// reading it as leaves takes the printed numbers off the whole back matter of
+// the fascicule before it. var-fr is the volume that says so.
+func TestALargeRiseIsNotReadAsUnnumberedLeaves(t *testing.T) {
+	covers := []cover{
+		{from: 1, to: 87, offset: -2, chapter: "1"},
+		{from: 96, to: 190, offset: 6, chapter: "1"},
+	}
+	got := closeCracks(covers)
+	if got[0].to != 95 {
+		t.Errorf("the first cover ends at pdf %d, want 95: a rise of 8 is not 8 loose leaves", got[0].to)
 	}
 }

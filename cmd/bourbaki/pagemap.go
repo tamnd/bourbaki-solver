@@ -90,6 +90,10 @@ func pagemapBuild(args []string) error {
 		if err != nil {
 			return err
 		}
+		labels, err := pageLabels(root, b)
+		if err != nil {
+			return err
+		}
 		// What the manifest already says the volume does, unless the flag
 		// overrules it. Detection is a guess made from the reading, and the
 		// reading changes: Commutative Algebra is a foot-number volume whose
@@ -109,6 +113,7 @@ func pagemapBuild(args []string) error {
 			Book:       b.ID,
 			Chapters:   b.Chapters,
 			Folios:     folios,
+			Labels:     labels,
 			Grammar:    pagemap.Grammar(g),
 			Pagination: pagemap.Pagination(p),
 			MinRun:     *minRun,
@@ -360,6 +365,31 @@ func pageFolios(root string, b corpus.Book) ([]int, error) {
 		folios[page-1] = file.Meta.Folio
 	}
 	return folios, nil
+}
+
+// pageLabels is the page label every page file of a volume records, in page
+// order, with an empty string where the page has not been read or does not say.
+//
+// It reads the page files for the same reason pageFolios does, and the reason
+// bites harder here. pageText goes to the PDF for any volume that has a text
+// layer, and for a scan that layer is whatever the scanner left behind, which
+// is not what read the pages: the page files were read afterwards off the image
+// and the label went into the front matter rather than back into the body. So
+// on the scanned labelled volumes the two sources are far apart, and the front
+// matter is the better one.
+func pageLabels(root string, b corpus.Book) ([]string, error) {
+	labels := make([]string, b.Pages)
+	for page := 1; page <= b.Pages; page++ {
+		file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, b.ID, page))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		labels[page-1] = file.Meta.PageLabel
+	}
+	return labels, nil
 }
 
 // readPageFiles is the body of every page file of a volume, in page order, with
