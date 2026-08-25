@@ -1494,6 +1494,30 @@ func fixOpening(args []string) error {
 						fmt.Printf("%s/%04d.md  %s   the page has %q\n", b.ID, n.PDFPage, head, words)
 						return nil
 					}
+					// The head is asked before the text layer because it is
+					// the better reading of the two. It is this corpus's own
+					// reading of the same page image, filed in the wrong
+					// field, where the layer is the publisher's scan of the
+					// paper and comes back with the words mangled as often as
+					// not.
+					if rest, ok := toc.HistoricalNoteFromHead(runningHead(root, b.ID, n.PDFPage)); ok {
+						lines = openAt(lines, head)
+						if rest != "" {
+							// openAt sets the head and a blank line above
+							// whatever the body opened on, so the
+							// parenthetical goes under the blank and keeps
+							// one of its own.
+							lines = slices.Insert(lines, slices.Index(lines, head)+2, rest, "")
+						}
+						edits[n.PDFPage] = lines
+						// The words are the whole of what the page prints
+						// over a note, so where the reading filed them as
+						// the running head there is no head left to keep.
+						heads[n.PDFPage] = ""
+						notes++
+						fmt.Printf("%s/%04d.md  %s   the running head had it\n", b.ID, n.PDFPage, head)
+						return nil
+					}
 					page, err := layerPage(b, n.PDFPage)
 					if err != nil {
 						return err
@@ -1539,15 +1563,26 @@ func fixOpening(args []string) error {
 					// appendix to chapter II and has the word standing as a
 					// plain line in the middle of them.
 					//
-					// Nothing is read from the running head here. Every page
-					// of an appendix carries the word as its running head, so
-					// the front matter of an exercises page says only that the
-					// page is inside the appendix, which is not the same thing
-					// as the page opening something.
+					// The running head is read here only when the page after
+					// carries something else. Every page of an appendix
+					// carries the word as its running head, so on its own the
+					// front matter of an exercises page says the page is
+					// inside the appendix and not that it opens anything. What
+					// settles it is the next page of the same run: page 274 of
+					// General Topology V to X is headed APPENDIX and page 275
+					// is headed EXERCISES, so the word on 274 is not the head
+					// of that run and the reading took it off the page.
 					if x := s.Exercises; x != nil && x.PDFPage > 0 {
+						run := runningHead(root, b.ID, x.PDFPage)
+						if strings.EqualFold(strings.TrimSpace(run), strings.TrimSpace(runningHead(root, b.ID, x.PDFPage+1))) {
+							run = ""
+						}
 						if lines, ok := read(x.PDFPage); ok && !toc.Appendix(lines) {
-							if out, _, done := toc.AppendixOpening(lines, "", "", s.Number); done {
+							if out, drop, done := toc.AppendixOpening(lines, run, "", s.Number); done {
 								edits[x.PDFPage] = out
+								if drop {
+									heads[x.PDFPage] = ""
+								}
 								appendices++
 								if *check {
 									fmt.Printf("%s/%04d.md  %s\n", b.ID, x.PDFPage, added(lines, out))
@@ -1585,6 +1620,21 @@ func fixOpening(args []string) error {
 				}
 				from, to, head, done := toc.SectionOpening(lines, s.Number, s.Title)
 				if !done {
+					// The running head is asked before the contents is, and
+					// before the text layer, for the same reason the
+					// historical note asks it there. It is a reading of this
+					// page image made by this corpus, and the only thing
+					// wrong with it is the field it was written into.
+					if put, ok := toc.SectionOpeningFromHead(runningHead(root, b.ID, s.PDFPage), s.Number, s.Title); ok {
+						edits[s.PDFPage] = openAt(lines, put)
+						// The heading is the whole of what the page prints
+						// above the §, so there is no running head left to
+						// keep.
+						heads[s.PDFPage] = ""
+						sections++
+						fmt.Printf("%s/%04d.md  %s   the running head had it\n", b.ID, s.PDFPage, put)
+						continue
+					}
 					if got, ok := toc.SectionTitle(lines, s.Number); ok {
 						differ++
 						fmt.Printf("%s chapter %s § %d: pdf page %d calls it %q, the table of contents calls it %q\n",

@@ -841,3 +841,54 @@ func TestTheLooseComparisonStaysStrictAboutTheThingsItHasTo(t *testing.T) {
 		t.Error("the § comparison went loose, and the differ report it feeds is gone")
 	}
 }
+
+func TestASectionHeadingFiledAsTheRunningHeadIsPutBack(t *testing.T) {
+	// General Topology V to X was read with a prompt that wrote no headings at
+	// all, so the top line of every page went into the running head field. On a
+	// section opening page there is no running head to take, and what the
+	// reading took is the heading. Page 18 opens section 2 of chapter V and page
+	// 35 opens section 3 of the same chapter. The sign is not written back,
+	// because the field a running head is kept in never carries one and this
+	// printing sets none over its sections either.
+	for _, c := range []struct {
+		running string
+		number  int
+		title   string
+		want    string
+	}{
+		{"2. MEASUREMENT OF MAGNITUDES", 2, "Measurement of magnitudes",
+			"## 2. MEASUREMENT OF MAGNITUDES"},
+		{"3. TOPOLOGICAL CHARACTERIZATION OF THE GROUPS R AND T", 3,
+			"Topological characterization of the groups R and T",
+			"## 3. TOPOLOGICAL CHARACTERIZATION OF THE GROUPS R AND T"},
+	} {
+		head, ok := SectionOpeningFromHead(c.running, c.number, c.title)
+		if !ok {
+			t.Fatalf("%q reads as the heading of section %d", c.running, c.number)
+		}
+		if head != c.want {
+			t.Errorf("got %q, want %q", head, c.want)
+		}
+	}
+}
+
+func TestASectionRunningHeadWithNoNumberIsNotAHeading(t *testing.T) {
+	// A genuine running head carries the title alone. Page 177 of Topologie
+	// generale V a X is the case the body path was already written against, and
+	// the head path has to refuse it for the same reason. A head numbered for
+	// another section is refused too.
+	for _, c := range []struct {
+		running string
+		number  int
+		title   string
+	}{
+		{"ESPACES POLONAIS ; ESPACES SOUSLINIENS", 6,
+			"Espaces polonais ; espaces sousliniens"},
+		{"2. MEASUREMENT OF MAGNITUDES", 3, "Measurement of magnitudes"},
+		{"1. SUBGROUPS AND QUOTIENT GROUPS OF R", 1, "Exponentials and logarithms"},
+	} {
+		if _, ok := SectionOpeningFromHead(c.running, c.number, c.title); ok {
+			t.Errorf("%q was written back as the heading of section %d", c.running, c.number)
+		}
+	}
+}
