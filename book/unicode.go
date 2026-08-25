@@ -152,6 +152,10 @@ func Math(s string) string {
 			b.WriteRune(r)
 			continue
 		}
+		if r == '°' {
+			b.WriteString(degree(b.String()))
+			continue
+		}
 		if tex, ok := mathRune[r]; ok {
 			b.WriteString(tex)
 			// A command has to be told where it stops. The corpus writes the
@@ -165,6 +169,22 @@ func Math(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// degree is the TeX for a degree sign, given what has been written before it.
+//
+// The sign is a raised circle and the corpus writes it in both of the places a
+// raised circle can go. The polar of a set is A°, where the superscript has to
+// be opened. The bipolar is A^{°°} and the polar of a union is (A° \cup U°)^°,
+// where one is open already. Written as ^\circ every time, those two come out
+// as A^{^\circ^\circ} and )^^\circ, and TeX stops on a double superscript. It
+// stopped both of the volumes of Topological Vector Spaces.
+func degree(before string) string {
+	t := strings.TrimRight(before, " ")
+	if strings.HasSuffix(t, "^") || strings.HasSuffix(t, "^{") || strings.HasSuffix(t, `\circ`) {
+		return `\circ`
+	}
+	return `^\circ`
 }
 
 func endsInLetter(s string) bool {
