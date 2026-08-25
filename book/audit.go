@@ -12,6 +12,9 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
 // The audit is the point of the whole milestone and the build is only how it
@@ -81,13 +84,6 @@ func (a *Audit) Failed() int {
 // AuditOptions says how strict to be about the two numbers that are judgements
 // rather than facts.
 type AuditOptions struct {
-	// Tolerance is how far the built page count may sit from the printing's own
-	// before the check fails, as a fraction. It is not zero and cannot be: the
-	// build sets Latin Modern where Springer set Times, it has no plates and no
-	// index and no publisher's front matter, and the corpus does not carry the
-	// blank versos. A volume within a fifth of the printing is a volume; one at
-	// half is half a book and one at twice is a document fighting its class.
-	Tolerance float64
 	// Overfull is the most lines that may run past the measure. A few dozen in a
 	// volume is ordinary typesetting for a book this dense. A few thousand is a
 	// class that does not fit its content.
@@ -105,6 +101,11 @@ type AuditOptions struct {
 	// raised, which turns each of them into a ratchet: the number cannot get
 	// worse without somebody noticing.
 	Stray, Wide int
+	// Short is how far under the printing's own text the volume may sit before
+	// the check fails, as a fraction. A tenth is room for the front matter and
+	// the publisher's pages that no reading of the book puts into content/, and
+	// not room for a chapter.
+	Short float64
 	// Cover asks pdftoppm to render the first page and looks at it, which is the
 	// only way to know that the cover is the cover. It is a flag because
 	// poppler is not on every machine and a missing tool should skip a check
@@ -114,7 +115,7 @@ type AuditOptions struct {
 
 // DefaultAuditOptions are what the command uses when nothing is said.
 func DefaultAuditOptions() AuditOptions {
-	return AuditOptions{Tolerance: 0.20, Overfull: 200, Cover: true}
+	return AuditOptions{Overfull: 200, Short: 0.10, Cover: true}
 }
 
 // Inspect runs every check over a volume that has been loaded, written, built
@@ -125,6 +126,7 @@ func Inspect(root string, v *Volume, d *Document, b *Build, e *EPUB, opt AuditOp
 	a := &Audit{Volume: v.Meta.ID, Lang: v.Lang, Title: v.Title, Doc: d, Build: b, EPUB: e}
 	a.structure(v)
 	a.coverage(root, v)
+	a.length(root, v, opt)
 	a.written(d, opt)
 	a.typeset(v, b, opt)
 	a.packed(e)
@@ -250,6 +252,123 @@ func (a *Audit) coverage(root string, v *Volume) {
 	a.ok("the printing's sections are all in this language", pass, detail, notes...)
 }
 
+// length is whether the volume holds the text the printing has.
+//
+// This used to be a page count. The build set 326 pages, the printing has 443,
+// anything past a fifth either way was a failure. It was the wrong measure, and
+// it took three volumes to see why: General Topology I-IV and Algebre
+// commutative V-VII both sat at 74 per cent of their printings and both hold
+// every word of them. What differs is the type. Algebre commutative sets 41
+// lines of 55 characters to the page where this class sets 44 of 62, so 346 of
+// those pages is 257 of these, and Topological Vector Spaces, whose printing is
+// nearly as dense as the class, comes out at 95 per cent of its pages from the
+// same corpus and the same build. A check that turns on the publisher's leading
+// is a check about Springer and not about the book.
+//
+// What it was reaching for is that nothing is missing, and the repository holds
+// the printing's own text to ask that of. pages/<volume>/ is the reading of
+// every page of the printing, page by page, and content/ is assembled out of
+// it, so the two are the same book in the same words at two stages. Counting
+// characters asks the question in the one unit that does not move when the type
+// does. Measured that way the two volumes that were failing sit at 99 and 102
+// per cent, and Theory of Sets, which passed the page check comfortably, sits
+// at 84 because the Summary of Results, 67 pages of it, is not in content/ at
+// all.
+//
+// The comparison is one-sided on purpose. content/ writes \varphi where the
+// printing sets one letter and $\mathfrak{S}$ where it sets one more, so a
+// faithful volume runs a few per cent over the printing and how far over is a
+// fact about the markup rather than about the book. Short is the only direction
+// that means something is gone.
+func (a *Audit) length(root string, v *Volume, opt AuditOptions) {
+	printed, pages, err := printingChars(root, v.Meta.ID)
+	if err != nil || pages == 0 {
+		a.ok("the volume holds the text the printing has", true,
+			"the corpus has no reading of this printing to compare against")
+		return
+	}
+	held := v.Chars()
+	// A language the volume was never printed in is compared against the
+	// printing scaled by how much of it exists, for the reason the coverage
+	// check gives: half a translation should hold about half the text, and
+	// calling that a failure would be calling the translation's progress a
+	// defect.
+	scale := 1.0
+	if a.Want > 0 && a.Have < a.Want {
+		scale = float64(a.Have) / float64(a.Want)
+	}
+	ratio := float64(held) / float64(printed) / scale
+	a.ok("the volume holds the text the printing has", ratio >= 1-opt.Short,
+		fmt.Sprintf("%d characters against the reading's %d over %d pages, %.0f%% of it",
+			held, printed, pages, 100*ratio))
+}
+
+// printingChars counts the characters in the reading of the printing, which is
+// pages/<volume>/ and nothing else. The front matter of each page file is a
+// record about the page rather than text off it, so it is not counted, and
+// whitespace is not counted either because a line break is a decision the
+// reading made and not a character the printing set.
+func printingChars(root, id string) (chars, pages int, err error) {
+	dir := filepath.Join(root, "pages", id)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0, 0, err
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			return 0, 0, err
+		}
+		_, body, err := corpus.SplitFrontMatter(raw)
+		if err != nil {
+			body = raw
+		}
+		chars += countNonSpace(string(body))
+		pages++
+	}
+	return chars, pages, nil
+}
+
+// countNonSpace counts the runes that are not whitespace.
+func countNonSpace(s string) int {
+	n := 0
+	for _, r := range s {
+		if !unicode.IsSpace(r) {
+			n++
+		}
+	}
+	return n
+}
+
+// Chars is the text of the volume, in the same unit printingChars uses, so that
+// the two can be divided. It is every body the build would set: the Book's
+// introduction, each chapter's opening page, its §§ and appendices with their
+// exercises, and its historical note.
+func (v *Volume) Chars() int {
+	n := 0
+	if v.Intro != nil {
+		n += countNonSpace(v.Intro.Body)
+	}
+	for _, c := range v.Chapters {
+		if c.Front != nil {
+			n += countNonSpace(c.Front.Body)
+		}
+		for _, s := range c.Sections {
+			n += countNonSpace(s.Body)
+			for _, e := range s.Exercises {
+				n += countNonSpace(e.Body)
+			}
+		}
+		if c.Historical != nil {
+			n += countNonSpace(c.Historical.Body)
+		}
+	}
+	return n
+}
+
 // written is what the writer found on its way through.
 func (a *Audit) written(d *Document, opt AuditOptions) {
 	if d == nil {
@@ -292,23 +411,23 @@ func (a *Audit) typeset(v *Volume, b *Build, opt AuditOptions) {
 		fmt.Sprintf("%d overfull boxes, %d underfull, the ceiling is %d",
 			b.Overfull, b.Underfull, opt.Overfull))
 
+	// How many pages it came to is worth reporting and is not a failure. The
+	// question of whether anything is missing is asked in characters, against
+	// the reading of the printing, in length above; what is left here is how
+	// this class set that text, and the honest answer is that it sets it
+	// tighter than most of the printings. Two volumes out of the same corpus
+	// and the same build land at 95 and 74 per cent of their printings because
+	// the printings are two different books to look at. That is a fact about
+	// the class worth having in the report and it is not a defect in the
+	// volume, so it goes in the way the aligned displays do, as a number and
+	// not a gate.
 	if v.Meta.Pages <= 0 {
-		a.ok("the volume is about the length of the printing", true, "the manifest has no page count to compare against")
+		a.ok("how long the volume came out", true, fmt.Sprintf("%d pages, the manifest has no page count to compare against", b.Pages))
 		return
 	}
-	ratio := float64(b.Pages) / float64(v.Meta.Pages)
-	// A language the volume was never printed in is compared against the
-	// printing scaled by how much of it exists, since half a book should
-	// paginate to about half the pages and calling that a failure would be
-	// calling the translation's progress a defect.
-	scale := 1.0
-	if a.Want > 0 && a.Have < a.Want {
-		scale = float64(a.Have) / float64(a.Want)
-	}
-	off := ratio/scale - 1
-	a.ok("the volume is about the length of the printing", off <= opt.Tolerance && off >= -opt.Tolerance,
-		fmt.Sprintf("%d pages against the printing's %d, %.0f%% of it, %.0f%% of what this language holds",
-			b.Pages, v.Meta.Pages, 100*ratio, 100*ratio/scale))
+	a.ok("how long the volume came out", true,
+		fmt.Sprintf("%d pages against the printing's %d, %.0f%% of it",
+			b.Pages, v.Meta.Pages, 100*float64(b.Pages)/float64(v.Meta.Pages)))
 }
 
 // packed reads the EPUB back off the disk and checks it.

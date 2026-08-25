@@ -18,7 +18,7 @@ func runBook(args []string) error {
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: bourbaki book -book <id> [-lang en,vi] [-chapter I] [-out work/books]
                       [-no-pdf] [-no-epub] [-bundle url] [-cached] [-epoch n]
-                      [-tolerance 0.20] [-max-overfull 200] [-no-cover-check]
+                      [-short 0.10] [-max-overfull 200] [-no-cover-check]
 
 Builds a printed volume back out of content/ and audits what came out.
 
@@ -56,8 +56,11 @@ because a built book is a statement about one build and not about the corpus.
                     cache somebody kept
   -epoch            the timestamp everything is pinned to, so that two builds of
                     the same content come out as the same bytes
-  -tolerance        how far the page count may sit from the printing's own
-                    before that check fails, as a fraction
+  -short            how far under the printing's own text the volume may sit
+                    before that check fails, as a fraction. It is measured
+                    against pages/, the reading of the printing, in characters,
+                    because the page count turns on the publisher's leading and
+                    the character count turns on the book
   -max-overfull     the most lines that may run past the measure
   -max-stray        the most TeX control sequences that may be loose in the
                     prose, and -max-wide the most arrays that had to be widened
@@ -81,7 +84,7 @@ Exits 1 if any check failed, so this can be a gate.
 	bundle := fs.String("bundle", os.Getenv("BOURBAKI_TEX_BUNDLE"), "where tectonic fetches its packages")
 	cached := fs.Bool("cached", false, "refuse to fetch anything")
 	epoch := fs.Int64("epoch", 1735689600, "the timestamp everything is pinned to")
-	tolerance := fs.Float64("tolerance", 0.20, "how far the page count may sit from the printing's")
+	short := fs.Float64("short", 0.10, "how far under the printing's own text the volume may sit")
 	maxOverfull := fs.Int("max-overfull", 200, "the most lines that may run past the measure")
 	maxStray := fs.Int("max-stray", 0, "the most TeX control sequences loose in the prose")
 	maxWide := fs.Int("max-wide", 0, "the most arrays widened to hold their own rows")
@@ -116,7 +119,7 @@ Exits 1 if any check failed, so this can be a gate.
 
 	opt := book.Options{Epoch: *epoch, Bundle: *bundle, Cached: *cached}
 	aopt := book.AuditOptions{
-		Tolerance: *tolerance, Overfull: *maxOverfull,
+		Short: *short, Overfull: *maxOverfull,
 		Stray: *maxStray, Wide: *maxWide,
 		Cover: !*noCover && !*noPDF,
 	}
@@ -156,7 +159,7 @@ func buildOne(root, out, id, lang, chapter string, opt book.Options, aopt book.A
 		// the whole of it would fail on a build that is doing exactly what it was
 		// asked to. The rest of the audit is about what is on the page and holds
 		// for a chapter as well as for a book.
-		aopt.Tolerance = 1e9
+		aopt.Short = 1
 	}
 	dir := filepath.Join(out, v.ID())
 	if err := os.MkdirAll(dir, 0o755); err != nil {
