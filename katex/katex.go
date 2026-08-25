@@ -91,9 +91,32 @@ func New() (*Renderer, error) {
 // deliberate. The message is KaTeX's own, which names the character it stopped
 // at.
 func (r *Renderer) Render(tex string, display bool) (string, error) {
-	key := tex
+	return r.render(tex, display, "")
+}
+
+// MathML renders one span of TeX as MathML and nothing else.
+//
+// The site wants what Render gives, which is MathML for a screen reader with a
+// pile of positioned spans over the top of it for the eye, because a browser
+// with the KaTeX stylesheet and the KaTeX fonts sets that beautifully and a
+// browser is what the site is read in. An EPUB is not read in a browser. It is
+// read in a dozen reading systems with a dozen ideas of how much CSS they will
+// honour, and the ones that honour least would show the positioned spans with
+// no positioning, which is every symbol of a formula in a row at the same size
+// with the fractions inside out.
+//
+// So the book takes the other half of the same render. MathML is what EPUB 3
+// requires a reading system to support, it needs no stylesheet and no font file,
+// and it is the same parse of the same TeX by the same engine, so a formula that
+// is right on the site is right in the EPUB or neither is.
+func (r *Renderer) MathML(tex string, display bool) (string, error) {
+	return r.render(tex, display, "mathml")
+}
+
+func (r *Renderer) render(tex string, display bool, output string) (string, error) {
+	key := output + "\x00" + tex
 	if display {
-		key = "$$" + tex
+		key = output + "\x00$$" + tex
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -103,6 +126,9 @@ func (r *Renderer) Render(tex string, display bool) (string, error) {
 
 	opts := r.vm.NewObject()
 	opts.Set("displayMode", display)
+	if output != "" {
+		opts.Set("output", output)
+	}
 	// throwOnError is the default and is set anyway, because the alternative is
 	// KaTeX writing the error into the page in red, which is the one behaviour
 	// this must not have.
