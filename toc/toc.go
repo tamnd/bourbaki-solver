@@ -664,6 +664,71 @@ func classify(text string, mark SectionMark) entry {
 	return entry{}
 }
 
+// flatVolume reports whether the volume prints no chapters over its body.
+//
+// It is the state pagemap.WholeVolume names, one span over the whole of a
+// volume that declares chapters: [] and whose page map found no chapter to put
+// a row under. Two volumes are in it, the two printings of the Elements of the
+// History of Mathematics, which are a flat run of numbered notes with nothing
+// above them.
+//
+// It is asked as a question about the page map rather than about the line,
+// which is the whole reason the reading below is safe to do at all.
+func flatVolume(pm *pagemap.Map) bool {
+	return pm != nil && len(pm.Chapters) == 1 &&
+		pm.Chapters[0].Chapter == pagemap.WholeVolume
+}
+
+// backMatterRe matches what a table of contents lists after the body.
+//
+// A flat contents has no numbers to tell a note from the bibliography, so the
+// only thing separating them is what they are called. The French History lists
+// Bibliographie and Index des noms cites under its twenty six notes with a page
+// against each, exactly as it lists the notes, and read as notes they would
+// make the volume twenty eight. The English printing lists the same two and
+// prints no page against either, which is why it never had to be said there.
+//
+// It is a word list and it is written down as one, in the two languages the
+// corpus is in, the same way contentsHeadRe and bareTableHeadRe are targeted.
+var backMatterRe = regexp.MustCompile(
+	`(?i)^\s*(?:bibliographie|bibliography|index\b|table\s+des\s+mati|contents\b)`)
+
+// flatEntry reads a contents line that carries a title and a page and no number
+// of any kind.
+//
+// Every caller gates this on flatVolume, and nothing else may use it. The
+// comment on minEntries says why: a rule that read any line ending near a
+// numeral as an entry would take the numbered paragraphs of To the Reader and
+// any prose line that happened to end on a figure. What makes it safe here is
+// not the shape of the line but the state of the volume. A volume with one span
+// over the whole of it prints no chapter lines, no § lines and no no. lines, so
+// there is nothing for an unnumbered entry to be confused with.
+//
+// The number is left at zero. The notes are numbered where they are read, in
+// the order the contents prints them, which is the order the English printing
+// numbers the same twenty six notes in and is what makes the two manifests
+// comparable.
+func flatEntry(text string) (entry, bool) {
+	if backMatterRe.MatchString(text) {
+		return entry{}, false
+	}
+	title := cleanTitle(text)
+	if title == "" {
+		return entry{}, false
+	}
+	return entry{kind: kindSection, title: title}, true
+}
+
+// flatLine reports whether the line reads as an entry of a flat contents, which
+// is what the two counters ask so that a page of them is seen at all.
+func flatLine(text string, flat bool) bool {
+	if !flat {
+		return false
+	}
+	_, ok := flatEntry(text)
+	return ok
+}
+
 // isPart reports whether the line is a heading set the way a chapter heading is
 // set, flush left and in capitals, without being a chapter.
 //
@@ -802,6 +867,10 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	// the run, and nestNum the last item taken out of it, which is what reads
 	// a list that runs over onto the next page.
 	runIndent, lastNo, nestNum := -1, 0, 0
+	// flat says the volume prints no chapters, which is what lets an unnumbered
+	// line be read as an entry at all. flatNo numbers those entries in the order
+	// they are printed, since the volume numbers none of them itself.
+	flat, flatNo := flatVolume(pm), 0
 
 	// openImplied opens the chapter a one chapter volume never names.
 	//
@@ -977,6 +1046,29 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			// prints none and stands alone at the top of the page.
 			if e.kind == kindPart && top && !hasPage {
 				continue
+			}
+			// A volume with no chapters lists its notes with no numbers at all,
+			// so nothing above this reads a single line of its contents. The two
+			// printings of the Elements of the History of Mathematics are it: the
+			// French lists twenty six titles, each with leaders and a page and
+			// nothing in front, and came out with no chapter and no §§.
+			//
+			// They are read as §§ because that is what the English manifest calls
+			// them, and because commit's § case is the one that calls openImplied,
+			// which opens the single chapter a chapterless volume never names in
+			// its contents. Numbering is by the order they are printed in, which
+			// is the order the English printing numbers the same notes in, so the
+			// two manifests line up note for note.
+			//
+			// hasPage is required. A title with no page cannot be placed, and
+			// without that gate every line of prose in the front matter would
+			// become a note.
+			if flat && e.kind == kindNone && hasPage {
+				if fe, ok := flatEntry(text); ok {
+					flatNo++
+					fe.number = flatNo
+					e = fe
+				}
 			}
 			// Read § point no. before anything downstream looks at the number,
 			// since nested and the run indent both compare one no. against the
@@ -1317,10 +1409,10 @@ const minEntries = 3
 const minRunEntries = 2
 
 // contentsPages keeps the pages that carry a table of contents.
-func contentsPages(pages []string, g Grammar) []string {
+func contentsPages(pages []string, g Grammar, flat bool) []string {
 	var out []string
 	for _, pg := range pages {
-		if readsAsContents(pg, g, minEntries) {
+		if readsAsContents(pg, g, minEntries, flat) {
 			out = append(out, pg)
 		}
 	}
@@ -1329,11 +1421,20 @@ func contentsPages(pages []string, g Grammar) []string {
 
 // readsAsContents reports whether the page carries enough complete contents
 // lines to be one.
-func readsAsContents(pg string, g Grammar, min int) bool {
+//
+// flat is what the volume's page map said, and it has to be asked here and not
+// only at the point the line is read. A contents of unnumbered notes has no
+// line classify will take, so the count came out zero, the page was not a
+// candidate, and the volume was turned away with "no page that looks like a
+// table of contents" before a single line of it was looked at.
+func readsAsContents(pg string, g Grammar, min int, flat bool) bool {
 	n := 0
 	for _, line := range strings.Split(pg, "\n") {
 		text, _, ok := splitTail(line, g.Page)
-		if ok && classify(text, g.Mark).kind != kindNone {
+		if !ok {
+			continue
+		}
+		if classify(text, g.Mark).kind != kindNone || flatLine(text, flat) {
 			n++
 		}
 	}
@@ -1357,8 +1458,10 @@ func readsAsContents(pg string, g Grammar, min int) bool {
 // needs none of it: a page whose layer already reads is left alone, so a reading
 // that came back short or refused cannot take a working contents away.
 //
-// read is keyed by pdf page, counting from one.
-func Overlay(pages []string, read map[int]string) []string {
+// read is keyed by pdf page, counting from one. pm is the volume's page map,
+// which is asked only whether the volume prints chapters at all, and may be nil.
+func Overlay(pages []string, read map[int]string, pm *pagemap.Map) []string {
+	flat := flatVolume(pm)
 	out := make([]string, len(pages))
 	copy(out, pages)
 	for i := range out {
@@ -1366,7 +1469,7 @@ func Overlay(pages []string, read map[int]string) []string {
 		if !ok {
 			continue
 		}
-		if contentsLines(text) > contentsLines(out[i]) {
+		if contentsLines(text, flat) > contentsLines(out[i], flat) {
 			out[i] = text
 		}
 	}
@@ -1380,12 +1483,15 @@ func Overlay(pages []string, read map[int]string) []string {
 // grammar is detected and only has to compare one page against another reading
 // of the same page. A bare "1. Title" at the margin is a § in the 2023 volumes
 // and a no. everywhere else, and either way it is an entry and it counts.
-func contentsLines(pg string) int {
+func contentsLines(pg string, flat bool) int {
 	n := 0
 	for _, line := range strings.Split(pg, "\n") {
 		for _, form := range []PageForm{Bare, Label} {
 			text, _, ok := splitTail(line, form)
-			if ok && classify(text, Pilcrow).kind != kindNone {
+			if !ok {
+				continue
+			}
+			if classify(text, Pilcrow).kind != kindNone || flatLine(text, flat) {
 				n++
 				break
 			}
@@ -1408,9 +1514,10 @@ func contentsLines(pg string) int {
 // out with one § where the volume prints eight, with no problem reported
 // because nothing tells the validator how many §§ a chapter should have.
 func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
+	flat := flatVolume(pm)
 	keep := make([]bool, len(pages))
 	for i, pg := range pages {
-		if !readsAsContents(pg, g, minEntries) {
+		if !readsAsContents(pg, g, minEntries, flat) {
 			continue
 		}
 		e, ok := pm.Lookup(i + 1)
@@ -1420,7 +1527,7 @@ func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
 		if !keep[i] {
 			continue
 		}
-		for j := i + 1; j < len(pages) && !keep[j] && readsAsContents(pages[j], g, minRunEntries); j++ {
+		for j := i + 1; j < len(pages) && !keep[j] && readsAsContents(pages[j], g, minRunEntries, flat); j++ {
 			keep[j] = true
 		}
 	}

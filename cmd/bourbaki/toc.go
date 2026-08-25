@@ -96,7 +96,7 @@ func tocBuild(args []string) error {
 		if err != nil {
 			return fmt.Errorf("%s: %w", b.ID, err)
 		}
-		pages = toc.Overlay(pages, read)
+		pages = toc.Overlay(pages, read, pm)
 		if pages, err = correctContents(pages, errata.ContentsErrata(b.ID)); err != nil {
 			return fmt.Errorf("%s: %w", b.ID, err)
 		}

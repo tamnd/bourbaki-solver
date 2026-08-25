@@ -215,10 +215,10 @@ and normally proceeds from the general to the particular.
 
 3. The Elements are divided into Books.
 `
-	if got := contentsPages([]string{prose}, Grammar{Pilcrow, Bare}); len(got) != 0 {
+	if got := contentsPages([]string{prose}, Grammar{Pilcrow, Bare}, false); len(got) != 0 {
 		t.Errorf("%d pages of prose read as contents", len(got))
 	}
-	if got := contentsPages([]string{contents}, Grammar{Column, Bare}); len(got) != 1 {
+	if got := contentsPages([]string{contents}, Grammar{Column, Bare}, false); len(got) != 1 {
 		t.Errorf("the contents was not recognised, got %d pages", len(got))
 	}
 }
@@ -932,7 +932,9 @@ const evtRead = `Table des matières
 
 func TestAReadingWithThePagesOnItBeatsALayerWithout(t *testing.T) {
 	pages := []string{"front matter", evtLayer, "chapter I"}
-	out := Overlay(pages, map[int]string{2: evtRead})
+	// nil for the page map. Espaces vectoriels topologiques prints chapters, so
+	// there is nothing here the flat reading would change.
+	out := Overlay(pages, map[int]string{2: evtRead}, nil)
 	if out[1] != evtRead {
 		t.Fatalf("the layer was kept over the reading:\n%s", out[1])
 	}
@@ -953,7 +955,7 @@ func TestAReadingThatCarriesLessThanTheLayerIsDropped(t *testing.T) {
 ### 1. Définition d'un espace vectoriel topologique
 ### 2. Espaces normés sur un corps valué`
 	pages := []string{evtRead}
-	out := Overlay(pages, map[int]string{1: asHeadings})
+	out := Overlay(pages, map[int]string{1: asHeadings}, nil)
 	if out[0] != evtRead {
 		t.Fatalf("a reading with no pages in it replaced one that had them:\n%s", out[0])
 	}
