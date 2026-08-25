@@ -29,11 +29,16 @@ func TestExtractionOfCountsWhatIsOnDisk(t *testing.T) {
 	}
 	// A page long enough and balanced enough to pass, a blank, a page nobody
 	// could read, and a page short enough for the short rule to reject.
+	//
+	// The last two sit past ocr.FrontLeaves on purpose. Rule 1 does not run on
+	// the opening leaves of a volume, because a cover has no length to hold it
+	// to, so a fixture that wants to be rejected for being short has to be a
+	// page of the book.
 	write("0001.md", "---\nbook: alg-viii\npdf_page: 1\nmethod: native\nlines: 40\n---\n\n"+
 		"A VIII.1  STRUCTURE OF SEMISIMPLE RINGS  § 1\n\n"+longEnough)
 	write("0002.md", "---\nbook: alg-viii\npdf_page: 2\nmethod: blank\nlines: 0\n---\n")
-	write("0003.md", "---\nbook: alg-viii\npdf_page: 3\nmethod: ocr-failed\nlines: 0\n---\n\nnothing\n")
-	write("0004.md", "---\nbook: alg-viii\npdf_page: 4\nmethod: ocr\nlines: 1\nflags:\n  - diagram\nmanual: true\n---\n\nshort\n")
+	write("0005.md", "---\nbook: alg-viii\npdf_page: 5\nmethod: ocr-failed\nlines: 0\n---\n\nnothing\n")
+	write("0006.md", "---\nbook: alg-viii\npdf_page: 6\nmethod: ocr\nlines: 1\nflags:\n  - diagram\nmanual: true\n---\n\nshort\n")
 
 	got, err := extractionOf(root, book)
 	if err != nil {
@@ -55,14 +60,14 @@ func TestExtractionOfCountsWhatIsOnDisk(t *testing.T) {
 	if got.Methods["native"] != 1 || got.Methods["blank"] != 1 || got.Methods["ocr"] != 1 {
 		t.Errorf("methods %v", got.Methods)
 	}
-	if len(got.Failed) != 1 || got.Failed[0] != 3 {
-		t.Errorf("ocr-failed pages %v, want [3]", got.Failed)
+	if len(got.Failed) != 1 || got.Failed[0] != 5 {
+		t.Errorf("ocr-failed pages %v, want [5]", got.Failed)
 	}
 	if len(got.Flagged) != 1 || got.Manual != 1 {
 		t.Errorf("flagged %v, by hand %d", got.Flagged, got.Manual)
 	}
 	if len(got.Rejected) != 2 {
-		t.Errorf("rejected %v, want pages 3 and 4", got.Rejected)
+		t.Errorf("rejected %v, want pages 5 and 6", got.Rejected)
 	}
 	if got.Rules["short"] != 2 {
 		t.Errorf("rules %v", got.Rules)

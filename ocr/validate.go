@@ -40,6 +40,34 @@ const Illegible = "⟪illegible⟫"
 // percent sits between the two with room on both sides.
 const SparseInk = 0.01
 
+// FrontLeaves is how many leaves at the head of a volume rule 1 does not run
+// on. A cover, a half title, a series title, a blank verso and a title page
+// carry between fifty and a hundred and fifty characters, and no threshold on
+// length will ever accept one, so the rule has to be told not to ask.
+//
+// SparseInk was supposed to cover this and does not, because it was calibrated
+// on born digital leaves. The Springer knight on alg-iv-vii page 3 measures
+// 0.47 percent ink and a scanned cover of the same book measures 4.7 percent,
+// ten times as much, for the same amount of text: the difference is the scan,
+// not the page. Measured across the corpus: of the 61 opening leaves that had
+// no reading, exactly 1 falls under SparseInk, and their median ink is 2.2
+// percent.
+//
+// Raising the ink threshold instead was the obvious move and it does not work.
+// Against 127 body pages rendered across 12 volumes, 0.02 buys 66 percent of
+// the front matter and gives up rule 1 on 2.4 percent of body pages, and 0.03
+// buys 71 percent and gives up 3.1 percent. Both leave a quarter of the front
+// matter still failing, and both start exempting the body pages the rule
+// exists for, since a short body page is a truncated answer and that is the
+// thing worth catching. Ink does not separate these two populations.
+//
+// The leaf number does, exactly. A body page is never leaf 1 to 4 of a volume
+// and a cover is never anything else, so this costs no coverage anywhere it
+// matters and it needs no measurement to be right. Four rather than three
+// because alg-iv-vii prints a half title, a blank verso, the device and the
+// title page before the book starts.
+const FrontLeaves = 4
+
 // Rule names the check that rejected a page. It goes in the queue history and
 // in the failures report, and the retry policy reads it.
 type Rule string
@@ -194,8 +222,11 @@ func Validate(text string, expect Expect, options Options) []Problem {
 
 	body := strings.TrimSpace(text)
 
-	// Rule 1.
-	if !expect.Blank && !expect.Sparse && len([]rune(body)) < MinChars {
+	// Rule 1. PDFPage is one based, and a caller that does not set it leaves it
+	// zero, which must not turn the rule off for a whole volume, so the test is
+	// on a page in range rather than on a page at or below the last leaf.
+	front := expect.PDFPage >= 1 && expect.PDFPage <= FrontLeaves
+	if !expect.Blank && !expect.Sparse && !front && len([]rune(body)) < MinChars {
 		problems = append(problems, Problem{
 			Rule:   RuleShort,
 			Detail: fmt.Sprintf("%d characters, want at least %d", len([]rune(body)), MinChars),
