@@ -933,6 +933,42 @@ func TestSupersedeIgnoresATargetItWasNotAskedAbout(t *testing.T) {
 	}
 }
 
+// A chunk the section no longer has goes, and it goes for the same reason a
+// superseded one does: nobody is going to answer it. The English was edited, the
+// section that had four chunks has two, and chunks three and four are pending
+// with nothing behind them. A lane that leases one cannot find a chunk of that
+// number to give the answer back to, so it fails, and three failures in a second
+// is the whole of what put twenty four dead jobs in this corpus's queue.
+func TestSupersedeDropsAChunkTheSectionNoLongerHas(t *testing.T) {
+	q := open(t)
+	still := New(StageTranslate, "vi-a9dd72/001", "input-1", "prompt-v1")
+	gone := New(StageTranslate, "vi-a9dd72/004", "input-4", "prompt-v1")
+	elsewhere := New(StageTranslate, "vi-563ecb/004", "input-4", "prompt-v1")
+	for _, job := range []Job{still, gone, elsewhere} {
+		if _, err := q.Add(job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dropped, err := q.Supersede(StageTranslate, map[string]string{"vi-a9dd72/001": still.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dropped != 1 {
+		t.Fatalf("dropped %d, want the one chunk the section no longer has", dropped)
+	}
+	if _, state, err := q.Find(StageTranslate, still.ID); err != nil || state != Pending {
+		t.Errorf("the chunk that is still there is %s: %v", state, err)
+	}
+	if _, _, err := q.Find(StageTranslate, gone.ID); !os.IsNotExist(err) {
+		t.Errorf("the chunk the section no longer has is still in the queue: %v", err)
+	}
+	// Chunk four of another section carries the same number and is nobody's to
+	// judge here, because keep says nothing about that section at all.
+	if _, state, err := q.Find(StageTranslate, elsewhere.ID); err != nil || state != Pending {
+		t.Errorf("another section's chunk four is %s: %v", state, err)
+	}
+}
+
 // A cut down model gets one ask at a chunk and no second one. Its lane leases
 // what nobody has answered wrongly yet, the chunk it fails goes back on the pile
 // for a lane that can do better, and its own next lease passes over it rather

@@ -237,6 +237,40 @@ func chunksOutstanding(root, lang, promptHash string, j job, redoSmall bool) int
 	return left
 }
 
+// sweep drops the pending jobs whose chunk no longer exists, and does nothing
+// else to the queue.
+//
+// It is plan's first three lines and none of the rest. A run reaches those lines
+// one section at a time, and it reaches them only for the sections it is about
+// to work on, so a queue that has been re-chunked carries the litter of every
+// section nobody has come back to. Measured on the Vietnamese side of this
+// corpus, 3,487 of 5,124 pending jobs were chunks that no longer existed, spread
+// over 257 sections that three lanes were going to reach one at a time.
+//
+// The litter is not inert. A lane leases by group, so it takes the chunk, cannot
+// find one of that number to give the answer back to, fails, and three failures
+// in the same second is what dead means. All twenty four dead translate jobs in
+// this corpus were chunks 10 to 33 of a section that has nine.
+func sweep(q *queue.Queue, lang, promptHash string, jobs []job) (int, error) {
+	dropped := 0
+	for _, j := range jobs {
+		keep := map[string]string{}
+		for _, c := range j.chunks {
+			target := translateTarget(lang, j.source, c.Index)
+			keep[target] = queue.NewID(queue.StageTranslate, target, chunkInput(c.Body, j.terms), promptHash)
+		}
+		n, err := q.Supersede(queue.StageTranslate, keep)
+		if err != nil {
+			return dropped, err
+		}
+		if n > 0 {
+			fmt.Printf("%-64s %4d dropped\n", j.source, n)
+		}
+		dropped += n
+	}
+	return dropped, nil
+}
+
 // plan decides, for every chunk of one section, whether the answer is in hand,
 // whether the chunk goes on the queue, and whether it is out of attempts.
 //

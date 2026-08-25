@@ -79,6 +79,8 @@ about a fifth of the words.
   -dry           print the first question and stop, without asking anything
   -stale         list what needs translating, how many chunks of it are still
                  to ask for and why, fewest chunks first, and ask nothing
+  -sweep         drop the queued chunks the sections no longer have, which is
+                 what a re-cut of a section leaves behind, and ask nothing
   -check-glossary  hold the translations already on disk to the glossary, term
                  by term, and ask nothing
   -all           with -check-glossary, every term and not only the missed ones
@@ -182,6 +184,7 @@ func runTranslate(args []string) error {
 	routeFile := fs.String("routes", "", "route file")
 	dry := fs.Bool("dry", false, "print the first question and stop")
 	stale := fs.Bool("stale", false, "list what needs translating and why, and ask nothing")
+	sweepQueue := fs.Bool("sweep", false, "drop the queued chunks the sections no longer have, and ask nothing")
 	checkGlossary := fs.Bool("check-glossary", false, "hold what is on disk to the glossary and ask nothing")
 	all := fs.Bool("all", false, "with -check-glossary, every term and not only the missed ones")
 	keep := fs.Bool("keep", false, "leave the questions on the boxes")
@@ -257,6 +260,27 @@ func runTranslate(args []string) error {
 	promptHash, err := prompt.TranslateSHA256(*from, *lang)
 	if err != nil {
 		return err
+	}
+	// The sweep wants every section and not the stale ones. A section that is
+	// translated and current still has the chunks a longer cut of it left behind
+	// in pending, and those are the ones nothing is ever going to come back for:
+	// no run will plan that section again, so nothing will supersede them. On
+	// this corpus they were 406 of the 3,487.
+	if *sweepQueue {
+		all, _, err := translateJobs(root, g, *from, *lang, tree, *book, *chapter, *file, promptHash, true, *redoSmall)
+		if err != nil {
+			return err
+		}
+		q, err := queue.Open(*queueRoot)
+		if err != nil {
+			return err
+		}
+		dropped, err := sweep(q, *lang, promptHash, all)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("translate: %d queued chunks dropped over %d sections\n", dropped, len(all))
+		return nil
 	}
 	jobs, skipped, err := translateJobs(root, g, *from, *lang, tree, *book, *chapter, *file, promptHash, *force, *redoSmall)
 	if err != nil {
