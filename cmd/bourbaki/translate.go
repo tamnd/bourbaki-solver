@@ -900,14 +900,30 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 	// Every rule here is about order, and a chunk that is right on its own can
 	// still land in the wrong place if a lane returned late, so this is what
 	// says the section is a section.
+	//
+	// -raw waives this the same way it waives a chunk, and it has to, or the
+	// waiver buys nothing on the files that cost the most. Section 4 of Algebra
+	// chapter I is twenty six chunks. Every one of them was answered, every one
+	// of them passed or was taken raw, and the file was still thrown away at the
+	// join over 1325 math spans against 1304, which is a whole afternoon of eight
+	// lanes spent for an empty tree. The counts are true and they are written
+	// down. What is on disk after this is a section that reads as a section and
+	// fails the same arithmetic, and that is a thing L08 and L10 can mend.
+	//
+	// The chunks that never came back are refused above and stay refused. A file
+	// short a chunk is short a passage, and no audit of the text finds a passage
+	// that is not in it.
 	if ps := translate.Audit(lang, j.body, body); len(ps) > 0 {
-		return "", "", ps
+		if !raw {
+			return "", "", ps
+		}
+		for _, p := range ps {
+			logf("%s: taken raw at the join, %s: %s", j.source, p.Rule, p.Msg)
+		}
 	}
 	return body, modelsUsed(models), nil
 }
 
-// askChunk asks once, and asks again with the complaint if the first answer did
-// not pass.
 // takeRaw drops the complaints about a chunk and logs each one, when the run was
 // told to take what it was given.
 //
@@ -928,6 +944,8 @@ func takeRaw(raw bool, bad []translate.Problem, j job, c translate.Chunk, logf f
 	return kept
 }
 
+// askChunk asks once, and asks again with the complaint if the first answer did
+// not pass.
 func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, from, lang string, j job, c translate.Chunk, keep, raw bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	terms := g.For(j.meta.Book)
 	// A chunk with nothing in it to translate is not put to anybody. See
