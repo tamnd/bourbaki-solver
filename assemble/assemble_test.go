@@ -1060,3 +1060,48 @@ func TestSameTitle(t *testing.T) {
 		}
 	}
 }
+
+// Three volumes are not divided into chapters. Elements d'histoire des
+// mathematiques is a run of twenty seven historical notes and Varietes
+// differentielles et analytiques is a fascicule de resultats, and neither sets
+// a chapter heading anywhere, because neither has a chapter. The contents wraps
+// each in one chapter all the same, since the assembler hangs everything off
+// one, and that chapter is the manifest's own and not the printing's.
+//
+// Asked for a marker no page has, the assembler refused all three volumes and
+// they came out of a build with nothing in them. Nominal says the chapter is
+// not the printing's, and the marker and the front matter are then both what
+// the printing says they are, which is absent.
+func TestAChapterThePrintingDoesNotHaveOpensOnItsFirstSection(t *testing.T) {
+	ch, pages := smallChapter()
+	ch.Nominal = true
+	first := pages[18]
+	first.Body = strings.TrimPrefix(first.Body, "## CHAPTER VIII SEMISIMPLE MODULES AND RINGS\n\n")
+	pages[18] = first
+
+	got, err := Chapter("alg", "en", ch, pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d pieces, want § 1 alone", len(got))
+	}
+	if got[0].Front {
+		t.Errorf("the one piece is the front matter: %+v", got[0])
+	}
+	if got, want := got[0].Name(), "§ 1"; got != want {
+		t.Errorf("the one piece is %q, want %q", got, want)
+	}
+}
+
+// The same chapter with the marker still on the page and nothing saying the
+// chapter is nominal is the ordinary case, and it keeps its front matter.
+func TestAChapterThePrintingDoesHaveStillWantsItsMarker(t *testing.T) {
+	ch, pages := smallChapter()
+	first := pages[18]
+	first.Body = strings.TrimPrefix(first.Body, "## CHAPTER VIII SEMISIMPLE MODULES AND RINGS\n\n")
+	pages[18] = first
+	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+		t.Fatal("a chapter with no marker on its page assembled")
+	}
+}

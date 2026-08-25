@@ -281,11 +281,16 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 		out = append(out, p)
 		body = append(body, span{page: page, off: off, piece: len(out) - 1})
 	}
-	off, _, err := find(pages, ch.PDFPage, pr.chapter)
-	if err != nil {
-		return nil, nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
+	// A chapter the printing does not have gets no marker looked for and no
+	// front matter opened, since the page the contents points at opens on the
+	// first section. See corpus.Chapter.Nominal.
+	if !ch.Nominal {
+		off, _, err := find(pages, ch.PDFPage, pr.chapter)
+		if err != nil {
+			return nil, nil, fmt.Errorf("chapter %s: %w", ch.Numeral, err)
+		}
+		open(Piece{Front: true}, ch.PDFPage, off)
 	}
-	open(Piece{Front: true}, ch.PDFPage, off)
 	for _, s := range ch.Sections {
 		want := sectionHeads(s.Number)
 		if s.Appendix {
