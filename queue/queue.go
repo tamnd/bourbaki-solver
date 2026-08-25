@@ -668,6 +668,21 @@ func (q *Queue) Reset(stage Stage, id string) (bool, error) {
 // keep and whose id is not the one kept is work nobody wants any more, and it is
 // removed.
 //
+// So is a pending job in one of keep's groups whose target is not in keep at
+// all. That target is a piece of work the caller no longer has: a section cut
+// into thirteen chunks today was cut into thirty when the English was longer,
+// and chunks fourteen to thirty are still sitting in pending with nothing behind
+// them. A lane leases one, chunkOf cannot find a chunk of that number, the job
+// fails, and three failures in the same second is what dead means, so the queue
+// fills with dead jobs that were never real work. Measured on this corpus, all
+// twenty four dead translate jobs were this and nothing else.
+//
+// The group is what makes it safe to say "not in keep at all". keep is built
+// from one section and pending holds every section, so dropping everything
+// outside it would empty the queue. Inside a group the caller has just listed
+// the whole of the work, so a target of that group it did not list is a target
+// it does not have.
+//
 // This is the cost of keying a job on its content. The id is the target and the
 // input and the instructions together, which is what makes an unchanged chunk
 // the same job across runs, and it also means that editing the instructions
@@ -687,6 +702,10 @@ func (q *Queue) Supersede(stage Stage, keep map[string]string) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	groups := make(map[string]bool, len(keep))
+	for target := range keep {
+		groups[GroupOf(target)] = true
+	}
 	dropped := 0
 	for _, id := range ids {
 		job, err := q.read(Pending, stage, id)
@@ -697,7 +716,10 @@ func (q *Queue) Supersede(stage Stage, keep map[string]string) (int, error) {
 			return dropped, err
 		}
 		want, ok := keep[job.Target]
-		if !ok || want == id {
+		switch {
+		case ok && want == id:
+			continue
+		case !ok && !groups[GroupOf(job.Target)]:
 			continue
 		}
 		if err := os.Remove(q.path(stage, Pending, id)); err != nil && !os.IsNotExist(err) {
