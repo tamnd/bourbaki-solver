@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -666,6 +667,35 @@ func TestNormalisingATranslationLeavesTheAsterisksThatAreNotTheMark(t *testing.T
 	} {
 		if got := textguard.Normalise(body); got != body {
 			t.Errorf("normalising changed a line it should not have:\n got %q\nwant %q", got, body)
+		}
+	}
+}
+
+// The second ask goes to the same host, and for every transport failure but one
+// that is worth doing: measured on the usage log, the second ask was answered
+// half the time after a Cloudflare interstitial and a third of the time after a
+// timeout. After out of quota it was answered no times at all, 2,538 of them,
+// which is 2,538 messages spent against a quota that was already gone.
+func TestAHostThatSaysItIsOutOfQuotaIsNotAskedTwice(t *testing.T) {
+	for _, s := range []string{
+		// What the codex command on this machine says, which is 5,165 of the
+		// 5,169 in the log, and what a gateway says instead.
+		"question tr-vi-ea69fe-001-1 on codex: You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/",
+		"question tr-vi-373c9d-001-1 on zen-mimo: chat completions returned 429 Too Many Requests: Error from provider (Console): Rate limit exceeded. Please try again later.",
+	} {
+		if !outOfTurns(errors.New(s)) {
+			t.Errorf("a host out of turns would be asked again: %q", s)
+		}
+	}
+	// The three that are worth a second ask. Losing any of these to a wider
+	// match costs the chunks that only ever came back on the retry.
+	for _, s := range []string{
+		"question tr-vi-014afd-002-1 on server3 stopped without writing an answer: browser: ERROR Cloudflare is holding this host on an interstitial. It is the IP, not the account",
+		"question tr-vi-6c822f-010-1 on server2: no answer after 12m21s, giving up",
+		"context canceled: node:events:487 throw er; // Unhandled 'error' event Error: write EPIPE at afterWriteDispatched",
+	} {
+		if outOfTurns(errors.New(s)) {
+			t.Errorf("a transport failure worth retrying was read as an empty quota: %q", s)
 		}
 	}
 }

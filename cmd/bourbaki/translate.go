@@ -943,6 +943,14 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 				// those minutes are spent after the person has pressed Ctrl-C.
 				break
 			}
+			// A host that has just said it is out of quota will say it again,
+			// and saying it again is another message off a quota that is
+			// already gone. See outOfTurns for what the log says about the
+			// other transport failures, which are all still worth a second
+			// ask.
+			if outOfTurns(err) {
+				break
+			}
 			continue
 		}
 		// Both halves are kept before either is judged, for the reason the
@@ -1046,6 +1054,36 @@ func transportOnly(bad []translate.Problem) bool {
 		}
 	}
 	return true
+}
+
+// outOfTurns says the far end has just told us it has nothing left to spend,
+// which is a state of the account and not of the question.
+//
+// The second ask in askChunk is worth having and the measurement says so. Of the
+// first asks that died in transport and were followed by a second to the same
+// host, the second one was answered 49.4 per cent of the time after a Cloudflare
+// interstitial, 32.0 per cent after a timeout and 7.5 per cent after some other
+// transport error. All three stay.
+//
+// Out of quota is the one that never is. 2,538 second asks went to a host that
+// had said it was out of quota a moment earlier, and not one of them was
+// answered. 1,838 of those were in a single day. They cost 271 minutes of lane
+// time, and worse than the time, they were 2,538 messages spent against a quota
+// that was already gone, which is the budget ChunkSpans is written around: the
+// fleet is billed by the message, and a third to a half of the messages a day
+// die on account state before the question is read.
+//
+// Both shapes are here because both occur in the usage log. The codex command on
+// this machine says it in words and is 5,165 of the 5,169 occurrences, and a
+// gateway says 429 with a sentence after it. Neither is worth a second ask
+// inside the same call: the caller retires the lane as soon as this comes back,
+// because every complaint is a transport one, and the chunk goes to the queue
+// with its attempts intact for a route that still has turns.
+func outOfTurns(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "usage limit") ||
+		strings.Contains(s, "rate limit") ||
+		strings.Contains(s, "too many requests")
 }
 
 // refusedBefore is what the answers this chunk already has on disk are refused
