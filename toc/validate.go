@@ -40,7 +40,27 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 			add(c.Numeral, 0, "the contents lists a chapter the page map never found")
 			continue
 		}
-		if c.Page != sp.FirstPage {
+		// A span that opens on pdf page 1 is not evidence of where the chapter
+		// opens. Nothing marks the end of the front matter, so the fit hands
+		// every leaf before chapter II to chapter I, cover included, and the
+		// span then starts on the first leaf of the file rather than on the
+		// page the chapter is printed on.
+		//
+		// ac-i-iv-fr is the case. The page map runs chapter I from pdf 1 and
+		// calls that printed page 3, and the contents says printed 13 at pdf
+		// 11. The numbering is not in dispute: printed is pdf plus 2 on both
+		// sides, and pdf 9, 10 and 12 carry that in a printed head. What is in
+		// dispute is only where the chapter begins, and the contents is the one
+		// that was told, while the map is filling in a boundary nothing gave
+		// it. The map also reports 0 front matter for the volume, and every
+		// other volume in the corpus reports between 7 and 29, which is the
+		// same fact said another way.
+		//
+		// The test is on pdf page 1 rather than on the front matter count
+		// because it needs no measurement to be right. A chapter of a bound
+		// volume never opens on the first leaf of the file, that leaf is the
+		// cover, so this gives up nothing anywhere it matters.
+		if c.Page != sp.FirstPage && sp.FirstPDF > 1 {
 			add(c.Numeral, 0, "the contents starts it at printed page %d, the page map at %d",
 				c.Page, sp.FirstPage)
 		}
