@@ -30,6 +30,7 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/mathtex"
+	"github.com/tamnd/bourbaki-solver/textguard"
 	"github.com/tamnd/bourbaki-solver/typography"
 )
 
@@ -233,6 +234,18 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 // agree.
 func unstraddle(body string) string {
 	out, _ := mathtex.Unstraddle(body)
+	// Tight, because the repair is the one thing in the pipeline that writes a
+	// delimiter of its own rather than copying one off a page. A span it cuts in
+	// two keeps the spaces that stood either side of the bracket it moved, so
+	// "$... u_2 ) u_1$)" comes back as "$... u_2$ ) $ u_1$)", padded, and the
+	// corpus writes an inline span tight. Nothing else here needs it: the pages
+	// are tight, and a body copied off a tight page is tight already.
+	//
+	// It cannot go in Unstraddle itself. That function refuses its own output
+	// unless everything but the dollars is unchanged, which is what keeps a
+	// bracket repair from quietly editing the text, and taking a space out
+	// would trip exactly that guard.
+	out, _ = textguard.Tighten(out)
 	// After, because the repair moves the space at the head of what is left of a
 	// span outside the delimiter, and that space can land at the end of a line.
 	return corpus.NormalizeBody(out)

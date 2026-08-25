@@ -51,6 +51,7 @@ Repairs the committed Markdown in the ways that need no PDF and no model.
 commands:
   dollars   write a formula set between brackets between dollars instead
   stray     take out a delimiter that opens mathematics and closes nothing
+  padding   write an inline formula tight against its dollars, $K[[T]]$
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
   notin     put the stroke back on a relation sign that came back struck through
@@ -68,8 +69,10 @@ this repository, because every tool here finds the mathematics by its dollars,
 so until the delimiters are turned round the three repairs after it cannot see
 inside it and neither can the audit. Then run the next three in that order.
 Everything after an unclosed delimiter reads as mathematics, so stray comes next
-and the two after it will not touch a span whose end they cannot see, and parens
-comes before math so that math reads the spans as they will be rather than as
+and the four after it will not touch a span whose end they cannot see. padding
+refuses a body with a span still open outright, so it wants stray to have been
+through first or it will skip the file and say nothing about it. parens comes
+before math so that math reads the spans as they will be rather than as
 they are. notin runs after those, since it works inside the spans and wants them
 closed and whole. star runs there too and for the same reason from the other
 side, since it works everywhere the spans are not. elision runs after those two
@@ -269,6 +272,50 @@ into the corpus the way the OCR and the mender do, and it was the one of the
 three that did not put what it wrote into the corpus's typography first. It does
 now, so a solution written after this needs nothing done to it, and this command
 is for the ones written before.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
+const fixPaddingUsage = `usage: bourbaki fix padding [flags]
+
+Writes an inline formula tight against its dollars, $K[[T]]$ and not $ K[[T]] $.
+
+TeX does not care either way. Whitespace means nothing in math mode, so the two
+spell the same formula and the site sets them identically, which is why the
+padded form got in and stayed: nothing anybody looked at ever came out
+different.
+
+GitHub does care. It renders $ ... $ in a Markdown file by pandoc's rule, where
+the opening dollar must not be followed by whitespace and the closing dollar
+must not be preceded by it, so a padded span is not a formula there at all. It
+is four literal characters sitting in a sentence, and the corpus is read on
+github.com far more than it is read on the site.
+
+The corpus cares too. The mathematics arrived by three routes, the OCR, the
+mender and the translator, and each of them pads differently, so the same
+formula is written two ways in two languages of the same section and a grep for
+it has to be written twice. This settles on one.
+
+Displays are left alone. A display is set on lines of its own and the whitespace
+inside it is what puts it there.
+
+A body with a span left open is left alone as well, and reported by M01. The
+offsets after a delimiter that never closes are not the spans anybody meant, so
+trimming by them would move dollars around in the prose.
+
+It walks the same three trees fix dollars walks, pages/ and content/ and
+content/solutions, and moves a translation on with its source.
+
+It reads the titles as well as the bodies, since a § called "THE TOPOLOGY OF
+$ \mathbf{C} $" is padded wherever it is written down: the running head of a
+page, the section_title and subsections of a section, and the chapter, § and no.
+titles of manifests/toc/. They have to move together, because fix opening writes
+a heading from the title in the manifest and then matches it against the heading
+on the page, and one side tightened without the other would never match again.
 
 Run bourbaki assemble afterwards, or the section files still hold the old text.
 
@@ -624,6 +671,8 @@ func runFix(args []string) error {
 	switch args[0] {
 	case "dollars":
 		return fixDollars(args[1:])
+	case "padding":
+		return fixPadding(args[1:])
 	case "math":
 		return fixMath(args[1:])
 	case "stray":
@@ -2063,6 +2112,184 @@ func fixDollars(args []string) error {
 		fmt.Println("fix dollars: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
+}
+
+// fix padding is fix dollars over the same three trees with the other half of
+// the same question: dollars settles which delimiter a formula is written
+// between, and this settles whether it is written tight against it. They are
+// kept apart because dollars has to run first. Tighten finds its spans by their
+// dollars, so a formula still written \( ... \) is not a span it can see, and
+// running this before the delimiters are turned round would leave exactly those
+// padded.
+func fixPadding(args []string) error {
+	fs := flag.NewFlagSet("fix padding", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixPaddingUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, spans int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := textguard.Tighten(f.Body)
+		// The running head is the one field of a page's front matter that
+		// carries mathematics, and 1784 of them carry a padded span: the head
+		// of a § called "THE TOPOLOGY OF $ \mathbf{C} $" is read off the page
+		// the same way the body is and pads the same way. It matters more than
+		// its share of the corpus, because fix opening reads a heading back out
+		// of this field, so a head written one way and a heading written the
+		// other stop matching.
+		head, m := textguard.Tighten(f.Meta.RunningHead)
+		if n+m == 0 || (body == f.Body && head == f.Meta.RunningHead) {
+			return nil
+		}
+		changed++
+		spans += n + m
+		if *check {
+			fmt.Printf("%s  %d spans\n", rel(root, path), n+m)
+			return nil
+		}
+		f.Body, f.Meta.RunningHead = body, head
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	files, content, followed, err := repairContent(root, *check, "spans", textguard.Tighten)
+	if err != nil {
+		return err
+	}
+
+	titled, titles, err := tightenTitles(root, *check)
+	if err != nil {
+		return err
+	}
+
+	var solutions, solved int
+	err = eachSolution(root, "", func(path string, f *corpus.File[corpus.SolutionFrontMatter]) error {
+		solutions++
+		body, n := textguard.Tighten(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		solved++
+		if *check {
+			fmt.Printf("%s  %d spans\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	verb := "closed up"
+	if *check {
+		verb = "would close up"
+	}
+	fmt.Printf("fix padding: %d pages read, %s %d spans on %d of them\n", pages, verb, spans, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix padding: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	fmt.Printf("fix padding: %d solutions read, %d of them changed\n", solutions, solved)
+	fmt.Printf("fix padding: %s %d titles on %d files\n", verb, titles, titled)
+	if changed > 0 && !*check {
+		fmt.Println("fix padding: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+// tightenTitles is the same repair over the titles rather than the bodies.
+//
+// A title is not prose and it is not a body, and it goes in four places: the
+// section_title, chapter_title and book_title of a section's front matter, the
+// subsections list under them, and the chapter, § and no. titles of
+// manifests/toc/. All four are read off the same printed contents page as the
+// running head and pad the same way, and all four are printed to a reader, in
+// the contents of the site and in the contents of a book.
+//
+// They have to move together with the headings in the bodies, which is the
+// reason this is here rather than in a command of its own. manifests/toc/ is
+// the authority fix opening and fix heading work to: an opening is written
+// from the title in the manifest and then matched against the heading on the
+// page, so a manifest tightened without the pages, or pages tightened without
+// the manifest, would leave the two spellings on either side of a comparison
+// that has to come out equal.
+func tightenTitles(root string, check bool) (files, titles int, err error) {
+	at := func(s *string) {
+		tight, n := textguard.Tighten(*s)
+		if n == 0 {
+			return
+		}
+		titles += n
+		if !check {
+			*s = tight
+		}
+	}
+
+	err = eachSection(root, "", func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
+		was := titles
+		at(&f.Meta.BookTitle)
+		at(&f.Meta.ChapterTitle)
+		at(&f.Meta.SectionTitle)
+		for i := range f.Meta.Subsections {
+			at(&f.Meta.Subsections[i].Title)
+		}
+		if titles == was {
+			return nil
+		}
+		files++
+		if check {
+			fmt.Printf("%s  %d titles\n", rel(root, path), titles-was)
+			return nil
+		}
+		return f.Write(path)
+	})
+	if err != nil {
+		return files, titles, err
+	}
+
+	m, err := corpus.LoadTOC(root)
+	if err != nil {
+		return files, titles, err
+	}
+	was := titles
+	for i := range m.Books {
+		for j := range m.Books[i].Chapters {
+			c := &m.Books[i].Chapters[j]
+			at(&c.Title)
+			for k := range c.Subsections {
+				at(&c.Subsections[k].Title)
+			}
+			for k := range c.Sections {
+				s := &c.Sections[k]
+				at(&s.Title)
+				for l := range s.Subsections {
+					at(&s.Subsections[l].Title)
+				}
+			}
+		}
+	}
+	if titles == was {
+		return files, titles, nil
+	}
+	files++
+	if check {
+		fmt.Printf("manifests/toc/  %d titles\n", titles-was)
+		return files, titles, nil
+	}
+	return files, titles, m.Save(root)
 }
 
 func fixStar(args []string) error {
