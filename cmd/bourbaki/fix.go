@@ -1687,6 +1687,26 @@ func fixOpening(args []string) error {
 						continue
 					}
 					if got, ok := toc.SectionTitle(lines, s.Number); ok {
+						// A volume that heads a section one way and lists it
+						// another in its own contents is disagreeing with
+						// itself, and no rule here can tell which of the two
+						// it meant. So it is named and left, unless somebody
+						// has already looked at both and written the page
+						// down in assemble.differs, in which case the words
+						// are settled and only the level is missing. The
+						// heading then goes back in the page's own words, put
+						// to the page's own title rather than to the
+						// contents, which is what the record says to keep.
+						if assemble.Differs(b.ID, s.PDFPage) {
+							if from, to, head, done := toc.SectionOpening(lines, s.Number, got); done {
+								lines = append(lines[:from], append([]string{head}, lines[to+1:]...)...)
+								edits[s.PDFPage] = lines
+								sections++
+								fmt.Printf("%s/%04d.md  %s   the contents calls it %q\n",
+									b.ID, s.PDFPage, head, s.Title)
+								continue
+							}
+						}
 						differ++
 						fmt.Printf("%s chapter %s § %d: pdf page %d calls it %q, the table of contents calls it %q\n",
 							b.ID, ch.Numeral, s.Number, s.PDFPage, got, s.Title)
