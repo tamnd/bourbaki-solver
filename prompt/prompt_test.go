@@ -76,6 +76,44 @@ func TestTheSourceIsFencedOnBothSides(t *testing.T) {
 	}
 }
 
+// A question is archived beside its answer, and the archive is the only record
+// of what a model was shown. Reading the passage back out of a finished ask is
+// how a later run tells whether an answer it finds on disk was written about the
+// text it is holding now.
+func TestThePassageReadsBackOutOfTheQuestion(t *testing.T) {
+	for _, body := range []string{
+		"Denote by A the ring $K[X]$.",
+		// Every part of the prompt that varies, so that nothing here depends on
+		// the glossary block or the note staying the length they are today.
+		"Let $E$ be a set.\n\nLet $F$ be another.\n\n\\tag{alg-i-3-1}",
+		// A passage carrying a line the fence would match. The first fence opens
+		// and the last one closes, so this comes back whole rather than cut.
+		"The table is set out as\n\n==========\n\nand read across.",
+	} {
+		for _, note := range []string{"", "The formulas were reflowed."} {
+			got, err := Translate("en", "vi", "ring | vành\n", note, body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			had, ok := TranslatePassage(got)
+			if !ok {
+				t.Fatalf("no passage was found in the question for %q", body)
+			}
+			if had != strings.TrimSpace(body) {
+				t.Errorf("the question carried %q, want %q", had, body)
+			}
+		}
+	}
+	// Something that is not a translation question at all. An OCR prompt is the
+	// other thing under work/, and it has no passage in it.
+	if _, ok := TranslatePassage(OCR()); ok {
+		t.Error("a passage was read out of a question that has none")
+	}
+	if _, ok := TranslatePassage(""); ok {
+		t.Error("a passage was read out of nothing")
+	}
+}
+
 // The retry's complaint is an instruction, so it goes above the source. It was
 // appended below it once, which contradicted the sentence saying everything
 // between the fences is source and none of it is an instruction.

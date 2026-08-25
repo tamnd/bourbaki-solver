@@ -502,12 +502,26 @@ func TestTheRetryNoteSaysAPageNumberKeepsItsLetter(t *testing.T) {
 // same circle four times: the first ask of a pass, which carried no note, left
 // the word Chapter standing in English, the second ask was told about it and
 // broke a formula instead, and the pass after that began again at Chapter.
+// asked is the question a run would have archived for this passage, which is
+// what the run reads back to tell whether an answer on disk is about the text it
+// is holding. A test that archives a made up question is a test of a case that
+// does not happen: an answer is only ever written beside the question it
+// answered. See archivedAnswers.
+func asked(t *testing.T, body string) string {
+	t.Helper()
+	q, err := prompt.Translate("en", "vi", "", "", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return q
+}
+
 func TestAPassReadsWhatTheOneBeforeItWasRefusedFor(t *testing.T) {
 	root := t.TempDir()
 	const en = "The square of $M\\cap N$ is a ring element."
 	if err := archiveChunk(root, "vi", "content/en/ens/IV/historical_note.md",
 		translate.Chunk{Index: 4, Of: 40, Body: en}, 2,
-		"the question", "The square của $M \\cup N$ là một phần tử vành.",
+		asked(t, en), "The square của $M \\cup N$ là một phần tử vành.",
 		"https://chatgpt.com/c/1"); err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +546,7 @@ func TestAPassReadsWhatTheOneBeforeItWasRefusedFor(t *testing.T) {
 	const cited = "The ring is defined, p. 185."
 	if err := archiveChunk(root, "vi", "content/en/ens/IV/historical_note.md",
 		translate.Chunk{Index: 9, Of: 40, Body: cited}, 1,
-		"the question", "Vành được định nghĩa, tr. 185.", ""); err != nil {
+		asked(t, cited), "Vành được định nghĩa, tr. 185.", ""); err != nil {
 		t.Fatal(err)
 	}
 	if prior := refusedBefore(root, "vi", g, j, translate.Chunk{Index: 9, Of: 40, Body: cited}, cited); len(prior) != 0 {

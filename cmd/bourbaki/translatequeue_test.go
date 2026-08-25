@@ -164,6 +164,58 @@ func TestAChangeOfInstructionsIsANewChunk(t *testing.T) {
 	}
 }
 
+// Where a section is cut is not fixed either, and this is the test that says
+// moving it is safe to do.
+//
+// translate.ChunkChars and ChunkSpans are the only handle there is on how much
+// goes over in one question, and how much goes over in one question is most of
+// what decides whether the fleet answers in seventy seconds or twelve minutes.
+// Moving either of them renumbers every chunk of every section, and the answers
+// on disk are filed by section and chunk number, so the question worth having an
+// answer to before anybody touches those numbers is what happens to the eleven
+// thousand answers already written.
+//
+// What happens is that they are not used, and that is the right thing. An answer
+// is taken back only when chunkInput matches, and chunkInput is the body and the
+// terminology hashed, so a chunk cut differently is a different question and is
+// asked again. The cost is a re-split throwing the cache away, which is a bill
+// in fleet time. The failure it is not is a run pairing chunk seven's answer
+// with chunk seven's new text and writing a section half of which translates
+// something else.
+func TestASectionCutDifferentlyIsAskedAgainRatherThanMispaired(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	for _, c := range j.chunks {
+		if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: c.Index, Of: c.Of,
+			Input: chunkInput(c.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6",
+			Text: viOf(c.Body)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Every answer is in hand while the split is the one they were written
+	// under, which is what makes the second half of this test mean anything.
+	have, queued, _, err := plan(q, root, "vi", "prompt-v1", j, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) != len(j.chunks) || queued != 0 {
+		t.Fatalf("have %d of %d and queued %d, want every answer taken back", len(have), len(j.chunks), queued)
+	}
+
+	// The same section, the same source, cut into one chunk instead of three.
+	// Chunk 1 exists under both splits and is a different piece of English under
+	// each, which is the pairing that has to fail.
+	whole := j
+	whole.chunks = []translate.Chunk{{Index: 1, Of: 1, Body: strings.TrimSpace(j.body)}}
+	have, queued, _, err = plan(q, root, "vi", "prompt-v1", whole, false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(have) != 0 || queued != 1 {
+		t.Fatalf("have %d and queued %d, want the chunk asked again under the new split", len(have), queued)
+	}
+}
+
 // An answer written before the prompt was recorded cannot say what it was asked
 // for, so it is asked again rather than trusted.
 func TestAnAnswerWithNoInstructionsRecordedIsAskedAgain(t *testing.T) {
@@ -326,7 +378,7 @@ func TestAnInterruptedChunkIsNotAskedTwice(t *testing.T) {
 	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "element", VI: "phần tử"}}}
 	asks := 0
 	_, _, bad := askChunk(ctx, t.TempDir(), ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false"},
-		g, "en", "vi", "vi", j, j.chunks[0], false, chunkDeadline, func(format string, args ...any) { asks++ })
+		g, "en", "vi", j, j.chunks[0], false, chunkDeadline, func(format string, args ...any) { asks++ })
 	if asks != 1 {
 		t.Errorf("the chunk was asked %d times, want the one that was interrupted", asks)
 	}
