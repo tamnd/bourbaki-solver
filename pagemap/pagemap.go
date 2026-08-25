@@ -1538,16 +1538,17 @@ func chapterOrder(chapters []string) []string {
 	return out
 }
 
-// WholeVolume is the numeral of the span a volume that prints no chapters
-// gets. Three volumes are in that state: the two printings of the Elements of
-// the History of Mathematics, which are a flat run of numbered notes, and the
-// French Varietes differentielles et analytiques, which is a fascicule de
-// resultats and runs § 1 to § 7 with no chapter over them. All three carry
-// chapters: [] in manifests/books.yaml, which is the volume saying so, and the
-// chapter column of all three page maps is empty on every row. Two of the three
-// get the span. The fascicule does not, because the scan holds both fascicules
-// bound together and its numbering starts over at the second, which is a
-// separate thing to sort out and is described below.
+// WholeVolume is the numeral of the first span a volume that prints no chapters
+// gets, and the only one where the volume is a single run of printed pages.
+// Three volumes are in that state: the two printings of the Elements of the
+// History of Mathematics, which are a flat run of numbered notes, and the French
+// Varietes differentielles et analytiques, which is a fascicule de resultats and
+// runs § 1 to § 7 with no chapter over them. All three carry chapters: [] in
+// manifests/books.yaml, which is the volume saying so, and the chapter column of
+// all three page maps is empty on every row. The two histories are one run and
+// so get this span and no other. The Varietes scan holds both fascicules bound
+// together and starts its numbering over at the second, so it gets two, named
+// "1" and "2" in the order they are bound.
 //
 // The span is ours and not the book's. It is named with an arabic numeral for
 // that reason, since a chapter Bourbaki prints is always a roman one, so
@@ -1581,38 +1582,45 @@ const WholeVolume = "1"
 // nothing to say about chapters. Whether the body is one span is a question the
 // rows can settle on their own.
 //
-// The body has to run forward to be one span, which is the whole of the test. A
-// volume bound from two fascicules restarts its numbering part way through, so
-// its printed pages go 97, 98 and then 6, and calling that one span would claim
-// it covers 97 down to 7. It would also make a printed page ambiguous, since
-// each of the two fascicules prints its own page 50. The French Varietes is that
-// volume: pdf 96 is where paragraphes 8 a 15 begin and the count goes back to 6.
-// Refusing costs such a volume nothing it had before, since it is left exactly
-// where an empty chapter list used to leave it, and what it needs is a span per
-// fascicule rather than one over both.
+// A volume bound from more than one fascicule gets a span each. Its printed
+// pages go 97, 98 and then 6, and one span over both would claim it covers 97
+// down to 7, which Validate reports as a negative number of printed pages. It
+// would also make a printed page ambiguous, since each fascicule prints its own
+// page 50 and PDFPageOf would answer with whichever row it reached first. The
+// French Varietes is that volume: pdf 96 is where paragraphes 8 a 15 begin and
+// the count goes back to 6, so it is two runs, printed 3 to 97 over pdf 1 to 95
+// and printed 6 to 100 over pdf 96 to 190.
+//
+// A run ends where the printed number goes backwards, which is the same test
+// that used to refuse the volume outright. Each fascicule is a separate
+// publication with its own front matter and its own table of contents, so this
+// is not a repair of a broken numbering; it is the volume being read as what it
+// is. A volume with one run is unaffected and its single span is still named
+// WholeVolume, since the first run is always "1".
 func spansFor(entries []Entry, chapters []string) []Span {
 	if len(chapters) > 0 {
 		return chapterSpans(entries, chapters)
 	}
-	last, body := 0, false
-	for _, e := range entries {
-		if e.Page == 0 {
+	// names is built in printed order and chapterOrder is a stable sort that
+	// leaves an arabic numeral where it found it, RomanOrder having nothing to
+	// say about one, so the spans come back in the order the volume binds them.
+	last, run := 0, 0
+	var names []string
+	for i := range entries {
+		if entries[i].Page == 0 {
 			continue
 		}
-		if e.Page < last {
-			return nil
+		if run == 0 || entries[i].Page < last {
+			run++
+			names = append(names, strconv.Itoa(run))
 		}
-		last, body = e.Page, true
+		last = entries[i].Page
+		entries[i].Chapter = names[run-1]
 	}
-	if !body {
+	if run == 0 {
 		return nil
 	}
-	for i := range entries {
-		if entries[i].Page != 0 {
-			entries[i].Chapter = WholeVolume
-		}
-	}
-	return chapterSpans(entries, []string{WholeVolume})
+	return chapterSpans(entries, names)
 }
 
 func chapterSpans(entries []Entry, chapters []string) []Span {
