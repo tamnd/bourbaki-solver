@@ -679,6 +679,41 @@ func flatVolume(pm *pagemap.Map) bool {
 		pm.Chapters[0].Chapter == pagemap.WholeVolume
 }
 
+// fascicules says the volume is bound from more than one fascicule, each with
+// its own front matter, its own table of contents and its own page numbering.
+// The French Varietes is the one in the library: paragraphes 1 a 7 are bound
+// ahead of paragraphes 8 a 15 and the printed numbering starts over between
+// them, so pagemap gives it a span each rather than one span running backwards.
+//
+// It is the numerals that identify those spans, because pagemap named them and
+// named them with arabic ones. A chapter Bourbaki prints is always roman, so
+// nothing a volume declares for itself can be taken for one of these.
+func fascicules(pm *pagemap.Map) bool {
+	if pm == nil || len(pm.Chapters) < 2 {
+		return false
+	}
+	for _, sp := range pm.Chapters {
+		if _, err := strconv.Atoi(sp.Chapter); err != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// spanAt is the numeral of the span a pdf page falls in, taken as the last span
+// that opens at or before it. A fascicule prints its contents inside itself,
+// at the front in the Varietes' first and at the back in its second, so the
+// span already open at that page is the one the contents describes.
+func spanAt(pm *pagemap.Map, pdf int) string {
+	out := ""
+	for _, sp := range pm.Chapters {
+		if sp.FirstPDF <= pdf {
+			out = sp.Chapter
+		}
+	}
+	return out
+}
+
 // backMatterRe matches what a table of contents lists after the body.
 //
 // A flat contents has no numbers to tell a note from the bibliography, so the
@@ -847,7 +882,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	} else {
 		g = Detect(cand)
 	}
-	cand = contentsRun(pages, pm, g)
+	cand, candAt := contentsRun(pages, pm, g)
 	if len(cand) == 0 {
 		return nil, fmt.Errorf("toc: %s has no page that looks like a table of contents", opt.Book)
 	}
@@ -871,6 +906,9 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	// line be read as an entry at all. flatNo numbers those entries in the order
 	// they are printed, since the volume numbers none of them itself.
 	flat, flatNo := flatVolume(pm), 0
+	// curPDF is where in the pdf the contents page being read sits, which is
+	// what says which fascicule of a volume bound from two the page describes.
+	curPDF := 0
 
 	// openImplied opens the chapter a one chapter volume never names.
 	//
@@ -883,22 +921,35 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 	//
 	// The page map is what settles it. When it found exactly one chapter there
 	// is nothing to decide, every § in the contents belongs to that one, so the
-	// chapter is opened here on the § that would otherwise be lost. With two or
-	// more chapters mapped the contents alone cannot say where one ends and the
-	// next starts, so the § is still dropped and validate still reports a
-	// contents that yielded no chapters, which is the honest answer.
+	// chapter is opened here on the § that would otherwise be lost.
+	//
+	// A volume bound from fascicules is the same case twice over. Each fascicule
+	// names no chapter either, and pagemap has already cut the volume at the
+	// restart, so the fascicule the contents page is printed in is the one its
+	// §§ belong to. With two or more chapters the volume declared for itself the
+	// contents alone cannot say where one ends and the next starts, so the § is
+	// still dropped and validate still reports a contents that yielded no
+	// chapters, which is the honest answer.
 	//
 	// The title is the volume's, because the contents page does not carry one.
 	// It is a starting point and not a reading: the chapter opening page prints
 	// the real title, and once that page is read the title in the manifest is
 	// corrected by hand and KeepTitles holds on to the correction across every
-	// later rebuild.
+	// later rebuild. Both fascicules therefore open under the volume title and
+	// are told apart by hand, which is the same one line correction.
 	openImplied := func(page int) bool {
-		if len(pm.Chapters) != 1 {
+		num := ""
+		switch {
+		case len(pm.Chapters) == 1:
+			num = pm.Chapters[0].Chapter
+		case fascicules(pm):
+			num = spanAt(pm, curPDF)
+		}
+		if num == "" {
 			return false
 		}
 		res.Chapters = append(res.Chapters, corpus.Chapter{
-			Book: opt.Book, Numeral: pm.Chapters[0].Chapter,
+			Book: opt.Book, Numeral: num,
 			Title: strings.ToUpper(opt.Title), Page: page})
 		cur = &res.Chapters[len(res.Chapters)-1]
 		curSec, underNote = nil, false
@@ -991,7 +1042,15 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		}
 	}
 
-	for _, pg := range cand {
+	for ci, pg := range cand {
+		curPDF = candAt[ci]
+		// The second fascicule of a volume bound from two starts a contents of
+		// its own, so whatever the first left open is closed here. Without this
+		// the §§ of paragraphes 8 a 15 would be filed under paragraphes 1 a 7
+		// and the second fascicule would come out empty.
+		if fascicules(pm) && cur != nil && spanAt(pm, curPDF) != cur.Numeral {
+			cur, curSec, underNote = nil, nil, false
+		}
 		// A wrapped title never crosses a page break in these volumes, and
 		// letting one try is how a stray line picks up somebody else's page.
 		pend = nil
@@ -1513,7 +1572,11 @@ func contentsLines(pg string, flat bool) int {
 // rectos announce themselves, so the versos were dropped and chapter II came
 // out with one § where the volume prints eight, with no problem reported
 // because nothing tells the validator how many §§ a chapter should have.
-func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
+//
+// The pdf page of each kept page comes back alongside it, because a volume
+// bound from two fascicules prints two tables of contents and which fascicule
+// each one describes is settled by where in the book it sits.
+func contentsRun(pages []string, pm *pagemap.Map, g Grammar) ([]string, []int) {
 	flat := flatVolume(pm)
 	keep := make([]bool, len(pages))
 	for i, pg := range pages {
@@ -1532,12 +1595,14 @@ func contentsRun(pages []string, pm *pagemap.Map, g Grammar) []string {
 		}
 	}
 	var out []string
+	var at []int
 	for i, pg := range pages {
 		if keep[i] {
 			out = append(out, pg)
+			at = append(at, i+1)
 		}
 	}
-	return out
+	return out, at
 }
 
 // Detect works out the grammar by reading the candidate pages both ways and
