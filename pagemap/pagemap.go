@@ -88,6 +88,20 @@ const (
 	// Telling them apart is worth a word in the map, since a run of one and a
 	// run of the other are worth different amounts of doubt.
 	FromFolio Confidence = "folio"
+	// FromLabel was taken from the page label the page's front matter records.
+	//
+	// It stands to FromHead as FromFolio stands to FromFoot. FromHead is this
+	// package finding a label on the first lines of the text it was handed;
+	// FromLabel is the label written in the front matter by the reader that had
+	// the page image in front of it.
+	//
+	// The two disagree more often than they sound like they should, because
+	// they are not reading the same thing. A volume whose text_layer is "ocr"
+	// hands the fit the layer the scanner left in the PDF, and the page files
+	// beside it were read by a model that saw the image. On ac-x-fr the layer
+	// yields a label on 14 pages of 180 and the front matter carries one on
+	// 131, all 131 agreeing on the offset to the page.
+	FromLabel Confidence = "label"
 	// Interpolated was not printed on the page, or was misread, and follows
 	// from the fitted offset of the pages around it.
 	Interpolated Confidence = "interpolated"
@@ -99,7 +113,7 @@ const (
 // Printed reports whether the number was read off the page rather than worked
 // out from its neighbours.
 func (c Confidence) Printed() bool {
-	return c == FromHead || c == FromFoot || c == FromFolio
+	return c == FromHead || c == FromFoot || c == FromFolio || c == FromLabel
 }
 
 // Entry is one PDF page.
@@ -232,9 +246,26 @@ type Options struct {
 	// A folio counts for the two grammars that print a bare number and not for
 	// the labelled one, because in a labelled volume the folio is the page
 	// within its chapter and an anchor that does not say which chapter cannot
-	// be placed. Those volumes lose nothing: the label carries both halves and
-	// is read off the head already.
+	// be placed. What a labelled volume has instead is Labels, which carry both
+	// halves.
 	Folios []int
+	// Labels is the page label each page's front matter records, one entry per
+	// PDF page in file order, empty where the page does not say. It is what
+	// Folios is for the two bare-number grammars and it counts only for the
+	// labelled one, since nothing else in the corpus writes a label.
+	//
+	// The reason it is here is the same reason Folios is, and the numbers are
+	// larger. The fit is handed the text of the volume, which for a scan means
+	// whatever layer the scanner left in the PDF, and that layer is not what
+	// read the pages: the page files were read afterwards by a model looking at
+	// the image, and it puts the label in the front matter rather than back in
+	// the body. So the label was there to be had on 6,631 pages of the nineteen
+	// labelled volumes and the fit was finding it on 4,645 of them.
+	//
+	// Two volumes carry the whole argument. ac-x-fr fits 14 anchors from the
+	// layer and has 131 labels in front matter; alg-x-fr fits none at all from
+	// the layer, has 206 labels, and could not be mapped.
+	Labels []string
 	// MinRun is how many consecutive anchors have to agree on a new offset
 	// before the fitter believes the printing stepped rather than the OCR
 	// slipped. Zero means DefaultMinRun.
@@ -684,8 +715,8 @@ func (a anchor) fits(off int) bool {
 // readAnchors pulls one candidate page number per page. chapters restricts
 // which Roman numerals count, so that a cross-reference to another volume in a
 // running head does not become an anchor.
-func readAnchors(pages []string, folios []int, g Grammar, chapters []string) []anchor {
-	as, _ := readAnchorsPrefix(pages, folios, g, chapters)
+func readAnchors(pages []string, folios []int, labels []string, g Grammar, chapters []string) []anchor {
+	as, _ := readAnchorsPrefix(pages, folios, labels, g, chapters)
 	return as
 }
 
@@ -700,7 +731,7 @@ func readAnchors(pages []string, folios []int, g Grammar, chapters []string) []a
 // it is what lets a head citing another Book be rejected: the alternative is
 // accepting any letters, and then "TG I.4" in a cross-reference inside a running
 // head of Algebra is an anchor.
-func readAnchorsPrefix(pages []string, folios []int, g Grammar, chapters []string) ([]anchor, string) {
+func readAnchorsPrefix(pages []string, folios []int, labels []string, g Grammar, chapters []string) ([]anchor, string) {
 	want := map[string]bool{}
 	for _, c := range chapters {
 		want[strings.ToUpper(c)] = true
@@ -716,6 +747,21 @@ func readAnchorsPrefix(pages []string, folios []int, g Grammar, chapters []strin
 		if g != HeadLabel && i < len(folios) && folios[i] != 0 {
 			as = append(as, anchor{pdfPage: n, page: folios[i], src: FromFolio})
 			continue
+		}
+		// The label comes first for the same reason, and for one more: the
+		// text this fit was handed is the scanner's layer and the label was
+		// written by the reader that saw the page, so where they disagree the
+		// label is the better of the two rather than merely the earlier. It
+		// still has to name a chapter this volume has and still has to carry
+		// the prefix the volume prints, both checked below exactly as a label
+		// found on the page is.
+		if g == HeadLabel && i < len(labels) && labels[i] != "" {
+			if pre, ch, p, ok := readHeadLabel(labels[i]); ok && want[ch] {
+				prefixes[pre]++
+				as = append(as, anchor{pdfPage: n, chapter: ch, page: p,
+					src: FromLabel, raw: strings.TrimSpace(labels[i]), prefix: pre})
+				continue
+			}
 		}
 		switch g {
 		case HeadLabel:
@@ -830,17 +876,18 @@ func readChapterStarts(pages []string, chapters []string) map[int]string {
 // one of the other two ways. It only wins where the other two find almost
 // nothing.
 //
-// The folios the front matter records are not read here, though the fit reads
-// them. How a volume prints its page number is a fact about the printing, and a
-// number somebody wrote into the front matter says nothing about where on the
-// paper it was printed: counting them would hand the volume to whichever
-// bare-number reading they were offered to, and a labelled volume whose folios
-// have been filled in would stop reading its own labels. So the grammar is
-// settled on what is on the page and the folios are then read under it.
+// The folios and the labels the front matter records are not read here, though
+// the fit reads both. How a volume prints its page number is a fact about the
+// printing, and a number somebody wrote into the front matter says nothing
+// about where on the paper it was printed: counting the folios would hand the
+// volume to whichever bare-number reading they were offered to, and counting
+// the labels would hand every scanned volume to HeadLabel on the strength of a
+// field the reader fills in. So the grammar is settled on what is on the page,
+// and the front matter is then read under it.
 func Detect(pages []string, chapters []string) Grammar {
-	head := len(readAnchors(pages, nil, HeadLabel, chapters))
-	foot := len(readAnchors(pages, nil, FootNumber, chapters))
-	headNum := len(readAnchors(pages, nil, HeadNumber, chapters))
+	head := len(readAnchors(pages, nil, nil, HeadLabel, chapters))
+	foot := len(readAnchors(pages, nil, nil, FootNumber, chapters))
+	headNum := len(readAnchors(pages, nil, nil, HeadNumber, chapters))
 	best, n := FootNumber, foot
 	if headNum > n {
 		best, n = HeadNumber, headNum
@@ -1146,6 +1193,12 @@ func Build(pages []string, opt Options) (*Map, error) {
 			folios[i] = opt.Folios[p-1]
 		}
 	}
+	labels := make([]string, len(pages))
+	for i, p := range order {
+		if p-1 < len(opt.Labels) {
+			labels[i] = opt.Labels[p-1]
+		}
+	}
 	declared := opt.Restarts
 	restarts := make([]int, 0, len(declared))
 	for _, r := range declared {
@@ -1163,7 +1216,7 @@ func Build(pages []string, opt Options) (*Map, error) {
 		opt.MinRun = DefaultMinRun
 	}
 
-	as, prefix := readAnchorsPrefix(pages, folios, opt.Grammar, opt.Chapters)
+	as, prefix := readAnchorsPrefix(pages, folios, labels, opt.Grammar, opt.Chapters)
 	if opt.Pagination == "" {
 		// A grammar that prints no chapter on the page cannot be numbering by
 		// chapter, because there would be no way to tell two page 40s apart. The
@@ -1397,8 +1450,18 @@ func coverPerChapter(as []anchor, opt Options) []cover {
 // the first page of the new offset. Chapter VIII is the case in hand, where pdf
 // 485 opens the historical note at printed 469 and the blank 468 is not in the
 // file at all, so the crack goes to the right. When the offset rises the file
-// carries pages the book never numbered, and those belong to the end of what
-// came before, so the crack goes to the left.
+// carries pages the book never numbered, and the crack goes to the left except
+// for the unnumbered leaves themselves, which go to neither side.
+//
+// How many of them there are is arithmetic and not a guess: the offset is how
+// far the file has run ahead of the printing, so a rise of one is one leaf the
+// printing never counted and a rise of three is three. Handing them to the left
+// cover numbers them, and numbering them is what produces two pdf pages
+// claiming the same printed page. The French Topologie generale is the case in
+// hand: pdf 360 is the bibliography at printed IV.89, pdf 361 is an unnumbered
+// leaf, and pdf 362 is labelled IV.90, so a left-hand crack gives printed 90 to
+// both 361 and 362. A leaf the book did not number has no printed page, and the
+// map says so by leaving it outside every cover.
 func closeCracks(covers []cover) []cover {
 	for i := 0; i+1 < len(covers); i++ {
 		cur, next := &covers[i], &covers[i+1]
@@ -1407,6 +1470,19 @@ func closeCracks(covers []cover) []cover {
 		}
 		if cur.chapter == next.chapter && next.offset < cur.offset {
 			next.from = cur.to + 1
+			continue
+		}
+		if cur.chapter == next.chapter && next.offset == cur.offset+1 {
+			// One leaf, and only one. A rise of one is a leaf, and a rise of
+			// eight is not eight leaves: on the French Varietes it is where the
+			// second fascicule starts its own numbering, and the arithmetic
+			// that is right for a leaf hands the whole back matter of the first
+			// fascicule to nobody. Nothing in the corpus has been measured
+			// dropping two leaves at once, so nothing here claims to know what
+			// a larger rise means, and the old answer stands for it.
+			if end := next.from - 2; end > cur.to {
+				cur.to = end
+			}
 			continue
 		}
 		cur.to = next.from - 1

@@ -138,12 +138,24 @@ func (m *Map) Validate() []Problem {
 				missing += len(s.MissingPages)
 			}
 		}
+		// A leaf inside the chapter that the book never numbered is the mirror
+		// of a printed page the file does not have, and it has to come off the
+		// count for the same reason the missing ones go on. The bibliography
+		// leaf between IV.89 and IV.90 of the French Topologie generale is one:
+		// the file has 96 leaves there and the printing numbered 95 of them,
+		// which is not an error in the fit and reads as one without this.
+		unnumbered := 0
+		for _, e := range m.Entries {
+			if e.PDFPage >= sp.FirstPDF && e.PDFPage <= sp.LastPDF && e.Page == 0 {
+				unnumbered++
+			}
+		}
 		pdfPages := sp.LastPDF - sp.FirstPDF + 1
 		printed := sp.LastPage - sp.FirstPage + 1
-		if printed != pdfPages+missing {
+		if printed != pdfPages+missing-unnumbered {
 			probs = append(probs, Problem{Chapter: sp.Chapter,
-				Detail: fmt.Sprintf("%d printed pages over %d pdf pages with %d recorded missing",
-					printed, pdfPages, missing)})
+				Detail: fmt.Sprintf("%d printed pages over %d pdf pages with %d recorded missing and %d unnumbered",
+					printed, pdfPages, missing, unnumbered)})
 		}
 	}
 
