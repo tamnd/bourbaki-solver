@@ -892,3 +892,31 @@ func TestASectionRunningHeadWithNoNumberIsNotAHeading(t *testing.T) {
 		}
 	}
 }
+
+// A page that filed the § title as its running head and the § number in its
+// locator. Page 64 of Topologie generale I a IV and page 39 of Algebre chapitre
+// 9 are both this, and both volumes assembled to nothing over it.
+func TestASectionHeadingSplitBetweenTheHeadAndTheLocator(t *testing.T) {
+	got, ok := SectionOpeningFromLocatedHead("ESPACES SÉPARÉS ET ESPACES RÉGULIERS", 8,
+		"Espaces séparés et espaces réguliers")
+	if !ok {
+		t.Fatal("the head and the locator did not make a heading")
+	}
+	if want := "## § 8. ESPACES SÉPARÉS ET ESPACES RÉGULIERS"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// The number the locator gives still has to be the number the contents gives,
+// and the title still has to agree exactly. A running head off a page in the
+// middle of a § carries the title of some other § and must not become one.
+func TestALocatedHeadStillHasToAgreeWithTheContents(t *testing.T) {
+	for _, c := range []struct{ head, title string }{
+		{"ESPACES SÉPARÉS ET ESPACES RÉGULIERS", "Espaces compacts et espaces localement compacts"},
+		{"", "Espaces séparés et espaces réguliers"},
+	} {
+		if got, ok := SectionOpeningFromLocatedHead(c.head, 8, c.title); ok {
+			t.Errorf("head %q under title %q made %q", c.head, c.title, got)
+		}
+	}
+}
