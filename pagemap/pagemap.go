@@ -1279,7 +1279,7 @@ func Build(pages []string, opt Options) (*Map, error) {
 			m.Steps[i].AtPDFPage = order[s.AtPDFPage-1]
 		}
 	}
-	m.Chapters = chapterSpans(m.Entries, opt.Chapters)
+	m.Chapters = spansFor(m.Entries, opt.Chapters)
 	m.Gaps = findGaps(m.Entries)
 	return m, nil
 }
@@ -1536,6 +1536,83 @@ func chapterOrder(chapters []string) []string {
 		return a < b
 	})
 	return out
+}
+
+// WholeVolume is the numeral of the span a volume that prints no chapters
+// gets. Three volumes are in that state: the two printings of the Elements of
+// the History of Mathematics, which are a flat run of numbered notes, and the
+// French Varietes differentielles et analytiques, which is a fascicule de
+// resultats and runs § 1 to § 7 with no chapter over them. All three carry
+// chapters: [] in manifests/books.yaml, which is the volume saying so, and the
+// chapter column of all three page maps is empty on every row. Two of the three
+// get the span. The fascicule does not, because the scan holds both fascicules
+// bound together and its numbering starts over at the second, which is a
+// separate thing to sort out and is described below.
+//
+// The span is ours and not the book's. It is named with an arabic numeral for
+// that reason, since a chapter Bourbaki prints is always a roman one, so
+// nothing downstream can mistake it for something the volume said.
+const WholeVolume = "1"
+
+// spansFor works out the chapter spans, naming the body of a volume that has
+// no chapters first.
+//
+// A volume with no chapters still needs somewhere for its § to hang, and toc
+// already knows how to open one: openImplied takes the numeral of the only span
+// in the map and puts the § of the contents under it. What it wants is exactly
+// one span, and what these volumes have is none, so the whole body is that span.
+// The alternative, reading the top level of the printing as chapters, would
+// number the notes of the History as chapters and throw away the numbering the
+// volume prints.
+//
+// The rows of that body are named too, and not just the span over them, because
+// every consumer of the map keys on the chapter. PDFPageOf refuses a row whose
+// chapter does not match the one asked for, so a span standing over rows that
+// name nothing reports every page of the volume as being on no pdf page, which
+// is 27 problems on the English History alone. Naming the rows once here is what
+// keeps that from having to be a special case in each of them.
+//
+// What is read here is the rows and not the declaration in books.yaml, even
+// though the declaration is what these volumes carry, because Load has no
+// declaration to read: the TSV holds one row per page and nothing else. Reading
+// the rows keeps the two ways into a map answering the same, and it is the
+// stricter of the two anyway. A chapter list that is empty only says the caller
+// did not name one, and the caller is often a test or a folio run that has
+// nothing to say about chapters. Whether the body is one span is a question the
+// rows can settle on their own.
+//
+// The body has to run forward to be one span, which is the whole of the test. A
+// volume bound from two fascicules restarts its numbering part way through, so
+// its printed pages go 97, 98 and then 6, and calling that one span would claim
+// it covers 97 down to 7. It would also make a printed page ambiguous, since
+// each of the two fascicules prints its own page 50. The French Varietes is that
+// volume: pdf 96 is where paragraphes 8 a 15 begin and the count goes back to 6.
+// Refusing costs such a volume nothing it had before, since it is left exactly
+// where an empty chapter list used to leave it, and what it needs is a span per
+// fascicule rather than one over both.
+func spansFor(entries []Entry, chapters []string) []Span {
+	if len(chapters) > 0 {
+		return chapterSpans(entries, chapters)
+	}
+	last, body := 0, false
+	for _, e := range entries {
+		if e.Page == 0 {
+			continue
+		}
+		if e.Page < last {
+			return nil
+		}
+		last, body = e.Page, true
+	}
+	if !body {
+		return nil
+	}
+	for i := range entries {
+		if entries[i].Page != 0 {
+			entries[i].Chapter = WholeVolume
+		}
+	}
+	return chapterSpans(entries, []string{WholeVolume})
 }
 
 func chapterSpans(entries []Entry, chapters []string) []Span {
