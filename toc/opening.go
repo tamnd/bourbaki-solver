@@ -1,6 +1,7 @@
 package toc
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strconv"
@@ -262,6 +263,32 @@ func SectionOpening(body []string, number int, title string) (int, int, string, 
 func SectionOpeningFromHead(running string, number int, title string) (string, bool) {
 	_, _, head, ok := opening([]string{strings.TrimSpace(running)}, number, title, "## ", true, false)
 	return head, ok
+}
+
+// SectionOpeningFromLocatedHead is SectionOpeningFromHead on a page that filed
+// the number of the § somewhere else again.
+//
+// SectionOpeningFromHead wants the number in the running head, and says why: a
+// running head carries the title alone, so a head that carries the number as
+// well is not a running head but the § heading in the wrong field. Two pages of
+// this corpus split the heading between two fields instead. Page 64 of
+// Topologie generale I a IV has running_head "ESPACES SEPARES ET ESPACES
+// REGULIERS", which is § 8 of chapter I word for word as the contents gives it,
+// and locator.section 8 under it; page 39 of Algebre chapitre 9 is the same
+// with § 2. Both bodies open on the first no. of the § with nothing over it.
+//
+// The number is on the page either way, and what it is doing is the same thing
+// in both: saying which § the head belongs to. So the two fields are put back
+// together and the ordinary test is run on the result. The title still has to
+// agree with the contents exactly, and the locator still has to give the number
+// the contents gives, on the one page the contents opens that § on.
+func SectionOpeningFromLocatedHead(running string, number int, title string) (string, bool) {
+	head := strings.TrimSpace(running)
+	if head == "" {
+		return "", false
+	}
+	_, _, out, ok := opening([]string{fmt.Sprintf("§ %d. %s", number, head)}, number, title, "## ", true, false)
+	return out, ok
 }
 
 // NumberOpening puts back the heading over a no. whose page kept the title and

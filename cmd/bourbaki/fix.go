@@ -1676,7 +1676,15 @@ func fixOpening(args []string) error {
 					// historical note asks it there. It is a reading of this
 					// page image made by this corpus, and the only thing
 					// wrong with it is the field it was written into.
-					if put, ok := toc.SectionOpeningFromHead(runningHead(root, b.ID, s.PDFPage), s.Number, s.Title); ok {
+					run := runningHead(root, b.ID, s.PDFPage)
+					put, ok := toc.SectionOpeningFromHead(run, s.Number, s.Title)
+					if !ok && locatorSection(root, b.ID, s.PDFPage) == s.Number {
+						// The head carries the title and the locator carries
+						// the number, which between them are the heading. See
+						// toc.SectionOpeningFromLocatedHead.
+						put, ok = toc.SectionOpeningFromLocatedHead(run, s.Number, s.Title)
+					}
+					if ok {
 						edits[s.PDFPage] = openAt(lines, put)
 						// The heading is the whole of what the page prints
 						// above the §, so there is no running head left to
@@ -3031,6 +3039,16 @@ func mustRel(base, path string) string {
 // runningHead is what a page file records as the running head of the page, and
 // the empty string where the page is not there. fixOpening reads the body of a
 // page through read and this is the one thing it wants out of the front matter.
+// locatorSection is the § the page itself says it is in, and 0 where the page
+// says nothing.
+func locatorSection(root, book string, pdfPage int) int {
+	f, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, book, pdfPage))
+	if err != nil || f.Meta.Locator == nil {
+		return 0
+	}
+	return f.Meta.Locator.Section
+}
+
 func runningHead(root, book string, pdfPage int) string {
 	f, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, book, pdfPage))
 	if err != nil {
