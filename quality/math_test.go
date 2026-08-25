@@ -459,3 +459,53 @@ func TestM12(t *testing.T) {
 		t.Errorf("the display is on line %d, want 2", got[0].Line)
 	}
 }
+
+func TestM13(t *testing.T) {
+	// A file written the corpus's way: the inline spans tight against their
+	// dollars and the display on lines of its own.
+	clean := doc("a.md", "for every $x$ in $E$ we have\n$$\nf(x) = 0\n$$\nand nothing else")
+	if got := run(t, m13, clean); len(got) != 0 {
+		t.Errorf("a file written the corpus's way was reported: %v", got)
+	}
+
+	loose := doc("b.md", "the ring $ K[[T]] $ of formal power series\nover $ k $")
+	got := run(t, m13, loose)
+	if len(got) != 2 {
+		t.Fatalf("gave %d findings, want 2: %v", len(got), got)
+	}
+	if got[0].Line != 1 || got[1].Line != 2 {
+		t.Errorf("the findings are on lines %d and %d, want 1 and 2", got[0].Line, got[1].Line)
+	}
+	if !strings.Contains(got[0].Msg, "$ K[[T]] $") {
+		t.Errorf("the finding does not show the span: %s", got[0].Msg)
+	}
+	if !strings.Contains(got[0].Msg, "bourbaki fix padding") {
+		t.Errorf("the finding does not name the repair: %s", got[0].Msg)
+	}
+
+	// A display keeps the whitespace that puts it on its own lines, so neither
+	// spelling of one is a finding here.
+	display := doc("c.md", "$$\nf(x) = 0\n$$\n"+`$$ f(x) = 0 $$`)
+	if got := run(t, m13, display); len(got) != 0 {
+		t.Errorf("a display was reported: %v", got)
+	}
+
+	// A blank span is not this rule's to close up. See tighten in textguard.
+	if got := run(t, m13, doc("d.md", "the ring $ $ of series")); len(got) != 0 {
+		t.Errorf("a blank span was reported: %v", got)
+	}
+
+	// A body with a span left open belongs to M01, and reading it by these
+	// offsets would report spans nobody wrote.
+	if got := run(t, m13, doc("e.md", "the ring $ K[[T]] of series")); len(got) != 0 {
+		t.Errorf("a body with a span left open was reported: %v", got)
+	}
+
+	// The solutions are read, the way M12 reads them, because the solver is the
+	// third thing that writes Markdown into the corpus.
+	sol := Doc{Path: "content/solutions/en/ens/II/s5/01.md", Lang: "en", Kind: KindSolution, head: 1,
+		Body: "By induction on $ n $:\n$$\n\\operatorname{Card}(A) = n\n$$"}
+	if got := run(t, m13, sol); len(got) != 1 {
+		t.Errorf("a solution gave %d findings, want 1: %v", len(got), got)
+	}
+}

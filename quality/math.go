@@ -46,6 +46,8 @@ func init() {
 			Title: "the star on a forward-looking passage is the corpus's star", Run: m11},
 		Check{ID: "M12", Group: Mathematics, Hard: true,
 			Title: "the mathematics is written between dollars", Run: m12},
+		Check{ID: "M13", Group: Mathematics, Hard: false,
+			Title: "an inline formula is written tight against its dollars", Run: m13},
 	)
 }
 
@@ -779,6 +781,41 @@ func m12(c *Corpus) ([]Finding, error) {
 			out = append(out, Finding{File: d.Path, Line: d.BodyLine(b.Line),
 				Msg: fmt.Sprintf("%s where the corpus writes %s and %s: %s",
 					b.Name, textguard.Display, textguard.Span, ellipsis(b.Text, 60))})
+		}
+	}
+	return out, nil
+}
+
+// M13. An inline formula is written tight against its dollars.
+//
+// $K[[T]]$ and not $ K[[T]] $. TeX reads the two the same, whitespace means
+// nothing in math mode, and KaTeX on the site sets them identically, which is
+// exactly why the padded form got into the corpus and stayed for as long as it
+// did. Nothing anybody looked at ever came out different.
+//
+// What is different is the Markdown. GitHub renders $ ... $ in a file by
+// pandoc's rule, where the opening dollar must not be followed by whitespace
+// and the closing dollar must not be preceded by it, so a padded span is not a
+// formula on github.com at all. It is four literal characters in the middle of
+// a sentence, and these files are read there more than they are read anywhere
+// else.
+//
+// It is soft rather than hard, and that is a judgement about what the corpus is
+// for rather than about how much of it was padded. Every other rule in this
+// group is about whether the mathematics survived, and a padded span says the
+// same formula as a tight one. This one is about how it is written down. It
+// costs a reader nothing on the site and it costs a repair nothing to run, so
+// it is worth reporting and it is not worth stopping a build over.
+//
+// Displays are not read. A display is set on lines of its own and the
+// whitespace inside it is what puts it there.
+func m13(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		for _, p := range textguard.Padded(d.Body) {
+			out = append(out, Finding{File: d.Path, Line: d.BodyLine(p.Line),
+				Msg: fmt.Sprintf("an inline formula written loose against its dollars, %s%s%s: run bourbaki fix padding",
+					textguard.Span, p.Text, textguard.Span)})
 		}
 	}
 	return out, nil
