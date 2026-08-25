@@ -497,6 +497,27 @@ func TestAProviderThatWillNotAnswerDoesNotKillTheChunks(t *testing.T) {
 	}
 }
 
+// -raw waives what the audit thinks of a translation. It does not waive a chunk
+// that is not there, and the difference is the whole safety of the flag: a
+// complaint about the text is about something on disk that can be read again,
+// and a chunk nobody answered is a passage of the book that would go missing
+// with nothing in the file to say so.
+func TestRawStillRefusesAFileThatIsShortAChunk(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "element", VI: "phần tử"}}}
+	host := ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false", Lanes: 1}
+
+	body, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, g,
+		"en", "vi", "vi", "prompt-v1", j, false, false, false, true, chunkDeadline, func(string, ...any) {})
+	if len(problems) == 0 {
+		t.Fatal("-raw wrote a section out of chunks that were never answered")
+	}
+	if body != "" {
+		t.Fatalf("-raw handed back %d bytes of a file it could not assemble", len(body))
+	}
+}
+
 // And the two are told apart by what askChunk called them, so an answer that
 // came back and was wrong still costs the chunk an attempt.
 func TestOnlyATransportFailureIsGivenBack(t *testing.T) {
