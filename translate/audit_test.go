@@ -368,7 +368,11 @@ func TestChunksNeverSplitABlock(t *testing.T) {
 // ChunkChars and well over ChunkSpans, which is the case the appendix on the
 // Nullstellensatz turned out to be and the case the character budget missed.
 func TestAChunkCarriesOnlySoMuchMathematics(t *testing.T) {
-	body := strings.TrimSpace(strings.Repeat("Let $x$ be in $A$ and $y$ in $B$.\n\n", 12))
+	// Four spans to the block, and enough blocks to go past whatever the cap is
+	// today. Writing the block count in gave a fixture of 48 spans, which tested
+	// the budget while the cap was fifteen and stopped testing anything the day
+	// it went to sixty.
+	body := strings.TrimSpace(strings.Repeat("Let $x$ be in $A$ and $y$ in $B$.\n\n", ChunkSpans/4+2))
 	if len(body) > ChunkChars {
 		t.Fatalf("the fixture is %d characters, so it does not test the span budget", len(body))
 	}

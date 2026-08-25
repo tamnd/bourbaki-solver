@@ -63,13 +63,56 @@ const ChunkChars = 6000
 // cap is enforceable at the boundary the chunker already cuts on, for all but a
 // handful of blocks that go over on their own because a block is never split.
 //
-// Fifteen. It puts the appendix into four asks instead of one, each with a
-// quarter of the mathematics, and a slip costs one ask rather than the section.
-// Across the whole corpus it turns 479 chunks into 1,552, a median of 13 spans
-// each and 19 at the ninetieth percentile, and the 58 span worst case is a
-// single block that cannot be cut. Three times the asks is the price, and it is
-// worth paying while a refusal costs a whole section.
-const ChunkSpans = 15
+// Fifteen was the first answer. It put the appendix into four asks instead of
+// one, each with a quarter of the mathematics, so a slip cost one ask rather
+// than the section. Across the whole corpus it turned 479 chunks into 1,552, a
+// median of 13 spans each and 19 at the ninetieth percentile, and the 58 span
+// worst case was a single block that cannot be cut. Three times the asks was
+// the price, and it was worth paying while a refusal cost a whole section.
+//
+// Sixty is the answer now, and the thing that changed is not the models. It is
+// that an ask stopped being cheap. Of 17,123 translation asks recorded in
+// reports/ask-usage.jsonl between 19 and 25 August, 33 to 47 percent a day were
+// lost before the question was read at all: the account was out of quota, or
+// answering 403, or signed out. That is a bill per message and not per
+// character, so the arithmetic that priced three times the asks as worth paying
+// no longer holds. Three times the asks is now three times the messages spent
+// against a quota that is eating half of them.
+//
+// The measurement the paragraph above asked for is on the same file. Refusal
+// against the number of spans in the chunk, over the 7,598 chunks with a
+// question archived beside them:
+//
+//	spans     chunks   first ask refused   ever accepted
+//	0 to 4       777               9.1%           99.5%
+//	5 to 9     1,426              11.2%           99.3%
+//	10 to 14   3,157              15.5%           99.7%
+//	15 to 19   1,661              16.9%           99.5%
+//	20 to 29     460              15.4%           99.6%
+//	30 to 44     103              22.3%          100.0%
+//
+// It is flat. Refusal goes from 15 percent to 22 across the range where the
+// sample is worth anything, and every band lands eventually. The Nullstellensatz
+// appendix is in the last row and it is the hard end of it: a chunk over the cap
+// today is a chunk the cutter could not split, which means one block carrying
+// all of that mathematics at once. A chunk of sixty spans built out of twenty
+// small blocks is an easier question than the appendix, not a harder one.
+//
+// What sixty buys, measured on the 102 English sections of Algebra: 4,459 chunks
+// at a cap of fifteen, 2,362 at thirty, 1,164 at sixty, 765 at a hundred. The
+// median chunk goes from 658 characters to 2,873, which with the 6,700
+// characters of instructions every question carries is a 9,573 character ask.
+// Measured on the same usage log, once the account failures are set aside, an
+// ask under 10,000 characters is answered 91 percent of the time in a mean of 73
+// seconds, and one over 11,000 falls to 70 percent and 232 seconds. So sixty
+// sits inside the flat band and a hundred does not.
+//
+// The extrapolation is one band wide and it is the part to watch. There are 117
+// archived chunks over thirty spans and all of them are single blocks, so
+// nothing here has measured a sixty span chunk made of many. If refusal at sixty
+// comes back worse than the high twenties, the number to try next is thirty,
+// which is covered by the table above and still halves the asks.
+const ChunkSpans = 60
 
 // A Chunk is one question's worth of a section body.
 type Chunk struct {
