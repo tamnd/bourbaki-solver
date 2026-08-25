@@ -347,6 +347,41 @@ func Translate(source, lang, glossary, note, body string) (string, error) {
 	return text + "\n", nil
 }
 
+// passageFence is the line of equals signs translate.md puts either side of the
+// passage. It is a whole line, newlines included, so that a run of equals signs
+// inside a sentence cannot be mistaken for it.
+const passageFence = "\n==========\n"
+
+// TranslatePassage is the passage a finished ask carried, read back out of it.
+//
+// A question is archived beside its answer, and the archive is the only record
+// of what a model was actually shown. Reading the passage back out is how a
+// later run tells whether an answer it finds on disk was written about the text
+// it is holding now, which is not the same question as whether the file is
+// where that text's answer would be filed. See archivedAnswers: the archive is
+// named by the section and the chunk number, so a section chunked differently
+// than it was the day the answer was written files a different passage under
+// the same name.
+//
+// The first fence opens and the last one closes, rather than the first two,
+// because a passage that happens to contain a line of equals signs is then read
+// whole instead of being cut at it. A stray fence above the passage, in the
+// glossary or in a note, does the opposite and takes half the prompt with it,
+// and that is the harmless direction: the text will not match what the caller
+// is holding and the answer is passed over.
+func TranslatePassage(ask string) (string, bool) {
+	i := strings.Index(ask, passageFence)
+	if i < 0 {
+		return "", false
+	}
+	i += len(passageFence)
+	j := strings.LastIndex(ask, passageFence)
+	if j < i {
+		return "", false
+	}
+	return strings.TrimSpace(ask[i:j]), true
+}
+
 // Language spells out a language code for a model to read.
 func Language(lang string) string {
 	switch lang {

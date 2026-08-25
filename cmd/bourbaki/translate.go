@@ -765,7 +765,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 						}
 						continue
 					}
-					text, model, bad := askChunk(ctx, root, host, g, from, lang, tree, j, c, keep, deadline, logf)
+					text, model, bad := askChunk(ctx, root, host, g, from, lang, j, c, keep, deadline, logf)
 					if len(bad) > 0 && ctx.Err() != nil {
 						// Somebody pressed Ctrl-C while this chunk was out. The
 						// model did not get it wrong, so the attempt is given
@@ -878,7 +878,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 
 // askChunk asks once, and asks again with the complaint if the first answer did
 // not pass.
-func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, from, lang, tree string, j job, c translate.Chunk, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
+func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, from, lang string, j job, c translate.Chunk, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	terms := g.For(j.meta.Book)
 	// A chunk with nothing in it to translate is not put to anybody. See
 	// translate.SelfTranslation: what comes back has to be what went out, so the
@@ -906,7 +906,16 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 	// What the answers already on disk for this chunk are refused for goes into
 	// the first ask, so a pass does not begin by making the mistake the pass
 	// before it ended on. See refusedBefore.
-	prior := refusedBefore(root, tree, terms, j, c, body)
+	//
+	// The archive is keyed by the language and not by the tree it is filed in.
+	// The two differ in one case: a volume read out of the French is English and
+	// goes to content/en-mt, because it is a model's reading and content/en is
+	// Springer's. archiveChunk writes under the language, acceptedPath and plan
+	// both read under the language, and this line alone asked for en-mt, which
+	// nothing has ever written. So every ask of every machine English chunk was
+	// a first ask, four passes over one chunk each opening as though the three
+	// before it had not happened, which is the circle this note exists to break.
+	prior := refusedBefore(root, lang, terms, j, c, body)
 	if len(prior) > 0 {
 		logf("%s chunk %d of %d: an earlier pass was refused for %d things, and the ask carries them",
 			j.source, c.Index, c.Of, len(prior))
@@ -1057,7 +1066,7 @@ func transportOnly(bad []translate.Problem) bool {
 // reading plan makes of an accepted answer before it trusts it.
 func refusedBefore(root, lang string, terms *glossary.Glossary, j job, c translate.Chunk, body string) []translate.Problem {
 	var out []translate.Problem
-	for _, text := range archivedAnswers(root, lang, j.source, c.Index) {
+	for _, text := range archivedAnswers(root, lang, j.source, c.Index, body) {
 		// Read the way the run reads: both repairs first, so that the note
 		// carries what an answer is refused for and not what it would have been
 		// refused for if nobody had put its formulas and its citations back.
@@ -1087,12 +1096,41 @@ func merge(a, b []translate.Problem) []translate.Problem {
 // The conversation link archiveChunk writes above the answer comes off again:
 // it is a comment for a person following the answer back to where it was
 // written, and to the rules it is a block the English has no block for.
-func archivedAnswers(root, lang, source string, index int) []string {
+//
+// An answer counts only if the question beside it carried this passage. The
+// archive is filed under the section and the chunk number, and the chunk number
+// is a position in a split that is not fixed: translate.ChunkChars and
+// ChunkSpans decide where a section is cut, and the day either of them moves,
+// chunk seven of a section is a different piece of English than the chunk seven
+// whose answer is on disk. Every other place a chunk is recognised already
+// knows this. The queue id is built over chunkInput, which is the body and the
+// terminology hashed, and readAccepted compares that hash before it will hand
+// an answer back, so a re-split misses the cache and asks again rather than
+// answering the wrong passage. This was the one path with nothing to compare,
+// and what it feeds is the note telling a model what it got wrong last time, so
+// the failure is a run opening with a page of complaints about text nobody is
+// looking at. The question is read rather than a hash of it, because the
+// question is what is already on disk and there are eleven thousand answers
+// beside one, none of which would have a hash to compare.
+func archivedAnswers(root, lang, source string, index int, body string) []string {
 	dir := filepath.Join(root, "work", "translate", lang, strings.ReplaceAll(source, "/", "_"))
+	want := strings.TrimSpace(body)
 	var out []string
 	for attempt := 1; attempt <= 2; attempt++ {
-		b, err := os.ReadFile(filepath.Join(dir, fmt.Sprintf("%03d-%d.answer.md", index, attempt)))
+		stem := filepath.Join(dir, fmt.Sprintf("%03d-%d", index, attempt))
+		b, err := os.ReadFile(stem + ".answer.md")
 		if err != nil {
+			continue
+		}
+		// archiveChunk writes the question first and returns if it cannot, so an
+		// answer with no question beside it is not a case that arises. If one
+		// does, it is an answer nothing can say the provenance of, and the run
+		// goes on without it rather than guessing.
+		ask, err := os.ReadFile(stem + ".ask.md")
+		if err != nil {
+			continue
+		}
+		if had, ok := prompt.TranslatePassage(string(ask)); !ok || had != want {
 			continue
 		}
 		text := string(b)
