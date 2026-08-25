@@ -219,6 +219,13 @@ func numbers(masked string, spans []mathtex.Span) (string, map[int]string) {
 // soleDisplay says whether a line is one display placeholder and nothing else,
 // and which span it is. A line with any prose on it is a paragraph that happens
 // to have a formula in it, and the number before it was not a formula number.
+//
+// A display that opens an environment of its own counts here like any other. It
+// used not to, because a \tag has nowhere to go in one, and the number was then
+// left behind as a paragraph reading "(23)" above the formula. There are three
+// of those in the corpus. unmask now takes such an environment down to the form
+// that sets a row inside a display rather than a display of its own, and the
+// number goes where the printing has it.
 func soleDisplay(line string, spans []mathtex.Span) (int, bool) {
 	m := placeholderRE.FindString(strings.TrimSpace(line))
 	if m == "" || strings.TrimSpace(placeholderRE.ReplaceAllString(line, "")) != "" {
@@ -226,7 +233,7 @@ func soleDisplay(line string, spans []mathtex.Span) (int, bool) {
 	}
 	var n int
 	fmt.Sscanf(m, "\x00m%d\x00", &n)
-	if n >= len(spans) || !spans[n].Display || ownEnvironment(spans[n].Text) {
+	if n >= len(spans) || !spans[n].Display {
 		return 0, false
 	}
 	return n, true
@@ -264,18 +271,54 @@ func (r Renderer) unmask(s string, spans []mathtex.Span, tags map[int]string) st
 			out[i] = "$" + text + "$"
 			continue
 		}
-		if ownEnvironment(text) {
-			out[i] = "\n" + strings.TrimSpace(text)
+		body := strings.TrimSpace(text)
+		tag, tagged := tags[i]
+		// A number the corpus wrote on the first line inside the display is the
+		// same number as one written on the line above it, and the printing sets
+		// it in the same place. Left where it is it also hides the environment
+		// underneath it, which is how the one in Lie VI, § 3 came to be wrapped
+		// in \[ \] and stopped both builds of that volume.
+		if n, rest, ok := liftNumber(body); ok {
+			body = rest
+			if !tagged {
+				tag, tagged = n, true
+			}
+		}
+		// A number the corpus wrote inside the display rather than on the line
+		// above it is the same number and belongs in the same place. Left where
+		// it is, it ends up inside the \begin{aligned} this build puts around a
+		// calculation, and amsmath will not set a \tag there and stops: the tag
+		// belongs to the display and an aligned is a box inside one. Seven of
+		// the seventeen volumes that would not typeset stopped on this.
+		if inner, rest, ok := liftTag(body); ok {
+			body = rest
+			if !tagged {
+				tag, tagged = inner, true
+			}
+		}
+		if ownEnvironment(body) {
+			if !tagged {
+				out[i] = "\n" + body
+				continue
+			}
+			// The environment sets a display of its own and amsmath refuses to
+			// have one inside another, so a number that has to go beside it goes
+			// there by taking the environment down to the form that sets rows
+			// inside a display somebody else opened.
+			if inner, ok := inlineEnvironment(body); ok {
+				out[i] = "\n\\[\n\\tag{" + tag + "}\n" + inner + "\n\\]"
+			} else {
+				out[i] = "\n" + body
+			}
 			continue
 		}
-		body := strings.TrimSpace(text)
-		if a, ok := alignedDisplay(text); ok {
+		if a, ok := alignedDisplay(body); ok {
 			body = a
 			if r.Aligned != nil {
 				r.Aligned(r.at(sp.Line))
 			}
 		}
-		if tag, ok := tags[i]; ok {
+		if tagged {
 			out[i] = "\n\\[\n\\tag{" + tag + "}\n" + body + "\n\\]"
 			continue
 		}
@@ -314,13 +357,7 @@ func alignedDisplay(text string) (string, bool) {
 	if strings.Contains(text, `\begin{`) || strings.Contains(text, "&") {
 		return "", false
 	}
-	var lines []string
-	for _, l := range strings.Split(text, "\n") {
-		l = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(l), `\\`))
-		if l != "" {
-			lines = append(lines, l)
-		}
-	}
+	lines := displayRows(text)
 	if len(lines) < 2 {
 		return "", false
 	}
@@ -344,6 +381,272 @@ func alignedDisplay(text string) (string, bool) {
 		}
 	}
 	return "\\begin{aligned}\n" + strings.Join(lines, " \\\\\n") + "\n\\end{aligned}", true
+}
+
+// displayRows is the lines of a display grouped into the rows of an alignment.
+//
+// A newline in display mathematics is a space, so the corpus writing a
+// calculation over several lines is not the corpus saying where the rows go. It
+// usually amounts to the same thing, because a step of a calculation is what
+// gets written on a line. It does not when a line ends in the middle of
+// something that has to finish where it started: a \left with its \right on the
+// line below, or an open brace, most often a \frac or a \substack whose second
+// argument the corpus wrote underneath the first. Ending a row there puts the
+// \left in one cell of the aligned and the \right in the next, and TeX stops
+// with "Extra }, or forgotten \right", which is exactly true and says nothing
+// about where to look.
+//
+// So a row runs on until what it holds is closed. In Set Theory III, § 5,
+// exercise 5 that is a sum over the subsets of even cardinal written as five
+// lines inside one \left( \right), and it belongs in one row of the alignment
+// rather than five.
+func displayRows(text string) []string {
+	var rows, cur []string
+	fence, brace := 0, 0
+	for _, l := range strings.Split(text, "\n") {
+		l = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(l), `\\`))
+		if l == "" {
+			continue
+		}
+		cur = append(cur, l)
+		f, b := fences(l)
+		fence += f
+		brace += b
+		if fence <= 0 && brace <= 0 {
+			rows = append(rows, strings.Join(cur, " "))
+			cur, fence, brace = nil, 0, 0
+		}
+	}
+	if len(cur) > 0 {
+		rows = append(rows, strings.Join(cur, " "))
+	}
+	return rows
+}
+
+// fences counts what a line of mathematics opens and does not close: \left
+// against \right, and braces that are not escaped.
+//
+// It reads control words rather than searching for the text, because \leftarrow
+// and \rightharpoonup begin with the same letters as the two words being counted
+// and neither of them opens anything.
+func fences(s string) (fence, brace int) {
+	rs := []rune(s)
+	for i := 0; i < len(rs); i++ {
+		if rs[i] != '\\' {
+			switch rs[i] {
+			case '{':
+				brace++
+			case '}':
+				brace--
+			}
+			continue
+		}
+		j := i + 1
+		for j < len(rs) && isTeXLetter(rs[j]) {
+			j++
+		}
+		if j == i+1 {
+			// \{ and \} and \\ and the rest of the single character escapes.
+			// The character after the backslash is not a brace of its own and
+			// is not the start of a word, so it is stepped over.
+			i = j
+			continue
+		}
+		switch string(rs[i:j]) {
+		case `\left`:
+			fence++
+		case `\right`:
+			fence--
+		}
+		i = j - 1
+	}
+	return fence, brace
+}
+
+func isTeXLetter(r rune) bool {
+	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
+}
+
+// liftNumber takes an equation number off the first line of a display and hands
+// it back, so that the caller can set it as the number of the display rather
+// than typeset it as a pair of parentheses at the head of the formula.
+//
+// The number belongs on the line above the $$ and is usually written there, in
+// which case numbers has already taken it. The corpus has one written just
+// inside instead. It is the same number and it goes to the same place, and
+// leaving it where it is also puts it in front of whatever the display opens
+// with, which hides an environment that sets its own display from the check for
+// one.
+func liftNumber(body string) (num, rest string, ok bool) {
+	head, tail, cut := strings.Cut(body, "\n")
+	if !cut {
+		return "", body, false
+	}
+	m := eqNumRE.FindStringSubmatch(strings.TrimSpace(head))
+	if m == nil {
+		return "", body, false
+	}
+	return m[1], strings.TrimSpace(tail), true
+}
+
+// inlineForm is the environment that sets the same rows inside a display
+// somebody else has opened, for each environment that opens one of its own.
+//
+// multline and equation have no such form in amsmath. Both set a single
+// formula, one broken over lines and one not, and aligned sets either of those
+// without the line breaking that is the whole point of multline. That is a
+// worse setting of a formula rather than a wrong one, and it is only reached by
+// a display that has a number to put beside it, which is three displays in the
+// corpus and none of them is a multline.
+var inlineForm = map[string]string{
+	"align":    "aligned",
+	"alignat":  "alignedat",
+	"flalign":  "aligned",
+	"gather":   "gathered",
+	"multline": "aligned",
+	"equation": "aligned",
+}
+
+// inlineEnvironment rewrites a display that opens an environment of its own
+// into the same rows inside an environment that does not.
+//
+// It refuses anything but a body that is one environment from end to end. A
+// display with an environment in the middle of it is a shape the writer has not
+// got a reading for, and turning the one it can see inside out would move rows
+// of a formula around on a guess.
+func inlineEnvironment(body string) (string, bool) {
+	body = strings.TrimSpace(body)
+	m := displayEnvironment.FindStringSubmatch(body)
+	if m == nil {
+		return "", false
+	}
+	inner, ok := inlineForm[m[1]]
+	if !ok {
+		return "", false
+	}
+	open := strings.TrimSpace(m[0])
+	star := ""
+	if strings.HasSuffix(open, "*}") {
+		star = "*"
+	}
+	end := `\end{` + m[1] + star + `}`
+	if !strings.HasSuffix(body, end) {
+		return "", false
+	}
+	// The starred and unstarred spellings differ only in whether the rows are
+	// numbered, and a row inside a display somebody else opened is never
+	// numbered, so the inner environment has the one spelling.
+	rows := strings.TrimSuffix(body[len(open):], end)
+	return `\begin{` + inner + `}` + rows + `\end{` + inner + `}`, true
+}
+
+// liftTag takes a \tag out of the body of a display and hands it back, so that
+// the caller can put it where amsmath will set it.
+//
+// The argument is read by counting braces rather than by looking for the next
+// one, because a tag is not always a number. Of the 1134 in the corpus ten are
+// a reference to somewhere else in the Elements, printed beside the formula the
+// way a number would be, and one of those is \tag{$A \in \mathcal{S}(X)$}. Read
+// to the first closing brace that is \tag{$A \in \mathcal{S, and taking that
+// out of the display leaves the rest of the formula behind as text.
+func liftTag(body string) (tag, rest string, ok bool) {
+	at := strings.Index(body, `\tag`)
+	if at < 0 {
+		return "", body, false
+	}
+	open := at + len(`\tag`)
+	if open < len(body) && body[open] == '*' {
+		open++
+	}
+	if open >= len(body) || body[open] != '{' {
+		return "", body, false
+	}
+	depth := 0
+	for i := open; i < len(body); i++ {
+		switch body[i] {
+		case '\\':
+			i++ // an escaped brace is not a brace
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				rest = strings.TrimSpace(body[:at] + body[i+1:])
+				return tagText(body[open+1 : i]), rest, true
+			}
+		}
+	}
+	return "", body, false
+}
+
+// splitFootnotes takes the footnotes out of a heading and hands them back.
+//
+// mark is the heading with a \footnotemark where each note was, for the head on
+// the page. plain is the heading with nothing where each note was, for the two
+// places the same words are written a second time. notes are the bodies, for
+// the \footnotetext that has to follow the heading.
+func splitFootnotes(s string) (mark, plain string, notes []string) {
+	var m, p strings.Builder
+	for i := 0; i < len(s); {
+		at := strings.Index(s[i:], `\footnote{`)
+		if at < 0 {
+			m.WriteString(s[i:])
+			p.WriteString(s[i:])
+			break
+		}
+		at += i
+		m.WriteString(s[i:at])
+		p.WriteString(s[i:at])
+		open := at + len(`\footnote`)
+		body, end, ok := braceArg(s, open)
+		if !ok {
+			// An opening brace with no closing one is not a footnote, and
+			// guessing where it ends would invent a note the page has not got.
+			m.WriteString(s[at:])
+			p.WriteString(s[at:])
+			break
+		}
+		notes = append(notes, body)
+		m.WriteString(`\footnotemark`)
+		i = end
+	}
+	return strings.TrimSpace(m.String()), strings.TrimSpace(p.String()), notes
+}
+
+// braceArg reads the group that starts at open and returns what is inside it
+// and the offset just past its closing brace.
+func braceArg(s string, open int) (arg string, end int, ok bool) {
+	if open >= len(s) || s[open] != '{' {
+		return "", open, false
+	}
+	depth := 0
+	for i := open; i < len(s); i++ {
+		switch s[i] {
+		case '\\':
+			i++ // an escaped brace is a character rather than a group
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[open+1 : i], i + 1, true
+			}
+		}
+	}
+	return "", open, false
+}
+
+// tagText is the argument of a \tag, which amsmath sets in text mode.
+//
+// It is the one piece of a display that is not a formula, and the writer got to
+// it through the mathematics, so a degree sign has already become a superscript
+// circle. That is right in a formula and it is an error beside one: the only
+// tag in the corpus that carries it is a reference reading "n° 6", and n° 6 is
+// a phrase rather than a quantity. The rest of what a tag holds sets in text
+// mode as it stands, including the ones that put their own dollars around the
+// part of themselves that is a formula.
+func tagText(s string) string {
+	return strings.ReplaceAll(s, `^\circ`, `\textdegree`)
 }
 
 // ampersand puts one alignment mark in a line of a calculation.
@@ -527,8 +830,23 @@ func (r Renderer) heading(line string) (string, bool) {
 			if no, err := strconv.Atoi(n[1]); err == nil && r.Contents[no] != "" {
 				words = r.Contents[no]
 			}
-			return fmt.Sprintf("\\bno{%s}{%s}{%s}{%s}{%s}\n\n",
-				n[1], r.inline(n[2]), r.inline(words), r.head(words), label), false
+			// A footnote in the title cannot travel with it. Three of the five
+			// arguments are the title, and two of those are read again later,
+			// once by \addcontentsline into the .toc and once by \markright
+			// into the running head, and a \footnote read a second time is the
+			// error "Use of \@xfootnote doesn't match its definition". The
+			// printing has one of these, on no. 10 of Integration VI, § 2, and
+			// it stopped both volumes that carry that chapter. So the head
+			// keeps a mark, the note follows the heading, and the contents line
+			// and the running head have neither.
+			mark, _, notes := splitFootnotes(n[2])
+			_, contents, _ := splitFootnotes(words)
+			out := fmt.Sprintf("\\bno{%s}{%s}{%s}{%s}{%s}\n\n",
+				n[1], r.inline(mark), r.inline(contents), r.head(contents), label)
+			for _, note := range notes {
+				out += "\\footnotetext{" + r.inline(note) + "}\n\n"
+			}
+			return out, false
 		}
 		return fmt.Sprintf("\\bnamed{%s}{%s}\n\n", r.inline(text), label), false
 	}
