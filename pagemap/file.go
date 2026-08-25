@@ -212,7 +212,7 @@ func Load(root, book string) (*Map, error) {
 	// diffs well. The chapter spans are a fact about those rows rather than a
 	// second source of truth, so they are worked out again on the way back in.
 	m.PDFPages = len(m.Entries)
-	m.Chapters = chapterSpans(m.Entries, chaptersOf(m.Entries))
+	m.Chapters = spansFor(m.Entries, chaptersOf(m.Entries))
 
 	if err := sc.Err(); err != nil {
 		return nil, err

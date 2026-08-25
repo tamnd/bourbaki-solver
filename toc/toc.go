@@ -174,6 +174,16 @@ var (
 	// renumbers every no. after it in the §, which is why both are here.
 	numberRe = regexp.MustCompile(`^(\s*)([0-9IlOJ|](?:\s?[0-9IlOJ|])?)\s*[.,·•]\s*(.*)$`)
 
+	// A no. line of a volume that numbers its nos § point no. rather than
+	// restarting the count at 1 under each §. The fascicule de résultats does
+	// this and nothing else in the library does, so the reading is gated on the
+	// § that is open rather than on the shape of the line alone. See dottedNo.
+	//
+	// The second period is optional because the reading does not print it
+	// consistently: the fascicule sets no. 1 of § 1 with none and no. 2 with
+	// one, on consecutive lines of the same page.
+	dottedNoRe = regexp.MustCompile(`^\s*([0-9IlOJ|]{1,2})\s*[.·•]\s*([0-9IlOJ|]{1,2})\s*[.,·•]?\s+(.*)$`)
+
 	// "Appendix", "Appendix 1.", "Appendix I - Polynomial maps", and the
 	// French "Appendice". Bourbaki closes chapters II, III and VIII with
 	// appendices that carry no. and exercises just as a § does, so they are
@@ -229,6 +239,37 @@ func readNumber(s string) (int, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+// dottedNo reads a no. line of a volume that numbers its nos § point no.
+//
+// The Varietes differentielles et analytiques is a fascicule de resultats and
+// numbers its nos that way, so § 1 runs 1.1 to 1.7 where every other volume in
+// the library runs 1 to 7. classify reads the first component as the number and
+// leaves the second at the head of the title, so all seven nos of § 1 came out
+// as no. 1 and the § was reported as holding seven of them.
+//
+// The reading is gated on the § that is open rather than on the shape of the
+// line, and that is the point of doing it here instead of in classify. A rule
+// that fired on any line opening with two numbers separated by a period would
+// have to be trusted against every contents in the library, where a title is
+// free to open with a figure. Requiring the first component to be the number of
+// the § the line is already under costs nothing on the volume that wants it and
+// cannot fire anywhere else, because a title would have to open with the number
+// of its own § and a period to be mistaken for one.
+func dottedNo(text string, sec int) (int, string, bool) {
+	m := dottedNoRe.FindStringSubmatch(text)
+	if m == nil {
+		return 0, "", false
+	}
+	if s, ok := readNumber(m[1]); !ok || s != sec {
+		return 0, "", false
+	}
+	n, ok := readNumber(m[2])
+	if !ok {
+		return 0, "", false
+	}
+	return n, cleanTitle(m[3]), true
 }
 
 func readRoman(s string) (string, bool) {
@@ -915,6 +956,14 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			// prints none and stands alone at the top of the page.
 			if e.kind == kindPart && top && !hasPage {
 				continue
+			}
+			// Read § point no. before anything downstream looks at the number,
+			// since nested and the run indent both compare one no. against the
+			// one before it and both want the real one.
+			if e.kind == kindSubsection && curSec != nil {
+				if n, title, ok := dottedNo(text, curSec.Number); ok {
+					e.number, e.title = n, title
+				}
 			}
 			if e.kind == kindSubsection && nested(line, runIndent, e.number, lastNo, nestNum) {
 				nestNum = e.number
