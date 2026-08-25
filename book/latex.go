@@ -1,0 +1,775 @@
+package book
+
+import (
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/tamnd/bourbaki-solver/mathtex"
+)
+
+// The corpus is machine-written Markdown over a small and known vocabulary, and
+// this reads that vocabulary rather than CommonMark, for the reason publish
+// gives at length: the input is full of TeX and TeX and Markdown fight over the
+// same characters. `$x^*\otimes y$` and `$x^*\in E^*$` in one sentence give a
+// Markdown parser two asterisks to pair up and the paragraph comes back with an
+// emphasis span cut through the middle of two formulae.
+//
+// Going out to LaTeX rather than to HTML makes that worse and not better,
+// because now the output language is TeX too, and a backslash that is prose has
+// to be told from a backslash that is a command. So the order here is fixed and
+// it is the only order that works: take the mathematics out first, then the
+// Markdown escapes, then escape what is left as prose, then read the Markdown,
+// then put the escapes back, then put the mathematics back. Anything that reads
+// the text before the mathematics is out is reading a string that has TeX in it
+// and does not know which parts.
+
+// A Renderer turns one body of corpus Markdown into LaTeX.
+type Renderer struct {
+	// File and Line say where the body came from, the path as committed and the
+	// file line the body's first line sits on, so that a complaint names
+	// something somebody can open.
+	File string
+	Line int
+	// Label is asked what to label a heading anchor, and returns empty for an
+	// anchor the book does not label. It returns the name and not the \label
+	// command, because the class is what decides where a label goes relative to
+	// the heading it belongs to, and that decision belongs in one place.
+	Label func(anchor string) string
+	// Ref is asked what a link in the body should become. It is given the URL as
+	// the corpus writes it and returns LaTeX for the whole link, or empty to
+	// have the link set as its own text with no reference at all.
+	Ref func(url, text string) string
+	// Missing collects the characters no font in the build can set, so that the
+	// audit can report them against the section they are in rather than against
+	// a line of a generated file nobody wrote.
+	Missing func(where string, runes []rune)
+	// Stray collects the control sequences found in prose that the table in
+	// control.go does not know, or knows and cannot complete. They are set as
+	// the literal characters they are made of, which is visible on the page and
+	// is meant to be, and the audit counts them.
+	Stray func(where string, cs []string)
+	// Wide collects the arrays whose preamble came out narrower than their own
+	// widest row. The preamble is widened so the build carries on, and the
+	// report is what somebody takes back to the page.
+	Wide func(where string, a wideArray)
+	// Contents is the sentence case title each numbered subsection of this file
+	// takes in the table of contents, keyed by its number. It is empty for a
+	// language the volume was not printed in, and a subsection it has nothing
+	// for is listed under its heading.
+	Contents map[int]string
+	// Lang is the language the body is in, which the title caser needs: the
+	// short words a title leaves in lower case are a different list in each.
+	Lang string
+	// Aligned counts the displays that were written over several lines and have
+	// been set as a calculation aligned on the relation. It is not a complaint,
+	// it is how many places the build made a decision about the layout of a
+	// formula that the corpus did not spell out.
+	Aligned func(where string)
+}
+
+// head is the running head of a numbered subsection, in the two forms the class
+// picks between. Both are title case, because the head is set as small capitals
+// and small capitals of a capitalised string are capitals.
+//
+// The short form is the title up to its first full stop. The printing shortens a
+// head at a sentence when the whole of it will not go, and the class is what
+// decides whether it will go, because that is a question about how wide a string
+// sets in a font.
+func (r Renderer) head(words string) string {
+	full := listed(words, r.Lang)
+	short := full
+	if i := strings.Index(full, ". "); i > 0 {
+		short = full[:i+1]
+	}
+	return fmt.Sprintf("\\bheadfit{%s}{%s}", r.inline(full), r.inline(short))
+}
+
+// TeX renders a body.
+func (r Renderer) TeX(body string) (string, error) {
+	masked, spans, err := r.mask(body)
+	if err != nil {
+		return "", err
+	}
+	masked, tags := numbers(masked, spans)
+	var b strings.Builder
+	// The statement of a proposition is set in italic and the discussion after
+	// it is not, and the corpus does not mark the join: a #### heading is
+	// followed by the statement and then by however many paragraphs of
+	// commentary the printing has, all under the one heading. What the printing
+	// does mark is where the italic stops, and it stops at the end of the first
+	// paragraph. So the first paragraph after the head goes in italic and the
+	// rest does not. A proposition whose statement runs to two paragraphs loses
+	// the second, which happens, and is a smaller error than setting a page of
+	// commentary in italic, which would happen far more often.
+	italic := false
+	closeItalic := func() {
+		if italic {
+			b.WriteString("\\bstateend\n")
+			italic = false
+		}
+	}
+	bs := blocks(masked)
+	for i, block := range bs {
+		joined := i+1 < len(bs) && opensDisplay(bs[i+1], spans)
+		if strings.HasPrefix(block, "#") {
+			closeItalic()
+			head, opens := r.heading(block)
+			b.WriteString(head)
+			italic = opens
+			continue
+		}
+		b.WriteString(r.paragraph(block, joined))
+		if !joined {
+			closeItalic()
+		}
+	}
+	closeItalic()
+	out := r.unmask(b.String(), spans, tags)
+	// Nothing in the corpus contains a NUL, so one here is a placeholder this
+	// package made and then lost track of. TeX prints it as ^^@ and carries on
+	// for a while and then stops in a way that names the generated file rather
+	// than the source, which is a bad afternoon. Refusing here names the source.
+	if i := strings.IndexByte(out, 0); i >= 0 {
+		return "", fmt.Errorf("%s: a placeholder was not restored near %q",
+			r.at(1+strings.Count(out[:i], "\n")), nearby(out, i))
+	}
+	return out, nil
+}
+
+// nearby is the text either side of a byte, for a message.
+func nearby(s string, i int) string {
+	lo, hi := max(0, i-40), min(len(s), i+40)
+	return strings.ReplaceAll(s[lo:hi], "\x00", "@")
+}
+
+// mask replaces every math span with a placeholder. The placeholder is built
+// from NUL, which cannot occur in the corpus: the files are UTF-8 text out of a
+// PDF and a NUL in one would have failed the audit long before it got here.
+func (r Renderer) mask(body string) (string, []mathtex.Span, error) {
+	spans, unclosed := mathtex.Split(body)
+	if unclosed != nil {
+		return "", nil, fmt.Errorf("%s: a math span opens and never closes", r.at(unclosed.Line))
+	}
+	rs := []rune(body)
+	var b strings.Builder
+	at := 0
+	for i, s := range spans {
+		d := 1
+		if s.Display {
+			d = 2
+		}
+		b.WriteString(string(rs[at : s.Start-d]))
+		fmt.Fprintf(&b, "\x00m%d\x00", i)
+		at = s.End + d
+	}
+	b.WriteString(string(rs[at:]))
+	return b.String(), spans, nil
+}
+
+var placeholderRE = regexp.MustCompile("\x00m(\\d+)\x00")
+
+// eqNumRE is a formula number alone on a line, "(12)" or "(iv)".
+var eqNumRE = regexp.MustCompile(`^\(([0-9]{1,3}|[ivxlIVXL]{1,5})\)$`)
+
+// numbers takes the formula numbers off their own lines and gives them to the
+// displays they belong to.
+//
+// The corpus writes them the way they come off the page. Bourbaki sets the
+// number in the left margin beside the display, so a reader of a scan sees a
+// short line holding "(12)" and then the formula, and that is what got written
+// down: "(12)", newline, the display. Left where they are, they set as a
+// one word paragraph above a centred formula, which is not what the printing
+// has and reads like a mistake.
+//
+// So they come off and go back on as \tag, and the class numbers on the left.
+// A number is only taken when the next thing that is not blank is a display and
+// nothing else on its line, which is what keeps "(2) In Z and more generally"
+// and every other enumerated paragraph out of it.
+func numbers(masked string, spans []mathtex.Span) (string, map[int]string) {
+	tags := map[int]string{}
+	lines := strings.Split(masked, "\n")
+	keep := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		m := eqNumRE.FindStringSubmatch(strings.TrimSpace(lines[i]))
+		if m == nil {
+			keep = append(keep, lines[i])
+			continue
+		}
+		j := i + 1
+		for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
+			j++
+		}
+		if j >= len(lines) {
+			keep = append(keep, lines[i])
+			continue
+		}
+		p, ok := soleDisplay(lines[j], spans)
+		if !ok {
+			keep = append(keep, lines[i])
+			continue
+		}
+		tags[p] = m[1]
+		i = j - 1 // the blank lines between go too, so the display keeps its block
+	}
+	return strings.Join(keep, "\n"), tags
+}
+
+// soleDisplay says whether a line is one display placeholder and nothing else,
+// and which span it is. A line with any prose on it is a paragraph that happens
+// to have a formula in it, and the number before it was not a formula number.
+func soleDisplay(line string, spans []mathtex.Span) (int, bool) {
+	m := placeholderRE.FindString(strings.TrimSpace(line))
+	if m == "" || strings.TrimSpace(placeholderRE.ReplaceAllString(line, "")) != "" {
+		return 0, false
+	}
+	var n int
+	fmt.Sscanf(m, "\x00m%d\x00", &n)
+	if n >= len(spans) || !spans[n].Display || ownEnvironment(spans[n].Text) {
+		return 0, false
+	}
+	return n, true
+}
+
+// unmask puts the mathematics back as TeX, which is the whole reason a TeX
+// corpus was worth insisting on: the span goes out exactly as it came in.
+//
+// A display is wrapped in \[ \] unless it opens an environment of its own. 426
+// of the corpus's 25820 displays begin with \begin{align}, and align inside \[
+// is an error in LaTeX rather than a formula, so those go out bare. KaTeX
+// accepts both spellings, which is how they got written both ways.
+func (r Renderer) unmask(s string, spans []mathtex.Span, tags map[int]string) string {
+	if len(spans) == 0 {
+		return s
+	}
+	out := make([]string, len(spans))
+	for i, sp := range spans {
+		text := Math(sp.Text)
+		if r.Missing != nil {
+			if runes := Missing(text); len(runes) > 0 {
+				r.Missing(r.at(sp.Line), runes)
+			}
+		}
+		if strings.Contains(text, `\begin{`) {
+			widened, wide := widen(text)
+			text = widened
+			for _, w := range wide {
+				if r.Wide != nil {
+					r.Wide(r.at(sp.Line), w)
+				}
+			}
+		}
+		if !sp.Display {
+			out[i] = "$" + text + "$"
+			continue
+		}
+		if ownEnvironment(text) {
+			out[i] = "\n" + strings.TrimSpace(text)
+			continue
+		}
+		body := strings.TrimSpace(text)
+		if a, ok := alignedDisplay(text); ok {
+			body = a
+			if r.Aligned != nil {
+				r.Aligned(r.at(sp.Line))
+			}
+		}
+		if tag, ok := tags[i]; ok {
+			out[i] = "\n\\[\n\\tag{" + tag + "}\n" + body + "\n\\]"
+			continue
+		}
+		out[i] = "\n\\[\n" + body + "\n\\]"
+	}
+	return placeholderRE.ReplaceAllStringFunc(s, func(m string) string {
+		var i int
+		fmt.Sscanf(m, "\x00m%d\x00", &i)
+		return out[i]
+	})
+}
+
+// alignedDisplay sets a display whose source runs over several lines the way the
+// printing sets it, one step to a line aligned on the relation, instead of
+// running the whole calculation into one line the page has no room for.
+//
+// The corpus writes a long calculation the way the page has it, a step to a
+// line, and \[ \] turns those newlines into spaces. That is where the widest
+// overfull boxes came from: an identity in Algebra III, the one that multiplies
+// two sums of four squares, ran 415 pt past a 326 pt measure, which is a formula
+// two and a half times the width of the page it is on. There are 323 displays
+// written over several lines in the English Algebra alone.
+//
+// A line that opens with a relation or with a sign is aligned in front of it,
+// which is the continuation of the step above. A line that does not is aligned
+// in front of its own first relation, and a line with no relation at all ends at
+// the alignment column, so that the head of a calculation sits above the first
+// "=" rather than beside it. That is the arrangement the printing uses and it is
+// what \begin{aligned} gives with an ampersand in those three places.
+//
+// A display already carrying an ampersand or an environment of its own is left
+// alone. An array or a cases is written over several lines too and already says
+// where its own columns are, and putting that inside an aligned would align on
+// the wrong thing.
+func alignedDisplay(text string) (string, bool) {
+	if strings.Contains(text, `\begin{`) || strings.Contains(text, "&") {
+		return "", false
+	}
+	var lines []string
+	for _, l := range strings.Split(text, "\n") {
+		l = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(l), `\\`))
+		if l != "" {
+			lines = append(lines, l)
+		}
+	}
+	if len(lines) < 2 {
+		return "", false
+	}
+	if relationAt(lines[0]) < 0 {
+		// The head of the calculation carries no relation of its own, so there
+		// is nothing to align it on and it stands on its own line with the rest
+		// stepped in under it. That is what page 648 of the English Algebra does
+		// with the identity between two sums of four squares: the product stands
+		// alone at the margin and the four squared terms follow indented, each
+		// under the sign of the one above.
+		for i, l := range lines {
+			if i == 0 {
+				lines[i] = "&" + l
+				continue
+			}
+			lines[i] = `&\quad ` + l
+		}
+	} else {
+		for i, l := range lines {
+			lines[i] = ampersand(l)
+		}
+	}
+	return "\\begin{aligned}\n" + strings.Join(lines, " \\\\\n") + "\n\\end{aligned}", true
+}
+
+// ampersand puts one alignment mark in a line of a calculation.
+func ampersand(line string) string {
+	switch at := relationAt(line); {
+	case at == 0:
+		return "&" + line
+	case at > 0:
+		return strings.TrimRight(line[:at], " ") + " &" + line[at:]
+	}
+	return line + " &"
+}
+
+// relationAt is the byte offset of the first relation in a line that is not
+// inside a group, or -1 for a line that has none.
+//
+// Only outside braces, because the "=" of \text{where $x = y$} and the "-" of
+// f^{-1} are parts of something else and aligning on them would take the line
+// apart in the middle of a term. A leading sign counts, because a line that
+// opens with one is the continuation of the sum above it, but a sign in the
+// middle of a line does not: x - y is one term of a step and not a new step.
+func relationAt(line string) int {
+	depth := 0
+	for i := 0; i < len(line); {
+		c := line[i]
+		switch {
+		case c == '{':
+			depth++
+			i++
+		case c == '}':
+			depth--
+			i++
+		case c == '\\':
+			j := i + 1
+			for j < len(line) && isASCIILetter(line[j]) {
+				j++
+			}
+			if j == i+1 {
+				// An escaped character, \{ or \, or the like. Never a relation,
+				// and stepping over both bytes is what keeps an escaped brace
+				// from moving the depth.
+				j = i + 2
+			}
+			if depth == 0 && relations[line[i:j]] {
+				return i
+			}
+			if depth == 0 && i == 0 && leadingOps[line[i:j]] {
+				return 0
+			}
+			i = j
+		case depth == 0 && (c == '=' || c == '<' || c == '>'):
+			return i
+		case depth == 0 && i == 0 && (c == '+' || c == '-'):
+			return 0
+		default:
+			i++
+		}
+	}
+	return -1
+}
+
+func isASCIILetter(b byte) bool { return 'a' <= b && b <= 'z' || 'A' <= b && b <= 'Z' }
+
+// relations are the control words a step of a calculation turns on. The list is
+// the relations the corpus actually uses in a display written over more than one
+// line, plus the near neighbours of each, and it is matched on the whole control
+// word so that \le does not match the front of \left.
+var relations = map[string]bool{
+	`\le`: true, `\leq`: true, `\ge`: true, `\geq`: true,
+	`\ne`: true, `\neq`: true, `\equiv`: true, `\sim`: true,
+	`\simeq`: true, `\cong`: true, `\approx`: true, `\propto`: true,
+	`\subset`: true, `\subseteq`: true, `\subsetneq`: true,
+	`\supset`: true, `\supseteq`: true, `\supsetneq`: true,
+	`\in`: true, `\ni`: true, `\notin`: true, `\perp`: true,
+	`\to`: true, `\rightarrow`: true, `\longrightarrow`: true,
+	`\mapsto`: true, `\longmapsto`: true, `\leftarrow`: true,
+	`\Rightarrow`: true, `\Leftrightarrow`: true, `\iff`: true,
+	`\implies`: true, `\prec`: true, `\succ`: true,
+	`\ll`: true, `\gg`: true, `\doteq`: true, `\models`: true,
+}
+
+// leadingOps are the operators that begin a continuation line. They count only
+// at the head of a line, where they carry the sum on from the line above.
+var leadingOps = map[string]bool{
+	`\pm`: true, `\mp`: true, `\cup`: true, `\cap`: true,
+	`\times`: true, `\otimes`: true, `\oplus`: true, `\wedge`: true,
+	`\vee`: true, `\cdot`: true, `\circ`: true, `\bigcup`: true,
+	`\bigcap`: true, `\bigoplus`: true, `\bigotimes`: true,
+}
+
+// displayEnvironment is the environments that set their own display and must
+// not be put inside one. The matrices and cases and arrays are not here: those
+// go inside a display and want the \[ \] around them.
+var displayEnvironment = regexp.MustCompile(`^\s*\\begin\{(align|alignat|gather|multline|equation|flalign)\*?\}`)
+
+func ownEnvironment(tex string) bool { return displayEnvironment.MatchString(tex) }
+
+// blocks cuts a masked body into headings and paragraphs. A heading is its own
+// block whether or not a blank line follows it, because a file that lost one
+// should still come out as a heading and not as a paragraph beginning with
+// hashes.
+func blocks(masked string) []string {
+	var out []string
+	var cur []string
+	flush := func() {
+		if len(cur) > 0 {
+			out = append(out, strings.Join(cur, "\n"))
+			cur = nil
+		}
+	}
+	for line := range strings.SplitSeq(masked, "\n") {
+		switch {
+		case strings.TrimSpace(line) == "":
+			flush()
+		case strings.HasPrefix(line, "#"):
+			flush()
+			out = append(out, line)
+		default:
+			cur = append(cur, line)
+		}
+	}
+	flush()
+	return out
+}
+
+// headingRE reads a heading and the attribute block assembly writes on it: the
+// label, the classes, and tag=XXXX. It is the same expression publish uses,
+// deliberately, because the two have to agree about what a heading is.
+var headingRE = regexp.MustCompile(`^(#{1,6})\s+(.*?)(?:\s*\{#([a-z0-9-]+)((?:\s+[^}\s]+)*)\})?\s*$`)
+
+var tagAttrRE = regexp.MustCompile(`\btag=([0-9A-Z]{4})\b`)
+
+// numberedRE is a no. heading, "3. ASSOCIATIVE LAWS". The number is the one the
+// § prints and the class sets it in the margin, so it is pulled out rather than
+// left in the title.
+var numberedRE = regexp.MustCompile(`^(\d+)\.\s+(.*)$`)
+
+// statementRE is a statement heading, "Proposition 7" or "Theorem 2
+// (Commutativity theorem)". Bourbaki numbers most statements within the § and
+// leaves some unnumbered, and both forms are here.
+var statementRE = regexp.MustCompile(`^([A-Za-zÀ-ÿ]+(?:\s+[a-z]+)*?)(?:\s+(\d+))?\s*(?:\(([^)]*)\))?\s*$`)
+
+// roman is the statement kinds whose text the printing sets upright. Everything
+// else that reaches \bstate is a proposition or a definition or one of their
+// relatives, and those are italic. The list is in the three languages the corpus
+// has, because the kind is the word the page uses and nothing translates it back.
+var roman = map[string]bool{
+	"Remark": true, "Remarks": true, "Remarque": true, "Remarques": true,
+	"Nhận xét": true,
+	"Example":  true, "Examples": true, "Exemple": true, "Exemples": true,
+	"Ví dụ": true,
+	"Note":  true, "Notes": true, "Ghi chú": true,
+}
+
+// heading renders a heading and says whether it opens an italic statement, in
+// which case the caller closes it after the next paragraph.
+func (r Renderer) heading(line string) (string, bool) {
+	m := headingRE.FindStringSubmatch(line)
+	if m == nil {
+		return r.paragraph(line, false), false
+	}
+	level, text, anchor, attrs := len(m[1]), strings.TrimSpace(m[2]), m[3], m[4]
+	label := ""
+	if r.Label != nil && anchor != "" {
+		label = r.Label(anchor)
+	}
+	switch level {
+	case 1, 2:
+		// A level one or two heading this far into a body is not the file naming
+		// itself, because StripTitle has already taken that off the front. Four
+		// files in the corpus have one, where the printing runs two divisions
+		// together under one head.
+		return fmt.Sprintf("\\bpart{%s}{%s}\n\n", r.inline(text), label), false
+	case 3:
+		if n := numberedRE.FindStringSubmatch(text); n != nil {
+			// The third argument is the title the contents lists it under, which
+			// is the same words in a different case and is not derivable from
+			// the second. Where manifests/toc/ has not got it, the head goes in
+			// both places.
+			words := n[2]
+			if no, err := strconv.Atoi(n[1]); err == nil && r.Contents[no] != "" {
+				words = r.Contents[no]
+			}
+			return fmt.Sprintf("\\bno{%s}{%s}{%s}{%s}{%s}\n\n",
+				n[1], r.inline(n[2]), r.inline(words), r.head(words), label), false
+		}
+		return fmt.Sprintf("\\bnamed{%s}{%s}\n\n", r.inline(text), label), false
+	}
+	kind, number, note := statement(text)
+	tag := ""
+	if t := tagAttrRE.FindStringSubmatch(attrs); t != nil {
+		tag = t[1]
+	}
+	head := fmt.Sprintf("\\bstate{%s}{%s}{%s}{%s}{%s}",
+		r.inline(kind), number, r.inline(note), tag, label)
+	if roman[kind] {
+		return head + "\n", false
+	}
+	return head + "\\bstatebegin\n", true
+}
+
+// statement cuts a statement heading into its three parts. A heading it cannot
+// read comes back whole as the kind, which sets it as it stands rather than
+// losing half of it to a regular expression that was written for the other
+// nineteen thousand.
+func statement(text string) (kind, number, note string) {
+	m := statementRE.FindStringSubmatch(text)
+	if m == nil {
+		return text, "", ""
+	}
+	return strings.TrimSpace(m[1]), m[2], strings.TrimSpace(m[3])
+}
+
+// opensDisplay says whether a block starts with a displayed formula. The corpus
+// writes a display with a blank line in front of it, which makes it the start of
+// a block of its own, but the printing sets it inside the sentence that leads
+// into it: "may be expressed by the formulae", then the formula, then whatever
+// qualifies it. So a block that opens with a display is joined to the one
+// before, and the blank line between them goes.
+func opensDisplay(block string, spans []mathtex.Span) bool {
+	loc := placeholderRE.FindStringIndex(block)
+	if loc == nil || strings.TrimSpace(block[:loc[0]]) != "" {
+		return false
+	}
+	var n int
+	fmt.Sscanf(block[loc[0]:loc[1]], "\x00m%d\x00", &n)
+	return n < len(spans) && spans[n].Display
+}
+
+// displayOnly says whether a block is a displayed formula and nothing else.
+func displayOnly(block string) bool {
+	return placeholderRE.MatchString(block) &&
+		strings.TrimSpace(placeholderRE.ReplaceAllString(block, "")) == ""
+}
+
+// paragraph renders one block. It is told whether a display comes next, because
+// that decides whether the block ends with a blank line or not, and the answer
+// is worth a line of explanation.
+//
+// A blank line before \[ leaves TeX in vertical mode. amsmath then opens a
+// paragraph of its own to hold the display, and the page gets a whole empty line
+// above the formula on top of \abovedisplayskip. The printing has the formula
+// hanging off the end of the sentence that introduces it, with no more space
+// than a display normally takes. So the blank line goes only after the display
+// and never before it, and the same rule joins two displays that follow one
+// another.
+func (r Renderer) paragraph(block string, joined bool) string {
+	end := "\n\n"
+	if joined {
+		// Nothing at all, not a newline: a display carries its own line break in
+		// front of it, and a second one here is the blank line this is avoiding.
+		end = ""
+	}
+	if displayOnly(block) {
+		return block + end
+	}
+	return r.inline(strings.ReplaceAll(block, "\n", " ")) + end
+}
+
+// Markdown escapes. The corpus writes \* for the star that opens a forward
+// looking passage, 595 of them, and \_ and a few others where an OCR read a
+// character Markdown would otherwise have eaten. They have to come out before
+// the prose is escaped, or the backslash becomes a printed backslash, and they
+// have to stay out of reach of the emphasis reader, or the star opens an italic
+// that runs to the end of the paragraph.
+var mdEscapeRE = regexp.MustCompile(`\\([*_$#\[\]()~^\\&%{}])`)
+
+const (
+	escOpen  = "\x00e"
+	escClose = "\x00"
+)
+
+// The placeholder holds an index and not the character itself, because the
+// character itself would still be a brace or a backslash and the prose escaper
+// runs next and would escape it where it stood. That happened: a \{ in prose
+// came out of the escaper as the placeholder with a backslash inside it, which
+// then matched nothing, and a NUL reached the typesetter.
+var escRestoreRE = regexp.MustCompile("\x00e(\\d+)\x00")
+
+var (
+	boldRE = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	// emRE is a single pair of asterisks. The corpus has 20853 of them in
+	// English alone, which is Bourbaki setting a term in italic where it is
+	// defined, and a book that printed the asterisks instead would be unreadable
+	// in twenty thousand places.
+	emRE   = regexp.MustCompile(`(?:^|([^*\x00]))\*([^*\n]+)\*(?:$|([^*]))`)
+	linkRE = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
+)
+
+// inline renders the inside of a paragraph or a heading.
+func (r Renderer) inline(s string) string {
+	s, ctl := r.controls(s)
+	var esc []string
+	s = mdEscapeRE.ReplaceAllStringFunc(s, func(m string) string {
+		esc = append(esc, mdEscapeRE.FindStringSubmatch(m)[1])
+		return escOpen + itoa(len(esc)-1) + escClose
+	})
+	s = escapeTeX(s)
+	s = boldRE.ReplaceAllString(s, `\textbf{$1}`)
+	s = emRE.ReplaceAllString(s, `$1\emph{$2}$3`)
+	s = linkRE.ReplaceAllStringFunc(s, func(m string) string {
+		p := linkRE.FindStringSubmatch(m)
+		if r.Ref == nil {
+			return p[1]
+		}
+		if out := r.Ref(p[2], p[1]); out != "" {
+			return out
+		}
+		return p[1]
+	})
+	if r.Missing != nil {
+		if runes := Missing(s); len(runes) > 0 {
+			r.Missing(r.at(0), runes)
+		}
+	}
+	s = Text(s)
+	if len(esc) > 0 {
+		s = escRestoreRE.ReplaceAllStringFunc(s, func(m string) string {
+			var i int
+			fmt.Sscanf(m, "\x00e%d\x00", &i)
+			return literal(esc[i])
+		})
+	}
+	// The control sequences go back last, after the character table has run, so
+	// that the TeX this wrote is not read as prose and rewritten.
+	if len(ctl) == 0 {
+		return s
+	}
+	return ctlRE.ReplaceAllStringFunc(s, func(m string) string {
+		var i int
+		fmt.Sscanf(m, "\x00c%d\x00", &i)
+		return ctl[i]
+	})
+}
+
+// teXSpecial is the ten characters TeX reads rather than prints. The backslash
+// and the braces are first, since replacing them after the others would escape
+// the backslashes the others just wrote.
+var teXSpecial = strings.NewReplacer(
+	`\`, `\textbackslash{}`,
+	`{`, `\{`,
+	`}`, `\}`,
+	`$`, `\$`,
+	`&`, `\&`,
+	`#`, `\#`,
+	`%`, `\%`,
+	`_`, `\_`,
+	`~`, `\textasciitilde{}`,
+	`^`, `\textasciicircum{}`,
+)
+
+func escapeTeX(s string) string { return teXSpecial.Replace(s) }
+
+// literal is one character of prose the corpus escaped, written so TeX prints
+// it. The star is the interesting one and the reason the whole placeholder
+// dance exists: it has to survive the emphasis reader and then be printed.
+func literal(ch string) string {
+	switch ch {
+	case `\`:
+		return `\textbackslash{}`
+	case `~`:
+		return `\textasciitilde{}`
+	case `^`:
+		return `\textasciicircum{}`
+	case `{`, `}`, `$`, `&`, `#`, `%`, `_`:
+		return `\` + ch
+	}
+	return ch
+}
+
+// at is where a body line is in the corpus, in the file:line form an editor and
+// a CI annotation both take.
+func (r Renderer) at(line int) string {
+	if r.File == "" {
+		return fmt.Sprintf("line %d", line)
+	}
+	return fmt.Sprintf("%s:%d", r.File, r.Line+line-1)
+}
+
+// StripTitle takes the heading a file opens with off the front of its body,
+// when that heading is the file naming itself.
+//
+// Every section file opens with its own title as a level two heading, every
+// chapter front page with the chapter number and the chapter title, and every
+// historical note with the words HISTORICAL NOTE. The document sets all three
+// from the front matter, where they are right in every language and where an
+// appendix has not had its Roman numeral eaten by an OCR, so the copy in the
+// body would print twice.
+//
+// It stops at the first block that is not a level one or two heading, so a
+// level two heading further down, which four files in the corpus have, stays
+// where it is.
+func StripTitle(body string) string {
+	lines := strings.Split(body, "\n")
+	i := 0
+	for i < len(lines) {
+		line := strings.TrimSpace(lines[i])
+		if line == "" {
+			i++
+			continue
+		}
+		m := headingRE.FindStringSubmatch(lines[i])
+		if m == nil || len(m[1]) > 2 {
+			break
+		}
+		i++
+	}
+	return strings.TrimLeft(strings.Join(lines[i:], "\n"), "\n")
+}
+
+// exercisesAnchorRE is the pointer the corpus writes at the foot of a § at the
+// place the printing prints the exercises, "### Exercises {#alg-i-s1-exercises}"
+// and a line under it linking the directory they are in.
+var exercisesAnchorRE = regexp.MustCompile(`(?m)^#{1,6}[^\n]*\{#[a-z0-9-]+-exercises[^}]*\}\s*$`)
+
+// StripExercisePointer takes that pointer off the end of a body.
+//
+// It is a link between two files of a repository and it has no meaning in a
+// book: the book sets the exercises themselves, in the place the pointer sits,
+// out of the files the pointer points at. Leaving it would print a heading
+// saying Exercises followed by a sentence telling the reader to see the
+// exercises, immediately above the exercises.
+func StripExercisePointer(body string) string {
+	loc := exercisesAnchorRE.FindStringIndex(body)
+	if loc == nil {
+		return body
+	}
+	return strings.TrimRight(body[:loc[0]], "\n") + "\n"
+}

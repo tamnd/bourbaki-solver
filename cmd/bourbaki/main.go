@@ -34,6 +34,7 @@ commands:
   translate        turn English sections into Vietnamese, Chinese or Japanese
   audit            every quality rule in spec 08, run over the committed corpus
   publish          build the static site out of the committed Markdown
+  book             build a volume back out of content/ as a PDF and an EPUB, and audit it
   repo             the checkout itself: point git at the hooks the corpus keeps
   ocr              read the pages of a scanned volume through a model, and check them
   ocr-batch        read a directory of page images on this machine, the local half of ocr run
@@ -92,6 +93,8 @@ func main() {
 		err = runAudit(args[1:])
 	case "publish":
 		err = runPublish(args[1:])
+	case "book":
+		err = runBook(args[1:])
 	case "repo":
 		err = runRepo(args[1:])
 	case "ocr":
