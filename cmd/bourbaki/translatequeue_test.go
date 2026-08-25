@@ -721,3 +721,37 @@ func TestChunksOutstandingCountsWhatIsLeftAndNotTheFile(t *testing.T) {
 		t.Errorf("chunksOutstanding() on an answer the audit refuses = %d, want 1", got)
 	}
 }
+
+// A run that is stopped with chunks outstanding writes nothing, and this is the
+// one that was getting through.
+//
+// The runner gives a lane a wall clock and sends it a TERM when it runs out.
+// TERM cancels the context this function is handed, and the collecting loop
+// used to make a cancelled context the reason not to complain about a chunk
+// that never came back. So problems came out empty, the answers for the chunks
+// the run never reached were the empty string, Join drops an empty answer, and
+// a section short two thirds of its statements went to disk with the text
+// closed neatly over the hole. Section 4 of Integration chapter IV lost 39 of
+// its 64 statements that way, and the log line for it reads like a success.
+func TestARunStoppedWithChunksOutstandingWritesNothing(t *testing.T) {
+	q, root := openQueue(t)
+	j := section()
+	first := j.chunks[0]
+	if err := writeAccepted(root, "vi", accepted{Source: j.source, Chunk: first.Index, Of: first.Of,
+		Input: chunkInput(first.Body, j.terms), Prompt: "prompt-v1", Model: "gpt-5-6",
+		Text: viOf(first.Body)}); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	host := ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false", Lanes: 1}
+	body, _, problems := translateFile(ctx, root, q, []ocr.Host{host}, nil,
+		"en", "vi", "vi", "prompt-v1", j, false, false, false, true, chunkDeadline, func(string, ...any) {})
+	if len(problems) == 0 {
+		t.Fatal("a run stopped after one chunk of three handed back a section")
+	}
+	if body != "" {
+		t.Fatalf("it handed back %d bytes assembled from one chunk of three", len(body))
+	}
+}

@@ -876,12 +876,48 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 	var problems []translate.Problem
 	for i, c := range j.chunks {
 		if a, ok := have[c.Index]; ok {
+			// An answer with nothing in it is a passage deleted, and Join
+			// drops it without a word, so the join audit never sees a gap and
+			// the counts it compares are the counts of a shorter section. It
+			// is caught here instead, where the chunk it belongs to still has
+			// a number to put in the complaint.
+			if strings.TrimSpace(a.Text) == "" {
+				problems = append(problems, translate.Problem{Rule: "queue",
+					Msg: fmt.Sprintf("chunk %d of %d: the answer held is empty", c.Index, c.Of)})
+				continue
+			}
 			answers[i], models[i] = a.Text, a.Model
 			continue
 		}
+		// A chunk that is not in hand is a refusal whatever stopped the run,
+		// and the interrupt is not the exception it used to be treated as.
+		//
+		// The old test here was "not stuck and the context is still live", so a
+		// run that was cancelled with chunks outstanding produced no complaint
+		// about them at all. problems then came out empty, the join ran over
+		// answers that were the empty string for every chunk the run never got
+		// to, Join drops an empty answer, and the file went to disk with the
+		// missing passages closed over and the run reported it written.
+		//
+		// This is not theoretical. Section 4 of Integration chapter IV is 29
+		// chunks. The runner gives a lane 1800 seconds and then sends it a
+		// TERM, the signal context this function is handed cancels on TERM,
+		// and the pass had 8 of the 29 answered when the clock ran out. The
+		// log line reads "in 1807s" beside the section name, which is the
+		// runner's line for a file that was written, and what landed was 25 of
+		// the 64 statements with no sign anywhere that 39 of them were gone.
+		// Two other sections went the same way in the same hour.
+		//
+		// The cached chunks are not lost by refusing. They are on disk under
+		// work and the next pass picks them up, which is the whole point of
+		// the archive, so a refusal here costs a pass and not the work.
 		bad, ok := stuck[c.Index]
-		if !ok && ctx.Err() == nil {
-			bad = []translate.Problem{{Rule: "queue", Msg: "it was never answered"}}
+		if !ok {
+			msg := "it was never answered"
+			if ctx.Err() != nil {
+				msg = "the run was stopped before it was answered"
+			}
+			bad = []translate.Problem{{Rule: "queue", Msg: msg}}
 		}
 		for _, p := range bad {
 			p.Msg = fmt.Sprintf("chunk %d of %d: %s", c.Index, c.Of, p.Msg)
