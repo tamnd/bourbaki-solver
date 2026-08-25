@@ -62,7 +62,7 @@ func TestMathPlain(t *testing.T) {
 // that nobody can see and nobody can search for.
 func TestMathPlainDropsTheInvisibleOperators(t *testing.T) {
 	got := mathPlain(engine(t), `\operatorname{Hom}(E, F)`, false)
-	if strings.ContainsAny(got, "⁡⁢⁣⁤") {
+	if strings.ContainsAny(got, "\u2061\u2062\u2063\u2064") {
 		t.Errorf("mathPlain kept an invisible operator: %q", got)
 	}
 	if !strings.HasPrefix(got, "Hom") {
