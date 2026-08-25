@@ -3,6 +3,7 @@ package book
 import (
 	"regexp"
 	"testing"
+	"unicode"
 )
 
 // The five words this build writes that did not come out of the corpus are
@@ -111,5 +112,51 @@ func TestEveryLanguageHasItsOwnFurniture(t *testing.T) {
 		if spanWords[lang] == [3]string{} {
 			t.Errorf("%s has the five class words and no words for the chapter span on the cover", lang)
 		}
+	}
+}
+
+// A Greek letter in one of these titles is a symbol. The contents of Algebra
+// VIII lists a subsection as "\u03c4 -Extensions of Groups", and the title caser used
+// to make that "\u03a4 -extensions of Groups": cap tau, which is a different
+// character and one Latin Modern has no glyph for, so eight running heads in
+// that volume came out of the build with a hole in them. Cap theta went the
+// other way and came out as theta, which is a symbol that sets and is not the
+// one the book uses.
+//
+// The Latin around it is cased the way it always was. What the test pins is
+// that the Greek comes through untouched in either direction.
+func TestListedLeavesGreekAlone(t *testing.T) {
+	for _, c := range []struct{ in, lang, want string }{
+		{"\u03c4 -Extensions of Groups", "en", "\u03c4 -extensions of Groups"},
+		{"Construction des applications \u0398a", "fr", "Construction des Applications \u0398a"},
+		{"The coefficients c\u03b1\u03b2\u03b3", "en", "The Coefficients C\u03b1\u03b2\u03b3"},
+	} {
+		got := listed(c.in, c.lang)
+		if got != c.want {
+			t.Errorf("listed(%q) = %q, want %q", c.in, got, c.want)
+		}
+		if greekOf(got) != greekOf(c.in) {
+			t.Errorf("listed(%q) changed the Greek to %q", c.in, greekOf(got))
+		}
+	}
+}
+
+func greekOf(s string) string {
+	var b []rune
+	for _, r := range s {
+		if unicode.Is(unicode.Greek, r) {
+			b = append(b, r)
+		}
+	}
+	return string(b)
+}
+
+// Math in dollars is cut out of the casing entirely, which is what listed did
+// before and has to keep doing.
+func TestListedStillCasesTheProseAroundMath(t *testing.T) {
+	got := listed("PROPERTIES OF THE RING $\\mathbf{A}^{(d)}$", "en")
+	want := "Properties of the Ring $\\mathbf{A}^{(d)}$"
+	if got != want {
+		t.Errorf("listed = %q, want %q", got, want)
 	}
 }

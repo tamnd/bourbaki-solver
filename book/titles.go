@@ -134,16 +134,46 @@ func listedProse(s, lang string, first bool) string {
 		return s
 	}
 	lead, trail := leading(s), trailing(s)
-	words := strings.Fields(strings.ToLower(s))
+	words := strings.Fields(s)
 	for i, w := range words {
+		w = lowerProse(w)
+		words[i] = w
 		if !(first && i == 0) && particles[lang][w] {
 			continue
 		}
 		rs := []rune(w)
-		rs[0] = unicode.ToUpper(rs[0])
+		if !unicode.Is(unicode.Greek, rs[0]) {
+			rs[0] = unicode.ToUpper(rs[0])
+		}
 		words[i] = string(rs)
 	}
 	return lead + strings.Join(words, " ") + trail
+}
+
+// lowerProse lower cases a word and leaves its Greek where it is.
+//
+// A Greek letter in one of these titles is a symbol and not a word. Thirty
+// three of them are in manifests/toc/ standing outside a math span, written as
+// letters by the reading of the contents page: a subsection of Algebra VIII is
+// listed as "τ -Extensions of Groups" where the printing sets a tau. Casing
+// them is not a cosmetic error. It turns tau into cap tau, which is a different
+// character that Latin Modern has no glyph for, and it turns cap theta into
+// theta, which is a different symbol that sets perfectly well and says
+// something the book does not.
+//
+// The right place for the rest of that fix is the manifest, since a symbol
+// belongs in a math span, and it is being done volume by volume. This is the
+// guard that stops the build mangling the ones that are still there, and it
+// stays afterwards, because the next reading of a contents page will do the
+// same thing.
+func lowerProse(w string) string {
+	rs := []rune(w)
+	for i, r := range rs {
+		if !unicode.Is(unicode.Greek, r) {
+			rs[i] = unicode.ToLower(r)
+		}
+	}
+	return string(rs)
 }
 
 // leading and trailing keep the space either side of a math span, which Fields
