@@ -2,6 +2,7 @@ package book
 
 import (
 	"archive/zip"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -222,5 +223,93 @@ func TestWrittenHoldsTheCeilings(t *testing.T) {
 	}
 	if !find(t, b, "array had to be widened").OK {
 		t.Error("a widened array failed a ceiling that covers it")
+	}
+}
+
+// The length check is the one that had to be rewritten, so it is the one worth
+// pinning down. It used to compare the page count against the printing's, which
+// measured the publisher's leading, and it now compares characters against
+// pages/, which measures the book.
+
+// writePrinting lays out a corpus root holding a reading of a printing whose
+// text is n copies of the volume's own, which is how a test says "the same
+// length" and "twice the length" without counting anything by hand.
+func writePrinting(t *testing.T, id string, text string, pages int) string {
+	t.Helper()
+	root := t.TempDir()
+	dir := filepath.Join(root, "pages", id)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i <= pages; i++ {
+		name := filepath.Join(dir, fmt.Sprintf("%04d.md", i))
+		page := "---\nbook: " + id + "\npdf_page: " + fmt.Sprint(i) + "\n---\n\n" + text
+		if err := os.WriteFile(name, []byte(page), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return root
+}
+
+func TestLengthPassesWhenTheVolumeHoldsThePrinting(t *testing.T) {
+	v := sample()
+	root := writePrinting(t, v.Meta.ID, strings.Repeat("x", v.Chars()/2), 2)
+	a := &Audit{}
+	a.length(root, v, DefaultAuditOptions())
+	if c := find(t, a, "holds the text the printing has"); !c.OK {
+		t.Errorf("a volume the same length as its printing failed: %s", c.Detail)
+	}
+}
+
+func TestLengthFindsAVolumeThatIsShortOfThePrinting(t *testing.T) {
+	v := sample()
+	root := writePrinting(t, v.Meta.ID, strings.Repeat("x", v.Chars()), 2)
+	a := &Audit{}
+	a.length(root, v, DefaultAuditOptions())
+	c := find(t, a, "holds the text the printing has")
+	if c.OK {
+		t.Errorf("a volume holding half its printing passed: %s", c.Detail)
+	}
+	if !strings.Contains(c.Detail, "50% of it") {
+		t.Errorf("the detail should say how short it is, got %q", c.Detail)
+	}
+}
+
+// A language the volume was never printed in holds what has been translated,
+// and half a translation should be half the text. Calling that short would be
+// calling the translation's progress a defect, which is the same reason the
+// coverage check scales.
+func TestLengthScalesAPartialTranslation(t *testing.T) {
+	v := sample()
+	root := writePrinting(t, v.Meta.ID, strings.Repeat("x", v.Chars()), 2)
+	a := &Audit{Have: 1, Want: 2}
+	a.length(root, v, DefaultAuditOptions())
+	if c := find(t, a, "holds the text the printing has"); !c.OK {
+		t.Errorf("half a translation of a printing failed: %s", c.Detail)
+	}
+}
+
+// A volume the corpus has no reading of cannot be measured, and a check that
+// cannot be measured passes and says why rather than failing on a fact about
+// the repository.
+func TestLengthPassesWhenThereIsNoReadingToCompareAgainst(t *testing.T) {
+	a := &Audit{}
+	a.length(t.TempDir(), sample(), DefaultAuditOptions())
+	c := find(t, a, "holds the text the printing has")
+	if !c.OK || !strings.Contains(c.Detail, "no reading") {
+		t.Errorf("want a pass that says there is nothing to compare against, got %v %q", c.OK, c.Detail)
+	}
+}
+
+// The markup is why the comparison is one-sided. content/ writes \varphi where
+// the printing sets one letter, so a faithful volume runs over the printing and
+// running over is not a defect.
+func TestLengthDoesNotMindAVolumeLongerThanThePrinting(t *testing.T) {
+	v := sample()
+	root := writePrinting(t, v.Meta.ID, strings.Repeat("x", v.Chars()/4), 2)
+	a := &Audit{}
+	a.length(root, v, DefaultAuditOptions())
+	if c := find(t, a, "holds the text the printing has"); !c.OK {
+		t.Errorf("a volume twice the length of its printing failed: %s", c.Detail)
 	}
 }
