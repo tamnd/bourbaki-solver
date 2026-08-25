@@ -133,7 +133,7 @@ func tocBuild(args []string) error {
 			}
 		}
 		printTOC(res, *verbose)
-		if len(res.Problems) > 0 {
+		if len(toc.Hard(res.Problems)) > 0 {
 			// A contents with a problem in it is not written. What the parser
 			// reports as a problem is a chapter it lost, a § it doubled or a
 			// page the volume does not have, and a manifest that carries those
@@ -141,6 +141,11 @@ func tocBuild(args []string) error {
 			// would then count sections the volume never had, and every reader
 			// downstream would take the missing chapters for chapters nobody
 			// has extracted yet.
+			//
+			// A soft problem is none of those. It says the scan is short a leaf
+			// the volume prints, which is true of the file and not of the
+			// reading, and refusing to write over it would hold a correct
+			// contents hostage to a page nobody can put back by editing it.
 			failed++
 			continue
 		}
@@ -272,10 +277,21 @@ func printTOC(r *toc.Result, verbose bool) {
 			}
 		}
 	}
-	if n := len(r.Problems); n > 0 {
-		fmt.Printf("  %d problems:\n", n)
-		for _, p := range r.Problems {
+	hard := toc.Hard(r.Problems)
+	if len(hard) > 0 {
+		fmt.Printf("  %d problems:\n", len(hard))
+		for _, p := range hard {
 			fmt.Printf("    %s\n", p)
+		}
+	}
+	// The soft ones are printed apart and named for what they are, so that a
+	// volume written with one of them still says out loud what it is short.
+	if n := len(r.Problems) - len(hard); n > 0 {
+		fmt.Printf("  %d short of the scan:\n", n)
+		for _, p := range r.Problems {
+			if p.Soft {
+				fmt.Printf("    %s\n", p)
+			}
 		}
 	}
 }

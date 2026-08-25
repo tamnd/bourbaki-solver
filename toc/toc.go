@@ -86,6 +86,27 @@ type Problem struct {
 	Chapter string `json:"chapter,omitempty"`
 	Section int    `json:"section,omitempty"`
 	Detail  string `json:"detail"`
+
+	// Soft marks a problem that is not the contents' fault, the way audit
+	// separates a rule that says the corpus is wrong from a rule that says
+	// somebody should look. A contents entry landing on no pdf page because the
+	// scan is short a leaf is the case: the reading is right, the volume prints
+	// the page it names, and the file is what is incomplete. Reporting that in
+	// the same words as a misread digit made a correct reading unwritable.
+	Soft bool `json:"soft,omitempty"`
+}
+
+// Hard is the problems that are the contents' own fault. They are the ones a
+// manifest must not be written over, and the soft ones are not, so the two have
+// to be counted apart wherever that decision is made. See Problem.Soft.
+func Hard(probs []Problem) []Problem {
+	var out []Problem
+	for _, p := range probs {
+		if !p.Soft {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func (p Problem) String() string {

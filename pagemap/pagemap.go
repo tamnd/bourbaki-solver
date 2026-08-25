@@ -1692,6 +1692,28 @@ func (m *Map) Lookup(pdfPage int) (Entry, bool) {
 	return m.Entries[pdfPage-1], true
 }
 
+// MissingPage says whether the volume prints a page the file does not carry.
+//
+// PDFPageOf comes back empty for two quite different reasons and cannot tell
+// them apart on its own. Either the page was never printed, which is what a
+// misread digit in a table of contents looks like, or it was printed and the
+// leaf is not in the scan. The second is a fact the map already worked out: a
+// step is the printing carrying a leaf the file does not, and it lists the
+// printed pages that fall in the gap. Asking here is what lets a reader say
+// which of the two it is looking at instead of reporting both the same way.
+func (m *Map) MissingPage(chapter string, page int) bool {
+	chapter = strings.ToUpper(chapter)
+	for _, s := range m.Steps {
+		if chapter != "" && s.Chapter != chapter {
+			continue
+		}
+		if slices.Contains(s.MissingPages, page) {
+			return true
+		}
+	}
+	return false
+}
+
 // PDFPageOf is the inverse: which PDF page carries a printed page of a chapter.
 func (m *Map) PDFPageOf(chapter string, page int) (int, bool) {
 	chapter = strings.ToUpper(chapter)

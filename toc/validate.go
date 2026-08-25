@@ -19,6 +19,27 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 		probs = append(probs, Problem{Chapter: ch, Section: sec,
 			Detail: fmt.Sprintf(format, args...)})
 	}
+	// nopdf reports a contents entry that landed on no pdf page. There are two
+	// ways to get there and they want different answers. A misread digit names
+	// a page the volume never printed, and that is the contents being wrong.
+	// A page the scan is short a leaf for is the contents being right about a
+	// volume the file does not fully hold, and the map already knows which
+	// pages those are, so it is asked rather than guessed at.
+	//
+	// what names the entry and is empty for a chapter or a §, which read
+	// naturally without it. It is "no. 3" or "the exercises'" elsewhere.
+	nopdf := func(ch string, sec int, what string, page int) {
+		p := Problem{Chapter: ch, Section: sec}
+		switch {
+		case pm.MissingPage(ch, page):
+			p.Soft = true
+			p.Detail = fmt.Sprintf("%sprinted page %d is not in the scan, "+
+				"which the page map records as a missing leaf", what, page)
+		default:
+			p.Detail = fmt.Sprintf("%sprinted page %d is on no pdf page", what, page)
+		}
+		probs = append(probs, p)
+	}
 
 	if len(r.Chapters) == 0 {
 		add("", 0, "the contents yielded no chapters")
@@ -65,7 +86,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 				c.Page, sp.FirstPage)
 		}
 		if c.PDFPage == 0 {
-			add(c.Numeral, 0, "printed page %d is on no pdf page", c.Page)
+			nopdf(c.Numeral, 0, "", c.Page)
 		}
 		if c.Title == "" {
 			add(c.Numeral, 0, "no title")
@@ -102,7 +123,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 					sub.Number, sub.Page)
 			}
 			if sub.PDFPage == 0 {
-				add(c.Numeral, 0, "no. %d printed page %d is on no pdf page", sub.Number, sub.Page)
+				nopdf(c.Numeral, 0, fmt.Sprintf("no. %d ", sub.Number), sub.Page)
 			}
 			if sub.Title == "" {
 				add(c.Numeral, 0, "no. %d has no title", sub.Number)
@@ -144,7 +165,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 			}
 			last = s.Page
 			if s.PDFPage == 0 {
-				add(c.Numeral, s.Number, "printed page %d is on no pdf page", s.Page)
+				nopdf(c.Numeral, s.Number, "", s.Page)
 			}
 			// An appendix is allowed to have no title. Chapter VII of the
 			// English Integration 7 to 9 prints "Appendix I" and "Appendix II"
@@ -181,8 +202,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 						sub.Number, sub.Page)
 				}
 				if sub.PDFPage == 0 {
-					add(c.Numeral, s.Number, "no. %d printed page %d is on no pdf page",
-						sub.Number, sub.Page)
+					nopdf(c.Numeral, s.Number, fmt.Sprintf("no. %d ", sub.Number), sub.Page)
 				}
 				sublast = sub.Page
 			}
@@ -196,8 +216,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 						s.Exercises.Page, s.Page)
 				}
 				if s.Exercises.PDFPage == 0 {
-					add(c.Numeral, s.Number, "the exercises' printed page %d is on no pdf page",
-						s.Exercises.Page)
+					nopdf(c.Numeral, s.Number, "the exercises' ", s.Exercises.Page)
 				}
 				// The runs are printed in the order of the §§ they belong to,
 				// whether they follow each § or are gathered at the end of the
@@ -220,8 +239,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 					c.Exercises.Page)
 			}
 			if c.Exercises.PDFPage == 0 {
-				add(c.Numeral, 0, "the chapter's exercises' printed page %d is on no pdf page",
-					c.Exercises.Page)
+				nopdf(c.Numeral, 0, "the chapter's exercises' ", c.Exercises.Page)
 			}
 		}
 		if c.Historical != nil {
@@ -230,8 +248,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 					c.Historical.Page)
 			}
 			if c.Historical.PDFPage == 0 {
-				add(c.Numeral, 0, "the historical note's printed page %d is on no pdf page",
-					c.Historical.Page)
+				nopdf(c.Numeral, 0, "the historical note's ", c.Historical.Page)
 			}
 		}
 	}
