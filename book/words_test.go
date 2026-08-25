@@ -160,3 +160,33 @@ func TestListedStillCasesTheProseAroundMath(t *testing.T) {
 		t.Errorf("listed = %q, want %q", got, want)
 	}
 }
+
+// A subsection title off manifests/toc/ arrives with its formulae still in
+// dollars, because nothing masked it. Everything else that reaches inline came
+// out of a body that mask() had been over, so inline treats a dollar as prose
+// and escapes it, and that put two printed dollar signs around the tau in the
+// contents line and in the running head of every page of Algebra VIII, § 16,
+// no. 1.
+func TestTitleTextSetsMathThatWasNeverMasked(t *testing.T) {
+	r := Renderer{Lang: "en"}
+	for _, c := range []struct{ in, want string }{
+		{`$\tau$-Extensions of Groups`, `$\tau$-Extensions of Groups`},
+		{`Properties of the Ring $\mathbf{A}^{(d)}$`, `Properties of the Ring $\mathbf{A}^{(d)}$`},
+		{`Plain Title`, `Plain Title`},
+	} {
+		if got := r.titleText(c.in); got != c.want {
+			t.Errorf("titleText(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The running head takes the same title down a case and has to keep the math
+// out of it both times, in the full head and in the short one.
+func TestHeadKeepsTheMathOutOfTheCasing(t *testing.T) {
+	r := Renderer{Lang: "en"}
+	got := r.head(`$\tau$-Extensions of Groups`)
+	want := `\bheadfit{$\tau$-extensions of Groups}{$\tau$-extensions of Groups}`
+	if got != want {
+		t.Errorf("head = %q, want %q", got, want)
+	}
+}

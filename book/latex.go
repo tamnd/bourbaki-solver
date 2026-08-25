@@ -83,7 +83,52 @@ func (r Renderer) head(words string) string {
 	if i := strings.Index(full, ". "); i > 0 {
 		short = full[:i+1]
 	}
-	return fmt.Sprintf("\\bheadfit{%s}{%s}", r.inline(full), r.inline(short))
+	return fmt.Sprintf("\\bheadfit{%s}{%s}", r.titleText(full), r.titleText(short))
+}
+
+// titleText renders a title that may still have its mathematics in dollars.
+//
+// Every other string that reaches inline came out of a body mask() had already
+// been over, so its formulae are placeholders by then and there is not a dollar
+// left in it. A subsection title off manifests/toc/ has not been anywhere near
+// mask: load reads it straight out of the YAML and the heading writer is handed
+// it whole. inline escapes a dollar, because a loose dollar in a body is prose,
+// so "$\\tau$-Extensions of Groups" set as \\$$\\tau$\\$-Extensions of Groups,
+// two printed dollar signs around the tau in the contents line and in the
+// running head of every page of the subsection.
+//
+// So the title gets what the body got, one span at a time. A title with no
+// dollars in it goes through inline exactly as before, and that is every title
+// read off a heading and every manifest that has not had its symbols put back
+// into math yet.
+func (r Renderer) titleText(s string) string {
+	spans, unclosed := mathtex.Split(s)
+	if len(spans) == 0 || unclosed != nil {
+		return r.inline(s)
+	}
+	rs := []rune(s)
+	var b strings.Builder
+	at := 0
+	for _, sp := range spans {
+		d := 1
+		if sp.Display {
+			d = 2
+		}
+		if sp.Start-d < at || sp.End+d > len(rs) {
+			return r.inline(s)
+		}
+		b.WriteString(r.inline(string(rs[at : sp.Start-d])))
+		text := Math(sp.Text)
+		if r.Missing != nil {
+			if runes := Missing(text); len(runes) > 0 {
+				r.Missing(r.at(sp.Line), runes)
+			}
+		}
+		b.WriteString("$" + text + "$")
+		at = sp.End + d
+	}
+	b.WriteString(r.inline(string(rs[at:])))
+	return b.String()
 }
 
 // TeX renders a body.
@@ -842,7 +887,7 @@ func (r Renderer) heading(line string) (string, bool) {
 			mark, _, notes := splitFootnotes(n[2])
 			_, contents, _ := splitFootnotes(words)
 			out := fmt.Sprintf("\\bno{%s}{%s}{%s}{%s}{%s}\n\n",
-				n[1], r.inline(mark), r.inline(contents), r.head(contents), label)
+				n[1], r.inline(mark), r.titleText(contents), r.head(contents), label)
 			for _, note := range notes {
 				out += "\\footnotetext{" + r.inline(note) + "}\n\n"
 			}
