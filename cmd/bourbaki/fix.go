@@ -1483,7 +1483,9 @@ func fixOpening(args []string) error {
 			return strings.Split(f.Body, "\n"), true
 		}
 		for _, ch := range bt.Chapters {
-			if ch.PDFPage > 0 {
+			// A chapter the printing does not have has no opening to put
+			// back. See corpus.Chapter.Nominal.
+			if ch.PDFPage > 0 && !ch.Nominal {
 				lines, ok := read(ch.PDFPage)
 				switch {
 				case !ok:

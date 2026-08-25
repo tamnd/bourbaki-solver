@@ -44,6 +44,24 @@ type Chapter struct {
 	// of a chapter that goes on to open §§ is a misread contents line, not a
 	// printing, and the reader says so rather than filing it here.
 	Subsections []Subsection `yaml:"subsections,omitempty"`
+
+	// Nominal says the chapter is the manifest's own and not the printing's.
+	//
+	// Three volumes are not divided into chapters at all. Elements d'histoire
+	// des mathematiques is a run of twenty seven historical notes with no
+	// chapter anywhere in it, and Varietes differentielles et analytiques is
+	// a fascicule de resultats, one run of numbered paragraphs under the
+	// volume title. The assembler hangs everything off a chapter, so the
+	// contents wraps each of these in one chapter whose title is the volume
+	// title and whose page is where the first section opens.
+	//
+	// That chapter has no heading on any page, because the printing never
+	// sets one, and it has no front matter either, because the page the
+	// manifest points at opens on the first section. This says so, and the
+	// assembler then asks for neither. Without it a volume that is simply not
+	// divided into chapters is refused for the absence of a line the printing
+	// does not have.
+	Nominal bool `yaml:"nominal,omitempty"`
 }
 
 // Section is a § of a chapter.
