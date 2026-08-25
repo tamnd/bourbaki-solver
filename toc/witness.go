@@ -87,6 +87,26 @@ func HistoricalNote(lines []string) (int, string) {
 	return -1, ""
 }
 
+// HistoricalNoteFromHead says whether the reading filed the words a historical
+// note is headed by as the page's running head, and gives back whatever the
+// head carries after them.
+//
+// It is asked only about the page the contents opens the note on, and that page
+// carries no running head: the note begins there, the press sets its head in
+// display type at the top of the leaf, and nothing else is printed above the
+// text. So the words standing in that field are the head of the note and not a
+// head at all. Every one of the six chapters of General Topology V to X is in
+// this state, with running_head "HISTORICAL NOTE" and a body that opens on the
+// note's first parenthetical.
+//
+// The second and later pages of a note do carry HISTORICAL NOTE as a genuine
+// running head, and reading one of those as an opening would put a second head
+// in the middle of the note. Nothing here can reach them. The contents gives one
+// page per note and it is the first.
+func HistoricalNoteFromHead(running string) (string, bool) {
+	return historicalHead(strings.TrimSpace(running))
+}
+
 // WitnessHistorical says whether the text layer of a page prints the words a
 // historical note is headed by, and gives back what the layer's line carries
 // after them. It is the same second reading WitnessSection asks, and it is asked

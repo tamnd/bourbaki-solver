@@ -217,3 +217,36 @@ func TestWitnessSectionRefusesAnotherTitle(t *testing.T) {
 		t.Errorf("WitnessSection() = %q, true, want a different title refused", got)
 	}
 }
+
+func TestAHistoricalNoteFiledAsTheRunningHeadIsRead(t *testing.T) {
+	// All six chapters of General Topology V to X are in this state: the page
+	// the contents opens the note on carries running_head "HISTORICAL NOTE" and
+	// a body that opens on the note's first sentence. The parenthetical a head
+	// is sometimes set with comes back rather than being swallowed.
+	for _, c := range []struct {
+		running string
+		rest    string
+	}{
+		{"HISTORICAL NOTE", ""},
+		{"  HISTORICAL NOTE  ", ""},
+		{"NOTE HISTORIQUE (chapitres IV, V et VI).", "(chapitres IV, V et VI)"},
+	} {
+		rest, ok := HistoricalNoteFromHead(c.running)
+		if !ok {
+			t.Fatalf("%q reads as the head of a historical note", c.running)
+		}
+		if rest != c.rest {
+			t.Errorf("got %q, want %q", rest, c.rest)
+		}
+	}
+}
+
+func TestAnOrdinaryRunningHeadIsNotAHistoricalNote(t *testing.T) {
+	for _, running := range []string{
+		"", "MEASUREMENT OF MAGNITUDES", "HISTORICAL NOTE ON THE THEORY OF SETS",
+	} {
+		if _, ok := HistoricalNoteFromHead(running); ok {
+			t.Errorf("%q was read as the head of a historical note", running)
+		}
+	}
+}

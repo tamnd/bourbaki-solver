@@ -236,6 +236,34 @@ func SectionOpening(body []string, number int, title string) (int, int, string, 
 	return opening(body, number, title, "## ", true, false)
 }
 
+// SectionOpeningFromHead puts back the heading over a § whose page kept no line
+// of it, where the reading filed the heading as the page's running head. It
+// gives the heading to write and says nothing about where, since the words are
+// not in the body at all and there is nowhere in it they were taken from.
+//
+// A § opening page carries no running head. It is the first page of the § and
+// the press sets the heading in display type at the top of it, so what stands
+// at the top of that page is the heading and not a head. A reading that takes
+// the top line of every page for the running head is right on every page but
+// this one, and on this one it files the heading away where the assembler will
+// never look for it. General Topology V to X is read that way throughout: page
+// 18 has running_head "2. MEASUREMENT OF MAGNITUDES", which is § 2 of chapter V
+// word for word as the contents gives it, and a body that opens on the first
+// paragraph of the § with no heading over it.
+//
+// The number is what makes this safe, and it is the same number the body path
+// already requires. A running head carries the title and nothing else, which is
+// what turned page 177 of Topologie generale V a X away from ESPACES POLONAIS ;
+// ESPACES SOUSLINIENS when WitnessSection read the head of that page. A head
+// that carries a number as well is not a running head, and a head that carries
+// the number the contents gives on the one page the contents opens that § on,
+// under a title the contents agrees with, is that § heading and not another
+// line of the book.
+func SectionOpeningFromHead(running string, number int, title string) (string, bool) {
+	_, _, head, ok := opening([]string{strings.TrimSpace(running)}, number, title, "## ", true, false)
+	return head, ok
+}
+
 // NumberOpening puts back the heading over a no. whose page kept the title and
 // lost the level. It is the same repair as SectionOpening one level down, and
 // it is the same fault: page 32 of Theory of Sets sets PROOFS as its running
