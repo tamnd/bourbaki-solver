@@ -81,6 +81,11 @@ about a fifth of the words.
                  to ask for and why, fewest chunks first, and ask nothing
   -sweep         drop the queued chunks the sections no longer have, which is
                  what a re-cut of a section leaves behind, and ask nothing
+  -raw           write what the model gave back even when the audit complains,
+                 and put the complaints in the log instead of asking again. The
+                 complaints are still true and the finished file still fails the
+                 same audits, so this is for filling the corpus first and
+                 mending it after, not for deciding the audit was wrong
   -check-glossary  hold the translations already on disk to the glossary, term
                  by term, and ask nothing
   -all           with -check-glossary, every term and not only the missed ones
@@ -185,6 +190,7 @@ func runTranslate(args []string) error {
 	dry := fs.Bool("dry", false, "print the first question and stop")
 	stale := fs.Bool("stale", false, "list what needs translating and why, and ask nothing")
 	sweepQueue := fs.Bool("sweep", false, "drop the queued chunks the sections no longer have, and ask nothing")
+	rawText := fs.Bool("raw", false, "write the answer the model gave even when the audit complains, and log the complaints")
 	checkGlossary := fs.Bool("check-glossary", false, "hold what is on disk to the glossary and ask nothing")
 	all := fs.Bool("all", false, "with -check-glossary, every term and not only the missed ones")
 	keep := fs.Bool("keep", false, "leave the questions on the boxes")
@@ -338,7 +344,7 @@ func runTranslate(args []string) error {
 	run := runID(tree, promptHash, jobs)
 	var written, refused int
 	for _, job := range jobs {
-		body, model, problems := translateFile(ctx, root, q, hosts, g, *from, *lang, tree, promptHash, job, *force, *redoSmall, *keep, *deadline, logf)
+		body, model, problems := translateFile(ctx, root, q, hosts, g, *from, *lang, tree, promptHash, job, *force, *redoSmall, *keep, *rawText, *deadline, logf)
 		if len(problems) > 0 {
 			refused++
 			logf("%s: refused, nothing written", job.source)
@@ -749,7 +755,7 @@ func freshOnly(hosts []ocr.Host) map[string]func(queue.Job) bool {
 	return want
 }
 
-func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, from, lang, tree, promptHash string, j job, force, redoSmall, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
+func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, from, lang, tree, promptHash string, j job, force, redoSmall, keep, raw bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force, redoSmall)
 	if err != nil {
 		return "", "", []translate.Problem{{Rule: "queue", Msg: err.Error()}}
@@ -789,7 +795,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 						}
 						continue
 					}
-					text, model, bad := askChunk(ctx, root, host, g, from, lang, j, c, keep, deadline, logf)
+					text, model, bad := askChunk(ctx, root, host, g, from, lang, j, c, keep, raw, deadline, logf)
 					if len(bad) > 0 && ctx.Err() != nil {
 						// Somebody pressed Ctrl-C while this chunk was out. The
 						// model did not get it wrong, so the attempt is given
@@ -902,7 +908,27 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 
 // askChunk asks once, and asks again with the complaint if the first answer did
 // not pass.
-func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, from, lang string, j job, c translate.Chunk, keep bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
+// takeRaw drops the complaints about a chunk and logs each one, when the run was
+// told to take what it was given.
+//
+// Transport is left alone. A complaint of that rule is not an answer the audit
+// disliked, it is no answer at all, and there is nothing to keep.
+func takeRaw(raw bool, bad []translate.Problem, j job, c translate.Chunk, logf func(string, ...any)) []translate.Problem {
+	if !raw || len(bad) == 0 || transportOnly(bad) {
+		return bad
+	}
+	var kept []translate.Problem
+	for _, p := range bad {
+		if p.Rule == "transport" {
+			kept = append(kept, p)
+			continue
+		}
+		logf("%s chunk %d of %d: taken raw, %s: %s", j.source, c.Index, c.Of, p.Rule, p.Msg)
+	}
+	return kept
+}
+
+func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Glossary, from, lang string, j job, c translate.Chunk, keep, raw bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
 	terms := g.For(j.meta.Book)
 	// A chunk with nothing in it to translate is not put to anybody. See
 	// translate.SelfTranslation: what comes back has to be what went out, so the
@@ -1026,6 +1052,18 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// in English is a complaint askChunk can hand back on the second ask,
 		// and after the file is written it is a finding nobody acts on.
 		problems = append(problems, translate.AuditTerms(lang, terms, body, answer.Text)...)
+		// -raw keeps the answer and puts the complaints in the log. A second ask
+		// costs the whole question again, and on the codex subscription that is
+		// about 12,000 characters of prompt plus the command's own overhead every
+		// time: the smallest section in Algebra II, two chunks, cost 114,524
+		// tokens because one chunk was refused four times over terminology. The
+		// same file on a browser lane costs nothing and takes a minute.
+		//
+		// Nothing here decides the audit was wrong. The complaints are true, they
+		// are written down, and the finished file fails the same checks when L08
+		// and L10 read it, which is where they get mended. What this buys is the
+		// text on disk to mend rather than an empty tree and a spent quota.
+		problems = takeRaw(raw, problems, j, c, logf)
 		// The entries go back before anything is written, and the whole chunk is
 		// read once more with them in it. What was asked for and what is kept are
 		// two different texts here, and the rules have to hold over the one that
@@ -1033,11 +1071,17 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		if len(problems) == 0 && body != c.Body {
 			whole, ok := translate.WithBiblio(c.Body, answer.Text)
 			if !ok {
+				// Not waived by -raw, and it is the one that is not. Every other
+				// complaint is about the quality of a translation that is on
+				// disk and can be read again. This one says the answer has no
+				// place to put the bibliography back, so keeping it would write
+				// a chunk with the entries missing, and a missing passage is not
+				// something an audit of the text can find.
 				problems = append(problems, translate.Problem{Rule: translate.RuleStructure,
 					Msg: "the answer has no block for every block it was asked for, so the bibliography cannot go back around it"})
 			} else {
 				answer.Text = whole
-				problems = append(problems, translate.Audit(lang, c.Body, whole)...)
+				problems = append(problems, takeRaw(raw, translate.Audit(lang, c.Body, whole), j, c, logf)...)
 			}
 		}
 		if len(problems) == 0 {

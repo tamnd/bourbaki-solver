@@ -699,3 +699,54 @@ func TestAHostThatSaysItIsOutOfQuotaIsNotAskedTwice(t *testing.T) {
 		}
 	}
 }
+
+// -raw is for filling the corpus and not for deciding the audit was wrong, so
+// what it does is keep the text and write the complaints down. The measurement
+// that put it there: the smallest section in Algebra II is two chunks and cost
+// 114,524 tokens of the codex subscription, because one chunk was refused four
+// times over terminology, and a full size section cost 349,108 and wrote
+// nothing at all.
+func TestTakeRawKeepsTheTextAndLogsWhatWasWrongWithIt(t *testing.T) {
+	j := job{source: "content/en/alg/II/05_s5.md"}
+	c := translate.Chunk{Index: 2, Of: 7}
+	bad := []translate.Problem{
+		{Rule: translate.RuleMath, Msg: "has 56 math spans and the English has 58"},
+		{Rule: "terms", Msg: `leaves "left" in English`},
+	}
+	var said []string
+	got := takeRaw(true, bad, j, c, func(format string, args ...any) {
+		said = append(said, fmt.Sprintf(format, args...))
+	})
+	if len(got) != 0 {
+		t.Fatalf("the chunk is still refused for %d things", len(got))
+	}
+	if len(said) != 2 {
+		t.Fatalf("%d complaints were written down, want both of them: %q", len(said), said)
+	}
+	for _, line := range said {
+		if !strings.Contains(line, "taken raw") || !strings.Contains(line, "chunk 2 of 7") {
+			t.Errorf("the log line does not say which chunk was taken raw: %q", line)
+		}
+	}
+}
+
+// Transport is not an answer the audit disliked, it is no answer at all, so
+// there is nothing for -raw to keep and the chunk is asked again.
+func TestTakeRawLeavesAChunkThatNeverCameBack(t *testing.T) {
+	j := job{source: "content/en/alg/II/05_s5.md"}
+	c := translate.Chunk{Index: 1, Of: 7}
+	bad := []translate.Problem{{Rule: "transport", Msg: "Cloudflare is holding this host"}}
+	got := takeRaw(true, bad, j, c, func(string, ...any) {})
+	if len(got) != 1 {
+		t.Fatalf("a chunk that never came back was taken raw: %v", got)
+	}
+}
+
+// Off, it changes nothing, which is what every run that does not ask for it
+// gets.
+func TestTakeRawOffChangesNothing(t *testing.T) {
+	bad := []translate.Problem{{Rule: translate.RuleMath, Msg: "spans"}}
+	if got := takeRaw(false, bad, job{}, translate.Chunk{}, func(string, ...any) {}); len(got) != 1 {
+		t.Fatalf("the complaint was dropped by a run that did not ask for -raw: %v", got)
+	}
+}
