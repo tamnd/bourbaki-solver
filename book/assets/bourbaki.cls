@@ -340,6 +340,19 @@
   \@afterindentfalse\@afterheading
 }
 
+% \bfnmark is the footnote mark on a numbered subsection title.
+%
+% It is a name of our own for \footnotemark and not \footnotemark itself,
+% because the title goes through \MakeUppercase in \bno above, \MakeUppercase
+% expands what it is given, and \footnotemark is not robust: it expands to an
+% \@ifnextchar looking for the optional argument, and inside that expansion the
+% error is "Use of \@xfootnotemark doesn't match its definition". Declaring the
+% mark robust puts \protect in front of it, which is what \MakeUppercase honours,
+% so the mark reaches the page unexpanded and the uppercasing leaves it alone.
+%
+% One title in the corpus needs this, no. 10 of Integration VI, § 2.
+\DeclareRobustCommand{\bfnmark}{\footnotemark}
+
 % \bnoline is a contents line for a numbered subsection. The number is set right
 % against a fixed width so that the stop of "10." falls under the stop of "1.",
 % which is what the printing does and what a left aligned number does not.

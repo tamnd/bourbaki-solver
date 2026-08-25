@@ -320,7 +320,17 @@ var mathArg2 = []string{"frac", "binom"}
 // textWords is text-mode LaTeX that is correct where it stands. \S is by far
 // the commonest thing in this whole file and the only one of them that is not a
 // defect: the corpus writes "\S 2" where the book prints "§ 2".
-var textWords = []string{"S", "P", "quad", "hfill"}
+//
+// \bfnmark is not in the corpus at all. It is put there by this package, in
+// heading, where a \footnote in a numbered subsection title is split into a mark
+// for the head and a \footnotetext after it. That mark then goes through inline
+// like everything else, and with the name missing from this table the build was
+// reporting its own output as a control sequence loose in the prose. One
+// finding, on no. 10 of Integration VI, § 2, which is the one title in the
+// corpus that carries a footnote. The class declares \bfnmark rather than the
+// build writing \footnotemark, because the title is uppercased and \footnotemark
+// does not survive that.
+var textWords = []string{"S", "P", "quad", "hfill", "bfnmark"}
 
 // textArg1 is text-mode LaTeX with an argument, which is rendered as prose
 // rather than passed through, so that what is inside a \footnote gets the same

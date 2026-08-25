@@ -581,7 +581,7 @@ func liftTag(body string) (tag, rest string, ok bool) {
 
 // splitFootnotes takes the footnotes out of a heading and hands them back.
 //
-// mark is the heading with a \footnotemark where each note was, for the head on
+// mark is the heading with a \bfnmark where each note was, for the head on
 // the page. plain is the heading with nothing where each note was, for the two
 // places the same words are written a second time. notes are the bodies, for
 // the \footnotetext that has to follow the heading.
@@ -607,7 +607,7 @@ func splitFootnotes(s string) (mark, plain string, notes []string) {
 			break
 		}
 		notes = append(notes, body)
-		m.WriteString(`\footnotemark`)
+		m.WriteString(`\bfnmark`)
 		i = end
 	}
 	return strings.TrimSpace(m.String()), strings.TrimSpace(p.String()), notes
