@@ -949,9 +949,36 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 	// The chunks that never came back are refused above and stay refused. A file
 	// short a chunk is short a passage, and no audit of the text finds a passage
 	// that is not in it.
+	// The attribute blocks are the exception, and they are the exception for
+	// the same reason a chunk that was never answered is.
+	//
+	// An attribute block is an identifier and a class, {#evt-iv-s1-prop-3
+	// .statement}, and it is not prose, so it comes through a translation
+	// untouched. Every statement in the book carries one. That makes the list
+	// of them the only part of a section that is the same in both languages,
+	// and a translation missing one is a translation missing a statement, not
+	// a translation that rendered a statement badly. There is nothing on disk
+	// afterwards for a later pass to mend, because the passage is not there.
+	//
+	// Measured over one evening of the Vietnamese run: fifteen sections went to
+	// disk short a passage and every one of them read as a section and passed
+	// publish -check. Section 1 of Integration chapter III kept 17 of its 42
+	// statements and put three of Algebra chapter VIII in their place, which is
+	// the model having copied the worked example out of its own instructions.
+	// Section 1 of Topological Vector Spaces chapter V kept 15 of 42. None of
+	// this is arithmetic that L08 and L10 can mend.
 	if ps := translate.Audit(lang, j.body, body); len(ps) > 0 {
+		var hard []translate.Problem
+		for _, p := range ps {
+			if p.Rule == translate.RuleTag {
+				hard = append(hard, p)
+			}
+		}
 		if !raw {
 			return "", "", ps
+		}
+		if len(hard) > 0 {
+			return "", "", hard
 		}
 		for _, p := range ps {
 			logf("%s: taken raw at the join, %s: %s", j.source, p.Rule, p.Msg)
@@ -971,7 +998,7 @@ func takeRaw(raw bool, bad []translate.Problem, j job, c translate.Chunk, logf f
 	}
 	var kept []translate.Problem
 	for _, p := range bad {
-		if p.Rule == "transport" {
+		if p.Rule == "transport" || p.Rule == translate.RuleTag {
 			kept = append(kept, p)
 			continue
 		}

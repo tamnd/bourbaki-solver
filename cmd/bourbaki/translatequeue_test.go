@@ -755,3 +755,39 @@ func TestARunStoppedWithChunksOutstandingWritesNothing(t *testing.T) {
 		t.Fatalf("it handed back %d bytes assembled from one chunk of three", len(body))
 	}
 }
+
+// -raw does not waive a missing attribute block, and that is the one complaint
+// it does not waive.
+//
+// An attribute block is an identifier and a class and not prose, so it comes
+// through a translation untouched, and a translation missing one is missing the
+// statement it belonged to. There is nothing on disk afterwards for a later
+// pass to mend. The rest of what the audit says is about text that is there and
+// can be read again, which is what -raw is for.
+func TestRawDoesNotWaiveAMissingAttributeBlock(t *testing.T) {
+	en := "#### Proposition 1 {#alg-i-s1-prop-1 .statement}\n\nLet $x$ be an element of E.\n"
+	cases := []struct {
+		name  string
+		tr    string
+		waive bool
+	}{
+		{"a statement gone", "Cho $x$ là một phần tử của E.\n", false},
+		{"a statement kept", "#### Mệnh đề 1 {#alg-i-s1-prop-1 .statement}\n\nCho $x$ là một phần tử của E.\n", true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			var tags int
+			for _, p := range translate.Audit("vi", en, c.tr) {
+				if p.Rule == translate.RuleTag {
+					tags++
+				}
+			}
+			if c.waive && tags != 0 {
+				t.Fatalf("a faithful answer drew %d complaints about its attribute blocks", tags)
+			}
+			if !c.waive && tags == 0 {
+				t.Fatal("an answer that dropped the statement drew no complaint about its attribute block")
+			}
+		})
+	}
+}
