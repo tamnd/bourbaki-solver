@@ -808,6 +808,11 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 					Number: e.number, Title: e.title, Page: t.page})
 				return
 			}
+			// A § committed without a page takes the page of its first no., the
+			// way a chapter takes the page of its first §.
+			if curSec.Page == 0 {
+				curSec.Page = t.page
+			}
 			curSec.Subsections = append(curSec.Subsections, corpus.Subsection{
 				Number: e.number, Title: e.title, Page: t.page})
 		case kindExercises:
@@ -945,6 +950,28 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			// begins where its first § begins, and that page is on the next
 			// line. The page is filled in from that § below.
 			if pend != nil && pend.kind == kindChapter && e.kind == kindSection {
+				commit(pend.entry, tail{})
+				pend = nil
+			}
+			// The same thing one level down, and for the same reason. A § whose
+			// line carries no page still opens where its no. 1 opens, on that
+			// page or the next one, which is the fact validate leans on to catch
+			// a misread digit. So the page is there to be filled in from below
+			// and the § does not have to be given up.
+			//
+			// Giving it up is expensive, because the nos underneath it do not go
+			// with it. They are committed to whatever § is still open, which is
+			// the § above, and that § then holds two runs of nos end to end. The
+			// French Functions of a Real Variable prints "§ 2. Équations
+			// différentielles linéaires" with its leaders and no page at all, and
+			// chapter IV came out with one § holding sixteen nos rather than two
+			// holding seven and nine. The French General Topology loses the page
+			// off § 6 of chapter IV the same way and chapter IV came out with
+			// seven § rather than eight. In both the nine or so "a no. is missing
+			// or doubled" that follow are one lost page number reported once per
+			// no., and both volumes were refused a contents manifest over it.
+			if pend != nil && e.kind == kindSubsection &&
+				(pend.kind == kindSection || pend.kind == kindAppendix) {
 				commit(pend.entry, tail{})
 				pend = nil
 			}
