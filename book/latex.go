@@ -949,6 +949,21 @@ var (
 	// in twenty thousand places.
 	emRE   = regexp.MustCompile(`(?:^|([^*\x00]))\*([^*\n]+)\*(?:$|([^*]))`)
 	linkRE = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
+	// imageRE is a Markdown image, which in this corpus is never an image.
+	//
+	// 62 files carry one and not a single target exists. Some point at
+	// ../images/fig_1.png, which is a directory the corpus does not have and by
+	// policy will not have, and some point at an imgur URL the reading invented.
+	// What is real is that the printing has a figure there and that the reading
+	// wrote down what it saw, which is the alt text.
+	//
+	// It has to be matched before linkRE, and matched at all. Before, because
+	// linkRE matches the bracket part of it and leaves the exclamation mark
+	// standing, which is how the pdf of General Topology came to have a paragraph
+	// reading "!Figure 2". And at all, because an image handed to the reference
+	// check is a reference to a file, and the check is about anchors, so every one
+	// of the 62 was counted as a cross reference pointing at nothing.
+	imageRE = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]*)\)`)
 )
 
 // inline renders the inside of a paragraph or a heading.
@@ -962,6 +977,7 @@ func (r Renderer) inline(s string) string {
 	s = escapeTeX(s)
 	s = boldRE.ReplaceAllString(s, `\textbf{$1}`)
 	s = emRE.ReplaceAllString(s, `$1\emph{$2}$3`)
+	s = imageRE.ReplaceAllString(s, `\bfigure{$1}`)
 	s = linkRE.ReplaceAllStringFunc(s, func(m string) string {
 		p := linkRE.FindStringSubmatch(m)
 		if r.Ref == nil {

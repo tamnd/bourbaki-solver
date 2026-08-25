@@ -340,6 +340,25 @@
   \@afterindentfalse\@afterheading
 }
 
+% \bfigure stands where the printing has a figure and this build has not got it.
+%
+% The corpus is text and stays text: no image is committed to it and none ever
+% will be. So a figure is represented by what the reading wrote down about it,
+% which is the alt text of the Markdown image, set in a frame so that a reader
+% can see at once that something is missing rather than reading a stray caption
+% as if it were a sentence of the book.
+%
+% The frame is what an honest gap looks like. Printing the caption on its own,
+% which is what happened before, tells the reader nothing and reads as prose.
+\newcommand{\bfigure}[1]{%
+  \par\vspace{0.9em}
+  \begingroup\centering
+  \fbox{\begin{minipage}{0.75\linewidth}\centering\small\itshape #1\end{minipage}}%
+  \par\endgroup
+  \vspace{0.9em}
+  \noindent\ignorespaces
+}
+
 % \bfnmark is the footnote mark on a numbered subsection title.
 %
 % It is a name of our own for \footnotemark and not \footnotemark itself,

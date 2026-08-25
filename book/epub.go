@@ -524,6 +524,7 @@ func (p *pageRenderer) inline(s string, spans []mathtex.Span, tags map[int]strin
 	s = esc(s)
 	s = boldRE.ReplaceAllString(s, "<strong>$1</strong>")
 	s = emRE.ReplaceAllString(s, "$1<em>$2</em>$3")
+	s = imageRE.ReplaceAllString(s, `<span class="figure">$1</span>`)
 	s = linkRE.ReplaceAllStringFunc(s, func(m string) string {
 		q := linkRE.FindStringSubmatch(m)
 		return p.link(q[2], q[1])
@@ -764,6 +765,7 @@ func bookWord(lang, key string) string {
 func plain(s string) string {
 	s = boldRE.ReplaceAllString(s, "$1")
 	s = emRE.ReplaceAllString(s, "$1$2$3")
+	s = imageRE.ReplaceAllString(s, "$1")
 	s = linkRE.ReplaceAllString(s, "$1")
 	return strings.TrimSpace(s)
 }
@@ -1105,6 +1107,7 @@ div.display .eqno { float: left; }
 .exnum { font-weight: bold; }
 div.exercise { margin: 0.6em 0; }
 .footnote { font-size: 0.85em; }
+.figure { display: block; text-align: center; font-style: italic; font-size: 0.9em; border: 1px solid #999; padding: 0.6em; margin: 0.9em 0; text-indent: 0; }
 .rawtex { font-family: monospace; background: #fee; }
 .cover { margin: 0; padding: 0; text-align: center; }
 math { font-size: 1em; }
