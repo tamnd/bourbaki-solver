@@ -457,11 +457,19 @@ func (p *pageRenderer) heading(line string, spans []mathtex.Span, tags map[int]s
 			// The navigation lists the sentence case title off manifests/toc/,
 			// which is what the printed contents has, and falls back to the
 			// heading itself for a language the volume was never printed in.
-			label := n[2]
+			label, listed := n[2], false
 			if no, err := strconv.Atoi(n[1]); err == nil && p.contents[no] != "" {
-				label = p.contents[no]
+				label, listed = p.contents[no], true
 			}
-			p.sub = append(p.sub, subnav{Frag: frag, Label: n[1] + ". " + p.navText(label, spans)})
+			// A title off the manifest still has its formulae in dollars, since
+			// nothing masked it, so navText would find no placeholder to fill
+			// and the entry would read a literal "$\\tau$-Extensions". That is
+			// what plainMath is for.
+			nav := p.navText(label, spans)
+			if listed {
+				nav = plainMath(p.eng, plain(label))
+			}
+			p.sub = append(p.sub, subnav{Frag: frag, Label: n[1] + ". " + nav})
 			return fmt.Sprintf("<h3 class=\"no\"%s><span class=\"nonum\">%s.</span> %s</h3>\n",
 				id, esc(n[1]), p.inline(n[2], spans, tags)), false, ""
 		}
