@@ -401,7 +401,18 @@ func tocVerify(args []string) error {
 		if !ok {
 			return fmt.Errorf("%s is in %s but not in %s", bt.ID, corpus.TOCPath(root, bt.ID), corpus.BooksPath(root))
 		}
-		pages, err := volumeText(ctx, root, b)
+		// pageText and not volumeText, which is the whole of what this check
+		// used to be able to see. volumeText is the layer the PDF carries and
+		// three volumes carry none: alg-x-fr, top-v-x and ac-i-vii. For those it
+		// hands back empty pages, every heading misses, and the report reads as
+		// a page map that put nothing where the contents says it is. alg-x-fr
+		// scored 0 of 68 the first time its contents was read, on a map whose
+		// own numbers come off the pages and validate clean.
+		//
+		// Nothing moves for the forty volumes that do have a layer, because
+		// pageText goes to it for them and this is the same text it was reading
+		// before.
+		pages, err := pageText(ctx, root, *b)
 		if err != nil {
 			return err
 		}

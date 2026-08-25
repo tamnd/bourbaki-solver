@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -44,6 +45,30 @@ func TestAVolumeWithNoTextLayerTakesItsHeadsOffThePagesTheModelWrote(t *testing.
 	}
 	if !strings.Contains(pages[1], "second") {
 		t.Fatalf("page 2 = %q, want the body of the second page", pages[1])
+	}
+}
+
+// Everything that wants the text of a volume goes through pageText, and going
+// round it is how toc verify came to report a whole volume as wrong. It read
+// volumeText, which is the layer the PDF carries and nothing else, so on the
+// three volumes that carry none it was handed 222 empty pages and every heading
+// missed. ac-i-vii scored 0 of 263 and alg-x-fr 0 of 68, on maps whose numbers
+// come off the pages and validate clean.
+func TestPageTextGoesToThePagesWhenThePDFHasNoLayer(t *testing.T) {
+	root := t.TempDir()
+	book := corpus.Book{ID: "alg-x-fr", Pages: 2, TextLayer: "none"}
+	writePage(t, root, book.ID, 1, "§ 1. COMPLEMENTS D'ALGEBRE LINEAIRE\n")
+	writePage(t, root, book.ID, 2, "1. Diagrammes commutatifs\n")
+
+	pages, err := pageText(context.Background(), root, book)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pages) != 2 {
+		t.Fatalf("got %d pages, want 2", len(pages))
+	}
+	if !strings.Contains(pages[0], "COMPLEMENTS") || !strings.Contains(pages[1], "Diagrammes") {
+		t.Fatalf("the headings are not there to be found: %q", pages)
 	}
 }
 
