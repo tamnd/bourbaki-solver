@@ -1105,3 +1105,24 @@ func TestAChapterThePrintingDoesHaveStillWantsItsMarker(t *testing.T) {
 		t.Fatal("a chapter with no marker on its page assembled")
 	}
 }
+
+func TestWhatOpensAnExercise(t *testing.T) {
+	for _, l := range []string{
+		"1) Soit $f$ une fonction vectorielle",
+		"  2) Dans l’intervalle $I = (0, 1)$",
+		"**7)** Let E be a finite dimensional s-module",
+		"$\\P 15)$ Soient K un corps commutatif",
+	} {
+		if !ExerciseOpens(l) {
+			t.Errorf("%q does not open an exercise", l)
+		}
+	}
+	for _, l := range []string{
+		"", "§ 3", "## EXERCICES",
+		"Soit $f$ une fonction vectorielle définie dans un intervalle",
+	} {
+		if ExerciseOpens(l) {
+			t.Errorf("%q opens an exercise", l)
+		}
+	}
+}

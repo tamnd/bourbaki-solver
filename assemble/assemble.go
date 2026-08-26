@@ -582,6 +582,15 @@ func runMark(s corpus.Section) *regexp.Regexp {
 // what the assembler looks for rather than keep its own copy of the answer.
 func SectionMark(s corpus.Section) *regexp.Regexp { return runMark(s) }
 
+// ExerciseOpens is whether the line opens a numbered exercise.
+//
+// It is exported for fix opening, which has to tell a § mark that lost the blank
+// line under it from a § mark standing over prose. The mark of a gathered block
+// is followed by the first exercise of that block and by nothing else, so the
+// line under it is the whole of the evidence that the blank line is what is
+// missing rather than the mark being something else entirely.
+func ExerciseOpens(line string) bool { return itemOpen(strings.TrimSpace(line)) }
+
 // openRun writes the corpus's own exercises heading at the head of a gathered
 // block and takes the volume's mark out of it.
 //
