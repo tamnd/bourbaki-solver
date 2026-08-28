@@ -19,7 +19,11 @@
 
 \LoadClass[10pt,twoside]{book}
 
-\RequirePackage{fontspec}
+% no-math because the mathematics is set by newtxmath below and not by fontspec.
+% Without it fontspec claims the math families for itself and newtxmath's
+% declarations are overwritten, which shows up as Computer Modern digits inside
+% a Times formula.
+\RequirePackage[no-math]{fontspec}
 % leqno because Bourbaki numbers a formula on the left. 1108 displays in the
 % corpus carry \tag and the printing has every one of them flush left, which is
 % one option rather than 1108 edits. It has to be given to amsmath here and not
@@ -28,11 +32,30 @@
 % what the first attempt did.
 \RequirePackage[leqno]{amsmath}
 \RequirePackage{amssymb}
-% The corpus uses 277 distinct control sequences inside its math spans. All but
-% two of them are amsmath or amssymb or plain LaTeX. \mathscr is one, and it is
-% not decoration: it is the script E of the space of mappings and the script F
-% of a filter, and Bourbaki tells those apart from the roman and the fraktur.
 \RequirePackage{mathrsfs}
+% newtxmath is the mathematics of the Times the text is set in. It is the whole
+% reason the page holds together: amssymb and mathrsfs on their own are Computer
+% Modern, and a Computer Modern formula in the middle of a Times paragraph reads
+% as two books printed on the same sheet.
+%
+% unicode-math with STIX Two Math was tried first and abandoned, and the reason
+% is worth writing down because it will be tried again otherwise. unicode-math
+% defines every symbol as a \Umathchar primitive. hyperref, when it turns a
+% heading into a PDF bookmark string, throws the math shift away and then tries
+% to expand what was inside it, and a \Umathchar is not something it can expand.
+% The build died on a real heading, SS 4 of chapter II of Algebre, whose title
+% carries \otimes, with "Improper alphabetic constant". newtxmath's symbols are
+% ordinary \mathchar definitions and hyperref has digested those for thirty
+% years.
+%
+% The corpus uses 283 distinct control sequences inside its math spans. All 283
+% were probed for existence under the old stack and under this one. The two
+% stacks miss exactly the same four and no others, so nothing that used to set
+% has stopped setting. \widecheck is one of the four and has a fallback below.
+% The other three are not commands at all: \hook, \lvertarrow and \sqleftarrow
+% are what a reading made of an arrow it could not name, and they were already
+% broken before this change.
+\RequirePackage{newtxmath}
 \RequirePackage{graphicx}
 \RequirePackage{xcolor}
 \RequirePackage{eso-pic}
@@ -40,10 +63,8 @@
 \RequirePackage{enumitem}
 \RequirePackage[hidelinks]{hyperref}
 
-% \widecheck is the other one, and it has no package in the bundle. It occurs a
-% handful of times over a two letter argument, where a plain \check sits close
-% enough to what the printing has that nobody would notice, and where a build
-% that stopped would cost a volume.
+% \widecheck has no package in the bundle and is faked with \check. It is one of
+% the four control sequences the probe says neither stack carries.
 \providecommand{\widecheck}[1]{\check{#1}}
 
 % amsmath stops a matrix at ten columns and says so. The corpus has none wider,
@@ -51,38 +72,88 @@
 % file nobody is looking at, so the counter goes up rather than the build down.
 \setcounter{MaxMatrixCols}{20}
 
-% Latin Modern, because it is the one free text font that was checked against
-% the whole of Vietnamese before it was chosen. Tiếng Việt, Đại số, Bổ đề, Định
-% lý and the whole of Latin Extended Additional set in it with no missing
-% character, which is the thing that mattered: two of the four languages this
-% builds are written with tone marks stacked on vowels and a font that gets those
-% wrong is a font that cannot set half the corpus.
+% Times, which is what a Springer mathematics volume is set in.
+%
+% This was Latin Modern, and Latin Modern is Computer Modern: it is the face a
+% document is set in when nobody chose one. Springer does not set the Elements
+% in it and does not set anything else in it either. A Springer mathematics
+% volume, the Graduate Texts and the Universitext and the Grundlehren alike, is
+% set in a Times, and so is nearly every journal a reader of this book has read.
+% Times is a darker and narrower face than Computer Modern, it holds ink at ten
+% point in a way Computer Modern's thin strokes do not, and it is the reason a
+% Springer page reads as a printed book and a LaTeX default reads as a preprint.
+%
+% TeX Gyre Termes is that Times. It is the free cut of it, it is in tectonic's
+% bundle, and it is the face newtxmath's letters were drawn against, so the
+% italic in a formula and the italic in a sentence are the same italic. STIX Two
+% Text and TeX Gyre Pagella were set beside it on the same page of real Bourbaki
+% before this was chosen. STIX is the same Times with a slightly tighter fit and
+% would have done as well for the prose, but its math font is unicode-math only
+% and that stack does not survive hyperref, which is written out above. Pagella
+% is a Palatino and is not what Springer uses.
+%
+% Vietnamese was the condition Latin Modern was chosen for and Termes meets it.
+% Tiếng Việt, Đại số, Bổ đề, Định lý, Mệnh đề, Hệ quả and the whole of Latin
+% Extended Additional set in it with no missing character. Two of the four
+% languages this builds stack tone marks on vowels and a font that gets those
+% wrong cannot set half the corpus.
+%
+% The small caps are real. \textsc is what every statement head in the book
+% uses, and TeX Gyre Termes carries the feature in the regular file, so there is
+% no separate caps file to name here and no fontspec warning about faking them.
+% Latin Modern needed lmromancaps10 named explicitly for that reason.
 %
 % The fonts are named by file rather than by family. tectonic ships them inside
-% its bundle rather than installing them, so \setmainfont{Latin Modern Roman}
-% fails on a machine that has no TeX Live and works on one that has, which is
-% exactly the kind of difference this build is meant not to have. The file names
-% resolve out of the bundle on any machine, and every one of the fourteen below
-% was checked before it was written down.
+% its bundle rather than installing them, so \setmainfont{TeX Gyre Termes} fails
+% on a machine that has no TeX Live and works on one that has, which is exactly
+% the kind of difference this build is meant not to have. The file names resolve
+% out of the bundle on any machine, and every one below was checked before it
+% was written down.
+\setmainfont{texgyretermes-regular.otf}[
+  BoldFont       = texgyretermes-bold.otf,
+  ItalicFont     = texgyretermes-italic.otf,
+  BoldItalicFont = texgyretermes-bolditalic.otf,
+]
+% TeX Gyre Heros is the Helvetica that pairs with a Times, and nothing in the
+% book is set in it: the running heads are small capitals of the text face and
+% the corpus has no sans in it. It is here so that a document that ever asks for
+% one does not fall back to Computer Modern Sans beside a Times page.
+\setsansfont{texgyreheros-regular.otf}[
+  BoldFont       = texgyreheros-bold.otf,
+  ItalicFont     = texgyreheros-italic.otf,
+  BoldItalicFont = texgyreheros-bolditalic.otf,
+]
+% TeX Gyre Cursor is the Courier of the same family. Its whole use is the four
+% character permanent tag in the margin, set at 7 pt in grey.
+\setmonofont{texgyrecursor-regular.otf}[
+  BoldFont   = texgyrecursor-bold.otf,
+  ItalicFont = texgyrecursor-italic.otf,
+]
+
+% The running head face, which is the text face with the letters tracked apart.
+% The printing letterspaces the small capitals in its heads, which is what a
+% French mathematical printing of that period does, and it is why the printed
+% head is wider than the same words set solid. Measurement is under \bheadfont
+% further down. Nothing else in the book is tracked.
+\newfontfamily\bheadface{texgyretermes-regular.otf}[LetterSpace=5.5]
+
+% The roman inside a formula. newtxmath sets the letters and the symbols but
+% takes its upright alphabet and its digits from whatever the kernel has, and
+% with fontspec in no-math mode the kernel still has Computer Modern. Left
+% alone, every digit, every parenthesis and every \operatorname{Card} in the
+% book comes out Computer Modern in the middle of a Times formula. pdffonts on
+% a test page showed four Latin Modern faces embedded before these lines and
+% none after them.
 %
-% The small caps face is its own file and is set explicitly, because \textsc is
-% what every statement head in the book uses and a fontspec that has to fake
-% small caps from capitals sets a Proposition head that is visibly wrong.
-\setmainfont{lmroman10-regular.otf}[
-  BoldFont       = lmroman10-bold.otf,
-  ItalicFont     = lmroman10-italic.otf,
-  BoldItalicFont = lmroman10-bolditalic.otf,
-  SmallCapsFont  = lmromancaps10-regular.otf,
-]
-\setsansfont{lmsans10-regular.otf}[
-  BoldFont       = lmsans10-bold.otf,
-  ItalicFont     = lmsans10-oblique.otf,
-  BoldItalicFont = lmsans10-boldoblique.otf,
-]
-\setmonofont{lmmono10-regular.otf}[
-  BoldFont   = lmmonolt10-bold.otf,
-  ItalicFont = lmmono10-italic.otf,
-]
+% qtm, qhv and qcr are the Type1 TeX Gyre Termes, Heros and Cursor, which are
+% the same three faces named above in the encoding the math machinery wants.
+\DeclareSymbolFont{operators}{T1}{qtm}{m}{n}
+\SetSymbolFont{operators}{bold}{T1}{qtm}{b}{n}
+\DeclareMathAlphabet{\mathrm}{T1}{qtm}{m}{n}
+\DeclareMathAlphabet{\mathbf}{T1}{qtm}{b}{n}
+\DeclareMathAlphabet{\mathit}{T1}{qtm}{m}{it}
+\DeclareMathAlphabet{\mathsf}{T1}{qhv}{m}{n}
+\DeclareMathAlphabet{\mathtt}{T1}{qcr}{m}{n}
 
 % The scripts Latin Modern has nothing for. The corpus holds 239 characters of
 % Devanagari, Cyrillic, Armenian and Arabic, all of them in the historical notes
@@ -107,13 +178,17 @@
 \providecommand{\dbend}{{\bmanual\char127}}
 
 % The math extension font, the one that holds the big parentheses and the big
-% sums, at every size from the one file. The running head is set at 8 pt and a
-% Vietnamese head that carries math asked for cmex8, which is a real font and is
-% not in tectonic's bundle, and the build died at the last step with "cannot
-% proceed without a physical font". The English volume happened not to have a
-% head with math in it and built. This says that any size of the extension font
-% is cmex10 at that size, which is what plain LaTeX has always done, and it takes
-% the difference between the two languages out of the build.
+% sums, at every size from the one file. A Vietnamese running head that carries
+% math asked for cmex8, which is a real font and is not in tectonic's bundle,
+% and the build died at the last step with "cannot proceed without a physical
+% font". The English volume happened not to have a head with math in it and
+% built. This says that any size of the extension font is cmex10 at that size,
+% which is what plain LaTeX has always done, and it takes the difference between
+% the two languages out of the build.
+%
+% newtxmath brings its own extension font, txexs, so this should now never fire.
+% It stays because the cost of a line is nothing and the cost of that failure
+% was a volume that would not build in one language and would in another.
 \DeclareFontShape{OMX}{cmex}{m}{n}{<->cmex10}{}
 
 \definecolor{bourbakiyellow}{HTML}{FEC746}
@@ -517,19 +592,30 @@
 % expands the mark and gets both. The zero width boxes put the corner items on
 % the trim edge while leaving the title centred on the measure, which is how the
 % printing has it.
-% \bheadfont is the size the head is set at, which is 8 pt against a 10 pt body.
-% That is a measurement and not a taste. Page 29 of the English Algebra I to III
-% carries "DISTRIBUTIVITY OF ONE INTERNAL LAW WITH RESPECT TO ANOTHER" in the
-% head and it spans 262 pt. The same words set in this font as small capitals
-% measure 262.68 pt at 8 pt, 295.51 pt at 9 pt and 328.35 pt at 10 pt, so 8 pt is
-% the one the printing used and the other two are not close.
+% \bheadfont is the size the head is set at, which is 9 pt against a 10 pt body,
+% in the tracked face declared above. Both numbers are measurements.
+%
+% Page 29 of the English Algebra I to III carries "DISTRIBUTIVITY OF ONE
+% INTERNAL LAW WITH RESPECT TO ANOTHER" in the head and it spans 262 pt. Set
+% solid in TeX Gyre Termes small capitals the same words measure 211.68 pt at
+% 8 pt, 238.14 pt at 9 pt and 264.60 pt at 10 pt. Reading that as a size gives
+% 10 pt, and a running head the same size as the body is not what the page
+% shows: the printed head is plainly smaller than the text under it.
+%
+% The width is made up with tracking instead, which is what the printing is
+% actually doing. At 9 pt the same string measures 255.78 pt tracked 4.0,
+% 258.65 pt tracked 4.65 and 262.39 pt tracked 5.5, so 5.5 lands 0.4 pt from
+% the printing on a line of 262 pt while the head keeps the size the page says
+% it has. Latin Modern hid this because its small capitals are far wider than a
+% Times: it gave 262.68 pt at 8 pt set solid, so the tracking got absorbed into
+% a wrong size and the head came out a size too small ever since.
 %
 % Small capitals of a title case string, not of a capitalised one. Feeding the
 % capitals the corpus stores to \scshape gives full capitals throughout, which
 % measures 362.93 pt for that same head, 88 pt past the measure. That single
 % mistake was 201 of the 364 overfull boxes the English volume reported: every
 % head longer than about forty characters ran off the page.
-\DeclareRobustCommand{\bheadfont}{\fontsize{8}{9.6}\selectfont\scshape}
+\DeclareRobustCommand{\bheadfont}{\bheadface\fontsize{9}{10.8}\selectfont\scshape}
 
 % \bheadfit sets the first argument if it fits the head and the second if it does
 % not. The printing shortens a head that will not go rather than letting it run,
