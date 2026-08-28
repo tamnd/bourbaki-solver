@@ -1,6 +1,10 @@
 package book
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // The heading of a § in the corpus is usually written with a bare number and no
 // section sign, and a translation reads its title off that heading because its
@@ -28,5 +32,38 @@ func TestSectionTitleTakesTheNumberOffEitherWay(t *testing.T) {
 		if got := sectionTitle(c.head, c.n); got != c.want {
 			t.Errorf("sectionTitle(%q, %d) = %q, want %q", c.head, c.n, got, c.want)
 		}
+	}
+}
+
+func TestPickTakesTheTreeThatHasTheFile(t *testing.T) {
+	root := t.TempDir()
+	en := filepath.Join(root, "content", "en")
+	mt := filepath.Join(root, "content", "en-mt")
+	// Springer translated Algebre I to VIII and not IX, so content/en/alg stops
+	// at VIII and content/en-mt/alg picks up at IX. The split runs through the
+	// Book, which is why this is decided per chapter and not per volume.
+	for _, d := range []string{
+		filepath.Join(en, "alg", "VIII"),
+		filepath.Join(mt, "alg", "IX"),
+	} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dirs := []string{en, mt}
+	if got := pick(dirs, "alg", "VIII"); got != en {
+		t.Errorf("chapter VIII came out of %s, want content/en", got)
+	}
+	if got := pick(dirs, "alg", "IX"); got != mt {
+		t.Errorf("chapter IX came out of %s, want content/en-mt", got)
+	}
+	// A chapter that is in neither falls back to the first tree, so the caller
+	// gets the same "not there" it got before there were two trees.
+	if got := pick(dirs, "alg", "XI"); got != en {
+		t.Errorf("a chapter in neither tree came out of %s, want content/en", got)
+	}
+	// One tree and the answer is that tree, whatever is asked for.
+	if got := pick([]string{en}, "top", "IV"); got != en {
+		t.Errorf("with one tree the answer was %s, want content/en", got)
 	}
 }

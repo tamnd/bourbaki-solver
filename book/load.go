@@ -38,24 +38,30 @@ func Load(root, id, lang string) (*Volume, error) {
 	if _, err := os.Stat(dir); err != nil {
 		return nil, fmt.Errorf("no content in %s: %w", lang, err)
 	}
+	dirs := []string{dir}
+	if lang == "en" {
+		dirs = append(dirs, filepath.Join(root, "content", "en-mt"))
+	}
 	v := &Volume{Meta: *meta, Lang: lang, Title: title(meta.Book, lang, meta.Title)}
 
 	for _, numeral := range meta.Chapters {
-		c, err := loadChapter(root, dir, meta.Book, numeral, lang)
+		c, err := loadChapter(root, pick(dirs, meta.Book, numeral), meta.Book, numeral, lang)
 		if err != nil {
 			return nil, err
 		}
 		v.Chapters = append(v.Chapters, c)
 	}
 	if n := meta.ReaderNote; n != nil {
-		note, err := loadFront(root, dir, meta.Book, lang, frontName(n.File, "00_to_the_reader.md"))
+		name := frontName(n.File, "00_to_the_reader.md")
+		note, err := loadFront(root, pick(dirs, meta.Book, name), meta.Book, lang, name)
 		if err != nil {
 			return nil, err
 		}
 		v.Reader = note
 	}
 	if in := meta.Introduction; in != nil {
-		intro, err := loadFront(root, dir, meta.Book, lang, frontName(in.File, "00_introduction.md"))
+		name := frontName(in.File, "00_introduction.md")
+		intro, err := loadFront(root, pick(dirs, meta.Book, name), meta.Book, lang, name)
 		if err != nil {
 			return nil, err
 		}
@@ -124,6 +130,33 @@ func loadContentsTitles(root string, v *Volume) error {
 // empty and the coverage check is what refuses the build, so that the message a
 // person gets names every § that is missing rather than the first directory
 // that was not there.
+// pick says which content tree a chapter or a front matter file comes out of.
+//
+// For every language but English there is one tree and this is the identity.
+// English has two. content/en is what Springer translated, and Springer
+// translated 15 of the 43 printings. content/en-mt is what this pipeline read
+// out of the French for the other 28, and it is held apart from content/en on
+// purpose, because one is a publisher's translation and the other is a model's
+// and the audit has to be able to tell them apart.
+//
+// A build in English wants both. Algebre chapitre 9 has no English printing, so
+// content/en/alg holds chapters I to VIII and nothing else, and building
+// alg-ix-fr in English out of content/en alone gave a four page volume with a
+// title and no text. It was going into the book repo that way until the sync
+// noticed the section count was zero.
+//
+// The choice is per chapter and per file rather than per volume, because the
+// split runs through a Book and not around it: content/en/alg is Springer for
+// I to VIII and content/en-mt/alg picks up at IX.
+func pick(dirs []string, parts ...string) string {
+	for _, d := range dirs {
+		if _, err := os.Stat(filepath.Join(append([]string{d}, parts...)...)); err == nil {
+			return d
+		}
+	}
+	return dirs[0]
+}
+
 func loadChapter(root, langDir, book, numeral, lang string) (*Chapter, error) {
 	c := &Chapter{Numeral: numeral}
 	dir := filepath.Join(langDir, book, numeral)
