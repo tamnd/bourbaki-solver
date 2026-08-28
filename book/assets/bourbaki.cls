@@ -52,9 +52,10 @@
 % were probed for existence under the old stack and under this one. The two
 % stacks miss exactly the same four and no others, so nothing that used to set
 % has stopped setting. \widecheck is one of the four and has a fallback below.
-% The other three are not commands at all: \hook, \lvertarrow and \sqleftarrow
-% are what a reading made of an arrow it could not name, and they were already
-% broken before this change.
+% The other three were not commands at all: \hook, \lvertarrow and \sqleftarrow
+% were what a reading made of a sign it could not name. They have since been
+% read off the printed pages and replaced in the corpus by what is actually
+% there, so the probe now misses one, not four.
 \RequirePackage{newtxmath}
 \RequirePackage{graphicx}
 \RequirePackage{xcolor}
@@ -66,6 +67,18 @@
 % \widecheck has no package in the bundle and is faked with \check. It is one of
 % the four control sequences the probe says neither stack carries.
 \providecommand{\widecheck}[1]{\check{#1}}
+
+% The two interior products of Algebre III SS 11 are printed as corners, and the
+% printing spaces them the way it spaces any other binary operator: x is set
+% away from the corner and so is u. amssymb declares both corners as closing
+% delimiters, which is right for the corner of a diagram and wrong here, and it
+% sets the formula as x_|u with the three glyphs touching. The corpus uses these
+% two signs for the interior product and for nothing else, in Algebre III SS 11,
+% Algebre IX SS 9 and Lie IX SS 6, so the class can say so once for all of them.
+\let\bcornerlr\lrcorner
+\let\bcornerll\llcorner
+\renewcommand{\lrcorner}{\mathbin{\bcornerlr}}
+\renewcommand{\llcorner}{\mathbin{\bcornerll}}
 
 % amsmath stops a matrix at ten columns and says so. The corpus has none wider,
 % but it has 573 matrices and the one that goes over would stop the build in a
