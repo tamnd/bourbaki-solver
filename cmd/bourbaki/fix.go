@@ -55,6 +55,7 @@ commands:
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
   notin     put the stroke back on a relation sign that came back struck through
+  prime     brace a primed base so the power after it is not a second power
   star      write the star that marks a forward-looking passage the corpus's way
   label     take the a), b), c) of an exercise back out of the mathematics
   elision   write the apostrophe of a French elision the way the corpus sets it
@@ -724,6 +725,8 @@ func runFix(args []string) error {
 		return fixParens(args[1:])
 	case "notin":
 		return fixNotin(args[1:])
+	case "prime":
+		return fixPrime(args[1:])
 	case "star":
 		return fixStar(args[1:])
 	case "label":
@@ -2074,6 +2077,98 @@ func fixMath(args []string) error {
 		pages, verb, chars, changed, len(refused))
 	if changed > 0 && !*check {
 		fmt.Println("fix math: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+const fixPrimeUsage = `usage: bourbaki fix prime [flags]
+
+Braces a primed base so that the power after it is the only power.
+
+TeX reads a prime as a superscript. It is not a character that happens to sit
+high, it is \sp{\prime}, so $E'^*$ asks for two superscripts on one atom and TeX
+stops on it with "Double superscript". The corpus writes it that way 593 times
+over 199 files, in every language, and each one is a volume that will not build
+past that line: twelve volumes were failing on it before this command existed,
+and the first error is all a reader of the log ever sees, so there is no telling
+how many lay behind them.
+
+The repair is the one every TeX manual gives, which is to brace the base:
+${E'}^*$. Nothing about the mathematics changes and nothing about the page
+changes. A base already braced does not match, so running this twice does
+nothing the second time.
+
+A subscript is allowed between the prime and the power, because the corpus
+writes that too. $x'_\beta^{m'(\beta)}$ in SS 7 of Algebre I is the same fault
+with the subscript in the middle, and the base to brace is the whole of
+x'_\beta.
+
+Only mathematics is touched. An apostrophe in a sentence is an apostrophe, and
+the corpus has tens of thousands of those in French, which is why this reads the
+math spans and not the line.
+
+It runs over content/ as well as pages/, for fix notin's reason. A translation
+has no page under it and would otherwise carry the fault until somebody paid a
+model to do the section again.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
+func fixPrime(args []string) error {
+	fs := flag.NewFlagSet("fix prime", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixPrimeUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, powers int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := mathtex.Prime(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		powers += n
+		if *check {
+			fmt.Printf("%s  %d powers\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	files, content, followed, err := repairContent(root, *check, "powers", mathtex.Prime)
+	if err != nil {
+		return err
+	}
+
+	verb := "braced"
+	if *check {
+		verb = "would brace"
+	}
+	fmt.Printf("fix prime: %d pages read, %s %d powers on %d of them\n", pages, verb, powers, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix prime: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	if changed > 0 && !*check {
+		fmt.Println("fix prime: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
