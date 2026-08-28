@@ -44,6 +44,14 @@ type Build struct {
 	// Undefined is a control sequence the class does not define, which means the
 	// writer and the class have got out of step.
 	Undefined []string
+	// Errors is every line the typesetter began with an exclamation mark, which
+	// is how TeX marks an error and the only thing the different errors have in
+	// common. Undefined control sequence used to be the only one of them this
+	// read, and the two that got past it were Double superscript, out of a
+	// primed base under a power, and Missing } inserted, out of a subscript
+	// whose opening had been read twice. Both are as fatal to the output as an
+	// undefined command and neither was reported.
+	Errors []string
 	// References that never resolved, which LaTeX prints as two question marks
 	// and mentions once in the log.
 	Unresolved int
@@ -89,6 +97,17 @@ func Run(ctx context.Context, dir string, d *Document, opt Options) (*Build, err
 	}
 	b := &Build{Dir: dir, PDF: filepath.Join(dir, "book.pdf"), Log: filepath.Join(dir, "book.log")}
 
+	// The last run's PDF goes before this one starts. A compile that stops on a
+	// TeX error writes no PDF, and what it leaves behind is whatever was there
+	// before, which is a document that has nothing to do with the book.tex next
+	// to it. Two volumes sat in the book repo that way, four page title pages
+	// beside half a megabyte of manuscript, and the audit measured the
+	// manuscript and called them 20 of 22. Removing it turns a stale artefact
+	// into a missing one, and a missing one is loud.
+	if err := os.Remove(b.PDF); err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+
 	args := []string{"-X", "compile", "--keep-logs", "--keep-intermediates", "--outdir", dir}
 	if opt.Bundle != "" {
 		args = append(args, "--bundle", opt.Bundle)
@@ -121,6 +140,7 @@ var (
 	underfullRE = regexp.MustCompile(`^Underfull \\[hv]box`)
 	missingRE   = regexp.MustCompile(`Missing character: There is no (.+) in font (.+?)!`)
 	undefinedRE = regexp.MustCompile(`^! Undefined control sequence`)
+	errorRE     = regexp.MustCompile(`^! `)
 	csRE        = regexp.MustCompile(`\\([A-Za-z@]+) $`)
 	unresolvRE  = regexp.MustCompile(`LaTeX Warning: There were undefined references`)
 	outputRE    = regexp.MustCompile(`Output written on .* \((\d+) pages?`)
@@ -140,11 +160,21 @@ func (b *Build) readLog() error {
 	defer f.Close()
 	seenGlyph := map[string]bool{}
 	seenCS := map[string]bool{}
+	seenErr := map[string]bool{}
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 0, 1<<20), 1<<22)
 	undefinedNext := false
 	for s.Scan() {
 		line := s.Text()
+		// Before the switch, because the undefined case below takes the line
+		// out of the loop and an undefined control sequence is an error like
+		// the rest of them. Deduplicated on the whole line, since one bad macro
+		// in a chapter that is set twice for the table of contents prints the
+		// same error twice and that is one fault, not two.
+		if errorRE.MatchString(line) && !seenErr[line] {
+			seenErr[line] = true
+			b.Errors = append(b.Errors, strings.TrimSpace(line))
+		}
 		switch {
 		case overfullRE.MatchString(line):
 			b.Overfull++

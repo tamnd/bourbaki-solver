@@ -401,6 +401,12 @@ func (a *Audit) typeset(v *Volume, b *Build, opt AuditOptions) {
 	if b == nil {
 		return
 	}
+	// First, because everything below it is a report on a document and this is
+	// the question of whether there is one. A TeX error stops the page it is on
+	// and the run writes no PDF, so a build with an error in it has an audit
+	// measuring a manuscript nobody can open.
+	a.ok("the typesetter finished without an error", len(b.Errors) == 0,
+		fmt.Sprintf("%d errors", len(b.Errors)), b.Errors...)
 	a.ok("the typesetter defined every command the writer used", len(b.Undefined) == 0,
 		fmt.Sprintf("%d undefined", len(b.Undefined)), b.Undefined...)
 	a.ok("every character reached the page", len(b.MissingGlyphs) == 0,
