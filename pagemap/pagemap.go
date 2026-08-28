@@ -1420,7 +1420,8 @@ func coverPerChapter(as []anchor, opt Options) []cover {
 		if len(list) == 0 {
 			continue
 		}
-		segs, _ := fitOffsets(list, opt.MinRun)
+		segs, outliers := fitOffsets(list, opt.MinRun)
+		segs = believeTheOpener(list, segs, outliers)
 		for j, s := range segs {
 			c := cover{from: list[s.first].pdfPage, to: list[s.last].pdfPage,
 				offset: s.offset, chapter: ch}
@@ -1434,6 +1435,44 @@ func coverPerChapter(as []anchor, opt Options) []cover {
 	}
 	sort.Slice(covers, func(i, j int) bool { return covers[i].from < covers[j].from })
 	return closeCracks(covers)
+}
+
+// believeTheOpener takes back the reading on the page a chapter opens on when
+// that reading says printed page 1.
+//
+// It is the front edge of what believeLoneAnchors does in the middle of a
+// chapter, and it is needed for the same reason. A chapter's first anchor has
+// nothing before it to agree with, so the run rule cannot keep it, and when the
+// file is missing a leaf immediately after the opener the anchor is alone on
+// one side of a step with the whole rest of the chapter on the other. The run
+// rule then throws away the one reading that was right and slides the chapter
+// down by the width of the gap.
+//
+// What makes this safe where a general rule would not be is that the reading
+// has to say 1. A per-chapter volume numbers every chapter from 1, so a reading
+// of 1 on the chapter's first anchor agrees with the strongest fact the fitter
+// holds, and there is nothing left for a run of neighbours to add. Any other
+// number is a claim about the printing that only its neighbours can support,
+// and this leaves those alone.
+//
+// Algebre commutative chapitre 10 is the volume it is here for. Its pdf 1 is
+// the opener, printed AC X.1, its pdf 2 heads AC X.3, and the leaf between them
+// carrying § 1 was never scanned. Without this the fit reads the fascicle as
+// printed 2 to 180 and the map is refused, because a chapter that starts at
+// printed 2 is normally a fit that has slipped. With it the slide becomes the
+// missing leaf it is, and the loader reads that back off the rows as a step.
+func believeTheOpener(as []anchor, segs []segment, outliers []int) []segment {
+	if len(segs) == 0 || len(outliers) == 0 || segs[0].first == 0 {
+		return segs
+	}
+	if outliers[0] != 0 || as[0].page != 1 {
+		return segs
+	}
+	off := as[0].pdfPage - 1
+	if segs[0].offset == off {
+		return segs
+	}
+	return append([]segment{{first: 0, last: 0, offset: off}}, segs...)
 }
 
 // closeCracks hands out the pages that fall between two fitted stretches. None

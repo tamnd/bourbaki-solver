@@ -1251,3 +1251,45 @@ func TestALargeRiseIsNotReadAsUnnumberedLeaves(t *testing.T) {
 		t.Errorf("the first cover ends at pdf %d, want 95: a rise of 8 is not 8 loose leaves", got[0].to)
 	}
 }
+
+// The opener of a chapter is alone at the front edge of the volume, where the
+// run rule has nothing to hold it down with. Algebre commutative chapitre 10 is
+// the case: pdf 1 is the opener at printed 1, pdf 2 heads AC X.3, and the leaf
+// carrying SS 1 was never scanned.
+func TestTheOpenerIsBelievedWhenItReadsPageOne(t *testing.T) {
+	as := []anchor{
+		{pdfPage: 1, page: 1, chapter: "X"},
+		{pdfPage: 2, page: 3, chapter: "X"},
+		{pdfPage: 3, page: 4, chapter: "X"},
+		{pdfPage: 4, page: 5, chapter: "X"},
+	}
+	segs, outliers := fitOffsets(as, DefaultMinRun)
+	if len(outliers) != 1 || outliers[0] != 0 {
+		t.Fatalf("outliers are %v, want the opener alone", outliers)
+	}
+	segs = believeTheOpener(as, segs, outliers)
+	if len(segs) != 2 {
+		t.Fatalf("fit gave %v, want the opener and the rest of the chapter", segs)
+	}
+	if segs[0].offset != 0 || segs[1].offset != -1 {
+		t.Errorf("offsets are %d and %d, want 0 and -1", segs[0].offset, segs[1].offset)
+	}
+}
+
+// A reading of anything but 1 on the opener is a claim only its neighbours can
+// support, and this leaves it to them. A per-chapter volume numbers every
+// chapter from 1, which is what makes the reading of 1 free to believe and
+// every other reading not.
+func TestAnOpenerThatDoesNotReadPageOneIsStillAMisread(t *testing.T) {
+	as := []anchor{
+		{pdfPage: 1, page: 7, chapter: "X"},
+		{pdfPage: 2, page: 3, chapter: "X"},
+		{pdfPage: 3, page: 4, chapter: "X"},
+		{pdfPage: 4, page: 5, chapter: "X"},
+	}
+	segs, outliers := fitOffsets(as, DefaultMinRun)
+	got := believeTheOpener(as, segs, outliers)
+	if len(got) != len(segs) {
+		t.Errorf("the fit took the opener back, want it left as the misread it is")
+	}
+}
