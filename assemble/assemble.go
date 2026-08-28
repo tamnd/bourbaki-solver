@@ -771,10 +771,16 @@ var texWord = regexp.MustCompile(`\\[a-zA-Z]+`)
 // GROUPS OVER R AND Q_p", and page xv of the same volume lists that section as
 // "§ 8. Lie groups over R or Q_p". Both page images are plain and both readings
 // are right.
+// int-i-iv-fr is the second. Page 40 of Integration chapitres 1 a 4, which is
+// pdf page 44, heads its first section "§ 1. Mesures sur un espace localement
+// compact", and the table of contents on page 279 lists that section as
+// "§ 1. Mesures sur les espaces localement compacts", which is the title of
+// chapter III printed again a line lower. Both lines are plain in the scan.
 var differs = map[string][]int{
-	"alg-x-fr":  {67},
-	"lie-i-iii": {355},
-	"var-fr":    {29},
+	"alg-x-fr":    {67},
+	"int-i-iv-fr": {44},
+	"lie-i-iii":   {355},
+	"var-fr":      {29},
 }
 
 // Differs is whether the opening on this page of this volume is one the volume

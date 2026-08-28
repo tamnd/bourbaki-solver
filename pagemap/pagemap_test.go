@@ -569,6 +569,37 @@ func TestAnOpenerIsReadAsAHeadingAndWithItsFootnoteMark(t *testing.T) {
 	}
 }
 
+func TestAnOpenerIsReadWhenTheWordItselfIsLetterSpaced(t *testing.T) {
+	// Integration chapitres 1 a 4 opens three of its four chapters plainly and
+	// the fourth "C H A P I T R E IV". Three openers where four are wanted is
+	// the same as none, because the map then takes its boundaries from the
+	// running heads for the whole volume and every chapter starts on the
+	// exercises of the one before it.
+	pages := []string{
+		head("TABLE DES MATIÈRES"),
+		head("CHAPITRE 1"),
+		head("CHAPITRE II"),
+		head("CHAPITRE III"),
+		head("C H A P I T R E IV"),
+	}
+	starts := readChapterStarts(pages, []string{"I", "II", "III", "IV"})
+	want := map[int]string{2: "I", 3: "II", 4: "III", 5: "IV"}
+	if len(starts) != len(want) {
+		t.Fatalf("chapter starts = %v, want %v", starts, want)
+	}
+	for at, c := range want {
+		if starts[at] != c {
+			t.Errorf("chapter starts = %v, want %v", starts, want)
+		}
+	}
+	// The letters still have to spell the word and stand alone with a numeral.
+	for _, l := range []string{"C H A P E A U IV", "chapitre IV de ce livre"} {
+		if starts := readChapterStarts([]string{head(l)}, []string{"IV"}); len(starts) != 0 {
+			t.Errorf("%q read as an opener, want none", l)
+		}
+	}
+}
+
 func TestDetectPrefersTheGrammarThatReadsMore(t *testing.T) {
 	if g := Detect(perChapterVolume(), []string{"IV"}); g != HeadLabel {
 		t.Errorf("Detect = %s, want %s", g, HeadLabel)
