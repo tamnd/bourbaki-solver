@@ -682,3 +682,96 @@ func writeSection(t *testing.T, root, rel string, meta corpus.SectionFrontMatter
 		t.Fatal(err)
 	}
 }
+
+// machineDocs is a French section and the English a model made of it, which is
+// the pair L16 is about. It is not pairDocs with the languages changed: the
+// point of the rule is that both sides are written in the same alphabet, so the
+// fixture has to be the tree that is, content/fr read into content/en-mt.
+func machineDocs(fr, mt string) []Doc {
+	frDoc := Doc{
+		Path: "content/fr/alg/IX/01_s1.md", Lang: "fr", Kind: KindSection, Body: fr, head: 1,
+		Section: &corpus.SectionFrontMatter{},
+	}
+	mtDoc := Doc{
+		Path: "content/en-mt/alg/IX/01_s1.md", Lang: "en-mt", Kind: KindSection, Body: mt, head: 1,
+		Section: &corpus.SectionFrontMatter{
+			TranslatedFrom: frDoc.Path,
+			SourceSHA256:   corpus.ContentSHA256(fr),
+		},
+	}
+	return []Doc{frDoc, mtDoc}
+}
+
+// runMachine is run with a books manifest that names a French volume, so that
+// French counts as a language the library is printed in rather than as a
+// translation with no source. Without it every fixture here reports the French
+// side as well, which is c.pairs saying the corpus is misconfigured and not
+// the rule saying anything at all.
+func runMachine(t *testing.T, docs ...Doc) []Finding {
+	t.Helper()
+	c := &Corpus{Docs: docs, Books: &corpus.BooksManifest{
+		Books: []corpus.Book{{ID: "alg-ix-fr", Book: "alg", Lang: "fr"}},
+	}}
+	out, err := l16(c)
+	if err != nil {
+		t.Fatalf("the rule returned an error: %v", err)
+	}
+	return out
+}
+
+func TestL16FindsAParagraphLeftInFrench(t *testing.T) {
+	docs := machineDocs(
+		"Soit $A$ un anneau.\n\nSoient $F$ un sous-module de $E$ et $\\Phi_F$ la restriction de $\\Phi$.",
+		"Let $A$ be a ring.\n\nSoient $F$ un sous-module de $E$ et $\\Phi_F$ la restriction de $\\Phi$.")
+	got := runMachine(t, docs...)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].Line != 3 {
+		t.Errorf("the finding is on line %d, want 3", got[0].Line)
+	}
+	if !strings.Contains(got[0].Msg, "French") {
+		t.Errorf("the finding does not say what is wrong with it: %s", got[0].Msg)
+	}
+}
+
+// The line is three French words and no English word. It is drawn there so that
+// a name the printing keeps and the remains of a display stay off the report,
+// and every one of these is a shape content/en-mt actually holds.
+func TestL16AsksWhetherTheParagraphIsFrench(t *testing.T) {
+	cases := []struct {
+		name string
+		para string
+		want bool
+	}{
+		{"a sentence in French", "Soient $A$ un corps et $E$ un espace vectoriel sur $A$.", true},
+		{"a numbered item in French", "d) Montrer que pour tout entier $m > 0$ il existe un endomorphisme.", true},
+		{"English prose", "Let $A$ be a ring and let $E$ be a vector space over $A$.", false},
+		{"English with a French name in it", "Let $E$ be the space of de Rham cohomology.", false},
+		{"the remains of a display", "Hom Hom .", false},
+		{"a bibliography entry standing as printed", "12. A. WEIL, Sur la theorie des nombres, Journ. de Math., 28 (1949), pp. 1-10.", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := runMachine(t, machineDocs(c.para, c.para)...)
+			if c.want && len(got) != 1 {
+				t.Fatalf("got %d findings, want 1: %v", len(got), got)
+			}
+			if !c.want && len(got) != 0 {
+				t.Fatalf("got %d findings, want none: %v", len(got), got)
+			}
+		})
+	}
+}
+
+// The rule is for the one pair the script tests cannot read. A Vietnamese file
+// that quotes a French title is not a translation left undone, and reporting it
+// would put the historical notes on the report in bulk.
+func TestL16LeavesTheOtherLanguagesAlone(t *testing.T) {
+	docs := pairDocs(
+		"Let $A$ be a ring.",
+		"Soient $A$ un corps et $E$ un espace vectoriel sur $A$.")
+	if got := runMachine(t, docs...); len(got) != 0 {
+		t.Fatalf("got %d findings on a vi file, want none: %v", len(got), got)
+	}
+}
