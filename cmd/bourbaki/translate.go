@@ -64,7 +64,12 @@ exercises in English is not a volume anybody can work through. Theory of Sets is
 28 §§ and 211 exercises, so the exercises are seven eighths of the files and
 about a fifth of the words.
 
-  -lang CODE     vi, zh or ja, required
+  -lang CODE     vi, zh or ja, and en for the French only volumes, required
+  -from CODE     the tree the passage is read out of: en, the default, is
+                 Springer's English; fr is the French printing and reads into
+                 English; en-mt is the English this command wrote out of the
+                 French, and is what carries the French only volumes on into
+                 Vietnamese, Chinese and Japanese
   -corpus DIR    the checkout, default $BOURBAKI_CORPUS
   -book ID       only this book, as books.yaml names it
   -chapter ID    only this chapter, as VIII
@@ -178,7 +183,7 @@ func runTranslate(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, translateUsage) }
 	dir := fs.String("corpus", "", "the checkout")
 	lang := fs.String("lang", "", "vi, zh or ja")
-	from := fs.String("from", "en", "the language the passage is written in")
+	from := fs.String("from", "en", "the tree the passage is read out of: en, fr or en-mt")
 	book := fs.String("book", "", "only this book")
 	chapter := fs.String("chapter", "", "only this chapter")
 	file := fs.String("file", "", "only this English file")
@@ -212,12 +217,14 @@ func runTranslate(args []string) error {
 	// model to rewrite Springer's translation, which is not a thing this corpus
 	// has any business doing.
 	switch {
-	case *from != "en" && *from != "fr":
-		return fmt.Errorf("-from is %q, and the corpus is written in en and fr", *from)
+	case *from != "en" && *from != "fr" && *from != "en-mt":
+		return fmt.Errorf("-from is %q, and the corpus is written in en, en-mt and fr", *from)
 	case *lang == "en" && *from != "fr":
 		return fmt.Errorf("english is a target only from the french, so -lang en wants -from fr")
 	case *lang != "en" && *from == "fr":
 		return fmt.Errorf("-from fr reads the french only volumes into english, so it wants -lang en and not %q", *lang)
+	case *lang == "en" && *from == "en-mt":
+		return fmt.Errorf("-from en-mt is already english, so it is a source for vi, zh and ja and not for en")
 	}
 	// known is the glossary's question, which is which columns a pass may fill,
 	// and English is not one of them: it is the headword the row hangs off. It
@@ -545,7 +552,7 @@ func translateJobs(root string, g *glossary.Glossary, from, lang, tree, book, ch
 		// The glossary a file is held to is the one its own volume is
 		// translated against, since a row can be scoped to a book. See
 		// glossary.Glossary.For.
-		j.terms = translate.GlossaryDigest(g.For(j.meta.Book), from, lang, j.body)
+		j.terms = translate.GlossaryDigest(g.For(j.meta.Book), sourceLang(from), lang, j.body)
 		var fresh bool
 		if j.ex != nil {
 			fresh, j.why = currentExercise(root, tree, j.source, *j.ex, j.body, g.Version, promptHash, j.terms)
@@ -591,6 +598,7 @@ func translateJobs(root string, g *glossary.Glossary, from, lang, tree, book, ch
 // -book and -chapter flags and the per volume glossary are asked for by those
 // two fields and both heads carry them.
 func readJob(root, path, from string) (job, bool, error) {
+	from = sourceLang(from)
 	source := rel(root, path)
 	if strings.Contains(filepath.ToSlash(source), "/exercises/") {
 		f, err := corpus.ReadFile[corpus.ExerciseFrontMatter](path)
@@ -1416,6 +1424,7 @@ func translateQuestion(g *glossary.Glossary, source, lang, body string) (string,
 }
 
 func translateQuestionWithNote(g *glossary.Glossary, source, lang, body, note string) (string, error) {
+	source = sourceLang(source)
 	return prompt.Translate(source, lang, translate.GlossaryBlock(g, source, lang, body), note, body)
 }
 
@@ -1495,4 +1504,21 @@ func provenance(from string) (lang, method string) {
 		return "", ""
 	}
 	return from, "machine"
+}
+
+// sourceLang is the language a source tree is written in, which is not always
+// the name of the tree.
+//
+// content/en-mt is English. It is held apart from content/en because it is a
+// model's reading of a volume Springer never translated and a reader has to be
+// able to tell the two apart, but to everything that asks what language the
+// passage in front of it is written in the answer is English: the glossary is
+// keyed by language and has no en-mt column, and a lookup against the tree name
+// would return nothing for every term and quietly translate the French only
+// volumes with no terminology at all.
+func sourceLang(from string) string {
+	if from == "en-mt" {
+		return "en"
+	}
+	return from
 }
