@@ -211,17 +211,20 @@ func (p Piece) Verify() error {
 // English translation numbers the second of them Definition 6.
 //
 // ac-iii-s3-def-1 is the fifth. § 3 of chapter III of Commutative Algebra
-// prints Definition 1 at no. 1 on pdf page 216, where it says what it is for a
-// filtration to be m-good, and Definition 1 again at no. 3 on pdf page 221,
-// where it says what it is for an ideal to be a defining ideal of a topology.
-// Both page images were read and both print the number as 1, so the § really
-// does number two definitions the same and neither is a misreading.
+// prints Definition 1 at no. 1, where it says what it is for a filtration to be
+// m-good, and Definition 1 again at no. 2, where it says what it is for an ideal
+// to be a defining ideal of a topology. Both page images were read and both
+// print the number as 1, so the § really does number two definitions the same
+// and neither is a misreading. The second is pdf page 221 of the English and 240
+// of the French, and the French text layer settles it a second way: the fascicle
+// of 1961 sets DEFINITION 1 on printed page 242 and DEFINITION 2 on 243, so the
+// numbers 1 and 2 stand three pages apart with a Definition 1 above both.
 var repeats = map[string][]int{
 	"lie-iii-s3-def-7": {151},
 	"evt-ii-s6-def-2":  {81, 82},
 	"lie-vi-s1-lem-3":  {168},
 	"int-vi-s2-def-5":  {50},
-	"ac-iii-s3-def-1":  {221},
+	"ac-iii-s3-def-1":  {221, 240},
 }
 
 func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.Statement, error) {
@@ -231,21 +234,28 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 	}
 	out := make([]block, 0, len(blocks)*2)
 	var found []corpus.Statement
-	seen := map[string]bool{}
+	// seen holds the pdf page each label was first taken on. The page is what
+	// the message wants: a collision is either a printing that numbered two
+	// statements the same, which is settled by adding the second page to
+	// repeats, or a reader that misread a number, which is settled by looking
+	// at the page it misread. Neither is anything but a search without the two
+	// pages in front of you.
+	seen := map[string]int{}
 	err = walk(blocks, id, pr, taken, func(b block, r corpus.Ref, name, body string, ok bool) error {
 		if !ok {
 			out = append(out, b)
 			return nil
 		}
 		label := r.Label()
-		if seen[label] && slices.Contains(repeats[label], b.page) {
+		if _, dup := seen[label]; dup && slices.Contains(repeats[label], b.page) {
 			r.Repeated = true
 			label = r.Label()
 		}
-		if seen[label] {
-			return fmt.Errorf("two statements are labelled %s", label)
+		if first, dup := seen[label]; dup {
+			return fmt.Errorf("two statements are labelled %s, on pdf pages %d and %d",
+				label, first, b.page)
 		}
-		seen[label] = true
+		seen[label] = b.page
 		s := corpus.Statement{Ref: r, PDFPage: b.page, Body: body}
 		if l, ok := corpus.ParsePageLabel(b.label); ok {
 			s.Page = l.Page
