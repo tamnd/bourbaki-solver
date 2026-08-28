@@ -62,6 +62,8 @@ func init() {
 			Title: "a bibliography entry stands as printed", Run: l14, Need: needTranslations},
 		Check{ID: "L15", Group: Translation, Hard: false,
 			Title: "no translation was written on the free gateway", Run: l15, Need: needTranslations},
+		Check{ID: "L16", Group: Translation, Hard: true,
+			Title: "no paragraph of the machine English came back in French", Run: l16, Need: needTranslations},
 	)
 }
 
@@ -661,6 +663,48 @@ func l14(c *Corpus) ([]Finding, error) {
 	for _, p := range ps {
 		for _, q := range translate.AuditBiblio(p.en.Body, p.tr.Body) {
 			out = append(out, Finding{File: p.tr.Path, Line: 1, Msg: q.Msg})
+		}
+	}
+	return out, nil
+}
+
+// L16. No paragraph of the machine English came back in French.
+//
+// L07 and L11 ask whether a translation carries the writing of its language,
+// and for Vietnamese, Chinese and Japanese that is a question the letters
+// answer. English out of French is two languages in one alphabet, so the
+// letters answer nothing and both rules pass a paragraph that was never
+// translated at all. Measured on the corpus when this was written: seven files
+// of content/en-mt held eighteen paragraphs of French, one of them the note to
+// the reader of Topologie algebrique from its first line to its last, and the
+// audit had nothing to say about any of them.
+//
+// The test is the French word list against the English one, on the paragraph
+// rather than on a run of words inside it. Three French words and no English
+// word is the line, and it is drawn there because one French word is a name the
+// printing keeps and two are a name and a preposition, while an English
+// paragraph that holds no English word at all is a paragraph of pure
+// mathematics, which paragraphs already drops.
+//
+// Hard. A paragraph left in French in the English tree is a paragraph the
+// Vietnamese will be made from, so it does not stop at one file.
+func l16(c *Corpus) ([]Finding, error) {
+	ps, out := c.pairs()
+	for _, p := range ps {
+		if !strings.EqualFold(p.en.Lang, "fr") {
+			continue
+		}
+		for i, para := range paragraphs(p.tr.Body) {
+			fr := glossary.FrenchWords(para.text)
+			if fr < 3 || englishWords(para.text) > 0 {
+				continue
+			}
+			if translate.BiblioEntry(para.text) {
+				continue // it stands as printed, and L14 is what watches that
+			}
+			out = append(out, Finding{File: p.tr.Path, Line: p.tr.BodyLine(para.line),
+				Msg: fmt.Sprintf("paragraph %d carries %d French words and no English: %s",
+					i+1, fr, ellipsis(para.text, 50))})
 		}
 	}
 	return out, nil
