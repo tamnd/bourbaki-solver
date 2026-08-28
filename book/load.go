@@ -246,7 +246,7 @@ func loadSection(root, path, lang string) (*Section, error) {
 		if kind == corpus.KindFront && h1 != "" {
 			s.ChapterTitle = h1
 		}
-		if t := sectionNumberRE.ReplaceAllString(cmp.Or(h2, h1), ""); t != "" {
+		if t := sectionTitle(cmp.Or(h2, h1), f.Meta.Section); t != "" {
 			s.Title = t
 		}
 	}
@@ -262,6 +262,39 @@ func loadSection(root, path, lang string) (*Section, error) {
 // appendix has not had its numeral eaten by an OCR, so the copy in the heading
 // would print twice.
 var sectionNumberRE = regexp.MustCompile(`^§+\s*\d+\s*\.?\s*`)
+
+// bareSectionNumberRE is that number with no section sign in front of it, which
+// is how most of the corpus writes the heading of a §: "## 1. OPEN SETS,
+// NEIGHBOURHOODS, CLOSED SETS".
+var bareSectionNumberRE = regexp.MustCompile(`^(\d+)\s*\.\s*`)
+
+// sectionTitle is the title of a § read off its own body heading, with the
+// number the document composes for itself taken off the front.
+//
+// The sign is optional and that is the whole of it. Stripping only "§ 5." left
+// the number on every heading written "1. TITLE", and the contents of the eight
+// Vietnamese volumes came out reading "§ 1. 1. CAC TAP MO, LAN CAN, CAC TAP
+// DONG" on 175 lines, with the page heads saying the same thing. Only a
+// translation reads its title off the body, which is why this had not turned up
+// in English or French.
+//
+// The bare number has to match the number of the §, and a § numbered zero is
+// not a § at all. Without that this would eat the front of any title that opens
+// on a number, and the corpus has titles that do: II, § 5 of Theorie des
+// ensembles is not one of them, but nothing says the next volume read will not
+// be.
+func sectionTitle(h string, n int) string {
+	h = sectionNumberRE.ReplaceAllString(h, "")
+	if n == 0 {
+		return h
+	}
+	if m := bareSectionNumberRE.FindStringSubmatch(h); m != nil {
+		if got, _ := strconv.Atoi(m[1]); got == n {
+			return h[len(m[0]):]
+		}
+	}
+	return h
+}
 
 // bodyTitles returns the level one and level two headings a body opens with.
 //
