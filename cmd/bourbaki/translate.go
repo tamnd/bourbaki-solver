@@ -612,6 +612,15 @@ func readJob(root, path, from string) (job, bool, error) {
 	if err != nil || f.Meta.Lang != from || f.Meta.Book == "" {
 		return job{}, false, nil
 	}
+	// The name of the file is not in the file. SectionFrontMatter.Filename is
+	// yaml:"-" because it is what the file is called and writing it inside would
+	// be saying the same thing twice, so it has to be put back from the path.
+	// Without it every volume-suffixed piece of front matter collapses onto the
+	// default name: Algebre prints three notes to the reader, one for chapters
+	// I to III, one for IV to VII and one for VIII, and all three translations
+	// were written to content/vi/alg/00_to_the_reader.md, the last one winning.
+	// Two of the three were lost on every run.
+	f.Meta.Filename = filepath.Base(path)
 	return job{source: source, meta: f.Meta, body: f.Body}, true, nil
 }
 
