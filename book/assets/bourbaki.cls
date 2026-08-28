@@ -68,6 +68,49 @@
 % the four control sequences the probe says neither stack carries.
 \providecommand{\widecheck}[1]{\check{#1}}
 
+% The operator names the French printing uses and no TeX engine has heard of.
+%
+% A reading of TG VIII SS 2 or of FVR VI writes tg for the tangent and cotg for
+% the cotangent and ch, sh, th for the hyperbolic three, because that is what is
+% printed. A reading of AC VIII SS 2 writes dimgr and htgr, set solid and not
+% spaced, for the graded dimension and the graded height, and AC X writes prof
+% for the depth and Ass for the associated primes. The historical note to FVR
+% quotes Leibniz in his own hand and his integral is omn., for omnia. Every one
+% of these is the right reading of the sign in front of it, and every one of
+% them stops the typesetter, so the class is where they belong and not the
+% pages. A census over pages/ found 150 occurrences across 28 pages of nine
+% printings, and none of the nine would have built.
+%
+% \th is the one worth naming separately. LaTeX defines it already, as the
+% thorn of Old English, and only in text; in a formula it is an error rather
+% than a wrong glyph. Taking the name costs nothing the corpus uses, since
+% there is no thorn anywhere in the Elements and there are hyperbolic tangents
+% through the whole of FVR and TG.
+\DeclareMathOperator{\tg}{tg}
+\DeclareMathOperator{\cotg}{cotg}
+\DeclareMathOperator{\ch}{ch}
+\DeclareMathOperator{\sh}{sh}
+\DeclareMathOperator{\cosec}{cosec}
+\DeclareMathOperator{\codim}{codim}
+\DeclareMathOperator{\dimgr}{dimgr}
+\DeclareMathOperator{\htgr}{htgr}
+\DeclareMathOperator{\prof}{prof}
+\DeclareMathOperator{\Ass}{Ass}
+\DeclareMathOperator{\omn}{omn}
+\let\th\relax
+\DeclareMathOperator{\th}{th}
+
+% The arc over an inverse image, which E II SS 3 prints as a wide arc with the
+% -1 sitting above it. A reading names it \overparen or \wideparen, after the
+% two packages that carry it, and neither package can be loaded here: yhmath
+% takes over \widehat and mathabx takes over most of the symbols. newtxmath has
+% the sign under a third name, so the two readings are pointed at it rather than
+% a package pulled in for one accent. \overgroup was the other candidate and is
+% wrong: it draws a flat bar with the ends turned down, and the printing has a
+% curve.
+\providecommand{\overparen}[1]{\widearc{#1}}
+\providecommand{\wideparen}[1]{\widearc{#1}}
+
 % The two interior products of Algebre III SS 11 are printed as corners, and the
 % printing spaces them the way it spaces any other binary operator: x is set
 % away from the corner and so is u. amssymb declares both corners as closing
