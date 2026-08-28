@@ -379,7 +379,20 @@ var (
 	// with. Commutative Algebra hangs one on five of its seven chapters and
 	// prints the head "CHAPTER I(*)", which is the whole of what stopped those
 	// five from matching once the hashes were allowed.
-	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*#*\s*chap(?:ter|itre)\s*([ivxlcdm1|][ivxlcdm1| ]*?)\s*` + openerMark + `$`)
+	//
+	// The word itself admits spaces inside it, for the same reason the numeral
+	// does. The typesetter letter spaces the whole line and the scanner keeps
+	// the spacing: Integration chapitres 1 a 4 opens its fourth chapter
+	// "C H A P I T R E IV" and its other three plainly, so three openers were
+	// found where four were wanted, and one chapter short is the same as none.
+	// The map fell back to the running heads for the whole volume, and what a
+	// head gives is the page after the last page of the chapter before, so
+	// every chapter began on the exercises of the one before it: chapter III
+	// was put at printed 31 where the contents says 40.
+	//
+	// This costs nothing in precision. The line still has to be the word and a
+	// numeral and nothing else, which no line of prose is.
+	chapterOpenerRe = regexp.MustCompile(`(?i)^\s*#*\s*c\s*h\s*a\s*p(?:\s*t\s*e\s*r|\s*i\s*t\s*r\s*e)\s*([ivxlcdm1|][ivxlcdm1| ]*?)\s*` + openerMark + `$`)
 
 	// A French volume whose first chapter is its own book writes the numeral
 	// out: Groupes et algebres de Lie chapitre 1, Theories spectrales and

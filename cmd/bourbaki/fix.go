@@ -49,6 +49,7 @@ const fixUsage = `usage: bourbaki fix <command> [arguments]
 Repairs the committed Markdown in the ways that need no PDF and no model.
 
 commands:
+  section   write a section reference with the sign the corpus uses, § 1
   dollars   write a formula set between brackets between dollars instead
   stray     take out a delimiter that opens mathematics and closes nothing
   padding   write an inline formula tight against its dollars, $K[[T]]$
@@ -66,7 +67,12 @@ commands:
   footnote  take the printed mark off a footnote that already has a reference
   seal      write content_sha256 over a section body that was edited by hand
 
-Run dollars first. A formula written \[ ... \] is not a math span to anything in
+Run section first and dollars after it. A section reference written with an
+escaped dollar puts a dollar in the prose that no formula opened, and everything
+here counts dollars to find the mathematics, so a page with one on it has every
+span after that point read one boundary out.
+
+A formula written \[ ... \] is not a math span to anything in
 this repository, because every tool here finds the mathematics by its dollars,
 so until the delimiters are turned round the three repairs after it cannot see
 inside it and neither can the audit. Then run the next three in that order.
@@ -208,6 +214,43 @@ letter, and those are left alone and printed for somebody to read the page and
 decide. M03 reports them too.
 
 Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
+const fixSectionUsage = `usage: bourbaki fix section [flags]
+
+Writes the sign the books use to refer to their own sections.
+
+Bourbaki refers to itself constantly, "(§ 1, n° 8)" and "(chap. III, § 2, n° 4,
+prop. 7)", and there is a reference of that shape on most pages of most volumes.
+The corpus writes the sign. Two other spellings are in the readings, an escaped
+dollar and the LaTeX command, and both are turned into it.
+
+The escaped dollar is the one that does damage, and it is not a careless reading.
+A model asked for Markdown with mathematics in it knows a dollar has to be
+escaped to stand for itself, and it reaches for that escape when what it is
+looking at is a sign it has no character for. What comes back is "(\$ 1, n° 8)",
+which reads correctly and counts as one more dollar on the line. Every rule here
+finds mathematics by counting dollars, so one stray escape moves the boundary of
+every span after it: prose is read as a formula and the formula after it as
+prose, to the end of the file. Integration chapitres 1 a 4 has 25 of them and
+nine of its section files came out with an odd count of dollars.
+
+The LaTeX spelling renders as the sign and does no damage. It is turned round for
+the reason the delimiters are: a text with two spellings in it has to be searched
+twice, and the second search is the one somebody forgets.
+
+The sign has to have a numeral after it to be one, so \Sigma and \Subset and the
+rest of the commands that start the same way are left alone. Neither spelling has
+a second reading in these books: nothing in Bourbaki is priced, and \S means
+nothing in mathematics.
+
+It runs over content/ and over the solutions as well as pages/, for fix parens'
+reason. Run bourbaki assemble afterwards, or the section files still hold the old
+text.
 
 flags:
   -book ID   only this volume, default every volume that has pages
@@ -713,6 +756,8 @@ func runFix(args []string) error {
 		os.Exit(2)
 	}
 	switch args[0] {
+	case "section":
+		return fixSection(args[1:])
 	case "dollars":
 		return fixDollars(args[1:])
 	case "padding":
@@ -2301,6 +2346,89 @@ func fixDollars(args []string) error {
 	fmt.Printf("fix dollars: %d solutions read, %d of them changed\n", solutions, solved)
 	if changed > 0 && !*check {
 		fmt.Println("fix dollars: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+// fix section runs before fix dollars and for the same reason fix dollars runs
+// before fix padding: it takes a dollar out of the prose that no formula opened,
+// and every pass after it finds its formulas by counting dollars. A page with an
+// escaped dollar on it has every span after that point read one boundary out.
+func fixSection(args []string) error {
+	fs := flag.NewFlagSet("fix section", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSectionUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, signs int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := textguard.SectionSign(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		signs += n
+		if *check {
+			fmt.Printf("%s  %d signs\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	// Over content/ as well, for fix parens' reason. A translation has no page
+	// under it, so a reference the model copied through in the wrong spelling
+	// would otherwise stay in the Vietnamese until somebody paid for the section
+	// again.
+	files, content, followed, err := repairContent(root, *check, "signs", textguard.SectionSign)
+	if err != nil {
+		return err
+	}
+
+	var solutions, solved int
+	err = eachSolution(root, "", func(path string, f *corpus.File[corpus.SolutionFrontMatter]) error {
+		solutions++
+		body, n := textguard.SectionSign(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		solved++
+		if *check {
+			fmt.Printf("%s  %d signs\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	verb := "wrote"
+	if *check {
+		verb = "would write"
+	}
+	fmt.Printf("fix section: %d pages read, %s %d signs on %d of them\n", pages, verb, signs, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix section: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	fmt.Printf("fix section: %d solutions read, %d of them changed\n", solutions, solved)
+	if changed > 0 && !*check {
+		fmt.Println("fix section: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
