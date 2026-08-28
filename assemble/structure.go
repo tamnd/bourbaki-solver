@@ -20,7 +20,18 @@ import (
 
 // subsecRE is a no. heading as extraction writes it: "### 3. Simple Modules".
 // The star marks a subsection the book sets as supplementary, and § 21 has one.
-var subsecRE = regexp.MustCompile(`^### (?:\\\*)?(\d+)\. (.+)$`)
+//
+// The fascicules de resultats number a no. by its section as well. Varietes
+// differentielles et analytiques sets the fourth no. of its first section
+// "1.4. Produit de fonctions derivables" and its own table of contents lists
+// that piece as no. 4 of § 1, so the section number in front is the printing's
+// way of saying where the reader is and not part of the number. It is read and
+// dropped: what the contents is checked against is the no.
+//
+// The trailing full stop is the printing's too. Varietes sets most of its no.
+// with one and three of them without, "1.1 Ordre de contact de deux fonctions
+// en un point", and the page keeps whichever it has.
+var subsecRE = regexp.MustCompile(`^### (?:\\\*)?(?:\d+\.)?(\d+)\.? (.+)$`)
 
 // subsections reads the no. headings of a piece.
 //

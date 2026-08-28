@@ -424,7 +424,10 @@ func fathers(r corpus.Ref) bool {
 	return r.Number != 0 && (r.Kind == corpus.KindTheorem || r.Kind == corpus.KindProposition)
 }
 
-var subsecRE = regexp.MustCompile(`^### (\d+)\.`)
+// The section number a fascicule de resultats prints in front of its no. is
+// read and dropped here for assemble/structure.go's reason: the no. is what a
+// citation names.
+var subsecRE = regexp.MustCompile(`^### (?:\d+\.)?(\d+)\.? `)
 
 func subsecHeading(line string) (int, bool) {
 	m := subsecRE.FindStringSubmatch(line)

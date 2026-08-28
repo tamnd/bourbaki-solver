@@ -160,3 +160,35 @@ func TestTheRebuiltChaptersAreNotWrittenOver(t *testing.T) {
 		t.Errorf("the rebuild now reads %q, want what the volume read", got)
 	}
 }
+
+// A volume that is not divided into chapters carries the flag that says so in
+// its manifest and nowhere else, since its contents page has no way to say it.
+// Elements d'histoire des mathematiques and Varietes differentielles et
+// analytiques are both like this, and a rebuild that dropped the flag would
+// send the assembler looking for a chapter heading neither printing sets.
+func TestTheNominalFlagSurvivesARebuild(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "1", Nominal: true,
+		Title: "VARIÉTÉS DIFFÉRENTIELLES ET ANALYTIQUES, FASCICULE DE RÉSULTATS"}}
+	fresh := []corpus.Chapter{{Numeral: "1", Page: 11, PDFPage: 9,
+		Title: "VARIÉTÉS DIFFÉRENTIELLES ET ANALYTIQUES, FASCICULE DE RÉSULTATS"}}
+
+	out, kept := KeepTitles(old, fresh)
+	if !out[0].Nominal {
+		t.Error("the rebuild dropped the nominal flag")
+	}
+	if len(kept) != 0 {
+		t.Errorf("kept %v, want nothing: the flag is not a reading", kept)
+	}
+}
+
+// A chapter the manifest does not call nominal stays that way. The flag is one
+// the corpus adds and never one it takes away, but nothing here invents it.
+func TestAChapterThePrintingHasIsNotMadeNominal(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "I", Title: "Structures algébriques"}}
+	fresh := []corpus.Chapter{{Numeral: "I", Title: "Structures algébriques"}}
+
+	out, _ := KeepTitles(old, fresh)
+	if out[0].Nominal {
+		t.Error("chapter I of Algebre came back nominal")
+	}
+}
