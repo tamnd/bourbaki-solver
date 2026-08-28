@@ -41,11 +41,16 @@ type Page struct {
 // Markdown renders a conversation as the corpus writes Markdown.
 //
 // It refuses rather than repairs. An answer carrying a refusal, a narration or
-// the provider's own markup is not a transcription with a blemish on it, it is
-// an answer to a different question, and the import is abandoned with the turn
-// named. That is the same bargain the OCR path makes, and the reason it is
-// worth making here too is that a share page is somebody's old conversation:
-// nobody is watching it go by, so nothing else will notice.
+// one of the provider's citation anchors is not a transcription with a blemish
+// on it, it is an answer to a different question, and the import is abandoned
+// with the turn named. That is the same bargain the OCR path makes, and the
+// reason it is worth making here too is that a share page is somebody's old
+// conversation: nobody is watching it go by, so nothing else will notice.
+//
+// The wrappers are the exception and they are not repairs. A code fence and a
+// directive fence are both the provider packaging an answer it wrote correctly,
+// so textguard.Strip takes them off and what is inside goes through the same
+// guard as everything else.
 func Markdown(c *Conversation) (*Page, error) {
 	p := &Page{}
 	seen := map[string]bool{}

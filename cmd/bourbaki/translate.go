@@ -894,7 +894,12 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 					Msg: fmt.Sprintf("chunk %d of %d: the answer held is empty", c.Index, c.Of)})
 				continue
 			}
-			answers[i], models[i] = a.Text, a.Model
+			// Stripped here and not only in askChunk, because a chunk an earlier
+			// run answered is read straight out of the archive and never goes
+			// through askChunk at all. This is the one place every chunk passes
+			// through, cached or fresh, so it is where the provider's packaging
+			// comes off for good. See textguard.Strip.
+			answers[i], models[i] = textguard.Strip(a.Text), a.Model
 			continue
 		}
 		// A chunk that is not in hand is a refusal whatever stopped the run,
@@ -1123,7 +1128,13 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// decides where the math spans are and both of those read spans. Fixing
 		// the delimiters afterwards would mean the audit compared a formula the
 		// corpus does not think is a formula.
-		answer.Text = textguard.Normalise(answer.Text)
+		// The strip goes first because it is about packaging and everything
+		// after it is about text. A directive fence left on is a hard commentary
+		// finding, so without this the audit below hands back a complaint about
+		// markup the model was never asked for, the chunk is asked again at the
+		// cost of the whole question, and the second answer is wrapped the same
+		// way as the first.
+		answer.Text = textguard.Normalise(textguard.Strip(answer.Text))
 		answer.Text = translate.Respace(body, answer.Text)
 		// And the second repair, for the same reason: a citation the model wrote
 		// in the words of the language it was translating into is a citation
