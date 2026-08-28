@@ -401,7 +401,8 @@ func TestItemStartIgnoresACrossReference(t *testing.T) {
 }
 
 func TestSentenceEnd(t *testing.T) {
-	for _, s := range []string{"the module is projective.", "are bijective.$*$", "as in Exercise 11, c))", "M is simple. $"} {
+	for _, s := range []string{"the module is projective.", "are bijective.$*$", "as in Exercise 11, c))", "M is simple. $",
+		"les deux structures sont distinctes.\\*", "the two structures are distinct.\\*\n"} {
 		if !sentenceEnd(s) {
 			t.Errorf("sentenceEnd(%q) = false", s)
 		}
@@ -442,6 +443,50 @@ func TestExercisesReadsTheMarks(t *testing.T) {
 	}
 	if got[0].Meta.PDFPage != 42 || got[0].Meta.BookPage != "A VIII.7" {
 		t.Errorf("exercise 1 is on %d, %q", got[0].Meta.PDFPage, got[0].Meta.BookPage)
+	}
+}
+
+// A starred exercise closes on a star and the exercises printed after it are
+// still exercises. Page 366 of Algebre 1 a 3 in French is the case: SS 3 of
+// chapter II opens its second exercise with a star and closes it with one at the
+// end of part b, and its third and fourth are set on the lines under that with
+// no blank line between them, so all three land in one block. The closing star
+// is written escaped, since Markdown reads a bare one as emphasis, and the
+// backslash of it used to be left standing where the number was looked at, so
+// the sentence did not read as ended and exercises 3 and 4 were swallowed into
+// the body of exercise 2.
+func TestExercisesFindsTheOnesAfterAStarredOne(t *testing.T) {
+	in := blocks(
+		"### Exercises",
+		"1) Let A be a ring, E a right A-module, F a left A-module.",
+		`\*2) Consider the field C of complex numbers as a vector space over R.
+a) Show that the canonical map is not injective.
+b) Show that the two C-module structures are distinct.\*
+3) a) Let F be a left A-module. Show that the canonical map is surjective.
+b) Give an example of a commutative ring A and an ideal m of A.
+4) Let E be a right A-module and F a free left A-module.`,
+	)
+	got, err := exercises(in, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("got %d exercises, want 4", len(got))
+	}
+	if !got[1].Meta.Supplementary {
+		t.Error("exercise 2 opens with a star and is supplementary")
+	}
+	if got[2].Meta.Supplementary || got[3].Meta.Supplementary {
+		t.Error("the star closes on exercise 2 and does not carry on to 3 and 4")
+	}
+	if strings.Contains(got[1].Body, "surjective") {
+		t.Errorf("exercise 3 was swallowed into exercise 2: %q", got[1].Body)
+	}
+	if !strings.Contains(got[2].Body, "b) Give an example") {
+		t.Errorf("the lettered parts left exercise 3: %q", got[2].Body)
+	}
+	if !strings.Contains(got[3].Body, "free left A-module") {
+		t.Errorf("exercise 4 is missing its text: %q", got[3].Body)
 	}
 }
 

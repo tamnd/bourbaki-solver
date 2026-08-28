@@ -1204,6 +1204,21 @@ var pilcrowBefore = regexp.MustCompile(`\$?\s*(?:\\P|¶)\s*\$?\s*$`)
 // of the third, which cost that § the twenty exercises printed after it.
 var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])(?:no|nos|p|pp|cf|fig|chap|vol|resp|art)\.$`)
 
+// closingMarks are the marks that can stand between the end of a sentence and
+// the number after it: the space and the newline, the dollar of a span the mark
+// was written inside, and the star that closes a passage of small type, in both
+// the bare spelling and the escaped one.
+//
+// The escaped spelling is why this is a pattern and not a cutset. A cutset
+// works a rune at a time and cannot take a two rune mark off, so the star went
+// first and the backslash stayed behind, and a sentence closing a starred
+// passage did not read as ended. Exercises 3 and 4 of SS 3 of chapter II of
+// Algebre 1 a 3 in French are the case: exercise 2 is starred, the star closes
+// it on "sont distinctes.\*", and both exercises printed after it were swallowed
+// into its body. Bare stars are being written escaped across the corpus, since
+// Markdown reads a bare one as emphasis, so this would have spread.
+var closingMarks = regexp.MustCompile(`(?:\\\*|[ \t\n$*])+$`)
+
 // sentenceEnd reports whether the text before a number is the end of a
 // sentence, with the marks the book closes a passage with, and the mark it
 // opens one with, taken off.
@@ -1219,7 +1234,7 @@ var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])(?:no|nos|p|pp|cf|fig|chap|
 // looks for one number and one only. That § prints 27 exercises and the volume
 // reported none of them.
 func sentenceEnd(s string) bool {
-	s = strings.TrimRight(pilcrowBefore.ReplaceAllString(s, ""), " \t\n$*")
+	s = closingMarks.ReplaceAllString(pilcrowBefore.ReplaceAllString(s, ""), "")
 	if shortened.MatchString(s) {
 		return false
 	}
