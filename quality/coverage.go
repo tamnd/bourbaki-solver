@@ -2,8 +2,6 @@ package quality
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
@@ -18,26 +16,6 @@ import (
 // absent sections of volumes nobody has read yet would bury the one section
 // that really went missing. That leaves somebody having to say what has not
 // been read, and this is where it is said, once, in the place people look.
-
-// The markers the generated block sits between. They are HTML comments so that
-// they are invisible in every renderer and visible in the source.
-const (
-	CoverageBegin = "<!-- BEGIN COVERAGE -->"
-	CoverageEnd   = "<!-- END COVERAGE -->"
-)
-
-// coverageBlock is what sits between the markers, and whether they are there.
-func coverageBlock(readme string) (string, bool) {
-	i := strings.Index(readme, CoverageBegin)
-	if i < 0 {
-		return "", false
-	}
-	j := strings.Index(readme[i:], CoverageEnd)
-	if j < 0 {
-		return "", false
-	}
-	return readme[i+len(CoverageBegin) : i+j], true
-}
 
 // row is one chapter.
 type coverageRow struct {
@@ -227,28 +205,4 @@ func chapterOfPage(c *Corpus, book string, page int) string {
 		return e.Chapter
 	}
 	return ""
-}
-
-// WriteCoverage puts the block back into the README between its markers, and
-// reports whether anything changed.
-func WriteCoverage(root string, block string) (bool, error) {
-	path := filepath.Join(root, "README.md")
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return false, err
-	}
-	readme := string(b)
-	i := strings.Index(readme, CoverageBegin)
-	if i < 0 {
-		return false, fmt.Errorf("README.md has no %s marker", CoverageBegin)
-	}
-	j := strings.Index(readme[i:], CoverageEnd)
-	if j < 0 {
-		return false, fmt.Errorf("README.md has no %s marker", CoverageEnd)
-	}
-	out := readme[:i+len(CoverageBegin)] + block + readme[i+j:]
-	if out == readme {
-		return false, nil
-	}
-	return true, os.WriteFile(path, []byte(out), 0o644)
 }
