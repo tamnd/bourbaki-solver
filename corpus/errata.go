@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -197,7 +198,13 @@ func (m *ErrataManifest) check(path string) error {
 			// Read may be a line with no number on it, which is how a page
 			// that prints none is written down, but it cannot be the line the
 			// page already has.
-			if x.Says == "" || x.Says == x.Read {
+			//
+			// Says may be empty, and then the erratum supplies a head rather
+			// than correcting one. That is for the page a chapter opens on,
+			// which is numbered and, by the house style of the whole series,
+			// prints no running head to carry the number. Read still has to
+			// carry something, or the entry says nothing at all.
+			if x.Says == x.Read || (x.Says == "" && strings.TrimSpace(x.Read) == "") {
 				return fmt.Errorf("%s: heads of %s, pdf page %d has to say what the head says and what to read instead",
 					path, e.Book, x.PDFPage)
 			}

@@ -173,6 +173,19 @@ func pagemapBuild(args []string) error {
 // error and not a warning. An erratum nobody applied is a person having written
 // down a correction in the belief that it was in force, and the page it names
 // is exactly the page the fit was going to get wrong.
+//
+// An empty says supplies a head the printing never set. Every house in the
+// series suppresses the running head on the page a chapter opens on, and that
+// page is numbered all the same, so a volume whose scan is missing a leaf right
+// after its opener has no anchor at all in front of the gap and the fit slides
+// the whole chapter down by the width of it. Algebre commutative chapitre 10 is
+// that volume: its pdf 1 is the opener, printed AC X.1, its pdf 2 heads AC X.3,
+// and the leaf carrying SS 1 and the opening of no. 1 was never scanned. With
+// no anchor on pdf 1 the fit reads the volume as printed 2 to 180 and the map
+// refuses to be written, because a per-chapter volume whose chapter starts at
+// printed 2 is normally a fit that has slipped. Naming the page the opener
+// carries turns the slide into the missing leaf it is, which the loader then
+// reads back off the rows as a step.
 func correctHeads(pages []string, errata []corpus.PageErratum) error {
 	for _, e := range errata {
 		if e.PDFPage > len(pages) {
@@ -180,6 +193,14 @@ func correctHeads(pages []string, errata []corpus.PageErratum) error {
 				e.PDFPage, len(pages))
 		}
 		pg := pages[e.PDFPage-1]
+		if e.Says == "" {
+			if strings.TrimSpace(e.Read) == "" {
+				return fmt.Errorf("the head erratum for pdf page %d says nothing and reads nothing",
+					e.PDFPage)
+			}
+			pages[e.PDFPage-1] = e.Read + "\n" + pg
+			continue
+		}
 		if n := strings.Count(pg, e.Says); n != 1 {
 			return fmt.Errorf("the head erratum %q is on pdf page %d %d times, want exactly one",
 				e.Says, e.PDFPage, n)

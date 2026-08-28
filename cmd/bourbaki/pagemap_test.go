@@ -191,3 +191,44 @@ func TestATranspositionTheManifestGotWrongIsRefused(t *testing.T) {
 		t.Errorf("transpositions gave %v, want [[273 274]]", got)
 	}
 }
+
+// An erratum with no says supplies a head instead of correcting one, which is
+// the page a chapter opens on. It prints no running head, by the house style of
+// the whole series, and is numbered all the same, so there is nothing on it to
+// quote and the fit has no anchor there.
+func TestCorrectHeadsSuppliesAHeadThePrintingLeavesOff(t *testing.T) {
+	pages := []string{
+		"CHAPITRE X\n\nProfondeur, regularite, dualite\n",
+		"N 1 PROFONDEUR      AC X.3\n\nbody\n",
+	}
+	err := correctHeads(pages, []corpus.PageErratum{{
+		PDFPage: 1,
+		Erratum: corpus.Erratum{
+			Says: "", Read: "AC X.1",
+			Why: "the opener is printed AC X.1 and carries no running head",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(pages[0], "AC X.1\nCHAPITRE X") {
+		t.Errorf("the head did not go on the front of the page:\n%s", pages[0])
+	}
+	if !strings.HasPrefix(pages[1], "N 1 PROFONDEUR") {
+		t.Error("the supplied head ran past the page it was written for")
+	}
+}
+
+// A supplied head that supplies nothing is an entry that does nothing, and the
+// whole point of refusing an erratum that cannot apply is that writing one down
+// and not applying it is worse than not writing it.
+func TestCorrectHeadsRefusesAnErratumThatSuppliesNothing(t *testing.T) {
+	pages := []string{"a page\n"}
+	err := correctHeads(pages, []corpus.PageErratum{{
+		PDFPage: 1,
+		Erratum: corpus.Erratum{Says: "", Read: "   ", Why: "y"},
+	}})
+	if err == nil {
+		t.Fatal("no error")
+	}
+}

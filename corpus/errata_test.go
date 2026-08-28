@@ -267,10 +267,10 @@ func TestAHeadErratumThatWouldGoUnreadIsRefused(t *testing.T) {
         - {pdf_page: 7, says: a, read: b, why: c}
         - {pdf_page: 7, says: d, read: e, why: f}
 `, "entered twice"},
-		{"nothing said", `heads:
+		{"nothing said and nothing to read", `heads:
     - book: alg-x-fr
       errata:
-        - {pdf_page: 7, read: b, why: c}
+        - {pdf_page: 7, says: '', read: '  ', why: c}
 `, "what the head says"},
 		{"reads the same", `heads:
     - book: alg-x-fr
@@ -301,5 +301,28 @@ func TestAHeadErratumThatWouldGoUnreadIsRefused(t *testing.T) {
 				t.Errorf("the error does not say %q: %v", c.want, err)
 			}
 		})
+	}
+}
+
+// An erratum with no says supplies a head rather than correcting one, which is
+// how the page a chapter opens on says what it is printed as. Every house in
+// the series suppresses the running head there and numbers the page all the
+// same, so there is nothing on the page to quote.
+func TestAHeadErratumMaySupplyAHeadThePrintingSuppresses(t *testing.T) {
+	root := writeErrata(t, `heads:
+    - book: ac-x-fr
+      errata:
+        - pdf_page: 1
+          says: ''
+          read: AC X.1
+          why: the opener of the only chapter, printed AC X.1 and carrying no head
+`)
+	m, err := LoadErrata(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := m.HeadErrata("ac-x-fr")
+	if len(got) != 1 || got[0].Says != "" || got[0].Read != "AC X.1" {
+		t.Fatalf("the manifest gave %v, want one erratum supplying AC X.1", got)
 	}
 }
