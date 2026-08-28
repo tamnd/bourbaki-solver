@@ -56,6 +56,7 @@ commands:
   math      put the characters stranded outside their TeX back inside it
   notin     put the stroke back on a relation sign that came back struck through
   star      write the star that marks a forward-looking passage the corpus's way
+  label     take the a), b), c) of an exercise back out of the mathematics
   elision   write the apostrophe of a French elision the way the corpus sets it
   smallcaps write the kind of a statement head in capitals, as the page sets it
   folio     move the printed page number off the foot and into the front matter
@@ -75,7 +76,9 @@ through first or it will skip the file and say nothing about it. parens comes
 before math so that math reads the spans as they will be rather than as
 they are. notin runs after those, since it works inside the spans and wants them
 closed and whole. star runs there too and for the same reason from the other
-side, since it works everywhere the spans are not. elision runs after those two
+side, since it works everywhere the spans are not. label runs with them, since
+it reads the spans to decide which of them are not mathematics at all. elision
+runs after those two
 as well, since it reads the prose and wants to know where the prose ends. folio,
 heading and opening touch no mathematics and can be run at any point before
 assemble. seal works on
@@ -316,6 +319,46 @@ page, the section_title and subsections of a section, and the chapter, § and no
 titles of manifests/toc/. They have to move together, because fix opening writes
 a heading from the title in the manifest and then matches it against the heading
 on the page, and one side tightened without the other would never match again.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
+const fixLabelUsage = `usage: bourbaki fix label [flags]
+
+Takes the a), b), c) of an exercise back out of the mathematics.
+
+Bourbaki sets the parts of an exercise as a), b), c) and so on, in italic, and
+the parts of a long proof the same way with capitals. Italic on a printed page
+is also how a variable is set, so a model reading the page sees the same slope
+on the a of "a) Show that" as on the a of "for all a in A", and writes the label
+as mathematics. 1557 lines of pages/ carry it as $a)$ and 23 as $a$), across 361
+files and every volume that has exercises in it.
+
+It is wrong twice over. A lone bracket with nothing opening it is not TeX, so
+$a)$ is a span no renderer can read and KaTeX prints it in the error colour. And
+a label is not a variable: the a of "a) Show that" names a part of a question,
+it is quantified over nothing, and setting it as mathematics says that it is.
+The translators copied the shape through, so content/vi carries it in the same
+places, and one of them dropped the closing dollar on the way and left a file
+with an odd number of them.
+
+A span holding one letter and a closing bracket is a label wherever it stands,
+mid sentence as well as at the head of a line, because the bracket is inside the
+mathematics there and an unmatched bracket is not mathematics. A reference reads
+the same way: "deduce from $b)$ that" is the prose pointing at part b, and it is
+set in text like the label it points at.
+
+The other shape is taken at the head of a line only. $x$) mid sentence is nearly
+always a variable at the end of a prose bracket, "compatible (in $x$)" and "with
+respect to the function $f$)", and the corpus has 2056 of those against 23
+labels. At the head of a line there is no bracket open to close.
+
+It runs over content/ as well as pages/, for fix parens' reason, and moves a
+translation on with its source the way fix notin does.
 
 Run bourbaki assemble afterwards, or the section files still hold the old text.
 
@@ -683,6 +726,8 @@ func runFix(args []string) error {
 		return fixNotin(args[1:])
 	case "star":
 		return fixStar(args[1:])
+	case "label":
+		return fixLabel(args[1:])
 	case "elision":
 		return fixElision(args[1:])
 	case "smallcaps":
@@ -2394,6 +2439,62 @@ func fixStar(args []string) error {
 		files, content, followed, verbed)
 	if changed > 0 && !*check {
 		fmt.Println("fix star: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+// fixLabel takes the item labels of an exercise back out of the mathematics.
+func fixLabel(args []string) error {
+	fs := flag.NewFlagSet("fix label", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixLabelUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, labels int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := textguard.Labels(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		labels += n
+		if *check {
+			fmt.Printf("%s  %d labels\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	files, content, followed, err := repairContent(root, *check, "labels", textguard.Labels)
+	if err != nil {
+		return err
+	}
+
+	verb := "wrote"
+	if *check {
+		verb = "would write"
+	}
+	fmt.Printf("fix label: %d pages read, %s %d labels on %d of them\n", pages, verb, labels, changed)
+	verbed := "moved"
+	if *check {
+		verbed = "would move"
+	}
+	fmt.Printf("fix label: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verbed)
+	if changed > 0 && !*check {
+		fmt.Println("fix label: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
