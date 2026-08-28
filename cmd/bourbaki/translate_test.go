@@ -811,3 +811,42 @@ func TestTheMachineEnglishTreeIsEnglish(t *testing.T) {
 		}
 	}
 }
+
+// The name of the front matter file is not written inside it, so readJob has to
+// put it back from the path. Without it every volume-suffixed piece collapses
+// onto the default name and only the last one translated survives: Algebre
+// prints three notes to the reader and all three were writing to
+// content/vi/alg/00_to_the_reader.md.
+func TestReadJobKeepsTheNameOfTheFrontMatterFile(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "content", "en", "alg")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"00_to_the_reader_i_iii.md", "00_to_the_reader_iv_vii.md", "00_to_the_reader_viii.md"}
+	seen := map[string]string{}
+	for _, name := range names {
+		meta := corpus.SectionFrontMatter{
+			Book: "alg", BookTitle: "Algebra", Kind: corpus.KindReader,
+			SectionTitle: "TO THE READER", Lang: "en", Source: "alg-viii",
+		}
+		f := corpus.SectionFile{Meta: meta, Body: "## TO THE READER\n\n" + name + "\n"}
+		if err := f.Write(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
+		j, ok, err := readJob(root, filepath.Join(dir, name), "en")
+		if err != nil || !ok {
+			t.Fatalf("readJob(%s) = %v, %v", name, ok, err)
+		}
+		out := j.meta
+		out.Lang = "vi"
+		got := corpus.SectionPath(root, "vi", out)
+		if filepath.Base(got) != name {
+			t.Errorf("%s translates to %s, want the same name", name, filepath.Base(got))
+		}
+		if was, ok := seen[got]; ok {
+			t.Errorf("%s and %s both translate to %s", was, name, got)
+		}
+		seen[got] = name
+	}
+}
