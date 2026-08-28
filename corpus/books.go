@@ -77,9 +77,6 @@ type Book struct {
 	// ends the exercises of chapter V, and its pdf 273 opens the note
 	// historique at printed 170 and runs straight into pdf 275 at printed 171.
 	Transposed []Transposition `yaml:"transposed,omitempty"`
-	// Introduction is the Book's own introduction, where it has one, and is
-	// empty where it has not.
-	Introduction *Introduction `yaml:"introduction,omitempty"`
 	// ReaderNote is the pages the publisher puts in front of the introduction
 	// under a heading like TO THE READER, ADVICE TO THE READER, MODE D'EMPLOI
 	// DE CE TRAITE or AVERTISSEMENT. It is the same shape as an introduction
@@ -88,6 +85,9 @@ type Book struct {
 	// volume and a reader note is Bourbaki on how to read the Elements, printed
 	// again at the front of nearly every volume in the series.
 	ReaderNote *Introduction `yaml:"reader_note,omitempty"`
+	// Introduction is the Book's own introduction, where it has one, and is
+	// empty where it has not.
+	Introduction *Introduction `yaml:"introduction,omitempty"`
 }
 
 // Transposition is two PDF pages a file carries the wrong way round.
