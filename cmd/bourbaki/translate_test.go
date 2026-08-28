@@ -750,3 +750,64 @@ func TestTakeRawOffChangesNothing(t *testing.T) {
 		t.Fatalf("the complaint was dropped by a run that did not ask for -raw: %v", got)
 	}
 }
+
+// The machine English of a French only volume is a source for Vietnamese.
+//
+// Springer translated 15 of the 43 volumes and the other 28 have no English at
+// all, so a Vietnamese pass that walks content/en can never reach Topologie
+// algebrique or Theories spectrales. The French of those volumes is read into
+// content/en-mt first and this is the step that carries it on. The tree is held
+// apart from content/en because a reader has to be able to tell Springer's
+// English from a model's, and everything that asks what language the passage is
+// written in has to be told English all the same.
+func TestTheMachineEnglishIsASourceForVietnamese(t *testing.T) {
+	root := t.TempDir()
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "sheaf", VI: "bó"}}}
+	english := "A sheaf on a topological space is a space over it."
+	m := meta(1)
+	m.ContentSHA256 = corpus.ContentSHA256(english)
+	writeSection(t, corpus.SectionPath(root, "en-mt", m), corpus.SectionFile{Meta: m, Body: english})
+
+	jobs, _, err := translateJobs(root, g, "en-mt", "vi", "vi", "", "", "", "prompt-hash", false, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("got %d jobs out of content/en-mt, want the section: %v", len(jobs), jobs)
+	}
+	// The glossary is keyed by language and has no en-mt column, so a lookup
+	// against the name of the tree returns nothing for every term and the volume
+	// is translated with no terminology at all. That is the failure this guards.
+	if jobs[0].terms != translate.GlossaryDigest(g, "en", "vi", english) {
+		t.Error("the machine English was not held to the rows its text mentions")
+	}
+	if jobs[0].terms == translate.GlossaryDigest(g, "en-mt", "vi", english) {
+		t.Error("the glossary was asked for an en-mt column, which no glossary has")
+	}
+}
+
+// Where a translation says it came from. A file out of content/en is Springer
+// and says nothing extra; one out of the French or out of the machine English
+// says so, because it sits in the same tree as the first kind.
+func TestATranslationRecordsWhichEnglishItCameFrom(t *testing.T) {
+	for _, c := range []struct{ from, lang, method string }{
+		{"en", "", ""},
+		{"fr", "fr", "machine"},
+		{"en-mt", "en-mt", "machine"},
+	} {
+		lang, method := provenance(c.from)
+		if lang != c.lang || method != c.method {
+			t.Errorf("from %q gives %q %q, want %q %q", c.from, lang, method, c.lang, c.method)
+		}
+	}
+}
+
+func TestTheMachineEnglishTreeIsEnglish(t *testing.T) {
+	for _, c := range []struct{ from, want string }{
+		{"en", "en"}, {"en-mt", "en"}, {"fr", "fr"},
+	} {
+		if got := sourceLang(c.from); got != c.want {
+			t.Errorf("sourceLang(%q) is %q, want %q", c.from, got, c.want)
+		}
+	}
+}
