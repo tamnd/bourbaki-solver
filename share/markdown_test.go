@@ -141,7 +141,7 @@ func TestMarkdownRefusesAnAnswerThatIsNotATranscription(t *testing.T) {
 		"a narration": "Sure! Here's the transcription of the page:\n\nLet $A$ be a ring.",
 		"a refusal":   "I'm sorry, I can't help with that.",
 		"lost upload": "I don't see an image attached. Could you upload the page again?",
-		"markup":      ":::writing{variant=\"document\" id=\"58321\"}\nLet $A$ be a ring.\n:::",
+		"markup":      "Let $A$ be a ring 【4:0†source】.",
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := Markdown(&Conversation{Turns: []Turn{{Text: "Let $A$ be a ring."}, {Text: answer}}})
@@ -152,6 +152,26 @@ func TestMarkdownRefusesAnAnswerThatIsNotATranscription(t *testing.T) {
 				t.Errorf("the error does not name the answer: %v", err)
 			}
 		})
+	}
+}
+
+// The directive fence is the one piece of the provider's markup that does not
+// end the import, because it is packaging and not an answer to a different
+// question. It comes off the same way a code fence does and what is inside it
+// is the transcription.
+func TestMarkdownTakesTheDirectiveFenceOffRatherThanRefusingIt(t *testing.T) {
+	p, err := Markdown(&Conversation{Turns: []Turn{
+		{Text: "Let $A$ be a ring."},
+		{Text: ":::writing{variant=\"document\" id=\"58321\"}\nLet $A$ be a ring.\n:::"},
+	}})
+	if err != nil {
+		t.Fatalf("the import was refused: %v", err)
+	}
+	if strings.Contains(p.Body, ":::") {
+		t.Errorf("the fence survived into the page:\n%s", p.Body)
+	}
+	if !strings.Contains(p.Body, "Let $A$ be a ring.") {
+		t.Errorf("the transcription did not survive:\n%s", p.Body)
 	}
 }
 

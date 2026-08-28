@@ -117,6 +117,43 @@ func TestFencesAreStrippedNotRejected(t *testing.T) {
 	}
 }
 
+// The fence a provider puts round an answer when its own writing surface is on.
+// Six translated files reached the corpus wearing this one, so the shape here is
+// copied from what came back rather than invented.
+func TestTheDirectiveFenceComesOffAndTheTextStays(t *testing.T) {
+	text := ":::writing{variant=\"document\" id=\"58321\"}\n" +
+		"**Mệnh đề 4.** — Cho $G$ là một nhóm.\n\n" +
+		"Đoạn thứ hai.\n" +
+		":::"
+	got := Strip(text)
+	if strings.Contains(got, ":::") {
+		t.Fatalf("the fence survived:\n%s", got)
+	}
+	want := "**Mệnh đề 4.** — Cho $G$ là một nhóm.\n\nĐoạn thứ hai."
+	if got != want {
+		t.Fatalf("stripping changed the text:\n%q\nwant\n%q", got, want)
+	}
+	// Two chunks joined, so the fence turns up in the middle as well as at the
+	// ends. The paragraph break either side of it is one break and stays one.
+	pair := "first\n\n:::\n\n:::writing{id=\"7\"}\n\nsecond"
+	if got := Strip(pair); got != "first\n\nsecond" {
+		t.Fatalf("a fence in the middle left the paragraphs wrong:\n%q", got)
+	}
+	// Nothing to do is nothing done, and doing it twice changes nothing.
+	plain := "A I.24\n\nordinary prose with no fence on it"
+	if got := Strip(plain); got != plain {
+		t.Fatalf("a clean answer was altered:\n%q", got)
+	}
+	if once := Strip(text); Strip(once) != once {
+		t.Fatalf("stripping is not idempotent:\n%q", Strip(once))
+	}
+	// Check still refuses it. The strip is for the paths that take an answer
+	// raw, and it does not buy the pattern a way past the guard.
+	if leaks := Check(text); len(leaks) == 0 {
+		t.Fatal("Check no longer reports a directive fence")
+	}
+}
+
 func TestNormaliseFixesWhatIsUnambiguouslyWrong(t *testing.T) {
 	got := Normalise(`The ring $\mathbb{Z}$ and the field $\mathbb{Q}$, with ⚠ in the margin.   `)
 	for _, want := range []string{`\mathbf{Z}`, `\mathbf{Q}`, "☡"} {

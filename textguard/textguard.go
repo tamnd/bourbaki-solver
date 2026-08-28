@@ -186,11 +186,16 @@ var thinking = []string{
 // anchors, and 【 】 is where another one puts them. None of the three can be
 // part of a page of Bourbaki, so all three are refused wherever they turn up
 // rather than only at the start of an answer.
+// directive is a line the provider opens or closes its own writing surface
+// with. Strip removes it and Check refuses it, and they share the one pattern
+// so that the two can never come to disagree about what a fence is.
+var directive = regexp.MustCompile(`(?m)^\s*:::`)
+
 var markup = []struct {
 	what string
 	re   *regexp.Regexp
 }{
-	{"a directive fence, which is the provider's markup and not Markdown this corpus uses", regexp.MustCompile(`(?m)^\s*:::`)},
+	{"a directive fence, which is the provider's markup and not Markdown this corpus uses", directive},
 	{"a citation anchor", regexp.MustCompile(`【[^】]*】|oai_citation|contentReference`)},
 	{"a private use character, which is a provider's own marker", regexp.MustCompile(`[\x{e000}-\x{f8ff}]`)},
 }
@@ -280,7 +285,45 @@ func Strip(text string) string {
 	if match := fences.FindStringSubmatch(trimmed); match != nil {
 		trimmed = strings.TrimSpace(match[1])
 	}
-	return trimmed
+	return strings.TrimSpace(undirect(trimmed))
+}
+
+// undirect drops the provider's directive fences.
+//
+// This is the same argument as the code fence above it and it took a corpus
+// commit to learn. Six translated files came back wrapped in
+// :::writing{variant="document"} and its closing :::, ten pairs in Theory of
+// Sets II section 3 alone, and the first machine English section ever written
+// had the same fault, so it is the provider and not the language. Check has
+// refused the pattern from the start and H07 found the files, but both of those
+// are after the fact: a run started with -raw keeps the answer and writes it,
+// which is what the corpus asked for and what it got.
+//
+// So the fence is removed rather than refused. The text either side of it is
+// the translation and it is not touched, and a corpus that has no ::: on any
+// line of any file cannot lose anything to a rule that drops lines beginning
+// with one.
+//
+// The blank line in front of a fence goes with it. A fence sits in its own
+// paragraph, and taking the line out and leaving the blank behind would turn one
+// paragraph break into two, which is a change to the text rather than to its
+// packaging.
+func undirect(text string) string {
+	if !strings.Contains(text, ":::") {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		if directive.MatchString(line) {
+			if n := len(out); n > 0 && strings.TrimSpace(out[n-1]) == "" {
+				out = out[:n-1]
+			}
+			continue
+		}
+		out = append(out, line)
+	}
+	return strings.Join(out, "\n")
 }
 
 // Normalise fixes the typography a model substitutes for what the page prints.
