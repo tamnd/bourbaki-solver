@@ -219,12 +219,18 @@ func (c *Corpus) textOf(rel string) ([]byte, bool) {
 	return b, true
 }
 
-// H06. The README coverage table is the one the corpus has.
+// H06. Every generated block of the README is the one the corpus has.
 //
-// The README is the only thing most people will read, and a coverage table that
+// The README is the only thing most people will read, and a number in it that
 // says the corpus holds more than it does is the one wrong statement in this
-// project that has an audience. It is generated between two markers, so the
-// check is that regenerating it changes nothing.
+// project that has an audience. The library table, the text layer table, the
+// coverage table and the rule count are all generated between markers, so the
+// check is that regenerating them changes nothing.
+//
+// It names the block rather than saying the README is stale, because four of
+// them move for four different reasons: the library when a volume is
+// registered, the text layer when one is measured, coverage when a section is
+// extracted, and the rules when one is written.
 func h06(c *Corpus) ([]Finding, error) {
 	path := filepath.Join(c.Root, "README.md")
 	b, err := os.ReadFile(path)
@@ -234,18 +240,19 @@ func h06(c *Corpus) ([]Finding, error) {
 	if err != nil {
 		return nil, err
 	}
-	have, ok := coverageBlock(string(b))
-	if !ok {
-		return []Finding{{File: "README.md",
-			Msg: fmt.Sprintf("has no %s block, so the coverage table is not generated and cannot be checked",
-				CoverageBegin)}}, nil
+	stale, missing := StaleREADME(c, string(b))
+	var out []Finding
+	for _, name := range missing {
+		out = append(out, Finding{File: "README.md",
+			Msg: fmt.Sprintf("has no %s block, so those numbers are not generated and cannot be checked",
+				BeginMarker(name))})
 	}
-	want := Coverage(c)
-	if strings.TrimSpace(have) != strings.TrimSpace(want) {
-		return []Finding{{File: "README.md",
-			Msg: "the coverage table is not the one the corpus has, run bourbaki report coverage -write-readme"}}, nil
+	if len(stale) > 0 {
+		out = append(out, Finding{File: "README.md",
+			Msg: fmt.Sprintf("the %s block is not what the corpus says, run bourbaki report readme -write",
+				strings.Join(stale, ", "))})
 	}
-	return nil, nil
+	return out, nil
 }
 
 // H07. No content file carries a provider's own markup.

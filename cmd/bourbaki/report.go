@@ -46,6 +46,7 @@ const reportHelp = `usage: bourbaki report <what>
 
   usage        what the fleet did: pages, questions, wall clock, and what failed
   coverage     what the corpus holds against what the table of contents says
+  readme       regenerate every number the README carries
   extraction   how much of each volume has been read, and how well
   printings    where the two printings of a chapter disagree
   translation  what each language holds, what is stale, and which terms it misses
@@ -64,6 +65,8 @@ func runReport(args []string) error {
 		return reportUsageCmd(args[1:])
 	case "coverage":
 		return reportCoverageCmd(args[1:])
+	case "readme":
+		return reportREADMECmd(args[1:])
 	case "extraction":
 		return reportExtractionCmd(args[1:])
 	case "printings":
@@ -298,24 +301,46 @@ func printingsDoc(out []*report.Printings) string {
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-const coverageUsage = `usage: bourbaki report coverage [-write-readme]
+const coverageUsage = `usage: bourbaki report coverage
 
 Says what the corpus holds against what the table of contents says it should:
 one row per chapter of every volume, whether or not anything has been read in
 yet. A chapter with no row would be a chapter nobody notices is missing, which
 is why the empty ones are listed too.
 
-The README carries this table between two markers, and H01 to H06 check that it
-is the one the corpus has. -write-readme is what puts it there.
+The README carries this table between two markers. bourbaki report readme -write
+is what puts it there, along with every other number the README carries, and H06
+is what fails the build when it is out of date.
+`
+
+const readmeUsage = `usage: bourbaki report readme [-write]
+
+Regenerates every number the README carries and says which ones moved.
+
+The README is the only document here with an audience and almost every sentence
+in it has a number in it: how many volumes are registered and how many pages,
+what their text layers are worth, how many sections have been extracted, how
+many rules the audit runs. Typed in by hand they go stale together and quietly.
+The coverage table stood at 201 of 369 sections while the corpus held 362 of
+475, understating the work by a third and naming forty chapters as empty that
+were not.
+
+So each of them sits in a block between two HTML comments, invisible in every
+renderer and obvious in the source, and each block is a pure function of the
+manifests and the committed Markdown. This is what writes them. H06 regenerates
+them and fails if anything moved, so a stale README is a red build rather than
+something somebody has to remember.
+
+The prose around the blocks is not generated and is not touched. It says what
+the numbers mean, which is not derivable from a manifest.
 
 flags:
-  -write-readme  write the table into README.md between its markers
+  -write  write the blocks into README.md, rather than printing them
 `
 
 func reportCoverageCmd(args []string) error {
 	fs := flag.NewFlagSet("report coverage", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, coverageUsage) }
-	write := fs.Bool("write-readme", false, "write the table into README.md")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -330,20 +355,43 @@ func reportCoverageCmd(args []string) error {
 	if err != nil {
 		return err
 	}
-	block := quality.Coverage(c)
-	if !*write {
-		fmt.Print(block)
-		return nil
+	fmt.Print(quality.Coverage(c))
+	return nil
+}
+
+func reportREADMECmd(args []string) error {
+	fs := flag.NewFlagSet("report readme", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, readmeUsage) }
+	write := fs.Bool("write", false, "write the blocks into README.md")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
 	}
-	changed, err := quality.WriteCoverage(root, block)
+	root, err := corpus.Root()
 	if err != nil {
 		return err
 	}
-	if !changed {
-		fmt.Println("report coverage: README.md is already the table the corpus has")
+	// These blocks are facts about the corpus and not about the rules, so this
+	// loads the corpus and runs nothing. -skip on every group would be the same
+	// thing said less clearly.
+	c, err := quality.Load(quality.Options{Root: root})
+	if err != nil {
+		return err
+	}
+	if !*write {
+		for _, b := range quality.READMEBlocks() {
+			fmt.Printf("%s%s%s\n", quality.BeginMarker(b.Name), b.Render(c), quality.EndMarker(b.Name))
+		}
 		return nil
 	}
-	fmt.Println("report coverage: wrote the table into README.md")
+	changed, err := quality.WriteREADME(root, c)
+	if err != nil {
+		return err
+	}
+	if len(changed) == 0 {
+		fmt.Println("report readme: README.md already says what the corpus says")
+		return nil
+	}
+	fmt.Printf("report readme: rewrote %s in README.md\n", strings.Join(changed, ", "))
 	return nil
 }
 
