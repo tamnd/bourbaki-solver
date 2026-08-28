@@ -155,14 +155,19 @@ func lower(s string) bool {
 // matter and on page 12 of Theory of Sets wrote into the body instead. One
 // title is wanted and Introduction writes it back on at the top, so all of them
 // come off here.
+//
+// A title read as prose comes off too. Eleven of the notes to the reader open
+// with the title set in caps and small caps, which the reading turns into an
+// ordinary line rather than a heading: page 5 of Algebre I a III is the line
+// "Mode d'emploi de ce traite" and then the first numbered paragraph. A line on
+// its own that is the title is the title.
 func dropTitle(body, title string) string {
 	want := strings.ToLower(strings.TrimSpace(title))
 	lines := strings.Split(body, "\n")
 	out := lines[:0]
 	for _, line := range lines {
 		s := strings.TrimSpace(line)
-		if strings.HasPrefix(s, "#") &&
-			strings.ToLower(strings.TrimSpace(strings.TrimLeft(s, "# "))) == want {
+		if strings.ToLower(strings.TrimSpace(strings.TrimLeft(s, "# "))) == want {
 			continue
 		}
 		out = append(out, line)

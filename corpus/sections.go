@@ -29,6 +29,10 @@ type BookSections struct {
 	// is beside the chapters rather than in them because it is in no chapter,
 	// and it is accounted for like any other file: a part of the book that is
 	// written and not counted is a part nobody notices is missing.
+	// ReaderNote is the publisher's note to the reader, where the volume has
+	// one. It stands ahead of the introduction, which is where the printing
+	// puts it.
+	ReaderNote   *SectionRecord    `yaml:"reader_note,omitempty"`
 	Introduction *SectionRecord    `yaml:"introduction,omitempty"`
 	Chapters     []ChapterSections `yaml:"chapters"`
 }
@@ -67,9 +71,14 @@ const (
 	// chapter I and belongs to no chapter. It is the one kind whose file is not
 	// in a chapter directory. See Book.Introduction.
 	KindIntroduction = "introduction"
-	KindSection      = "section"
-	KindAppendix     = "appendix"
-	KindHistorical   = "historical"
+	// KindReader is the publisher's note to the reader, printed at the front of
+	// nearly every volume of the series under a heading like TO THE READER or
+	// MODE D'EMPLOI DE CE TRAITE. Like an introduction it belongs to no
+	// chapter. See Book.ReaderNote.
+	KindReader     = "reader"
+	KindSection    = "section"
+	KindAppendix   = "appendix"
+	KindHistorical = "historical"
 )
 
 // LoadSections reads manifests/sections.yaml. A missing file is an empty

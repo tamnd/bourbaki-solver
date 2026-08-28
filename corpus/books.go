@@ -77,6 +77,14 @@ type Book struct {
 	// ends the exercises of chapter V, and its pdf 273 opens the note
 	// historique at printed 170 and runs straight into pdf 275 at printed 171.
 	Transposed []Transposition `yaml:"transposed,omitempty"`
+	// ReaderNote is the pages the publisher puts in front of the introduction
+	// under a heading like TO THE READER, ADVICE TO THE READER, MODE D'EMPLOI
+	// DE CE TRAITE or AVERTISSEMENT. It is the same shape as an introduction
+	// and is assembled the same way, and it is separate from one because it is
+	// a different thing: an introduction is Bourbaki on the mathematics of the
+	// volume and a reader note is Bourbaki on how to read the Elements, printed
+	// again at the front of nearly every volume in the series.
+	ReaderNote *Introduction `yaml:"reader_note,omitempty"`
 	// Introduction is the Book's own introduction, where it has one, and is
 	// empty where it has not.
 	Introduction *Introduction `yaml:"introduction,omitempty"`
@@ -120,10 +128,20 @@ type Introduction struct {
 	// what a reader sees, and a translation renders it like any other heading.
 	Title string `yaml:"title"`
 	// Page is the printed number of the first page, for the record and for the
-	// front matter of the file. The last is worked out from the pages.
-	Page         int `yaml:"page"`
+	// front matter of the file. The last is worked out from the pages. It is
+	// left out where the printing numbers the page in roman, which is where
+	// nearly every note to the reader stands, since the field holds an int and
+	// a wrong arabic number would be worse than none.
+	Page         int `yaml:"page,omitempty"`
 	FirstPDFPage int `yaml:"first_pdf_page"`
 	LastPDFPage  int `yaml:"last_pdf_page"`
+	// File is what to call the assembled file, where the default name is
+	// already taken. A Book printed as several volumes keeps its content in one
+	// directory, so two volumes of one Book that each open with an introduction
+	// would both want 00_introduction.md. Theories spectrales is the case:
+	// chapters I and II open with one introduction and III to V with another,
+	// and the two are different texts. Empty means the default.
+	File string `yaml:"file,omitempty"`
 }
 
 // bookTitles is what the Éléments call their Books, as against what a publisher

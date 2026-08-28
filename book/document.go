@@ -84,16 +84,27 @@ func Write(v *Volume) (*Document, error) {
 	}
 	b.WriteString("\\begin{document}\n\\bcover\n\\btitlepage\n\\frontmatter\n\\bcontents\n")
 
-	// The Book's own introduction stands before chapter I and belongs to no
-	// chapter, which is where the printing puts it and why it is written into
-	// the front matter here rather than being made into a chapter of its own.
-	if v.Intro != nil {
-		title := v.Intro.Title
-		if title == "" {
-			title = "Introduction"
+	// The note to the reader and the Book's own introduction stand before
+	// chapter I and belong to no chapter, which is where the printing puts them
+	// and why they are written into the front matter here rather than being
+	// made into chapters of their own. The note comes first, as it is printed.
+	for _, f := range []struct {
+		sec      *Section
+		fallback string
+		anchor   string
+	}{
+		{v.Reader, "To the Reader", "reader"},
+		{v.Intro, "Introduction", "intro"},
+	} {
+		if f.sec == nil {
+			continue
 		}
-		fmt.Fprintf(&b, "\n\\bunnumbered{%s}{%s}{intro}\n", escapeTeX(title), escapeTeX(listed(title, v.Lang)))
-		tex, err := d.body(v, v.Intro, anchors)
+		title := f.sec.Title
+		if title == "" {
+			title = f.fallback
+		}
+		fmt.Fprintf(&b, "\n\\bunnumbered{%s}{%s}{%s}\n", escapeTeX(title), escapeTeX(listed(title, v.Lang)), f.anchor)
+		tex, err := d.body(v, f.sec, anchors)
 		if err != nil {
 			return nil, err
 		}
@@ -387,6 +398,9 @@ func Coverage(root string, v *Volume) (have, want int, missing []string, err err
 			return
 		}
 		missing = append(missing, r.Path)
+	}
+	if bs.ReaderNote != nil {
+		count(*bs.ReaderNote)
 	}
 	if bs.Introduction != nil {
 		count(*bs.Introduction)

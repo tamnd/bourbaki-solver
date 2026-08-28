@@ -1135,6 +1135,18 @@ func itemStart(text string, n int) (int, []string) {
 				raw, marks := text[at:off+loc[1]], text[at:off+loc[2]]
 				m = []string{raw, marks, strconv.Itoa(got), ""}
 			}
+			// The pattern wants something after the number and a block can end
+			// on the marker, so a space is lent to it for the match above. Give
+			// it back. Left in, the marker is one byte longer than the text it
+			// was found in and the caller slices the text past its own end.
+			// Page 112 of Topologie generale V a X in French closes a block on
+			// the reference "(cf. VII, p. 16, prop. 2)" while that § is up to
+			// its second exercise, so the number of the reference reads as the
+			// marker, the marker runs to the end of the block, and the audit
+			// came down on it with a slice out of range.
+			if n := len(text) - at; len(m[0]) > n {
+				m[0] = m[0][:n]
+			}
 			return at, m
 		}
 		off += loc[1]

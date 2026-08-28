@@ -87,6 +87,12 @@ type SectionFrontMatter struct {
 	// the prompt and every file that carries the old hash was translated
 	// under rules that no longer hold.
 	PromptSHA256 string `yaml:"prompt_sha256,omitempty"`
+
+	// Filename is what to call the file, where the name SectionPath would work
+	// out is already taken by another volume of the same Book. It is set by
+	// assembly off books.yaml and it is not written to the file, because it is
+	// not a fact about the section: it is the name of the thing holding it.
+	Filename string `yaml:"-"`
 }
 
 // ExerciseFrontMatter is the head of content/<lang>/<book>/<chapter>/exercises/sN/NN.md.
@@ -494,6 +500,16 @@ func SectionPath(root, lang string, m SectionFrontMatter) string {
 		// and this lands beside the chapter directories rather than inside one,
 		// where the printing puts it. 00 keeps it first.
 		name = "00_introduction.md"
+		if m.Filename != "" {
+			name = m.Filename
+		}
+	case KindReader:
+		// The note to the reader belongs to no chapter either and the printing
+		// puts it ahead of the introduction, so it sorts ahead of it too.
+		name = "00_to_the_reader.md"
+		if m.Filename != "" {
+			name = m.Filename
+		}
 	case KindHistorical:
 		// The note comes after everything, including the appendices, so its
 		// name has to sort after a leading A. It is the only file here named
