@@ -45,6 +45,13 @@ func (r Retitle) String() string {
 // its numeral, a § by its number and whether it is an appendix, a no. by its
 // number. An entry the manifest does not have is new and keeps what the volume
 // reads, and is not reported, since there is nothing there to have corrected.
+//
+// The nominal flag is kept for the same reason the titles are. It says the
+// chapter is the manifest's own and not the printing's, which is a thing about
+// the volume that its contents page cannot say, so the build has no way to
+// derive it and a rebuild that dropped it would refuse the volume for the
+// absence of a chapter heading the printing never set. It is not reported,
+// because unlike a title it is not a reading that could have gone either way.
 func KeepTitles(old, fresh []corpus.Chapter) ([]corpus.Chapter, []Retitle) {
 	var kept []Retitle
 	out := make([]corpus.Chapter, len(fresh))
@@ -59,6 +66,7 @@ func KeepTitles(old, fresh []corpus.Chapter) ([]corpus.Chapter, []Retitle) {
 			continue
 		}
 		where := "chapter " + chapter.Numeral
+		chapter.Nominal = chapter.Nominal || was.Nominal
 		chapter.Title, kept = keep(where, was.Title, chapter.Title, kept)
 		chapter.Sections, kept = keepSections(where, was.Sections, chapter.Sections, kept)
 		chapter.Subsections, kept = keepSubsections(where, was.Subsections, chapter.Subsections, kept)

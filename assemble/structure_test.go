@@ -2,6 +2,7 @@ package assemble
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -1335,5 +1336,39 @@ func TestItemStartOnAMarkerThatEndsTheBlock(t *testing.T) {
 		if n := i + markerLen(m); n > len(s) {
 			t.Errorf("itemStart(%q) marks %d bytes of a block of %d", first(s, 40), n, len(s))
 		}
+	}
+}
+
+func TestANoIsReadWhenTheFascicleNumbersItByItsSection(t *testing.T) {
+	// Varietes differentielles et analytiques, fascicule de resultats, sets the
+	// fourth no. of its first section "1.4. Produit de fonctions derivables" and
+	// lists it in its own contents as no. 4 of § 1. Three of its no. carry no
+	// full stop after the number.
+	for _, tc := range []struct {
+		line  string
+		no    int
+		title string
+	}{
+		{"### 3. Simple Modules", 3, "Simple Modules"},
+		{"### 1.4. Produit de fonctions derivables", 4, "Produit de fonctions derivables"},
+		{"### 1.1 Ordre de contact de deux fonctions en un point", 1, "Ordre de contact de deux fonctions en un point"},
+		{"### 5.11. Produits fibres et images reciproques", 11, "Produits fibres et images reciproques"},
+		{`### \*10. Subimmersions`, 10, "Subimmersions"},
+	} {
+		m := subsecRE.FindStringSubmatch(tc.line)
+		if m == nil {
+			t.Errorf("%q read as no heading", tc.line)
+			continue
+		}
+		if m[1] != strconv.Itoa(tc.no) || m[2] != tc.title {
+			t.Errorf("%q gives no. %q titled %q, want %d and %q", tc.line, m[1], m[2], tc.no, tc.title)
+		}
+	}
+	// A title that opens with a numeral is still a title. Chapter I of Algebre
+	// has "### 3. 2-groupes" nowhere, but the pattern has to leave the digit to
+	// the title or a volume that does would lose its heading.
+	m := subsecRE.FindStringSubmatch("### 3. 2-groupes")
+	if m == nil || m[1] != "3" || m[2] != "2-groupes" {
+		t.Errorf("### 3. 2-groupes gives %v", m)
 	}
 }

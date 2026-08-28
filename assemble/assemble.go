@@ -776,6 +776,17 @@ var texWord = regexp.MustCompile(`\\[a-zA-Z]+`)
 // compact", and the table of contents on page 279 lists that section as
 // "§ 1. Mesures sur les espaces localement compacts", which is the title of
 // chapter III printed again a line lower. Both lines are plain in the scan.
+// alg-x-fr is the third. Pdf page 67 of Algebre chapitre 10 heads the fourth
+// section of chapter X "§ 4. PRODUIT DE TORSION", in the singular, and the
+// table of contents lists it as "Produits de torsion". The section is about
+// one functor and the contents counts the torsion products it takes, so both
+// are the words of the book.
+// var-fr is the fourth. Pdf page 29 of Varietes differentielles et
+// analytiques heads its fourth section "§ 4. Fonctions analytiques (cas
+// ultrametrique)" and the contents on page 94 lists the same section as
+// "§ 4. Fonctions analytiques (cas non archimedien)". The two names are the
+// same property of an absolute value and the volume uses both, so neither
+// line is a misreading.
 var differs = map[string][]int{
 	"alg-x-fr":    {67},
 	"int-i-iv-fr": {44},
