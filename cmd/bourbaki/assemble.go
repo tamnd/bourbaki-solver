@@ -220,46 +220,61 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	exrec := corpus.BookExercises{ID: book}
 	files := map[string][]byte{}
 
-	// The introduction goes first, because it stands first in the book. It is
-	// not in the table of contents and so is not in the loop below, and that is
-	// the whole reason it was missing: the assembler walks chapters, the seven
-	// pages Bourbaki opens Theory of Sets with are in no chapter, and nothing
-	// ever asked for them.
-	if in := b.Introduction; in != nil {
+	// The note to the reader and the introduction go first, because they stand
+	// first in the book. Neither is in the table of contents and so neither is in
+	// the loop below, and that is the whole reason they were missing: the
+	// assembler walks chapters, the pages Bourbaki opens a volume with are in no
+	// chapter, and nothing ever asked for them.
+	//
+	// front assembles one of them. The two differ in nothing but the kind, the
+	// entry they are recorded under and the word used to say a page is missing.
+	front := func(in *corpus.Introduction, what string,
+		make func(corpus.Book, string, map[int]corpus.PageFile) (corpus.SectionFile, assemble.Piece, error),
+		was *corpus.SectionRecord, kind string) (*corpus.SectionRecord, error) {
+		if in == nil {
+			return nil, nil
+		}
 		if gap := unread(pages, in.FirstPDFPage, in.LastPDFPage); len(gap) > 0 && partial {
-			fmt.Fprintf(os.Stderr, "the introduction runs pdf %d to %d and %d of those pages are not read yet, skipping it\n",
-				in.FirstPDFPage, in.LastPDFPage, len(gap))
-			if was.Introduction != nil {
-				rec.Introduction = was.Introduction
+			fmt.Fprintf(os.Stderr, "the %s runs pdf %d to %d and %d of those pages are not read yet, skipping it\n",
+				what, in.FirstPDFPage, in.LastPDFPage, len(gap))
+			if was != nil {
 				sum.carried++
 				fmt.Fprintf(os.Stderr, "  carrying its committed entry through\n")
 			}
-		} else {
-			f, p, err := introFile(*b, lang, pages)
-			if err != nil {
-				return nil, nil, sum, err
-			}
-			path := corpus.SectionPath(root, lang, f.Meta)
-			out, err := f.Bytes()
-			if err != nil {
-				return nil, nil, sum, err
-			}
-			files[path] = out
-			r, _ := filepath.Rel(root, path)
-			rec.Introduction = &corpus.SectionRecord{
-				Kind:          corpus.KindIntroduction,
-				Title:         f.Meta.SectionTitle,
-				Path:          filepath.ToSlash(r),
-				FirstPDFPage:  p.First(),
-				LastPDFPage:   p.Last(),
-				BookPages:     f.Meta.BookPages,
-				Extraction:    f.Meta.Extraction,
-				ContentSHA256: corpus.ContentSHA256(f.Body),
-			}
-			if verbose {
-				fmt.Printf("%-46s %4d-%-4d\n", filepath.Base(path), p.First(), p.Last())
-			}
+			return was, nil
 		}
+		f, pc, err := make(*b, lang, pages)
+		if err != nil {
+			return nil, err
+		}
+		path := corpus.SectionPath(root, lang, f.Meta)
+		out, err := f.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		files[path] = out
+		r, _ := filepath.Rel(root, path)
+		if verbose {
+			fmt.Printf("%-46s %4d-%-4d\n", filepath.Base(path), pc.First(), pc.Last())
+		}
+		return &corpus.SectionRecord{
+			Kind:          kind,
+			Title:         f.Meta.SectionTitle,
+			Path:          filepath.ToSlash(r),
+			FirstPDFPage:  pc.First(),
+			LastPDFPage:   pc.Last(),
+			BookPages:     f.Meta.BookPages,
+			Extraction:    f.Meta.Extraction,
+			ContentSHA256: corpus.ContentSHA256(f.Body),
+		}, nil
+	}
+	if rec.ReaderNote, err = front(b.ReaderNote, "note to the reader", readerFile,
+		was.ReaderNote, corpus.KindReader); err != nil {
+		return nil, nil, sum, err
+	}
+	if rec.Introduction, err = front(b.Introduction, "introduction", introFile,
+		was.Introduction, corpus.KindIntroduction); err != nil {
+		return nil, nil, sum, err
 	}
 	// carry is what a skipped chapter leaves behind: the entries the run that did
 	// assemble it wrote. They go back in the order the table of contents puts

@@ -48,6 +48,9 @@ type Volume struct {
 	// Intro is the Book's own introduction, which stands before chapter I and
 	// belongs to no chapter. Four Books have one; the rest leave it nil.
 	Intro *Section
+	// Reader is the publisher's note to the reader, which stands ahead of the
+	// introduction because that is where the printing puts it.
+	Reader *Section
 }
 
 // Chapter is one chapter of the volume, in the order the volume prints it.
@@ -156,7 +159,7 @@ func (s *Section) Heading() string {
 			return name
 		}
 		return fmt.Sprintf("%s %d", name, s.Number)
-	case corpus.KindHistorical, corpus.KindFront, corpus.KindIntroduction:
+	case corpus.KindHistorical, corpus.KindFront, corpus.KindIntroduction, corpus.KindReader:
 		return s.Title
 	}
 	return fmt.Sprintf("§ %d", s.Number)
@@ -184,6 +187,9 @@ var appendixWord = map[string]string{
 // historical note, which is exactly the part of the book that gets forgotten.
 func (v *Volume) Pieces() []*Section {
 	var out []*Section
+	if v.Reader != nil {
+		out = append(out, v.Reader)
+	}
 	if v.Intro != nil {
 		out = append(out, v.Intro)
 	}

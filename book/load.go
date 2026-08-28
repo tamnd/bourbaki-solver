@@ -47,8 +47,15 @@ func Load(root, id, lang string) (*Volume, error) {
 		}
 		v.Chapters = append(v.Chapters, c)
 	}
-	if meta.Introduction != nil {
-		intro, err := loadIntro(root, dir, meta.Book, lang)
+	if n := meta.ReaderNote; n != nil {
+		note, err := loadFront(root, dir, meta.Book, lang, frontName(n.File, "00_to_the_reader.md"))
+		if err != nil {
+			return nil, err
+		}
+		v.Reader = note
+	}
+	if in := meta.Introduction; in != nil {
+		intro, err := loadFront(root, dir, meta.Book, lang, frontName(in.File, "00_introduction.md"))
 		if err != nil {
 			return nil, err
 		}
@@ -172,30 +179,32 @@ func sortSections(secs []*Section) {
 	})
 }
 
-// loadIntro reads the Book's own introduction, which sits beside the chapter
-// directories rather than in one because it is in no chapter.
-func loadIntro(root, langDir, book, lang string) (*Section, error) {
-	dir := filepath.Join(langDir, book)
-	entries, err := os.ReadDir(dir)
-	if os.IsNotExist(err) {
+// loadFront reads one of the two files that sit beside the chapter directories
+// rather than in one, the Book's own introduction and the publisher's note to
+// the reader, because neither is in a chapter.
+//
+// The file is named rather than searched for. A Book printed as several volumes
+// keeps them all in one directory, so a search for the first file of the right
+// kind would give both volumes of Theories spectrales the introduction of
+// chapters I and II. The name is the default for the kind unless books.yaml
+// gives another, which is the same rule assembly wrote the file under.
+//
+// A volume whose manifest claims one and whose directory has none is not an
+// error here. It is a volume translated as far as its chapters and no further,
+// and the build says so through the coverage checks rather than by refusing.
+func frontName(want, fallback string) string {
+	if want != "" {
+		return want
+	}
+	return fallback
+}
+
+func loadFront(root, langDir, book, lang, name string) (*Section, error) {
+	path := filepath.Join(langDir, book, name)
+	if _, err := os.Stat(path); err != nil {
 		return nil, nil
 	}
-	if err != nil {
-		return nil, err
-	}
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		s, err := loadSection(root, filepath.Join(dir, e.Name()), lang)
-		if err != nil {
-			return nil, err
-		}
-		if s.Kind == corpus.KindIntroduction {
-			return s, nil
-		}
-	}
-	return nil, nil
+	return loadSection(root, path, lang)
 }
 
 func loadSection(root, path, lang string) (*Section, error) {

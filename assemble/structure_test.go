@@ -1273,3 +1273,22 @@ func TestItemStartDoesNotCutADisplayDelimiterInHalf(t *testing.T) {
 		t.Errorf("exercise 31 begins %q", first(got, 40))
 	}
 }
+
+// A block that ends on what reads as a marker gave the caller a marker one
+// byte longer than the block, because the pattern is matched against the block
+// with a space on the end of it and the space stayed in the match. Page 112 of
+// Topologie generale V a X in French is the case and the audit panicked on it.
+func TestItemStartOnAMarkerThatEndsTheBlock(t *testing.T) {
+	for _, s := range []string{
+		"On munit E de la topologie de la convergence simple (cf. VII, p. 16, prop. 2)",
+		"Soit X un espace compact. 2)",
+	} {
+		i, m := itemStart(s, 2)
+		if i < 0 {
+			continue
+		}
+		if n := i + markerLen(m); n > len(s) {
+			t.Errorf("itemStart(%q) marks %d bytes of a block of %d", first(s, 40), n, len(s))
+		}
+	}
+}

@@ -65,11 +65,11 @@ func (c *Corpus) extracted(lang string) map[string]bool {
 		if d.Kind != KindSection || d.Lang != lang || d.Section == nil {
 			continue
 		}
-		// The Book's introduction is in no chapter, so it names none here. Left
-		// in, it would put a chapter called "" into the scope of three rules
-		// that count the §§ of a chapter, and it is not a § and has no chapter
-		// to be counted in.
-		if d.Section.Kind == corpus.KindIntroduction {
+		// The Book's introduction and its note to the reader are in no chapter,
+		// so they name none here. Left in, they would put a chapter called ""
+		// into the scope of three rules that count the §§ of a chapter, and
+		// neither is a § or has a chapter to be counted in.
+		if d.Section.Kind == corpus.KindIntroduction || d.Section.Kind == corpus.KindReader {
 			continue
 		}
 		out[d.Section.Book+"/"+d.Section.Chapter] = true
@@ -183,9 +183,10 @@ func requireSection(d Doc) []Finding {
 	if m.Book == "" {
 		miss("book")
 	}
-	// The Book's introduction is the one file that belongs to no chapter, and
-	// an empty chapter is what says so rather than a field somebody forgot.
-	if m.Chapter == "" && m.Kind != corpus.KindIntroduction {
+	// The Book's introduction and its note to the reader are the files that
+	// belong to no chapter, and an empty chapter is what says so rather than a
+	// field somebody forgot.
+	if m.Chapter == "" && m.Kind != corpus.KindIntroduction && m.Kind != corpus.KindReader {
 		miss("chapter")
 	}
 	if m.Lang == "" {
@@ -917,6 +918,9 @@ func sameSet(want, have map[string]bool) bool {
 func s12(c *Corpus) ([]Finding, error) {
 	named := map[string]corpus.SectionRecord{}
 	for _, b := range c.Sections.Books {
+		if b.ReaderNote != nil {
+			named[b.ReaderNote.Path] = *b.ReaderNote
+		}
 		if b.Introduction != nil {
 			named[b.Introduction.Path] = *b.Introduction
 		}

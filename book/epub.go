@@ -156,6 +156,13 @@ type subnav struct {
 // twenty pages and lays out at once.
 func layout(v *Volume) []doc {
 	var out []doc
+	if v.Reader != nil {
+		title := v.Reader.Title
+		if title == "" {
+			title = "To the Reader"
+		}
+		out = append(out, doc{Name: "text/reader.xhtml", Kind: "intro", Title: title, section: v.Reader})
+	}
 	if v.Intro != nil {
 		title := v.Intro.Title
 		if title == "" {
