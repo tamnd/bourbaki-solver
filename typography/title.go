@@ -60,6 +60,21 @@ func Footless(s string) string { return footnote.ReplaceAllString(s, "$1") }
 //
 // So the table grows only when a page image says it should, the same way the
 // class of characters a section sign is misread as grew.
+//
+// The circumflex on O is the second letter, and the page that added it is page
+// 90 of Elements d'histoire des mathematiques. The fifth note is headed
+// "POLYNOMES ET CORPS COMMUTATIFS" in display capitals and the volume's own
+// table of contents lists it as "Polynomes et corps commutatifs" with the
+// circumflex. The heading was read at 400 dpi and there is no accent over the O,
+// and the running head on every recto of the note prints the same bare word in
+// the layer the pdf carries, which is a second reading nobody in this corpus
+// made. So the press sets this word without its circumflex when it sets it in
+// capitals.
+//
+// Nothing else circumflexed is folded. The same corpus heads four sections of
+// the topology volumes "REVETEMENTS" with the accent standing on the E, so this
+// is not a press that drops circumflexes on capitals as a rule, and a heading
+// that lost one anywhere else is still a defect worth stopping for.
 func Accentless(s string) string { return accents.Replace(s) }
 
-var accents = strings.NewReplacer("à", "a", "À", "A")
+var accents = strings.NewReplacer("à", "a", "À", "A", "ô", "o", "Ô", "O")

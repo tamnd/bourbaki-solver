@@ -49,6 +49,19 @@ func TestAccentlessFoldsTheGraveOnA(t *testing.T) {
 	}
 }
 
+// The circumflex on O and nothing else circumflexed. Page 90 of Elements
+// d'histoire des mathematiques heads the fifth note POLYNOMES in display
+// capitals, the contents lists it with the accent, and the running head prints
+// it bare on every recto of the note.
+func TestAccentlessFoldsTheCircumflexOnO(t *testing.T) {
+	if got, want := Accentless("Polynômes et corps commutatifs"), "Polynomes et corps commutatifs"; got != want {
+		t.Errorf("Accentless() = %q, want %q", got, want)
+	}
+	if got, want := Accentless("PÔLES"), "POLES"; got != want {
+		t.Errorf("Accentless() = %q, want %q", got, want)
+	}
+}
+
 // An accent the press keeps is an accent a reading has to keep too, so nothing
 // else folds. Fréchet against Frechet is a page that lost one, and this is what
 // leaves it visible.
@@ -60,6 +73,8 @@ func TestAccentlessLeavesEveryOtherAccent(t *testing.T) {
 		"théorie élémentaire",
 		"Šafarevič",
 		"Espaces $ \\tau $-adiques",
+		"HOMOTOPIE ET REVÊTEMENTS",
+		"Théorème des fonctions implicites",
 	} {
 		if got := Accentless(in); got != in {
 			t.Errorf("Accentless(%q) = %q, want it left alone", in, got)
