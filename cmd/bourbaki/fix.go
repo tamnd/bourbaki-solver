@@ -1447,7 +1447,7 @@ func fixOpening(args []string) error {
 		return words, head, nil
 	}
 
-	var chapters, sections, numbers, appendices, notes, marks, unread, lost, differ, told int
+	var chapters, sections, numbers, appendices, notes, marks, blanks, unread, lost, differ, told int
 	for _, b := range books.Books {
 		if *book != "" && b.ID != *book {
 			continue
@@ -1803,6 +1803,24 @@ func fixOpening(args []string) error {
 						missing = append(missing, bl)
 						continue
 					}
+					// The mark is on the page and the first exercise is on the
+					// line under it, with no blank line between the two. A
+					// heading run into the paragraph below it is not a heading
+					// at all once the Markdown is read: the two join into one
+					// block, the exercises heading the assembler writes over
+					// the block goes into the middle of a paragraph, and the §
+					// is refused for carrying no exercises on the page its own
+					// contents opens them on. Three volumes stop there, and one
+					// blank line is the whole of the repair.
+					if at+1 < len(lines) && strings.TrimSpace(lines[at+1]) != "" &&
+						assemble.ExerciseOpens(lines[at+1]) {
+						put := slices.Insert(slices.Clone(lines), at+1, "")
+						edits[bl.page] = put
+						lines = put
+						blanks++
+						fmt.Printf("%s/%04d.md  %s   the first exercise was on the line under it\n",
+							b.ID, bl.page, strings.TrimSpace(lines[at]))
+					}
 					if strings.HasSuffix(strings.TrimSpace(lines[at]), ".") {
 						stops++
 					} else {
@@ -1941,6 +1959,9 @@ func fixOpening(args []string) error {
 	}
 	fmt.Printf("fix opening: %s %d chapter openings, %d § openings, %d no. openings, %d appendix openings, %d historical notes and %d § marks in gathered exercises\n",
 		verb, chapters, sections, numbers, appendices, notes, marks)
+	if blanks > 0 {
+		fmt.Printf("fix opening: %s the blank line under %d § marks the first exercise was run into\n", verb, blanks)
+	}
 	if told > 0 {
 		fmt.Printf("fix opening: %d of the openings were not on the page at all and came from the contents, with the text layer as the witness that the page prints them\n", told)
 	}
