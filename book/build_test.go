@@ -92,3 +92,43 @@ func TestReadLogOnACleanLogFindsNoErrors(t *testing.T) {
 		t.Errorf("pages = %d, want 126", b.Pages)
 	}
 }
+
+// XeTeX names the font it could not find a character in by file and by the whole
+// OpenType feature string, that runs past the width the log is wrapped at, and
+// the exclamation mark that ends the message lands on the next line. The pattern
+// wanted the exclamation mark on the same line, so under the OpenType fonts this
+// found nothing at all: the French history volume dropped four characters over
+// six places, two of them the Greek of a quotation from Euclid, and the audit
+// said no character had been lost.
+//
+// The wrap also cuts the character itself. It is by byte and not by character,
+// so the three bytes of a CJK character arrive as one and a half and the rest is
+// mojibake. The codepoint beside it is ASCII and survives, and the report is
+// built from that.
+func TestReadLogSeesAGlyphWhoseFontNameWrapped(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "book.log")
+	log := "Missing character: There is no ὸ (U+1F78) in font [texgyretermes-regular.otf]/O\n" +
+		"T:script=latn;language=dflt;mapping=tex-text;!\n" +
+		"Missing character: There is no \xe5\xae (U+5B9E) in font [texgyretermes-regular.otf]/O\n" +
+		"T:script=latn;language=dflt;mapping=tex-text;!\n" +
+		"Output written on book.xdv (374 pages, 1377952 bytes).\n"
+	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &Build{Dir: dir, Log: path, PDF: filepath.Join(dir, "book.pdf")}
+	if err := b.readLog(); err != nil {
+		t.Fatal(err)
+	}
+	if len(b.MissingGlyphs) != 2 {
+		t.Fatalf("missing glyphs = %q, want two", b.MissingGlyphs)
+	}
+	for i, w := range []string{
+		"ὸ (U+1F78) in [texgyretermes-regular.otf]/O",
+		"实 (U+5B9E) in [texgyretermes-regular.otf]/O",
+	} {
+		if b.MissingGlyphs[i] != w {
+			t.Errorf("glyph %d = %q, want %q", i, b.MissingGlyphs[i], w)
+		}
+	}
+}
