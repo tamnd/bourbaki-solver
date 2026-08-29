@@ -47,6 +47,7 @@ func READMEBlocks() []READMEBlock {
 		{Name: "LIBRARY", Render: Library},
 		{Name: "TEXTLAYER", Render: TextLayer},
 		{Name: "COVERAGE", Render: Coverage},
+		{Name: "TRANSLATION", Render: Translated},
 		{Name: "RULES", Render: Rules},
 	}
 }

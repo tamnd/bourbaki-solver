@@ -122,25 +122,15 @@ func uniqInts(in []int) []int {
 	return out
 }
 
-// langNames is what to call a language in a sentence. The code is what the
-// URLs and the -lang flag are in and it stays in the tables; a paragraph that
-// says "the vi is machine translation" is written for the build and not for a
-// reader. A language not in this list is printed as its code, which is wrong
-// looking enough that somebody will add it.
-var langNames = map[string]string{
-	"en": "English",
-	"fr": "French",
-	"vi": "Vietnamese",
-	"zh": "Chinese",
-	"ja": "Japanese",
-}
-
-func langName(code string) string {
-	if name := langNames[code]; name != "" {
-		return name
-	}
-	return code
-}
+// langName is what to call a language in a sentence. The code is what the URLs
+// and the -lang flag are in and it stays in the tables; a paragraph that says
+// "the vi is machine translation" is written for the build and not for a
+// reader.
+//
+// The list itself lives in quality, next to the README block that also has to
+// name a language, because two copies of it would disagree the first time a
+// language was added to one of them.
+func langName(code string) string { return quality.LangName(code) }
 
 // made is the phrase the coverage table prints for how a language got here.
 func (n langNumbers) made() string {
