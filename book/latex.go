@@ -335,7 +335,9 @@ func (r Renderer) unmask(s string, spans []mathtex.Span, tags map[int]string) st
 		// calculation, and amsmath will not set a \tag there and stops: the tag
 		// belongs to the display and an aligned is a box inside one. Seven of
 		// the seventeen volumes that would not typeset stopped on this.
-		if inner, rest, ok := liftTag(body); ok {
+		if countTags(body) > 1 {
+			body, _ = inlineTags(body)
+		} else if inner, rest, ok := liftTag(body); ok {
 			body = rest
 			if !tagged {
 				tag, tagged = inner, true
@@ -595,16 +597,28 @@ func inlineEnvironment(body string) (string, bool) {
 // to the first closing brace that is \tag{$A \in \mathcal{S, and taking that
 // out of the display leaves the rest of the formula behind as text.
 func liftTag(body string) (tag, rest string, ok bool) {
-	at := strings.Index(body, `\tag`)
-	if at < 0 {
+	at, open, close, ok := findTag(body, 0)
+	if !ok {
 		return "", body, false
 	}
-	open := at + len(`\tag`)
+	return tagText(body[open+1 : close]), strings.TrimSpace(body[:at] + body[close+1:]), true
+}
+
+// findTag is where the first \tag at or after from begins, where its argument
+// begins, and where its argument ends. The argument is read by counting braces,
+// for the reason given above liftTag.
+func findTag(body string, from int) (at, open, close int, ok bool) {
+	rel := strings.Index(body[from:], `\tag`)
+	if rel < 0 {
+		return 0, 0, 0, false
+	}
+	at = from + rel
+	open = at + len(`\tag`)
 	if open < len(body) && body[open] == '*' {
 		open++
 	}
 	if open >= len(body) || body[open] != '{' {
-		return "", body, false
+		return 0, 0, 0, false
 	}
 	depth := 0
 	for i := open; i < len(body); i++ {
@@ -616,12 +630,50 @@ func liftTag(body string) (tag, rest string, ok bool) {
 		case '}':
 			depth--
 			if depth == 0 {
-				rest = strings.TrimSpace(body[:at] + body[i+1:])
-				return tagText(body[open+1 : i]), rest, true
+				return at, open, i, true
 			}
 		}
 	}
-	return "", body, false
+	return 0, 0, 0, false
+}
+
+// inlineTags sets every \tag in a display where it already stands, at the right
+// of the row it sits on, and hands back how many it moved.
+//
+// A display with one \tag is a numbered formula, the number belongs beside the
+// display as a whole, and liftTag takes it there. A display with several is a
+// different thing: each one justifies the step it is written on, the way the
+// printing sets "(prop. 38)" out to the right of the line it applies to. There
+// is nowhere beside a display for a second number to go, and amsmath will not
+// set a \tag inside the \begin{aligned} that a calculation written over several
+// lines gets wrapped in, so it stops with "\tag not allowed here". Both builds
+// of Lie I to III failed on the same display in III, § 3, no. 1, which justifies
+// three of its four steps that way.
+func inlineTags(body string) (string, int) {
+	n, from := 0, 0
+	for {
+		at, open, close, ok := findTag(body, from)
+		if !ok {
+			return body, n
+		}
+		set := `\qquad(\text{` + tagText(body[open+1:close]) + `})`
+		body = body[:at] + set + body[close+1:]
+		from = at + len(set)
+		n++
+	}
+}
+
+// countTags is how many \tag a display carries.
+func countTags(body string) int {
+	n, from := 0, 0
+	for {
+		_, _, close, ok := findTag(body, from)
+		if !ok {
+			return n
+		}
+		n++
+		from = close + 1
+	}
 }
 
 // splitFootnotes takes the footnotes out of a heading and hands them back.
