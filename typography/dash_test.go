@@ -54,6 +54,63 @@ func TestStatementDashLeavesTheProseAlone(t *testing.T) {
 	}
 }
 
+// The mark is written where the reading dropped it altogether, which is the
+// commoner half of the fault: thirty six heads against ten. There is no spacing
+// to preserve in this case, so the printing's own is written.
+func TestStatementDashWritesTheMarkThatIsNotThereAtAll(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"COROLLAIRE 1. Pour toute suite $M$-régulière, les propriétés suivantes.",
+			"COROLLAIRE 1. — Pour toute suite $M$-régulière, les propriétés suivantes."},
+		{"**Proposition 10.** *Soient $\\rho : A \\to B$ un homomorphisme local.*",
+			"**Proposition 10.** — *Soient $\\rho : A \\to B$ un homomorphisme local.*"},
+		{"Corollaire. Soit $G_+$ l'ensemble des éléments positifs de $G$.",
+			"Corollaire. — Soit $G_+$ l'ensemble des éléments positifs de $G$."},
+		{"Définition 1. Soient $A$ un anneau, $J$ un idéal de $A$.",
+			"Définition 1. — Soient $A$ un anneau, $J$ un idéal de $A$."},
+		{"PROPOSITION 6. Soient $A$ un anneau noethérien, $N$ un $A$-module.",
+			"PROPOSITION 6. — Soient $A$ un anneau noethérien, $N$ un $A$-module."},
+	}
+	for _, c := range cases {
+		got, n := StatementDash(c.in)
+		if got != c.want || n != 1 {
+			t.Errorf("StatementDash(%q) = %q, %d, want %q, 1", c.in, got, n, c.want)
+		}
+	}
+}
+
+// The mark is moved out of the emphasis where the reading closed it one
+// character late. The three shapes are tried in the order that matters: a head
+// carrying a hyphen inside the emphasis has to have the mark moved and not
+// merely lengthened in place, or the line comes out repaired and still wrong.
+func TestStatementDashMovesTheMarkOutOfTheEmphasis(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"**Corollaire 1.—** *Toute algèbre finie et plate sur un anneau de Macaulay.*",
+			"**Corollaire 1.** — *Toute algèbre finie et plate sur un anneau de Macaulay.*"},
+		{"**Proposition 10.-** *Soit $\\rho : A \\to B$ un homomorphisme.*",
+			"**Proposition 10.** — *Soit $\\rho : A \\to B$ un homomorphisme.*"},
+		{"**THÉORÈME 3. —** *Supposons les $A$-modules de type fini.*",
+			"**THÉORÈME 3.** — *Supposons les $A$-modules de type fini.*"},
+		{"**Remarque. —** On notera que deux modules dualisants sont isomorphes.",
+			"**Remarque.** — On notera que deux modules dualisants sont isomorphes."},
+	}
+	for _, c := range cases {
+		got, n := StatementDash(c.in)
+		if got != c.want || n != 1 {
+			t.Errorf("StatementDash(%q) = %q, %d, want %q, 1", c.in, got, n, c.want)
+		}
+	}
+}
+
+// A head alone on its line is left alone. Its statement begins on the line
+// under it and there is nowhere on this line for the mark to go, so writing one
+// would leave the line ending in a dash and the statement still unmarked.
+func TestStatementDashLeavesAHeadThatStandsAlone(t *testing.T) {
+	body := "PROPOSITION 8.\n\n$$\nA \\otimes_B C = 0\n$$"
+	if got, n := StatementDash(body); n != 0 || got != body {
+		t.Errorf("changed %d lines, want the head left as it stands", n)
+	}
+}
+
 // A head in the middle of a paragraph is not a head. The pages set a paragraph
 // on one long line and a line that follows prose is the continuation of it.
 func TestStatementDashWantsTheLineToOpenAParagraph(t *testing.T) {
