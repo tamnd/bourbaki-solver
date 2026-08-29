@@ -797,3 +797,48 @@ func TestACitationHasToStartAWord(t *testing.T) {
 		}
 	}
 }
+
+// The two populations the numbered shape covers, from the corpus. The entries
+// are the four ways one opens: initials and a lower case surname, initials and a
+// surname in capitals, a name with no initial before an italic title, and an
+// italic title where the work has no one author. The rest are numbered
+// paragraphs of running prose, one from each place they are found: a note to the
+// reader, an exercise, an exercise whose parts are lettered, an exercise set in
+// italics, and a French note to the reader that has not been read into English
+// yet.
+func TestBiblioEntryTellsACitationFromANumberedParagraph(t *testing.T) {
+	entries := []string{
+		"1. O. Neugebauer, *Vorlesungen über die Geschichte der antiken Mathematik*, Vol. I, Vorgriechische Mathematik, Berlin (Springer), 1934.",
+		"1. F. KLEIN and S. LIE: (a) Sur une certaine famille de courbes et surfaces, C. R. Acad. Sci., 70 (1870), pp. 1222-1226.",
+		"2 (*bis*). T. L. Heath, *Mathematics in Aristotle*, Oxford (Clarendon Press), 1949.",
+		"8. Galileo Galilei, *Opere*, Ristampa della Edizione Nazionale, 20 volumes, Florence (Barbara), 1929-39.",
+		"2. ARISTOTLE, *Organon*, translated under the editorship of W. D. Ross, Oxford, 1928.",
+		"2. *The Works of Aristotle*, translated under the editorship of J. A. Smith and W. D. Ross (12 volumes, Oxford, 1908-1952).",
+		"45. M. ZORN, \"A remark on method in transfinite algebra\", *Bull. Amer. Math. Soc.*, **41** (1935), pp. 667-670.",
+	}
+	prose := []string{
+		"1. The Elements of Mathematics series takes up mathematics at the beginning and gives complete proofs.",
+		"11. Show that the simple group $\\mathfrak{A}_5$ of order 60 contains no subgroup of order 15.",
+		"27. (a) Let $A$ be a ring and $M$ a finitely generated faithful $A$-module.",
+		"5. *Let V be a vector space over a commutative field k and $W = \\bigwedge^2 V$.*",
+		"1. Le traité prend les mathématiques à leur début et donne des démonstrations complètes.",
+		"*Completion & local rings*. A local ring A shares with fields the property of having only one maximal ideal.",
+	}
+	for _, s := range entries {
+		if !BiblioEntry(s) {
+			t.Errorf("not read as an entry: %s", ellipsisFor(s))
+		}
+	}
+	for _, s := range prose {
+		if BiblioEntry(s) {
+			t.Errorf("read as an entry: %s", ellipsisFor(s))
+		}
+	}
+}
+
+func ellipsisFor(s string) string {
+	if len(s) <= 70 {
+		return s
+	}
+	return s[:70] + "..."
+}
