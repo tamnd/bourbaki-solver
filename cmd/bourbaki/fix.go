@@ -137,8 +137,17 @@ It is off by default because a number in the front matter of a page that does
 not show one in its body is worth saying out loud rather than doing quietly to a
 whole corpus.
 
+-fill also reaches the volumes that print the number in the running head, which
+nothing else here does. The head is cut as the page is read and the number goes
+with it, so those pages have no number in the body and none in the front matter
+either, and the map is the only place it is left. Functions of a Real Variable is
+the one volume of that kind: none of its 354 pages carried a number, so its
+twenty sections were printed on no page of the book and every reference that
+gives a page of it resolved to nothing.
+
 flags:
-  -book ID   only this volume, default every volume that prints its folio at the foot
+  -book ID   only this volume, default every volume that prints its folio at the
+             foot, and with -fill every volume that prints it in the head as well
   -check     say what would change and change nothing
   -fill      give a page whose reading dropped the number the one the page map
              holds, flagged as coming from there
@@ -1140,7 +1149,21 @@ func fixFolio(args []string) error {
 		if *book != "" && b.ID != *book {
 			continue
 		}
-		if pagemap.Grammar(b.Grammar) != pagemap.FootNumber {
+		// A head-number volume is here for -fill and for nothing else. It prints
+		// the number in the running head, so the head is where the number is cut
+		// from and the body it leaves has no number at the foot to take: the loop
+		// below finds none, counts the page as printing none, and fills it from
+		// the map like any other. Functions of a Real Variable is the one volume
+		// of that kind and none of its 354 pages carried a number at all, so its
+		// twenty sections were printed on no page of the book and 701 references
+		// that give a page of it resolved to nothing.
+		switch pagemap.Grammar(b.Grammar) {
+		case pagemap.FootNumber:
+		case pagemap.HeadNumber:
+			if !*fill {
+				continue
+			}
+		default:
 			continue
 		}
 		pm, err := pagemap.Load(root, b.ID)

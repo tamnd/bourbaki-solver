@@ -406,6 +406,29 @@ const sectionOrAppendix = `(§\s*\$?\s*\d+|Appendix\b)`
 var sectionLocator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:` + chapWord + `([IVX]+),\s*(?:` + stray + `\s*)?)?` + sectionOrAppendix +
 	`(?:,\s*[Nn]os?\.\s*(\d+))?`
 
+// bareSectionLocator is the same with the word in front of the chapter numeral
+// made optional, as it already is in the page locator. The volumes write the
+// reference both ways and write it oftener without: "Chap. I, § 1, no. 1" and
+// "I, § 1, no. 1" are the same reference, and the second is what the index of
+// notation of Algebra I to III sets under every one of its entries. Asking for
+// the word dropped the numeral off 1609 references, 1523 of them in that index,
+// and each one was then hunted for in the chapter doing the citing, which for a
+// historical note is no chapter at all.
+//
+// The comma after the numeral carries the guard on its own. A roman numeral
+// followed by a comma and a § is a citation and there is nothing else it can be,
+// and locateSection still refuses a § with no chapter in front of it.
+//
+// Only the plain § form reads it. The forms that carry a statement as well keep
+// the strict locator, because a bare numeral there is the head of a page
+// reference more often than it is a § reference: "II, §7, no. 5, p. 300,
+// Theorem 6" is one citation of a page and the relaxed locator would read the
+// § out of it and hand the resolver a bare Theorem 6 to hunt for in the § doing
+// the citing. The plain form is safe from that only because the page form is
+// tried before it, which is what the order in forms says.
+var bareSectionLocator = `(?:\*?(` + bookAlt + `)\*?,\s*)?(?:(?:` + chapWord + `)?([IVX]+),\s*(?:` + stray + `\s*)?)?` +
+	sectionOrAppendix + `(?:,\s*[Nn]os?\.\s*(\d+))?`
+
 // The forms, in the order they are tried. Order is the whole of the
 // difference between reading "Proposition 25 of II, §1, No. 13, p. 222" as one
 // reference to another chapter and reading it as two, a Proposition of the § in
@@ -502,7 +525,7 @@ var (
 	// no., the "Prop. 8" left over is a bare local citation hunted for in the §
 	// doing the citing, which is a different chapter of a different Book. Two
 	// references are written this way.
-	sectionRE = regexp.MustCompile(sectionLocator +
+	sectionRE = regexp.MustCompile(bareSectionLocator +
 		`(?:,\s*(text\s+(?:preceding|following)\s+)?(` + kindAlt + `)\s*(\d+))?`)
 
 	pageRE    = regexp.MustCompile(locator + `(?:,\s*(` + kindAlt + `)\s*(\d+))?`)
@@ -610,8 +633,16 @@ var (
 // scanner is the alternation of them all, tried in that order. Go's regexp
 // prefers the earliest match and, among matches at the same place, the first
 // alternative that matches, which is exactly the precedence wanted here.
+//
+// The page form goes before the plain § form because the two begin at the same
+// word and the page form is the longer of them. "II, §7, no. 5, p. 300, Theorem
+// 6" is one reference to a page of another chapter, and the § form reads the
+// head of it and stops at the no., leaving "p. 300, Theorem 6" to be read again
+// as a second reference with no chapter on it. Everything else that begins at
+// the § keeps its place ahead of the page form, since those forms begin at the
+// statement instead and the earliest match settles them.
 var forms = []*regexp.Regexp{namedRE, sectionParentRE, attachedRE, leadRE, sectionNamedRE, sectionAttachedRE,
-	sectionRE, pageRE, formulaRE, namedLocCitRE, locCitRE, contRE, sectionContRE, noRE, outsideRE,
+	pageRE, sectionRE, formulaRE, namedLocCitRE, locCitRE, contRE, sectionContRE, noRE, outsideRE,
 	otherBookRE, localRE}
 
 var scanner = regexp.MustCompile(alternation(forms))
@@ -636,9 +667,9 @@ var (
 	atLead        = atAttached + attachedRE.NumSubexp()
 	atSecNamed    = atLead + leadRE.NumSubexp()
 	atSecAttached = atSecNamed + sectionNamedRE.NumSubexp()
-	atSection     = atSecAttached + sectionAttachedRE.NumSubexp()
-	atPage        = atSection + sectionRE.NumSubexp()
-	atFormula     = atPage + pageRE.NumSubexp()
+	atPage        = atSecAttached + sectionAttachedRE.NumSubexp()
+	atSection     = atPage + pageRE.NumSubexp()
+	atFormula     = atSection + sectionRE.NumSubexp()
 	atNamedLoc    = atFormula + formulaRE.NumSubexp()
 	atLocCit      = atNamedLoc + namedLocCitRE.NumSubexp()
 	atCont        = atLocCit + locCitRE.NumSubexp()
