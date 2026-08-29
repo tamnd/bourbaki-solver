@@ -442,3 +442,45 @@ func TestNoPromptMeansNoCheck(t *testing.T) {
 		t.Fatalf("with no prompt in hand there is nothing to compare against, got %v", leaks)
 	}
 }
+
+// The gateway turning an account away is not the model refusing a page, and the
+// corpus has seventeen files that prove nobody was telling them apart. The body
+// of each was the one sentence and a trace id, and it went in as a Vietnamese
+// exercise of General Topology.
+//
+// The trace id is the reason for the test as much as the sentence is. Every one
+// of these carries a different guid, so a check that matched the whole line
+// would have caught none of them.
+func TestTheGatewayTurningTheAccountAwayIsItsOwnKind(t *testing.T) {
+	for _, answer := range []string{
+		"Unusual activity has been detected from your device. Try again later. (9bacebdc-f794-45e1-a3e3-41db5f45190b)",
+		"Unusual activity has been detected from your device. Try again later. (00000000-0000-0000-0000-000000000000)",
+		"You've been rate limited. Please wait a moment.",
+		"Access denied",
+		"Please verify you are human to continue.",
+	} {
+		leaks := Check(answer)
+		if len(leaks) == 0 {
+			t.Fatalf("no leak found in %q", answer)
+		}
+		if leaks[0].Kind != "gateway" {
+			t.Errorf("kind = %q, want gateway, in %q", leaks[0].Kind, answer)
+		}
+	}
+}
+
+// Bourbaki writes about access and about denial and about activity, and none of
+// those sentences is the gateway. The phrases are long on purpose so that the
+// book can keep its own words.
+func TestOrdinaryProseIsNotTakenForTheGateway(t *testing.T) {
+	for _, page := range []string{
+		"The unusual activity of the functor $F$ on $\\mathfrak{g}$ is studied in no. 4.",
+		"Access to the fibre is by the section $s$, and the denial of the axiom of choice is not at issue here.",
+		"A device of this kind was used by Weierstrass, and we shall come back to it later.",
+		"Let $H$ be a human readable presentation of the group $G$.",
+	} {
+		if leaks := Check(page); len(leaks) != 0 {
+			t.Errorf("leak %+v in ordinary prose %q", leaks, page)
+		}
+	}
+}

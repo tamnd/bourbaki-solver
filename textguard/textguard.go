@@ -18,7 +18,7 @@ import (
 
 // Leak is one thing found in an answer that should not be there.
 type Leak struct {
-	// Kind is refusal, no-image, meta, prompt, markup or empty.
+	// Kind is gateway, refusal, no-image, meta, prompt, markup or empty.
 	Kind string
 	// Detail is the phrase that was found, as it appeared.
 	Detail string
@@ -52,6 +52,35 @@ var refusals = []string{
 	"violates our",
 	"violates my",
 	"violates the content",
+}
+
+// gateway is the service turning the account away before the model ever sees
+// the question.
+//
+// It is not a refusal, because nothing was refused: no model read the page and
+// no model declined it. It is the anti abuse layer in front of the account, and
+// it is worth its own kind because the remedy is different in every respect. A
+// refusal is answered by asking again, perhaps of another model. This is
+// answered by leaving the account alone for a while, and asking again at once
+// is the one thing that makes it last longer.
+//
+// Seventeen files were written out of it before this list existed. The whole
+// body of each was the sentence and a trace id, about a hundred characters,
+// which cleared the minimum length once the tool had put its own header above
+// it, exactly as "I don't see an image attached" did. Six were Vietnamese
+// exercises of General Topology and three were machine English.
+//
+// The trace id is why the phrases stop where they do. Every one of these
+// carries a different guid, so the sentence has to be matched on the part that
+// does not vary.
+var gateway = []string{
+	"unusual activity has been detected from your device",
+	"you've been rate limited",
+	"you have been rate limited",
+	"too many requests in a short period",
+	"our systems have detected unusual activity",
+	"access denied",
+	"verify you are human",
 }
 
 // noImage is the model answering politely to a message that arrived without its
@@ -226,6 +255,7 @@ func Check(text string) []Leak {
 		kind    string
 		phrases []string
 	}{
+		{"gateway", gateway},
 		{"refusal", refusals},
 		{"no-image", noImage},
 		{"prompt", prompts},
