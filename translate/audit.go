@@ -325,10 +325,50 @@ func headings(body string) []heading {
 }
 
 // bibEntryRE opens a bibliography entry: the number the note cites the work by,
-// as "12." or "2 (*bis*).". Over the whole English corpus the shape appears 57
-// times and every one of them is under a BIBLIOGRAPHY heading, so a line that
-// looks like this is one.
+// as "12." or "2 (*bis*).". It is necessary and it is nowhere near sufficient.
+// The comment that stood here said the shape appears 57 times over the English
+// corpus and that every one of them is under a BIBLIOGRAPHY heading. Measured
+// again over content/en and content/en-mt it appears 459 times: 21 under a
+// BIBLIOGRAPHY heading, 170 in the notes to the reader, and 268 in exercises and
+// historical notes. The premise was wrong by a factor of twenty and the numbered
+// paragraph is the commonest shape in the book, since a note to the reader is
+// twelve of them and an exercise names its parts the same way.
+//
+// What it cost: WithoutBiblio took all 459 out of the question and WithBiblio
+// put them back from the English, so 438 blocks of running prose were never
+// asked for and came back verbatim English in every language. That is every
+// numbered paragraph of all thirteen notes to the reader, which is the first
+// page a reader of a Vietnamese volume opens.
 var bibEntryRE = regexp.MustCompile(`^\d+\s*(\(\*?bis\*?\)\s*)?\.\s`)
+
+// bibAuthorRE and bibTitleRE are what tells an entry from a numbered paragraph.
+//
+// A heading is no use here. Of the 149 real entries in the corpus only 20 stand
+// under a BIBLIOGRAPHY heading; 38 follow a historical note with no heading of
+// their own, and 27 are the Klein and Lie citations inside exercise 3 of Lie III
+// § 10, under nothing at all. So the block has to answer for itself.
+//
+// An entry opens on the work's author or on its title and neither is a sentence.
+// The author is initials and a surname, "O. Neugebauer" or "F. KLEIN", or a name
+// carrying no initial before an italic title, "Galileo Galilei, *Opere*," and
+// "ARISTOTLE, *Organon*,", which is why the second alternative ends on the comma
+// and the italic rather than on a word count. The title comes
+// first when the work has no one author, "*The Works of Aristotle*, translated
+// under the editorship of", and it is italic and followed by a comma, which is
+// what keeps an italic exercise statement and a bold lead-in like "*Completion &
+// local rings*." out. A numbered paragraph opens on a verb or an article
+// instead: "The Elements of Mathematics series takes up", "Let $X$ be a set",
+// "Show that the simple group", "Le traité prend les mathématiques".
+//
+// Measured over content/en, content/en-mt, content/fr, content/vi and
+// content/solutions: 149 entries in 13 files, every one of them a historical
+// note or that one exercise, and not one block missed of those standing under a
+// BIBLIOGRAPHY or THU MUC heading. The French tree comes to zero, which is right,
+// since no French bibliography has been read yet.
+var (
+	bibAuthorRE = regexp.MustCompile(`^\*{0,2}(\p{Lu}\.|\p{Lu}[\p{L}'’-]*( \p{Lu}[\p{L}'’-]*)*, \*)`)
+	bibTitleRE  = regexp.MustCompile(`^\*[^*$]{2,140}\*,`)
+)
 
 // AuditBiblio holds a translation to Invariant 1 for the apparatus: a
 // bibliography entry stands as printed.
@@ -367,7 +407,11 @@ func AuditBiblio(en, tr string) []Problem {
 func bibEntries(body string) []string {
 	var out []string
 	for _, b := range blocks(body) {
-		if bibEntryRE.MatchString(b) {
+		// BiblioEntry and not the opening shape alone. AuditBiblio requires that
+		// what this collects stands as printed, so a numbered paragraph gathered
+		// here would be a rule against ever translating it, said by the one rule
+		// nothing else can overrule.
+		if BiblioEntry(b) {
 			out = append(out, strings.Join(strings.Fields(b), " "))
 		}
 	}
@@ -476,8 +520,19 @@ func SelfTranslation(lang, en string) bool {
 // and does not ask it will call every entry an untranslated run, since standing
 // as printed is precisely what AuditBiblio requires of one, and the two rules
 // then hold a file between them with no answer that satisfies both.
+//
+// Three tests and all three have to hold. The block is numbered the way an entry
+// is numbered, it carries no mathematics, since a work's name has none and an
+// exercise nearly always does, and it opens on an author or on an italic title.
+// See bibAuthorRE for what the last one is measured against.
 func BiblioEntry(block string) bool {
-	return bibEntryRE.MatchString(strings.TrimSpace(block))
+	s := strings.TrimSpace(block)
+	m := bibEntryRE.FindString(s)
+	if m == "" || strings.Contains(s, "$") {
+		return false
+	}
+	rest := s[len(m):]
+	return bibAuthorRE.MatchString(rest) || bibTitleRE.MatchString(rest)
 }
 
 // Invariant 3 again, the part of it that catches an answer stopping early.
