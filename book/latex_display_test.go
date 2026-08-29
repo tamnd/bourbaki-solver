@@ -120,6 +120,34 @@ func TestLiftTagReadsAnArgumentWithBracesInIt(t *testing.T) {
 	}
 }
 
+// A calculation that justifies each of its steps carries a \tag on every row,
+// and there is nowhere beside the display for the second and third of them to
+// go. Left where they are they end up inside the \begin{aligned} the display is
+// wrapped in, amsmath stops with "\tag not allowed here", and the volume does
+// not typeset at all. Both builds of Lie I to III stopped on the display in III,
+// § 3 that justifies three of its four steps this way.
+func TestSeveralTagsAreSetBesideTheirOwnRows(t *testing.T) {
+	body := "a = b \\tag{prop. 38} \\\\\n= c \\\\\n= d \\tag{VAR, R, 5.5.6} \\\\\n= e \\tag{prop. 38}"
+	if n := countTags(body); n != 3 {
+		t.Fatalf("countTags gave %d for a display with three tags", n)
+	}
+	got, n := inlineTags(body)
+	if n != 3 {
+		t.Errorf("inlineTags moved %d tags, want 3", n)
+	}
+	if strings.Contains(got, `\tag`) {
+		t.Errorf("inlineTags left a tag in the body: %q", got)
+	}
+	for _, want := range []string{`\qquad(\text{prop. 38})`, `\qquad(\text{VAR, R, 5.5.6})`} {
+		if !strings.Contains(got, want) {
+			t.Errorf("inlineTags did not set %q, gave %q", want, got)
+		}
+	}
+	if countTags("a = b") != 0 {
+		t.Error("countTags found a tag in a display that has none")
+	}
+}
+
 // The degree sign reached the writer through the mathematics and came out as a
 // superscript circle, which is right in a formula and an error in the argument
 // of a \tag, where amsmath sets text.
