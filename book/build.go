@@ -145,7 +145,7 @@ var (
 	// line. Requiring it meant every dropped character under the OpenType fonts
 	// went unreported: the history volume lost four characters off six places and
 	// the audit said none. See cpRE for the other half of the same wrapping.
-	missingRE   = regexp.MustCompile(`^Missing character: There is no (.+?) in font (.+?)!?$`)
+	missingRE = regexp.MustCompile(`^Missing character: There is no (.+?) in font (.+?)!?$`)
 	// The codepoint TeX prints beside the character it could not set. The log is
 	// wrapped by byte and not by character, so a character of three bytes can be
 	// cut in half by the wrap and reach us as mojibake. The codepoint is ASCII and
