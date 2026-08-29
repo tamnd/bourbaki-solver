@@ -35,6 +35,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -101,10 +102,17 @@ type Job struct {
 }
 
 // Lease is a claim with a deadline on it.
+//
+// Host is the fleet route the ask went to and Worker is the machine the worker
+// itself ran on, which are two different things: a run on this laptop leases a
+// job and puts the question to server3. Worker is what makes the PID mean
+// something, since a pid is only an identity on the machine that issued it. See
+// Reap for the one thing it is used for.
 type Lease struct {
-	Host  string    `json:"host"`
-	Until time.Time `json:"until"`
-	PID   int       `json:"pid"`
+	Host   string    `json:"host"`
+	Until  time.Time `json:"until"`
+	PID    int       `json:"pid"`
+	Worker string    `json:"worker,omitempty"`
 }
 
 // Event is one attempt, kept so that a dead job says what went wrong every time
@@ -396,7 +404,7 @@ func (q *Queue) LeaseWhere(stage Stage, host, group string, want func(Job) bool,
 			return Job{}, err
 		}
 		job.Attempts++
-		job.Lease = &Lease{Host: host, Until: q.now().Add(expected + LeaseSlack), PID: os.Getpid()}
+		job.Lease = &Lease{Host: host, Until: q.now().Add(expected + LeaseSlack), PID: os.Getpid(), Worker: workerName()}
 		if err := q.write(Leased, job); err != nil {
 			return Job{}, err
 		}
@@ -558,12 +566,60 @@ func (q *Queue) Outstanding(stage Stage) (map[string]State, error) {
 	return out, nil
 }
 
-// Reap returns jobs whose lease has expired.
+// workerName is the machine the worker runs on, which is what gives its pid a
+// meaning. An error from the operating system is answered with the empty string
+// and not with a guess, because a wrong name here would let one machine reclaim
+// another's live work. Reap treats the empty string as unknown and falls back to
+// the deadline.
+func workerName() string {
+	n, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	return n
+}
+
+// alive says a process is still there. It is only asked about a pid this same
+// machine issued. Signal 0 delivers nothing and only reports whether the process
+// can be signalled; EPERM means it exists and belongs to somebody else, which is
+// still alive.
+func alive(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	p, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = p.Signal(syscall.Signal(0))
+	return err == nil || errors.Is(err, os.ErrPermission)
+}
+
+// Reap returns jobs whose lease has expired, and jobs whose worker is gone.
 //
 // This is the whole crash recovery story. A worker that is killed, or a laptop
 // that sleeps through a lease, leaves a job in leased with a deadline in the
 // past. Any worker starting up calls Reap and the job is pending again. Nothing
 // has to notice the crash and nothing has to be cleaned up by hand.
+//
+// The deadline alone is slow about it. LeaseSlack puts the deadline the better
+// part of an hour out, because a call that is answered in 151 seconds on a good
+// day can take twenty minutes on a bad one, and a lease that expires under a
+// worker still waiting on an answer gives the job to a second worker and pays
+// for it twice. So the deadline is generous on purpose, and the cost of that is
+// paid at a crash: on 29 August the disk filled, every run on this laptop died
+// inside a minute, and 25 of the 39 held leases sat there for the better part of
+// an hour with nobody coming back for them. Six lanes spent that hour finding
+// their next chunk already leased and giving up on the file.
+//
+// A pid is enough to end that, so long as it is only asked about on the machine
+// that issued it, which is what Lease.Worker records. The reasoning that put "no
+// pid to trust" at the top of this file still holds for everything else: the
+// lease is not a lock, nothing has to be cleaned up by hand, and a lease with no
+// Worker on it, or one written by another machine, is left to its deadline. The
+// direction of the risk is the safe one. A pid that has been reused reads as
+// alive and the job waits for its deadline, which is what happens today.
+// Reclaiming a live worker's job would need its pid to be dead while it runs.
 func (q *Queue) Reap(stage Stage) ([]string, error) {
 	ids, err := q.ids(stage, Leased)
 	if err != nil {
@@ -579,10 +635,16 @@ func (q *Queue) Reap(stage Stage) ([]string, error) {
 			}
 			return reaped, err
 		}
-		if job.Lease != nil && now.Before(job.Lease.Until) {
+		why := "lease expired, the worker did not come back"
+		switch {
+		case job.Lease == nil:
+		case !now.Before(job.Lease.Until):
+		case job.Lease.Worker != "" && job.Lease.Worker == workerName() && !alive(job.Lease.PID):
+			why = "the worker is gone, so the lease is not waited out"
+		default:
 			continue
 		}
-		state, err := q.Finish(job, false, "lease expired, the worker did not come back")
+		state, err := q.Finish(job, false, why)
 		if err != nil {
 			return reaped, err
 		}
