@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Building the PDF is the whole point of this package, and not because anybody
@@ -138,13 +139,40 @@ func Run(ctx context.Context, dir string, d *Document, opt Options) (*Build, err
 var (
 	overfullRE  = regexp.MustCompile(`^Overfull \\[hv]box`)
 	underfullRE = regexp.MustCompile(`^Underfull \\[hv]box`)
-	missingRE   = regexp.MustCompile(`Missing character: There is no (.+) in font (.+?)!`)
+	// The trailing ! is optional because the font name is not always on the line
+	// the message starts on. XeTeX names a font by its file and its whole feature
+	// string, that runs past the log's line width, and the ! ends up on the next
+	// line. Requiring it meant every dropped character under the OpenType fonts
+	// went unreported: the history volume lost four characters off six places and
+	// the audit said none. See cpRE for the other half of the same wrapping.
+	missingRE   = regexp.MustCompile(`^Missing character: There is no (.+?) in font (.+?)!?$`)
+	// The codepoint TeX prints beside the character it could not set. The log is
+	// wrapped by byte and not by character, so a character of three bytes can be
+	// cut in half by the wrap and reach us as mojibake. The codepoint is ASCII and
+	// survives, so it is what the character is rebuilt from.
+	cpRE        = regexp.MustCompile(`^(.*)\(U\+([0-9A-Fa-f]+)\)$`)
 	undefinedRE = regexp.MustCompile(`^! Undefined control sequence`)
 	errorRE     = regexp.MustCompile(`^! `)
 	csRE        = regexp.MustCompile(`\\([A-Za-z@]+) $`)
 	unresolvRE  = regexp.MustCompile(`LaTeX Warning: There were undefined references`)
 	outputRE    = regexp.MustCompile(`Output written on .* \((\d+) pages?`)
 )
+
+// glyphName is how a character TeX could not set is named in the report. TeX
+// gives the character and then its codepoint, and the character is the half that
+// the log's line wrapping can cut in two, so where there is a codepoint the
+// character is taken from that instead of from the bytes as they arrived.
+func glyphName(s string) string {
+	m := cpRE.FindStringSubmatch(strings.TrimSpace(s))
+	if m == nil {
+		return strings.TrimSpace(s)
+	}
+	n, err := strconv.ParseInt(m[2], 16, 32)
+	if err != nil || !utf8.ValidRune(rune(n)) {
+		return strings.TrimSpace(s)
+	}
+	return fmt.Sprintf("%c (U+%04X)", rune(n), rune(n))
+}
 
 // readLog reads the four things worth knowing out of a TeX log.
 //
@@ -187,7 +215,7 @@ func (b *Build) readLog() error {
 			b.Unresolved++
 		}
 		if m := missingRE.FindStringSubmatch(line); m != nil {
-			key := m[1] + " in " + m[2]
+			key := glyphName(m[1]) + " in " + m[2]
 			if !seenGlyph[key] {
 				seenGlyph[key] = true
 				b.MissingGlyphs = append(b.MissingGlyphs, key)
