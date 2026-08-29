@@ -63,6 +63,14 @@ const (
 	// page one reading got wrong. That is worth knowing when the queue has room
 	// to read it properly.
 	FlagPlainHead Flag = "plain-statement-head"
+	// FlagShortHeadDash is a page that came back with a hyphen or an en dash
+	// after the head of a statement where the French printing sets an em dash,
+	// and had the mark put back. It is the small capitals fault on the other
+	// half of the same head and it stays on the page for the same reason: the
+	// mark was put back from what the printing is known to set and not from the
+	// page image, so the page reads correctly now without having been read
+	// again.
+	FlagShortHeadDash Flag = "short-statement-head-dash"
 	// FlagStackedMatrix is a matrix the text layer flattened. A matrix is set
 	// as rows one above the other, and the layer reports the top row raised and
 	// the bottom row lowered, so a 2 by 2 arrives as a superscript holding one

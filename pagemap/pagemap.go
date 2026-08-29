@@ -191,6 +191,27 @@ type Step struct {
 	MissingPages []int  `json:"missing_pages"`
 }
 
+// AbsentBefore says the printing carries a page immediately before this PDF
+// page that the file does not have.
+//
+// It is the question a repair asks when a heading is nowhere in the file: not
+// whether the reading dropped the heading, which is the ordinary fault and is
+// fixable by reading the page again, but whether the leaf it is printed on is
+// in the scan at all. Chapter X of Algebre commutative heads its § 1 on printed
+// page 2 and the file goes from page 1 straight to page 3, so no reading of it
+// will ever produce that heading and there is no point asking for one.
+func (m *Map) AbsentBefore(pdf int) bool {
+	if m == nil {
+		return false
+	}
+	for _, s := range m.Steps {
+		if s.AtPDFPage == pdf && len(s.MissingPages) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Span is the stretch of PDF pages one chapter occupies.
 type Span struct {
 	Chapter   string `json:"chapter"`

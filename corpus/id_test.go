@@ -53,6 +53,24 @@ func TestRomanOrderSortsChaptersInScope(t *testing.T) {
 	}
 }
 
+// A volume divided into no chapters is bound in the order pagemap numbered its
+// spans, and content/en/hist/1 is what assemble writes for it. Refusing that
+// directory stopped every walk of content/ on the whole corpus.
+func TestChapterOrderReadsAFasciculeNumber(t *testing.T) {
+	cases := map[string]int{"I": 1, "VIII": 8, "1": 1, "2": 2, " 2 ": 2}
+	for in, want := range cases {
+		got, err := ChapterOrder(in)
+		if err != nil || got != want {
+			t.Errorf("ChapterOrder(%q) = %d, %v; want %d", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"", "0", "-1", "VIII2", "exercises"} {
+		if _, err := ChapterOrder(in); err == nil {
+			t.Errorf("ChapterOrder(%q) should be refused", in)
+		}
+	}
+}
+
 func TestLabelRoundTrip(t *testing.T) {
 	cases := []struct {
 		ref   Ref
