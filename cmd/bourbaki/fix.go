@@ -61,6 +61,7 @@ commands:
   label     take the a), b), c) of an exercise back out of the mathematics
   elision   write the apostrophe of a French elision the way the corpus sets it
   smallcaps write the kind of a statement head in capitals, as the page sets it
+  dash      write the em dash after a French statement head, as the page sets it
   folio     move the printed page number off the foot and into the front matter
   heading   set a numbered heading at the level the table of contents gives it
   opening   put back the heading that opens a chapter or a §
@@ -86,9 +87,11 @@ closed and whole. star runs there too and for the same reason from the other
 side, since it works everywhere the spans are not. label runs with them, since
 it reads the spans to decide which of them are not mathematics at all. elision
 runs after those two
-as well, since it reads the prose and wants to know where the prose ends. folio,
-heading and opening touch no mathematics and can be run at any point before
-assemble. seal works on
+as well, since it reads the prose and wants to know where the prose ends.
+smallcaps, dash, folio, heading and opening touch no mathematics and can be run
+at any point before assemble, though the first two want to come before opening,
+since a statement head the assembler cannot read stops the volume at the same
+place a missing § heading does. seal works on
 content/ and not on pages/, and is the last thing run after a hand correction.
 
 Run bourbaki fix <command> -h for the flags of a command.
@@ -134,8 +137,17 @@ It is off by default because a number in the front matter of a page that does
 not show one in its body is worth saying out loud rather than doing quietly to a
 whole corpus.
 
+-fill also reaches the volumes that print the number in the running head, which
+nothing else here does. The head is cut as the page is read and the number goes
+with it, so those pages have no number in the body and none in the front matter
+either, and the map is the only place it is left. Functions of a Real Variable is
+the one volume of that kind: none of its 354 pages carried a number, so its
+twenty sections were printed on no page of the book and every reference that
+gives a page of it resolved to nothing.
+
 flags:
-  -book ID   only this volume, default every volume that prints its folio at the foot
+  -book ID   only this volume, default every volume that prints its folio at the
+             foot, and with -fill every volume that prints it in the head as well
   -check     say what would change and change nothing
   -fill      give a page whose reading dropped the number the one the page map
              holds, flagged as coming from there
@@ -510,6 +522,35 @@ flags:
   -check     say what would change and change nothing
 `
 
+const fixDashUsage = `usage: bourbaki fix dash [flags]
+
+Writes the em dash after the head of a statement, the way the French printings
+set it.
+
+A French volume of the Elements sets an em dash between the head of a statement
+and the statement itself, "PROPOSITION 8. — Soit A un anneau", and 18200 heads
+in this corpus carry it. Six carry a hyphen or an en dash instead, all of them
+in chapter X of Algebre commutative, which is the volume read most recently. It
+is the same fault as a straight apostrophe for a typographic one and it is what
+fix elision exists for on the other mark: the reading is looking at what the
+press set and writing the nearest thing on a keyboard.
+
+It is not cosmetic. The assembler finds a French statement by its head and the
+dash is part of the head it looks for, so a head with a hyphen in it is not a
+statement at all. Chapter X gave two corollaries the same label because of one
+of these, a corollary 1 under proposition 8 on page 32 and the corollary 1 of
+proposition 9 on page 34, since proposition 9 was not read as a statement and
+the numbering never moved on. The volume did not assemble.
+
+Only the mark is replaced. Whatever spacing the reading put on either side of it
+stays as the reading left it, because the spacing is what the page has and the
+mark is what it does not.
+
+flags:
+  -book ID   only this volume
+  -check     say what would change and change nothing
+`
+
 const fixHeadingUsage = `usage: bourbaki fix heading [flags]
 
 Sets a numbered heading at the level the table of contents gives it.
@@ -780,6 +821,8 @@ func runFix(args []string) error {
 		return fixElision(args[1:])
 	case "smallcaps":
 		return fixSmallCaps(args[1:])
+	case "dash":
+		return fixDash(args[1:])
 	case "folio":
 		return fixFolio(args[1:])
 	case "heading":
@@ -1106,7 +1149,21 @@ func fixFolio(args []string) error {
 		if *book != "" && b.ID != *book {
 			continue
 		}
-		if pagemap.Grammar(b.Grammar) != pagemap.FootNumber {
+		// A head-number volume is here for -fill and for nothing else. It prints
+		// the number in the running head, so the head is where the number is cut
+		// from and the body it leaves has no number at the foot to take: the loop
+		// below finds none, counts the page as printing none, and fills it from
+		// the map like any other. Functions of a Real Variable is the one volume
+		// of that kind and none of its 354 pages carried a number at all, so its
+		// twenty sections were printed on no page of the book and 701 references
+		// that give a page of it resolved to nothing.
+		switch pagemap.Grammar(b.Grammar) {
+		case pagemap.FootNumber:
+		case pagemap.HeadNumber:
+			if !*fill {
+				continue
+			}
+		default:
 			continue
 		}
 		pm, err := pagemap.Load(root, b.ID)
@@ -1468,6 +1525,16 @@ const headingFromContents = "heading from the contents, printed on the page and 
 // the whole of what a person going back to the page image needs to know.
 const markFromContents = "§ mark from the contents, placed where the chapter's other marks put it, with no second reading of the page behind it"
 
+// headingFromAbsentLeaf is what a page gets when it was given the heading of a §
+// the printing sets on the leaf before it, which the scan does not have. It is
+// worded to say two things a person going back to the page image needs, because
+// both of them are unusual: the words are the book's own from its contents, and
+// the line is on this page rather than on the page the press printed it on,
+// because the page the press printed it on is not in the file at all. Reading
+// this page again will not produce the line and is not what the flag is asking
+// for.
+const headingFromAbsentLeaf = "heading from the contents, printed on the leaf before this page, which the scan does not have"
+
 func fixOpening(args []string) error {
 	fs := flag.NewFlagSet("fix opening", flag.ExitOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixOpeningUsage) }
@@ -1492,6 +1559,19 @@ func fixOpening(args []string) error {
 	// of every page of it, and most volumes need neither.
 	text := map[string][]string{}
 	style := map[string]sectionStyle{}
+	// The style of the volume's § headings is asked for by two repairs and read
+	// once. It used to be read as a side effect of reading the text layer,
+	// which was fine while the layer was the only thing that wrote a heading.
+	// A § headed on a leaf the scan does not have is written without the layer,
+	// since the layer of a page that is not in the file does not exist either.
+	styled := map[string]bool{}
+	styleOf := func(b corpus.Book) sectionStyle {
+		if !styled[b.ID] {
+			styled[b.ID] = true
+			style[b.ID] = sectionStyleOf(root, b.ID)
+		}
+		return style[b.ID]
+	}
 	layerPage := func(b corpus.Book, pdfPage int) (string, error) {
 		if !*layer || b.TextLayer == "none" {
 			return "", nil
@@ -1503,29 +1583,21 @@ func fixOpening(args []string) error {
 				return "", err
 			}
 			text[b.ID] = pages
-			style[b.ID] = sectionStyleOf(root, b.ID)
 		}
 		if pdfPage < 1 || pdfPage > len(pages) {
 			return "", nil
 		}
 		return pages[pdfPage-1], nil
 	}
-	witness := func(b corpus.Book, pdfPage, number int, title string) (string, string, error) {
-		page, err := layerPage(b, pdfPage)
-		if err != nil || page == "" {
-			return "", "", err
-		}
-		words, ok := toc.WitnessSection(page, number, title)
-		if !ok {
-			return "", "", nil
-		}
-		st := style[b.ID]
+	// styledHeading is the § heading the contents gives, set the way this
+	// volume sets its own. It comes back empty where the volume has no §
+	// heading anywhere in it for this to be set like: a heading written in one
+	// of the two styles at random would be a guess about the printing on a page
+	// nobody has looked at, and the guess would go on the page unmarked.
+	styledHeading := func(b corpus.Book, number int, title string) string {
+		st := styleOf(b)
 		if !st.known {
-			// The volume has no § heading anywhere in it for this to be set
-			// like, and a heading written in one of the two styles at random
-			// would be a guess about the printing on a page nobody has looked
-			// at. The witness is reported and the heading is not written.
-			return words, "", nil
+			return ""
 		}
 		head := st.heading(number, title)
 		if b.Lang == "fr" {
@@ -1537,10 +1609,21 @@ func fixOpening(args []string) error {
 			// than after.
 			head, _, _ = typography.Apostrophes(head)
 		}
-		return words, head, nil
+		return head
+	}
+	witness := func(b corpus.Book, pdfPage, number int, title string) (string, string, error) {
+		page, err := layerPage(b, pdfPage)
+		if err != nil || page == "" {
+			return "", "", err
+		}
+		words, ok := toc.WitnessSection(page, number, title)
+		if !ok {
+			return "", "", nil
+		}
+		return words, styledHeading(b, number, title), nil
 	}
 
-	var chapters, sections, numbers, appendices, notes, marks, blanks, unread, lost, differ, told int
+	var chapters, sections, numbers, appendices, notes, marks, blanks, unread, lost, differ, told, absent int
 	for _, b := range books.Books {
 		if *book != "" && b.ID != *book {
 			continue
@@ -1549,6 +1632,10 @@ func fixOpening(args []string) error {
 		if !ok {
 			continue
 		}
+		// The page map is what says whether a heading nowhere in the file is
+		// printed on a leaf the file does not have. A volume with no map yet
+		// gets nil, which answers no to that and leaves every repair as it was.
+		pm, _ := pagemap.Load(root, b.ID)
 		// Every page of a chapter start or a § start is opened at most once
 		// and written at most once, since a § and the chapter it opens share
 		// a page in most chapters and the two repairs would otherwise write
@@ -1564,6 +1651,9 @@ func fixOpening(args []string) error {
 		// A page whose § mark came from the contents with no second reading
 		// behind it, which is flagged differently and says so.
 		inferred := map[int]bool{}
+		// A page that was given the heading of a § printed on the leaf before
+		// it, which the file does not have. Flagged differently again.
+		fromLeaf := map[int]bool{}
 		read := func(pdfPage int) ([]string, bool) {
 			if lines, ok := edits[pdfPage]; ok {
 				return lines, true
@@ -1813,6 +1903,31 @@ func fixOpening(args []string) error {
 							b.ID, ch.Numeral, s.Number, s.PDFPage, got, s.Title)
 					} else if words, put, err := witness(b, s.PDFPage, s.Number, s.Title); err != nil {
 						return err
+					} else if put == "" && pm.AbsentBefore(s.PDFPage) &&
+						styledHeading(b, s.Number, s.Title) != "" {
+						// The § is headed on the leaf before this page and the
+						// file does not have that leaf, so no reading of the
+						// file will ever produce the heading and asking for the
+						// page image again would answer nothing. The page map
+						// is the authority for that and the only one consulted:
+						// it records the step and the printed page that is
+						// missing at it.
+						//
+						// The heading goes at the top of the first page of the
+						// § the file does have. That is one printed page later
+						// than the press put it, and the alternative is to hang
+						// it on the chapter's own first page, which would sweep
+						// the chapter title and the conventions paragraph into
+						// the § and leave the chapter with no front matter at
+						// all. Being one page late is the smaller error and it
+						// is the one the flag describes.
+						head = styledHeading(b, s.Number, s.Title)
+						edits[s.PDFPage] = openAt(lines, head)
+						fromLeaf[s.PDFPage] = true
+						sections++
+						absent++
+						fmt.Printf("%s/%04d.md  %s   headed on a leaf the scan does not have\n",
+							b.ID, s.PDFPage, head)
 					} else if put == "" {
 						lost++
 						switch {
@@ -2040,6 +2155,9 @@ func fixOpening(args []string) error {
 			if inferred[pdfPage] {
 				f.Meta.Flags = withFlag(f.Meta.Flags, markFromContents)
 			}
+			if fromLeaf[pdfPage] {
+				f.Meta.Flags = withFlag(f.Meta.Flags, headingFromAbsentLeaf)
+			}
 			if err := f.Write(path); err != nil {
 				return err
 			}
@@ -2057,6 +2175,9 @@ func fixOpening(args []string) error {
 	}
 	if told > 0 {
 		fmt.Printf("fix opening: %d of the openings were not on the page at all and came from the contents, with the text layer as the witness that the page prints them\n", told)
+	}
+	if absent > 0 {
+		fmt.Printf("fix opening: %d of the openings are printed on a leaf the scan does not have and were put at the top of the first page of the § the file carries\n", absent)
 	}
 	if lost > 0 {
 		fmt.Printf("fix opening: %s not on the page at all and need the page image read again\n", openings(lost))
@@ -2782,6 +2903,57 @@ func fixElision(args []string) error {
 	}
 	if changed > 0 && !*check {
 		fmt.Println("fix elision: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+func fixDash(args []string) error {
+	fs := flag.NewFlagSet("fix dash", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixDashUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, marks int
+	for _, b := range books.Books {
+		if b.Lang != "fr" || (*book != "" && b.ID != *book) {
+			continue
+		}
+		err = eachPage(root, books, b.ID, func(path string, f *corpus.PageFile) error {
+			pages++
+			body, n := typography.StatementDash(f.Body)
+			if n == 0 || body == f.Body {
+				return nil
+			}
+			changed++
+			marks += n
+			if *check {
+				fmt.Printf("%s  %d\n", rel(root, path), n)
+				return nil
+			}
+			f.Body = body
+			f.Meta.Flags = withFlag(f.Meta.Flags, string(extract.FlagShortHeadDash))
+			return f.Write(path)
+		})
+		if err != nil {
+			return err
+		}
+	}
+
+	verb := "wrote"
+	if *check {
+		verb = "would write"
+	}
+	fmt.Printf("fix dash: %d French pages read, %s %d em dashes on %d of them\n",
+		pages, verb, marks, changed)
+	if changed > 0 && !*check {
+		fmt.Println("fix dash: run bourbaki assemble")
 	}
 	return nil
 }

@@ -186,11 +186,12 @@ func dirs(path string) ([]string, error) {
 }
 
 // romanOrder sorts chapter directories the way the volume does, so that VIII
-// comes after III and not before it.
+// comes after III and not before it. A volume divided into no chapters is
+// bound in the order pagemap numbered its spans. See corpus.ChapterOrder.
 func romanOrder(chapters []string) error {
 	value := make(map[string]int, len(chapters))
 	for _, ch := range chapters {
-		n, err := corpus.RomanOrder(ch)
+		n, err := corpus.ChapterOrder(ch)
 		if err != nil {
 			return err
 		}

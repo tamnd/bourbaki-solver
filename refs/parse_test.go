@@ -371,6 +371,26 @@ func TestParse(t *testing.T) {
 			Chapter: "II", Section: 4, Subsec: 6,
 			Kind: corpus.KindProposition, Number: 7}},
 	}, {
+		// The chapter with no word in front of it, which is how the index of
+		// notation of Algebra I to III sets every one of its 1523 entries. Read
+		// only with the word the numeral went unread and the § was taken for a §
+		// of the file doing the citing, which is a historical note standing in no
+		// chapter, so all 1523 came back as a chapter with no numeral at all.
+		name: "a chapter with no word in front of it",
+		in:   "$x + y, x \\cdot y, xy, x \\top y, x \\perp y$: I, § 1, no. 1.",
+		want: []Citation{{Raw: "I, § 1, no. 1", Form: FormSection,
+			Chapter: "I", Section: 1, Subsec: 1}},
+	}, {
+		// The same numeral in front of a page, which is the form the § form would
+		// take the head of. It is read whole because the page form is tried first,
+		// and read otherwise it comes apart into a § of chapter II that nothing
+		// points at and a bare Theorem 6 hunted for in the § doing the citing.
+		name: "a chapter with no word in front of it and a page after it",
+		in:   "by II, §7, No. 5, p. 300, Theorem 6 the module is flat",
+		want: []Citation{{Raw: "II, §7, No. 5, p. 300, Theorem 6", Form: FormPage,
+			Chapter: "II", Section: 7, Subsec: 5, Page: 300,
+			Kind: corpus.KindTheorem, Number: 6}},
+	}, {
 		// The sign set as TeX, which is how page 178 of Theory of Sets writes it
 		// four times over. Nothing here was read at all before, not even as an
 		// unresolved reference, because the line carries no § for a locator to

@@ -159,6 +159,33 @@ func RomanOrder(s string) (int, error) {
 	return total, nil
 }
 
+// ChapterOrder is RomanOrder on a volume that prints chapters and the number
+// itself on a volume that does not.
+//
+// Three things in this corpus are bound as a volume and divided into no
+// chapters. Elements of the History of Mathematics is one, a set of
+// twenty eight notes under no chapter heading at all, and the two fascicules of
+// Varietes differentielles are the others. pagemap gives each of them a span
+// named with an arabic number, "1" for the whole of the history and "1" and "2"
+// for the two fascicules, and assemble writes the sections under a directory of
+// that name, so content/en/hist/1 is where the notes are.
+//
+// Everything that walks content/ in the book's own order therefore meets a
+// chapter directory that is not a roman numeral, and refusing it stops the walk
+// on the whole corpus rather than on the one volume. Reading it as the number
+// it is puts those volumes in the order they are bound, which is the order the
+// book has, and leaves every volume that does print chapters exactly as it was.
+func ChapterOrder(s string) (int, error) {
+	if n, err := RomanOrder(s); err == nil {
+		return n, nil
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("not a chapter numeral: %q", s)
+	}
+	return n, nil
+}
+
 // Scope is what a statement's number is counted within. Bourbaki does not
 // number everything the same way, and a label that assumed it did would put two
 // different statements at the same address.

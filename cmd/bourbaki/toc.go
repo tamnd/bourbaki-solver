@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -16,13 +17,15 @@ import (
 
 func runTOC(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("toc: want one of build, show, verify")
+		return fmt.Errorf("toc: want one of build, body, show, verify")
 	}
 	switch args[0] {
 	case "build":
 		return tocBuild(args[1:])
 	case "show":
 		return tocShow(args[1:])
+	case "body":
+		return tocBody(args[1:])
 	case "verify":
 		return tocVerify(args[1:])
 	default:
@@ -296,11 +299,19 @@ func printTOC(r *toc.Result, verbose bool) {
 	}
 }
 
+// trim is a title cut to fit a column of the table this prints.
+//
+// It counts runes and not bytes. Every title in the French volumes carries
+// accents and half the titles in Lie carry a typographic apostrophe, all of
+// which are two or three bytes, so a cut made on a byte count lands in the
+// middle of one and prints a replacement character: "Décomposition des
+// représentations d\ufffd" is what chapter VII of Lie used to show.
 func trim(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n-1] + "…"
+	return string(r[:n-1]) + "…"
 }
 
 func tocShow(args []string) error {
@@ -433,4 +444,108 @@ func tocVerify(args []string) error {
 		return fmt.Errorf("%d headings are printed on a page the contents does not name", moved)
 	}
 	return nil
+}
+
+// tocBody reads a volume's contents off its own pages, for the volumes that
+// have no contents page in the scan to read.
+//
+// It is a separate subcommand and not a fallback inside build, because the two
+// readings are not of equal standing and the manifest should say which one it
+// got. build reads the list the press printed and is complete by construction.
+// This sweeps the headings out of a body and is only as complete as the reading
+// of that body, so it is asked for by name, one volume at a time, and what it
+// writes is looked at before it is committed.
+func tocBody(args []string) error {
+	fs := flag.NewFlagSet("toc body", flag.ExitOnError)
+	book := fs.String("book", "", "book id")
+	dry := fs.Bool("n", false, "print the result without writing anything")
+	verbose := fs.Bool("v", false, "print every § and no. of every chapter")
+	retitle := fs.Bool("retitle", false, "take the titles the pages now read, over the ones the manifest carries")
+	fs.Usage = func() {
+		fmt.Fprint(os.Stderr, "usage: bourbaki toc body -book <id> [flags]\n\nReads a volume's § and no. headings off its pages into manifests/toc/,\nfor a volume whose scan carries no table of contents.\n\nThe chapters and their spans come from the page map. The § and no. come\nfrom the headings the press set on the pages, and the printed page of\neach comes from the page map rather than from the heading, because a\nheading does not carry one.\n\n")
+		fs.PrintDefaults()
+	}
+	if _, err := parseFlags(fs, args); err != nil {
+		return err
+	}
+	if *book == "" {
+		fs.Usage()
+		return fmt.Errorf("toc body: -book is required")
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+	books, err := corpus.LoadBooks(root)
+	if err != nil {
+		return err
+	}
+	b, ok := books.Get(*book)
+	if !ok {
+		return fmt.Errorf("no book %q in %s", *book, corpus.BooksPath(root))
+	}
+	man, err := corpus.LoadTOC(root)
+	if err != nil {
+		return err
+	}
+	pm, err := pagemap.Load(root, b.ID)
+	if err != nil {
+		return fmt.Errorf("%s: %w (run bourbaki pagemap build first)", b.ID, err)
+	}
+	pages, err := bodyPages(root, b.ID)
+	if err != nil {
+		return err
+	}
+	if len(pages) == 0 {
+		return fmt.Errorf("%s has no pages read yet", b.ID)
+	}
+	res := toc.FromBody(pages, pm, toc.Options{
+		Book: b.ID, Chapters: b.Chapters, Title: b.Title})
+	if was, ok := man.Get(b.ID); ok && !*retitle {
+		chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters)
+		res.Chapters = chapters
+		for _, one := range kept {
+			fmt.Printf("  kept %s\n", one)
+		}
+	}
+	printTOC(res, *verbose)
+	if len(toc.Hard(res.Problems)) > 0 {
+		return fmt.Errorf("%s has contents problems and was not written", b.ID)
+	}
+	if *dry {
+		return nil
+	}
+	man.Upsert(corpus.BookTOC{ID: b.ID, Grammar: res.Grammar.String(),
+		Chapters: res.Chapters})
+	if err := man.Save(root); err != nil {
+		return err
+	}
+	fmt.Printf("written to %s\n", corpus.TOCDir(root))
+	return nil
+}
+
+// bodyPages is every page of a volume as this corpus read it, in pdf order.
+func bodyPages(root, book string) ([]toc.BodyPage, error) {
+	paths, err := filepath.Glob(filepath.Join(corpus.PagesDir(root, book), "*.md"))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	var out []toc.BodyPage
+	for _, path := range paths {
+		file, err := corpus.ReadFile[corpus.PageFrontMatter](path)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", path, err)
+		}
+		if file.Meta.PDFPage <= 0 {
+			continue
+		}
+		page := toc.BodyPage{PDFPage: file.Meta.PDFPage,
+			RunningHead: file.Meta.RunningHead, Body: file.Body}
+		if file.Meta.Locator != nil {
+			page.Section = file.Meta.Locator.Section
+		}
+		out = append(out, page)
+	}
+	return out, nil
 }
