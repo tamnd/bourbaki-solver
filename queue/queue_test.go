@@ -1012,3 +1012,58 @@ func TestLeaseWhereLeavesAFailedJobToTheLaneThatCanTakeIt(t *testing.T) {
 		t.Errorf("the full lane took %s, want the chunk the small one failed", big.Target)
 	}
 }
+
+// A lease whose worker is gone comes back without waiting out the deadline, and
+// one whose worker is alive does not. The pid that stands for a dead worker is
+// this test's own process with the lease rewritten to a pid that cannot be
+// running, since a pid the test could kill would be racy.
+func TestReapTakesBackALeaseWhoseWorkerIsGone(t *testing.T) {
+	dir := t.TempDir()
+	q, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"gone", "here", "elsewhere"} {
+		if _, err := q.Add(Job{Stage: "translate", Target: id, ID: id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range 3 {
+		if _, err := q.Lease("translate", "server3", "", time.Minute); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// gone: this machine, a pid that is not running. here: this machine, this
+	// process. elsewhere: a pid that is not running but another machine's, which
+	// is the case the deadline still has to cover.
+	set := func(id string, pid int, worker string) {
+		job, err := q.read(Leased, "translate", id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		job.Lease.PID, job.Lease.Worker = pid, worker
+		if err := q.write(Leased, job); err != nil {
+			t.Fatal(err)
+		}
+	}
+	const noSuchPID = 0x7FFFFFF0
+	set("gone", noSuchPID, workerName())
+	set("here", os.Getpid(), workerName())
+	set("elsewhere", noSuchPID, workerName()+"-other")
+
+	reaped, err := q.Reap("translate")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reaped) != 1 || reaped[0] != "gone" {
+		t.Fatalf("reaped %v, want [gone]", reaped)
+	}
+	for _, id := range []string{"here", "elsewhere"} {
+		if _, err := q.read(Leased, "translate", id); err != nil {
+			t.Errorf("%s should still be leased: %v", id, err)
+		}
+	}
+	if _, err := q.read(Pending, "translate", "gone"); err != nil {
+		t.Errorf("gone should be pending again: %v", err)
+	}
+}
