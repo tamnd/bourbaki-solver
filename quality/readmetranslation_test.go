@@ -151,6 +151,48 @@ func TestTheRowsAreInShelfOrderAndNotAlphabetical(t *testing.T) {
 	}
 }
 
+// A Book whose only English is this project's own reading of the French is a
+// Book where every translation is a translation of a translation, and the table
+// has to say so. A hundred per cent for such a Book is not the claim a hundred
+// per cent makes for one Springer printed, and the two sit in the same column.
+func TestABookWithNoPrintedEnglishSaysSoInTheMachineColumn(t *testing.T) {
+	c := transCorpus(
+		"content/en-mt/ta/I/01_s1_revetements.md",
+		"content/en-mt/ta/I/exercises/s1/01.md",
+		"content/vi/ta/I/01_s1_revetements.md",
+		"content/vi/ta/I/exercises/s1/01.md",
+		"content/en/alg/VIII/01_s1_rings.md",
+		"content/vi/alg/VIII/01_s1_rings.md",
+	)
+	got := Translated(c)
+	if want := "| 1 | 1 | 100% | 2, all of it |"; !strings.Contains(got, want) {
+		t.Errorf("the wholly machine English Book does not end %q:\n%s", want, got)
+	}
+	if want := "| Algebra | 1 | 0 | 1 | 0 | 100% | 0 |"; !strings.Contains(got, want) {
+		t.Errorf("the Springer translated Book is not marked as having none:\n%s", got)
+	}
+	if want := "2 of the 3 files in Vietnamese"; !strings.Contains(got, want) {
+		t.Errorf("the prose does not count the two-hop files: %q\n%s", want, got)
+	}
+}
+
+// A Book part printed and part not gets the count and not the words, because
+// "all of it" is a different warning and saying it wrongly is worse than a bare
+// number.
+func TestAPartlyPrintedBookGetsACountAndNotTheWords(t *testing.T) {
+	c := transCorpus(
+		"content/en/ac/I/01_s1_prime_ideals.md",
+		"content/en-mt/ac/VIII/01_s1_dimension.md",
+	)
+	got := Translated(c)
+	if want := "| Commutative Algebra | 2 | 0 | 0 | 0 | 0% | 1 |"; !strings.Contains(got, want) {
+		t.Errorf("the partly printed Book is not counted plainly:\n%s", got)
+	}
+	if strings.Contains(got, "1, all of it") {
+		t.Errorf("a partly printed Book is described as wholly machine English:\n%s", got)
+	}
+}
+
 // Front matter that will not parse is still a file somebody has to translate,
 // so the kind is read off the path and not off the fields. A file that lost its
 // front matter should not quietly stop being counted as work.

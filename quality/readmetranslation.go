@@ -55,6 +55,12 @@ type translationRow struct {
 	// done is, per target language, how many of those have a file in that
 	// language: sections at 0 and exercises at 1.
 	done map[string][2]int
+
+	// machine is how many of the sections and exercises above are held only in
+	// content/en-mt, so a translation of them is a translation of a translation.
+	// machineDone is, per target language, how many of those have been made.
+	machine     int
+	machineDone map[string]int
 }
 
 // Translated renders the block. The name is not Translation because that is
@@ -71,14 +77,15 @@ func Translated(c *Corpus) string {
 		name := LangName(l)
 		fmt.Fprintf(&b, " %s sections | %s exercises | Done |", name, name)
 	}
-	b.WriteString("\n| --- | --- | --- |")
+	b.WriteString(" From machine English |\n| --- | --- | --- |")
 	for range langs {
 		b.WriteString(" --- | --- | --- |")
 	}
-	b.WriteString("\n")
+	b.WriteString(" --- |\n")
 
-	var sections, exercises int
+	var sections, exercises, machine int
 	total := map[string][2]int{}
+	machineTotal := map[string]int{}
 	for _, r := range rows {
 		fmt.Fprintf(&b, "| %s | %d | %d |", r.bookTitle, r.sections, r.exercises)
 		for _, l := range langs {
@@ -88,17 +95,19 @@ func Translated(c *Corpus) string {
 			t[0] += d[0]
 			t[1] += d[1]
 			total[l] = t
+			machineTotal[l] += r.machineDone[l]
 		}
-		b.WriteString("\n")
+		fmt.Fprintf(&b, " %s |\n", machineCell(r.machine, r.sections+r.exercises))
 		sections += r.sections
 		exercises += r.exercises
+		machine += r.machine
 	}
 	fmt.Fprintf(&b, "| **All** | **%d** | **%d** |", sections, exercises)
 	for _, l := range langs {
 		t := total[l]
 		fmt.Fprintf(&b, " **%d** | **%d** | **%s** |", t[0], t[1], percent(t[0]+t[1], sections+exercises))
 	}
-	b.WriteString("\n\n")
+	fmt.Fprintf(&b, " **%d** |\n\n", machine)
 
 	held := langHoldings(c)
 	fmt.Fprintf(&b, "The source column is the English, which is %d sections and %d exercises: %d files in `content/en` where Springer printed an English translation and %d in `content/en-mt` where this project read the French instead. The French originals are %d sections and %d exercises in `content/fr`, and they are counted here rather than compared, because a file name carries a slug of its own title and matching the two trees by path calls every honestly translated title a missing section.\n",
@@ -113,8 +122,32 @@ func Translated(c *Corpus) string {
 		}
 		fmt.Fprintf(&b, "\n%s. Sections here means every file that is not an exercise, so the introductions, the notes to the reader and the historical notes are counted with the §§.\n",
 			joinList(parts))
+
+		var hops []string
+		for _, l := range langs {
+			if machineTotal[l] > 0 {
+				hops = append(hops, fmt.Sprintf("%d of the %d files in %s", machineTotal[l], total[l][0]+total[l][1], LangName(l)))
+			}
+		}
+		if len(hops) > 0 {
+			fmt.Fprintf(&b, "\nThe last column is the part of a Book that was never printed in English, so the only English of it is this project's own reading of the French. A translation made from one of those is a translation of a translation, and that is %s. Where the column says all of it the whole Book is in that position, and a hundred per cent in the Done column for such a Book is not the same claim as a hundred per cent for one Springer translated.\n",
+				joinList(hops))
+		}
 	}
 	return b.String()
+}
+
+// machineCell says how much of a Book has no printed English behind it. The
+// whole of a Book is worth saying in words rather than leaving a reader to
+// notice that two numbers on the row happen to be equal.
+func machineCell(machine, all int) string {
+	switch {
+	case machine == 0:
+		return "0"
+	case machine == all:
+		return fmt.Sprintf("%d, all of it", machine)
+	}
+	return fmt.Sprintf("%d", machine)
 }
 
 // percent writes a share the way the tables around it do, with no decimal,
@@ -140,6 +173,12 @@ func translationRows(c *Corpus) ([]translationRow, []string) {
 	type unit struct {
 		book     string
 		exercise bool
+
+		// machine is whether the only English of this file is content/en-mt.
+		// The two trees hold no path in common, so this is settled by which of
+		// them the file was found in, and the precedence below is a guard
+		// against a day when they do rather than a rule that fires now.
+		machine bool
 	}
 	source := map[string]unit{}
 	for _, d := range c.Docs {
@@ -154,7 +193,7 @@ func translationRows(c *Corpus) ([]translationRow, []string) {
 		if _, seen := source[rel]; seen && lang != "en" {
 			continue
 		}
-		source[rel] = unit{book: book, exercise: isExercisePath(rel)}
+		source[rel] = unit{book: book, exercise: isExercisePath(rel), machine: lang == "en-mt"}
 	}
 
 	have := map[string]map[string]bool{}
@@ -178,6 +217,7 @@ func translationRows(c *Corpus) ([]translationRow, []string) {
 			r = &translationRow{
 				book: u.book, bookTitle: corpus.BookTitle(u.book),
 				order: bookShelfOrder(c, u.book), done: map[string][2]int{},
+				machineDone: map[string]int{},
 			}
 			byBook[u.book] = r
 		}
@@ -185,6 +225,9 @@ func translationRows(c *Corpus) ([]translationRow, []string) {
 			r.exercises++
 		} else {
 			r.sections++
+		}
+		if u.machine {
+			r.machine++
 		}
 		for _, l := range langs {
 			if !have[l][rel] {
@@ -197,6 +240,9 @@ func translationRows(c *Corpus) ([]translationRow, []string) {
 				d[0]++
 			}
 			r.done[l] = d
+			if u.machine {
+				r.machineDone[l]++
+			}
 		}
 	}
 
