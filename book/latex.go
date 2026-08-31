@@ -355,7 +355,7 @@ func (r Renderer) unmask(s string, spans []mathtex.Span, tags map[int]string) st
 		}
 		if strings.Contains(text, `\begin{`) {
 			widened, wide := widen(text)
-			text = widened
+			text = diagrams(widened)
 			for _, w := range wide {
 				if r.Wide != nil {
 					r.Wide(r.at(sp.Line), w)

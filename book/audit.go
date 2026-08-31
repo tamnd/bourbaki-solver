@@ -374,7 +374,11 @@ func (a *Audit) written(d *Document, opt AuditOptions) {
 	if d == nil {
 		return
 	}
-	a.ok("every character has a glyph the build can set", len(d.Missing) == 0,
+	// The fallback face sets these now, so this is no longer a report of what
+	// the page lost. It is a report of what the prose holds that a Times has no
+	// glyph for, which in a Latin book is a quotation in another alphabet or it
+	// is a reading that went wrong, and both are worth a line in the audit.
+	a.ok("no prose character needed the fallback face", len(d.Missing) == 0,
 		fmt.Sprintf("%d characters over %d places", distinct(d.Missing), len(d.Missing)),
 		top(d.Missing, 12)...)
 	a.ok("no TeX control sequence is loose in the prose", len(d.Stray) <= opt.Stray,
