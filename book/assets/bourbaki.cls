@@ -7,9 +7,11 @@
 % bands of the cover sit at the same fractions of the trim height on two volumes
 % of different trim, which is what says they are fractions and not millimetres.
 %
-% The trim comes from manifests/books.yaml, which took it from the PDF, so a
-% built Algebra I is 128 by 199.5 mm because that is what the book on the shelf
-% is. Nothing here has a default paper size worth using.
+% The page is the one exception and it is a deliberate one. It used to come from
+% manifests/books.yaml, which took it from whichever PDF the volume was read out
+% of, so a built Algebra I was 128 by 199.5 mm because the 1998 reprint on the
+% shelf is. Every volume is now set on Springer's monograph page instead, and the
+% measurements and the reasoning are written beside \bpaper.
 %
 % One thing this does not do is reproduce the Springer logo, which is somebody
 % else's mark and not part of the mathematics.
@@ -19,10 +21,9 @@
 
 \LoadClass[10pt,twoside]{book}
 
-% no-math because the mathematics is set by newtxmath below and not by fontspec.
-% Without it fontspec claims the math families for itself and newtxmath's
-% declarations are overwritten, which shows up as Computer Modern digits inside
-% a Times formula.
+% no-math because the mathematics is set by the packages below and by the symbol
+% font declarations further down, not by fontspec. Without it fontspec claims the
+% math families for itself and those declarations are overwritten.
 \RequirePackage[no-math]{fontspec}
 % leqno because Bourbaki numbers a formula on the left. 1108 displays in the
 % corpus carry \tag and the printing has every one of them flush left, which is
@@ -33,30 +34,35 @@
 \RequirePackage[leqno]{amsmath}
 \RequirePackage{amssymb}
 \RequirePackage{mathrsfs}
-% newtxmath is the mathematics of the Times the text is set in. It is the whole
-% reason the page holds together: amssymb and mathrsfs on their own are Computer
-% Modern, and a Computer Modern formula in the middle of a Times paragraph reads
-% as two books printed on the same sheet.
+% amssymb and mathrsfs on Computer Modern, which is the mathematics of the face
+% the text is set in. There is no third math package here and there used to be:
+% newtxmath, the Times mathematics, went out when the text face did, and the
+% reason is under \setmainfont.
 %
-% unicode-math with STIX Two Math was tried first and abandoned, and the reason
-% is worth writing down because it will be tried again otherwise. unicode-math
-% defines every symbol as a \Umathchar primitive. hyperref, when it turns a
-% heading into a PDF bookmark string, throws the math shift away and then tries
-% to expand what was inside it, and a \Umathchar is not something it can expand.
-% The build died on a real heading, SS 4 of chapter II of Algebre, whose title
-% carries \otimes, with "Improper alphabetic constant". newtxmath's symbols are
+% What the two above give between them is what the reference volume embeds.
+% pdffonts on Springer Nature's 2023 Algebra Chapter 8 lists CMEX10 for the big
+% operators, LMMathItalic and LMMathSymbols for the letters and the signs, rsfs10
+% for the script capitals, and nothing else. pdffonts on this build lists CMEX10,
+% CMMI, CMSY, MSAM and MSBM out of amssymb, EUFM for the fraktur and rsfs10 out
+% of mathrsfs. LMMathItalic and CMMI are the same design under two names, one cut
+% for the OpenType release and one for the original Type 1.
+%
+% unicode-math with STIX Two Math was tried before either of these and abandoned,
+% and the reason is worth keeping because it will be tried again otherwise.
+% unicode-math defines every symbol as a \Umathchar primitive. hyperref, when it
+% turns a heading into a PDF bookmark string, throws the math shift away and then
+% tries to expand what was inside it, and a \Umathchar is not something it can
+% expand. The build died on a real heading, SS 4 of chapter II of Algebre, whose
+% title carries \otimes, with "Improper alphabetic constant". These symbols are
 % ordinary \mathchar definitions and hyperref has digested those for thirty
 % years.
 %
-% The corpus uses 283 distinct control sequences inside its math spans. All 283
-% were probed for existence under the old stack and under this one. The two
-% stacks miss exactly the same four and no others, so nothing that used to set
-% has stopped setting. \widecheck is one of the four and has a fallback below.
-% The other three were not commands at all: \hook, \lvertarrow and \sqleftarrow
-% were what a reading made of a sign it could not name. They have since been
-% read off the printed pages and replaced in the corpus by what is actually
-% there, so the probe now misses one, not four.
-\RequirePackage{newtxmath}
+% The corpus uses 283 distinct control sequences inside its math spans and every
+% one of them was probed against this stack. It misses \widecheck, which has a
+% fallback below, and nothing else. \overparen and \wideparen used to be pointed
+% at newtxmath's \widearc and no longer can be; the corpus turns out to use
+% neither, so the two \providecommand lines that did it are gone with the
+% package.
 \RequirePackage{graphicx}
 \RequirePackage{xcolor}
 \RequirePackage{eso-pic}
@@ -101,15 +107,17 @@
 \DeclareMathOperator{\th}{th}
 
 % The arc over an inverse image, which E II SS 3 prints as a wide arc with the
-% -1 sitting above it. A reading names it \overparen or \wideparen, after the
-% two packages that carry it, and neither package can be loaded here: yhmath
-% takes over \widehat and mathabx takes over most of the symbols. newtxmath has
-% the sign under a third name, so the two readings are pointed at it rather than
-% a package pulled in for one accent. \overgroup was the other candidate and is
-% wrong: it draws a flat bar with the ends turned down, and the printing has a
-% curve.
-\providecommand{\overparen}[1]{\widearc{#1}}
-\providecommand{\wideparen}[1]{\widearc{#1}}
+% -1 sitting above it. A reading names it \overparen or \wideparen, after the two
+% packages that carry it, and neither package can be loaded here: yhmath takes
+% over \widehat and mathabx takes over most of the symbols. These used to be
+% pointed at newtxmath's \widearc, which is the same sign under a third name, and
+% newtxmath is no longer loaded.
+%
+% A census over the whole corpus finds no \overparen and no \wideparen in any
+% math span, so there is nothing to point anywhere. \widetilde is what the
+% readings settled on and it is in every stack. If one of the two names comes
+% back, \overgroup is not the substitute: it draws a flat bar with the ends
+% turned down and the printing has a curve.
 
 % The two interior products of Algebre III SS 11 are printed as corners, and the
 % printing spaces them the way it spaces any other binary operator: x is set
@@ -128,62 +136,70 @@
 % file nobody is looking at, so the counter goes up rather than the build down.
 \setcounter{MaxMatrixCols}{20}
 
-% Times, which is what a Springer mathematics volume is set in.
+% Latin Modern, which is what Springer sets the Elements in.
 %
-% This was Latin Modern, and Latin Modern is Computer Modern: it is the face a
-% document is set in when nobody chose one. Springer does not set the Elements
-% in it and does not set anything else in it either. A Springer mathematics
-% volume, the Graduate Texts and the Universitext and the Grundlehren alike, is
-% set in a Times, and so is nearly every journal a reader of this book has read.
-% Times is a darker and narrower face than Computer Modern, it holds ink at ten
-% point in a way Computer Modern's thin strokes do not, and it is the reason a
-% Springer page reads as a printed book and a LaTeX default reads as a preprint.
+% This was Latin Modern once, was changed to a Times, and is Latin Modern again.
+% The argument for the Times was that a Springer mathematics volume is set in
+% one, that the Graduate Texts and the Universitext and the Grundlehren are all
+% Times, and that Latin Modern is the face a document gets when nobody chose
+% one. Every clause of that is true of Springer in general and none of it is
+% true of this series, which is the thing being set.
 %
-% TeX Gyre Termes is that Times. It is the free cut of it, it is in tectonic's
-% bundle, and it is the face newtxmath's letters were drawn against, so the
-% italic in a formula and the italic in a sentence are the same italic. STIX Two
-% Text and TeX Gyre Pagella were set beside it on the same page of real Bourbaki
-% before this was chosen. STIX is the same Times with a slightly tighter fit and
-% would have done as well for the prose, but its math font is unicode-math only
-% and that stack does not survive hyperref, which is written out above. Pagella
-% is a Palatino and is not what Springer uses.
+% There is exactly one Bourbaki in pdf/ that is a modern Springer setting rather
+% than a photograph of a Hermann page, the Algebra Chapter 8 that Springer Nature
+% typeset in 2023, and pdffonts on it reads LMRoman10-Regular, LMRoman10-Italic,
+% LMRomanCaps10-Regular, LMRoman6, 7, 8, 9 and 12 for the smaller sizes, and the
+% Latin Modern math fonts. The Times faces in that file are on the four pages of
+% Springer's own front matter and nowhere in the mathematics. So the question of
+% what Springer sets the Elements in has an answer that can be read off a file
+% rather than argued from the rest of their list, and the answer is this.
 %
-% Vietnamese was the condition Latin Modern was chosen for and Termes meets it.
-% Tiếng Việt, Đại số, Bổ đề, Định lý, Mệnh đề, Hệ quả and the whole of Latin
-% Extended Additional set in it with no missing character. Two of the four
-% languages this builds stack tone marks on vowels and a font that gets those
-% wrong cannot set half the corpus.
+% Setting the two side by side on the same page of real Bourbaki, at the measure
+% and the leading under \bpaper, the Times is the darker page and the Latin
+% Modern is the reference page. The volume runs about six per cent longer in
+% Latin Modern, 431 pages against 407 for the English Algebra VIII, because the
+% face is wider.
 %
-% The small caps are real. \textsc is what every statement head in the book
-% uses, and TeX Gyre Termes carries the feature in the regular file, so there is
-% no separate caps file to name here and no fontspec warning about faking them.
-% Latin Modern needed lmromancaps10 named explicitly for that reason.
+% Vietnamese was the condition the Times was kept for once and it turns out not
+% to be a condition at all: lmroman10-regular.otf carries the whole of Latin
+% Extended Additional. Tiếng Việt, Đại số, Bổ đề, Định lý, Mệnh đề and Hệ quả set
+% in it with no missing character, and so do the 37 Vietnamese volumes. The
+% Latin Modern that does not is the Type 1 cut from before the OpenType release,
+% which is what the earlier note here was remembering.
+%
+% The small caps are real and they are in a file of their own. \textsc is what
+% every statement head in the book uses and lmroman10-regular has no small caps
+% feature, so lmromancaps10-regular is named as the SmallCapsFont and there is no
+% fontspec warning about faking them.
 %
 % The fonts are named by file rather than by family. tectonic ships them inside
-% its bundle rather than installing them, so \setmainfont{TeX Gyre Termes} fails
-% on a machine that has no TeX Live and works on one that has, which is exactly
-% the kind of difference this build is meant not to have. The file names resolve
-% out of the bundle on any machine, and every one below was checked before it
-% was written down.
-\setmainfont{texgyretermes-regular.otf}[
-  BoldFont       = texgyretermes-bold.otf,
-  ItalicFont     = texgyretermes-italic.otf,
-  BoldItalicFont = texgyretermes-bolditalic.otf,
+% its bundle rather than installing them, so \setmainfont{Latin Modern Roman}
+% fails on a machine that has no TeX Live and works on one that has, which is
+% exactly the kind of difference this build is meant not to have. The file names
+% resolve out of the bundle on any machine, and every one below was checked
+% before it was written down.
+\setmainfont{lmroman10-regular.otf}[
+  BoldFont       = lmroman10-bold.otf,
+  ItalicFont     = lmroman10-italic.otf,
+  BoldItalicFont = lmroman10-bolditalic.otf,
+  SmallCapsFont  = lmromancaps10-regular.otf,
 ]
-% TeX Gyre Heros is the Helvetica that pairs with a Times, and nothing in the
-% book is set in it: the running heads are small capitals of the text face and
-% the corpus has no sans in it. It is here so that a document that ever asks for
-% one does not fall back to Computer Modern Sans beside a Times page.
-\setsansfont{texgyreheros-regular.otf}[
-  BoldFont       = texgyreheros-bold.otf,
-  ItalicFont     = texgyreheros-italic.otf,
-  BoldItalicFont = texgyreheros-bolditalic.otf,
+% The sans and the mono of the same family, so that the three faces of the
+% document are three cuts of one design rather than three designs.
+%
+% Nothing in the book is set in the sans: the running heads are small capitals of
+% the text face and the corpus has no sans in it anywhere. It is named so that a
+% document that ever asks for one gets Latin Modern's and not a Helvetica beside
+% a Latin Modern page. The mono has one use, the four character permanent tag in
+% the margin, set at 7 pt in grey.
+\setsansfont{lmsans10-regular.otf}[
+  BoldFont       = lmsans10-bold.otf,
+  ItalicFont     = lmsans10-oblique.otf,
+  BoldItalicFont = lmsans10-boldoblique.otf,
 ]
-% TeX Gyre Cursor is the Courier of the same family. Its whole use is the four
-% character permanent tag in the margin, set at 7 pt in grey.
-\setmonofont{texgyrecursor-regular.otf}[
-  BoldFont   = texgyrecursor-bold.otf,
-  ItalicFont = texgyrecursor-italic.otf,
+\setmonofont{lmmono10-regular.otf}[
+  BoldFont   = lmmonolt10-bold.otf,
+  ItalicFont = lmmono10-italic.otf,
 ]
 
 % Protrusion, which is the difference between a page that was justified and a
@@ -235,27 +251,26 @@
 % French mathematical printing of that period does, and it is why the printed
 % head is wider than the same words set solid. Measurement is under \bheadfont
 % further down. Nothing else in the book is tracked.
-\newfontfamily\bheadface{texgyretermes-regular.otf}[LetterSpace=5.5]
+\newfontfamily\bheadface{lmromancaps10-regular.otf}[LetterSpace=2]
 
-% The roman inside a formula. newtxmath sets the letters and the symbols but
-% takes its upright alphabet and its digits from whatever the kernel has, and
-% with fontspec in no-math mode the kernel still has Computer Modern. Left
-% alone, every digit, every parenthesis and every \operatorname{Card} in the
-% book comes out Computer Modern in the middle of a Times formula. pdffonts on
-% a test page showed four Latin Modern faces embedded before these lines and
-% none after them.
+% The roman inside a formula. amssymb sets the symbols and the CM math fonts set
+% the letters, but the upright alphabet and the digits come from whatever the
+% kernel has, and with fontspec in no-math mode that is whatever the last class
+% to touch it left there. These lines say it explicitly, so that every digit,
+% every parenthesis and every \operatorname{Card} in the book is the same face as
+% the sentence around it.
 %
-% qtm, qhv and qcr are the Type1 TeX Gyre Termes, Heros and Cursor, which are
-% the same three faces named above in the encoding the math machinery wants.
-\DeclareSymbolFont{operators}{T1}{qtm}{m}{n}
-\SetSymbolFont{operators}{bold}{T1}{qtm}{b}{n}
-\DeclareMathAlphabet{\mathrm}{T1}{qtm}{m}{n}
-\DeclareMathAlphabet{\mathbf}{T1}{qtm}{b}{n}
-\DeclareMathAlphabet{\mathit}{T1}{qtm}{m}{it}
-\DeclareMathAlphabet{\mathsf}{T1}{qhv}{m}{n}
-\DeclareMathAlphabet{\mathtt}{T1}{qcr}{m}{n}
+% lmr, lms and lmtt are the Type 1 Latin Modern roman, sans and typewriter, which
+% are the same three faces named above in the encoding the math machinery wants.
+\DeclareSymbolFont{operators}{T1}{lmr}{m}{n}
+\SetSymbolFont{operators}{bold}{T1}{lmr}{b}{n}
+\DeclareMathAlphabet{\mathrm}{T1}{lmr}{m}{n}
+\DeclareMathAlphabet{\mathbf}{T1}{lmr}{b}{n}
+\DeclareMathAlphabet{\mathit}{T1}{lmr}{m}{it}
+\DeclareMathAlphabet{\mathsf}{T1}{lmss}{m}{n}
+\DeclareMathAlphabet{\mathtt}{T1}{lmtt}{m}{n}
 
-% The scripts a Times has nothing for. The corpus holds 239 characters of
+% The scripts the text face has nothing for. The corpus holds 239 characters of
 % Devanagari, Cyrillic, Armenian, Greek and Arabic, nearly all of them in the
 % historical notes quoting a source in its own alphabet, and the rest of them
 % OCR noise that a reader still has to be able to see in order to report. A hole
@@ -268,9 +283,11 @@
 % set on one and a gap on the other. A face out of the bundle is the same face
 % everywhere, which is the whole reason the text fonts are named by file too.
 %
-% It is a Times-metric serif, so a Greek word inside an English sentence sits at
-% the same weight and the same x-height as the sentence around it rather than
-% announcing itself.
+% It is a Times-metric serif, which is a shade darker and a shade narrower than
+% the Latin Modern around it. That is visible if you go looking for it and it is
+% the right trade: the alternative in the bundle that matches Latin Modern for
+% weight has none of the five scripts, and a Greek word set a little dark is a
+% Greek word a reader can read.
 %
 % book/unicode.go decides what goes inside this, and it wraps whole runs rather
 % than single characters so that no word is set in two faces.
@@ -288,8 +305,9 @@
 % alone hyperref tries to expand \bfallbackfont into the outline and writes a
 % warning for every heading that quotes a word in another alphabet. This says
 % the wrapper is the identity there, which keeps the word in the bookmark and
-% drops only the face. It is the same reason the mathematics is set by newtxmath
-% and not by unicode-math, written up at the top of this file.
+% drops only the face. It is the same reason the mathematics is set by ordinary
+% \mathchar declarations and not by unicode-math, written up at the top of this
+% file: hyperref has to be able to expand whatever it finds in a heading.
 \pdfstringdefDisableCommands{\let\bscript\@firstofone}
 
 % The dangerous bend. Bourbaki sets a road sign in the margin against a passage
@@ -308,9 +326,11 @@
 % which is what plain LaTeX has always done, and it takes the difference between
 % the two languages out of the build.
 %
-% newtxmath brings its own extension font, txexs, so this should now never fire.
-% It stays because the cost of a line is nothing and the cost of that failure
-% was a volume that would not build in one language and would in another.
+% This line was nearly dropped when newtxmath was loaded, on the grounds that
+% newtxmath brings its own extension font and the declaration would never fire.
+% With the mathematics back on the Computer Modern fonts it fires again and it is
+% the only thing standing between a Vietnamese head that carries math and a build
+% that stops at the last step.
 \DeclareFontShape{OMX}{cmex}{m}{n}{<->cmex10}{}
 
 \definecolor{bourbakiyellow}{HTML}{FEC746}
@@ -331,34 +351,53 @@
 \newcommand{\bseries}[1]{\renewcommand{\bvolumeseries}{#1}}
 \newcommand{\bedition}[1]{\renewcommand{\bvolumeedition}{#1}}
 
-% \bpaper is the trim out of the manifest. The margins are proportional to it
-% rather than fixed, because the volumes run from 128 mm wide to 174 mm and a
-% margin that suits one leaves the other either cramped or half empty.
+% \bpaper is the page, and it is one page for every volume of the shelf rather
+% than the trim of whichever printing the manifest happens to name.
 %
-% The fractions are the printing's own, off eight pages of the English Algebra I
-% to III taken from four places in the volume. The text block runs from 18.5 pt
-% to 344.7 pt on a 363.12 pt page every time, so the two margins are 0.051 of the
-% trim each and the measure is 0.898 of it. That is a narrow margin by the
-% standards of a modern book and it is what makes a Bourbaki page look like one.
-% The first version of this had 0.090 and 0.075, which cost 22 pt of measure and
-% ran the English Algebra to 127 per cent of the printed page count.
+% The earlier version of this took the trim out of the manifest and set the
+% margins as fractions of it, measured off the English Algebra I to III of 1998:
+% a 128 by 199.5 mm trim with a 6.5 mm margin on each side, giving a 116 mm
+% measure of ten point type led on 10.8 pt. Those numbers are right for that
+% book, because that book is a photographic reprint of the Hermann original and
+% Hermann set it on cheap paper in 1970 with as little white as it could manage.
+% Reproducing it faithfully reproduces a page nobody would set today: eighty
+% eight characters to the line with barely a point of lead between them.
 %
-% Vertically the block runs 46 pt to 511 pt with the head at 18 pt and the folio
-% at 529 pt, which is what the four fractions below give.
+% The numbers below are measured off the one Bourbaki in the sources that is a
+% modern Springer setting rather than a reprint, the Algebra Chapter 8 that
+% Springer Nature typeset in 2023. Six body pages of it give the same block
+% every time:
 %
-% The margin note column has to live inside the 18.5 pt, because there is no more
-% room than the printing left. It carries a four character tag at 7 pt in a
-% monospaced face, which measures 14.7 pt, so 0.042 of the trim holds it and 0.006
-% keeps it off the text. includemp=false because geometry's default is to count
-% that column as part of the body: left at the default it took another 28 pt off
-% the measure for a column the printing does not have.
-\newcommand{\bpaper}[2]{%
-  \geometry{paperwidth=#1,paperheight=#2,%
-    inner=0.051\paperwidth,outer=0.051\paperwidth,%
-    top=0.078\paperheight,bottom=0.098\paperheight,%
-    headsep=0.018\paperheight,footskip=0.040\paperheight,%
+%   trim         439.37 by 666.14 pt, which is 155 by 235 mm
+%   side margins 52.7 pt each, the same on the recto and the verso
+%   measure      333.9 pt, 117.8 mm, about 74 characters of ten point roman
+%   first line   54 to 59 pt from the head of the page
+%   last line    628.6 pt down, so 37.5 pt of foot margin
+%   leading      14.35 pt
+%
+% 155 by 235 mm is Springer's own monograph trim and 117 mm is the measure their
+% class sets on it. The leading is more open than that class's ten on twelve,
+% and it is what makes the reference page read the way it does, so it is kept.
+%
+% What this costs is the facsimile. A volume no longer comes out the size its
+% printing came out, and the audit line that reports the page count says so.
+% That line was never a gate, for the reason written beside it: two volumes out
+% of the same corpus already landed at 95 and 74 per cent of their printings
+% because the printings are two different books to look at.
+%
+% The margin note column carries a four character permanent tag at 7 pt in a
+% monospaced face, which measures 14.7 pt. The old 6.5 mm margin had no room for
+% it and it had to be squeezed in; 18.6 mm has room for it and for a gap wide
+% enough to read across. includemp=false because geometry's default is to count
+% that column as part of the body, and left at the default it takes 28 pt off
+% the measure for a column that is empty on most pages.
+\newcommand{\bpaper}{%
+  \geometry{paperwidth=155mm,paperheight=235mm,%
+    inner=18.6mm,outer=18.6mm,%
+    top=12mm,headheight=12pt,headsep=10pt,%
+    textheight=574.1pt,footskip=8mm,%
     includemp=false,%
-    marginparwidth=0.042\paperwidth,marginparsep=0.006\paperwidth}%
+    marginparwidth=7mm,marginparsep=2.5mm}%
 }
 
 % ---------------------------------------------------------------------------
@@ -717,20 +756,25 @@
 % \bheadfont is the size the head is set at, which is 9 pt against a 10 pt body,
 % in the tracked face declared above. Both numbers are measurements.
 %
-% Page 29 of the English Algebra I to III carries "DISTRIBUTIVITY OF ONE
-% INTERNAL LAW WITH RESPECT TO ANOTHER" in the head and it spans 262 pt. Set
-% solid in TeX Gyre Termes small capitals the same words measure 211.68 pt at
-% 8 pt, 238.14 pt at 9 pt and 264.60 pt at 10 pt. Reading that as a size gives
-% 10 pt, and a running head the same size as the body is not what the page
-% shows: the printed head is plainly smaller than the text under it.
+% The tracking is calibrated against the reference volume, Springer Nature's 2023
+% typesetting of Algebra Chapter 8, the one book in the sources that is set rather
+% than photographed. Page 60 of it carries "MULTIPLICITIES AND LENGTHS IN
+% SEMISIMPLE MODULES" in the head, running from 90.31 to 328.09, so 237.78 pt.
+% The same words in lmromancaps10 small capitals at 9 pt measure 231.06 pt set
+% solid, 234.84 pt tracked 1 and 238.62 pt tracked 2, so tracked 2 lands 0.8 pt
+% from the printing on a line of 238 pt.
 %
-% The width is made up with tracking instead, which is what the printing is
-% actually doing. At 9 pt the same string measures 255.78 pt tracked 4.0,
-% 258.65 pt tracked 4.65 and 262.39 pt tracked 5.5, so 5.5 lands 0.4 pt from
-% the printing on a line of 262 pt while the head keeps the size the page says
-% it has. Latin Modern hid this because its small capitals are far wider than a
-% Times: it gave 262.68 pt at 8 pt set solid, so the tracking got absorbed into
-% a wrong size and the head came out a size too small ever since.
+% Reading the width as a size instead gives nothing usable: 205.38 pt at 8 pt and
+% 231.06 pt at 9 pt bracket the target, and 8.5 pt tracked 2 gives 225.36 pt,
+% still 12 pt short. The printing is tracking a 9 pt face, not setting a larger
+% one solid.
+%
+% This was 5.5 and that number came from a different face and a different page.
+% It was fitted to "DISTRIBUTIVITY OF ONE INTERNAL LAW WITH RESPECT TO ANOTHER"
+% spanning 262 pt in the 1998 photographic reprint of Algebra I to III, set in
+% TeX Gyre Termes, whose small capitals are narrower than these. Carried over to
+% Latin Modern it overshoots the reference by 14 pt, and it was overshooting on a
+% measure that has since come in by 64 pt.
 %
 % Small capitals of a title case string, not of a capitalised one. Feeding the
 % capitals the corpus stores to \scshape gives full capitals throughout, which
@@ -777,27 +821,50 @@
     \bheadfont #1%
   \fi
 }
-% The room a head has is the measure less the corner label and a gap, which is
-% what the printing leaves: the head on page 29 stops at 305 pt and the "§ 3.5"
-% runs from 310 pt to the edge of the block.
+% The room a head has is the measure less the two corner labels and a gap on
+% each side. The head carries a locator at one end and a folio at the other, and
+% a folio reading A VIII.243 is the widest either corner gets.
+%
+% 7 em, which is 70 pt at body size, leaves 263.9 pt of the 333.9 pt measure. The
+% reference sets its own head in that band: its title runs 90.31 to 328.09 on a
+% text block that starts at 52.7, so it clears the inner corner by 37.6 pt and
+% the outer by 58.5 pt, and a title centred on the measure with the tighter of
+% those two gaps at each end would have 258.7 pt to work in. This was 9 em while
+% the measure was 397.9 pt wide, and holding 9 em through the move to the
+% Springer page would have cut the room by 31 per cent at the same time as the
+% face got wider, which is a lot of heads squeezed for no reason.
 \newlength{\bheadroom}
-\AtBeginDocument{\setlength{\bheadroom}{\dimexpr\textwidth-4.5em\relax}}
+\AtBeginDocument{\setlength{\bheadroom}{\dimexpr\textwidth-7em\relax}}
 
-% \brhead is what goes in the recto mark. The corner label is at body size and
-% upright, which is also measured: "3.5" prints 12.36 pt wide and the digits of
-% this font are half an em, so it is set at 10 pt and not at the 9 pt the head
-% around it uses.
+% \brhead is what goes in the recto mark: the locator at the inner edge and the
+% title between it and the folio. The locator is at body size and upright, which
+% is measured: "3.5" prints 12.36 pt wide and the digits of this font are half
+% an em, so it is set at 10 pt and not at the 9 pt the head around it uses.
+%
+% The folio is not here. It is added by the page style, because the head of a
+% recto and the head of a verso want it at opposite ends and the mark is written
+% once for both.
 \DeclareRobustCommand{\brhead}[2]{%
-  \hfil\bheadfont #1\hfil\makebox[0pt][r]{\normalsize\upshape #2}%
+  \makebox[0pt][l]{\normalsize\upshape #2}\hfil\bheadfont #1\hfil
 }
 \makeatletter
+% The head carries the folio and the foot is empty, which is what the reference
+% page does and what nearly every mathematical book in print does. The old style
+% put the folio at the foot and the locator at the outer edge of the head, which
+% is the 1970 Hermann arrangement.
+%
+% Three slots, mirrored about the spine: the locator at the inner edge, the head
+% of the section between, the page number at the outer edge. Both corners are
+% set in boxes of no width so that neither takes anything off the room the title
+% is centred in.
 \newcommand{\ps@bourbaki}{%
   \let\@mkboth\markboth
-  \def\@oddhead{\rightmark}%
-  \def\@evenhead{\makebox[0pt][l]{\normalsize\upshape\bchapternumeral}%
-    \hfil\bheadfont\leftmark\hfil}%
-  \def\@oddfoot{\hfil\small\thepage}%
-  \def\@evenfoot{\small\thepage\hfil}%
+  \def\@oddhead{\rightmark\makebox[0pt][r]{\normalsize\upshape\thepage}}%
+  \def\@evenhead{\makebox[0pt][l]{\normalsize\upshape\thepage}%
+    \hfil\bheadfont\leftmark\hfil
+    \makebox[0pt][r]{\normalsize\upshape\bchapternumeral}}%
+  \def\@oddfoot{}%
+  \def\@evenfoot{}%
 }
 % The opening page of a chapter, of the contents and of a historical note takes
 % its number at the foot and no running head, which is what the printing does.
@@ -866,18 +933,26 @@
 
 % A display in the corpus is a formula on its own line and nothing else, so the
 % spacing round it is the spacing of a formula in a paragraph rather than the
-% spacing of a theorem. These are LaTeX's own values, set here so that a change
-% is one line and not a search.
-\setlength{\abovedisplayskip}{6pt plus 2pt minus 2pt}
-\setlength{\belowdisplayskip}{6pt plus 2pt minus 2pt}
-\setlength{\abovedisplayshortskip}{3pt plus 1pt minus 1pt}
-\setlength{\belowdisplayshortskip}{4pt plus 1pt minus 1pt}
+% spacing of a theorem.
+%
+% The comment that used to sit here said these were LaTeX's own values and they
+% were not: LaTeX at ten point sets \abovedisplayskip to 10 pt and this had 6.
+% Four points off every display in a book that is mostly displays is why a
+% formula used to sit in the paragraph rather than stand out of it. These are
+% the real ten point values.
+\setlength{\abovedisplayskip}{10pt plus 2pt minus 5pt}
+\setlength{\belowdisplayskip}{10pt plus 2pt minus 5pt}
+\setlength{\abovedisplayshortskip}{0pt plus 3pt}
+\setlength{\belowdisplayshortskip}{6pt plus 3pt minus 3pt}
 
-% The printing sets ten point on eleven. That was measured rather than guessed:
-% the baselines of twenty eight body pages of the English Algebra I to III come
-% out 11.0 pt apart, and LaTeX at ten point leads on twelve. Nine per cent of a
-% thousand page volume is worth one line here.
-\linespread{0.917}
+% Ten point on 14.35, which is the leading of the reference page measured under
+% \bpaper. LaTeX at ten point leads on twelve, so the spread is 14.35/12.
+%
+% The earlier value here was 0.917, ten on eleven, taken off twenty eight body
+% pages of the 1998 reprint of the English Algebra I to III. It is a true
+% measurement of that book and it is the wrong target, for the reason set out
+% under \bpaper: that book is a photograph of a 1970 Hermann page.
+\linespread{1.196}
 
 \setlength{\parindent}{1.2em}
 \setlength{\parskip}{0pt}

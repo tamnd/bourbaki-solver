@@ -72,10 +72,12 @@ func Write(v *Volume) (*Document, error) {
 	d.Anchors = len(anchors)
 
 	var b strings.Builder
-	w, h := v.TrimMM()
 	fmt.Fprintf(&b, "%% built from content/%s by bourbaki book. Do not edit.\n", v.Lang)
 	b.WriteString("\\documentclass{bourbaki}\n")
-	fmt.Fprintf(&b, "\\bpaper{%.2fmm}{%.2fmm}\n", w, h)
+	// One page for the whole shelf. \bpaper used to take the trim the manifest
+	// records for this volume's printing; the class sets Springer's monograph
+	// page instead and the reason is written beside it there.
+	b.WriteString("\\bpaper\n")
 	fmt.Fprintf(&b, "\\blanguage{%s}\n", v.Lang)
 	fmt.Fprintf(&b, "\\btitle{%s}\n", escapeTeX(v.Title))
 	fmt.Fprintf(&b, "\\bspan{%s}\n", escapeTeX(v.ChapterSpan()))

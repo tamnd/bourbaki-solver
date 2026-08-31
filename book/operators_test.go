@@ -57,14 +57,31 @@ func TestClassReleasesThornBeforeTakingItsName(t *testing.T) {
 	}
 }
 
-// The arc over an inverse image, which the corpus asks for under either of the
-// two package names. Both have to reach \widearc, which is the one newtxmath
-// has, and neither may reach \overgroup, which draws a bar rather than a curve.
-func TestClassGivesBothNamesForTheInverseImageArc(t *testing.T) {
-	for _, name := range []string{`\overparen`, `\wideparen`} {
-		want := `\providecommand{` + name + `}[1]{\widearc{#1}}`
-		if !strings.Contains(Class, want) {
-			t.Errorf("the class does not point %s at \\widearc", name)
+// The arc over an inverse image. The class used to point \overparen and
+// \wideparen at \widearc, which newtxmath brings, and newtxmath went out with
+// the Times. \widearc went with it, so a \providecommand still naming it would
+// expand to an undefined command in whichever volume first asked for the arc,
+// and that volume is not one anybody is watching.
+//
+// A census over the whole corpus finds no \overparen and no \wideparen in any
+// math span, so there is nothing to point anywhere and the right number of
+// definitions is none. If one of the two names comes back it needs a package
+// that is actually loaded, and it must not be \overgroup, which draws a bar with
+// the ends turned down where the printing has a curve.
+func TestClassDoesNotNameAnArcNoPackageSupplies(t *testing.T) {
+	// The comments say \widearc plenty and have to, since they are the record of
+	// why it went. Only what the typesetter reads is being asked about.
+	var code strings.Builder
+	for _, line := range strings.Split(Class, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "%") {
+			code.WriteString(line)
+			code.WriteString("\n")
 		}
+	}
+	if strings.Contains(code.String(), `\widearc`) {
+		t.Error("the class names \\widearc, which no package it loads supplies")
+	}
+	if strings.Contains(code.String(), `\overgroup{`) {
+		t.Error("the class draws the inverse image arc with \\overgroup")
 	}
 }
