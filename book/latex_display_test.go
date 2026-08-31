@@ -244,3 +244,74 @@ func TestNumberedEnvironmentDisplayGoesOutAsOneDisplay(t *testing.T) {
 		t.Errorf("the rows of the alignment were lost:\n%s", out)
 	}
 }
+
+// A number written under its display is the display's number. In the margin of
+// a scan it sits beside the formula, so which side of it the number lands on in
+// the text says nothing about what it numbers, and 366 of them in the corpus
+// landed underneath. Page 18 of Commutative Algebra I is one: the diagram, then
+// a line reading "(3)", then the next paragraph.
+func TestANumberUnderItsDisplayIsStillItsNumber(t *testing.T) {
+	body := "$$\nx = y\n$$\n\n(3)\n\nIt follows immediately that this is so.\n"
+	out, err := Renderer{File: "x.md", Line: 1}.TeX(body)
+	if err != nil {
+		t.Fatalf("TeX: %v", err)
+	}
+	if !strings.Contains(out, `\tag{3}`) {
+		t.Errorf("the number under the display was not taken:\n%s", out)
+	}
+	if strings.Contains(out, "\n(3)\n") {
+		t.Errorf("the number is still set as a paragraph of its own:\n%s", out)
+	}
+}
+
+// A number on the same line as its display, which is how 590 of them are
+// written. soleDisplay used to refuse the line because the number counted as
+// prose on it, and the number then set as a paragraph above an unnumbered
+// formula, the same fault by a different route.
+func TestANumberOnTheSameLineAsItsDisplayIsTaken(t *testing.T) {
+	body := "Consider the sequence\n\n(4) $$ x \\to y $$\n\nThis being so, E is flat.\n"
+	out, err := Renderer{File: "x.md", Line: 1}.TeX(body)
+	if err != nil {
+		t.Fatalf("TeX: %v", err)
+	}
+	if !strings.Contains(out, `\tag{4}`) {
+		t.Errorf("the number beside the display was not taken:\n%s", out)
+	}
+	if strings.Contains(out, "(4) ") {
+		t.Errorf("the number is still sitting in the text:\n%s", out)
+	}
+}
+
+// An enumerated item is not a formula number, and the thing that tells them
+// apart is that an item has its text on the same line. This is the case the
+// backward look could have broken and did not.
+func TestAnEnumeratedItemUnderADisplayIsLeftAlone(t *testing.T) {
+	body := "$$\nx = y\n$$\n\n(3) In $\\mathbf{Z}$ and more generally in any ring.\n"
+	out, err := Renderer{File: "x.md", Line: 1}.TeX(body)
+	if err != nil {
+		t.Fatalf("TeX: %v", err)
+	}
+	if strings.Contains(out, `\tag{3}`) {
+		t.Errorf("an enumerated item was taken for a formula number:\n%s", out)
+	}
+	if !strings.Contains(out, "(3) In") {
+		t.Errorf("the enumerated item lost its number:\n%s", out)
+	}
+}
+
+// A display already carrying a number does not take a second one. Two numbers
+// on one formula is worse than the paragraph this replaces, because the second
+// would silently overwrite the first.
+func TestADisplayDoesNotTakeTwoNumbers(t *testing.T) {
+	body := "(5)\n\n$$\nx = y\n$$\n\n(6)\n\nAnd so on.\n"
+	out, err := Renderer{File: "x.md", Line: 1}.TeX(body)
+	if err != nil {
+		t.Fatalf("TeX: %v", err)
+	}
+	if !strings.Contains(out, `\tag{5}`) {
+		t.Errorf("the display lost the number written above it:\n%s", out)
+	}
+	if strings.Contains(out, `\tag{6}`) {
+		t.Errorf("the display took a second number:\n%s", out)
+	}
+}

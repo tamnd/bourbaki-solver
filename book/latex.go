@@ -218,6 +218,11 @@ var placeholderRE = regexp.MustCompile("\x00m(\\d+)\x00")
 // eqNumRE is a formula number alone on a line, "(12)" or "(iv)".
 var eqNumRE = regexp.MustCompile(`^\(([0-9]{1,3}|[ivxlIVXL]{1,5})\)$`)
 
+// eqNumLeadRE is a formula number and its display on one line, which is the
+// third of the three ways a number arrives and the one that looks least like a
+// fault in the Markdown.
+var eqNumLeadRE = regexp.MustCompile("^\\(([0-9]{1,3}|[ivxlIVXL]{1,5})\\)\\s+(\x00m\\d+\x00)$")
+
 // numbers takes the formula numbers off their own lines and gives them to the
 // displays they belong to.
 //
@@ -229,14 +234,38 @@ var eqNumRE = regexp.MustCompile(`^\(([0-9]{1,3}|[ivxlIVXL]{1,5})\)$`)
 // has and reads like a mistake.
 //
 // So they come off and go back on as \tag, and the class numbers on the left.
-// A number is only taken when the next thing that is not blank is a display and
-// nothing else on its line, which is what keeps "(2) In Z and more generally"
-// and every other enumerated paragraph out of it.
+// A number is only taken when the display it belongs to is the only thing on
+// its line, which is what keeps "(2) In Z and more generally" and every other
+// enumerated paragraph out of it.
+//
+// The number arrives in three places and for a while only one of them was read.
+// In the margin of a scan the number sits beside the formula, so where it lands
+// in the text depends on how the page was read, and a census over the corpus
+// found 1530 written before the display, 590 on the same line as it and 366
+// after it. Only the first was lifted, so 956 numbered formulae in the library,
+// 38 per cent of them, set the number as a one word paragraph of its own and
+// left the formula unnumbered. Page 18 of Commutative Algebra I is what that
+// looks like: a line reading "(3)", a blank, and then the prose.
+//
+// Looking backwards is safe for the same reason looking forwards is. A number
+// that opens an enumerated item has the item's text after it on the same line,
+// so a number alone on a line under a display is not the start of anything.
 func numbers(masked string, spans []mathtex.Span) (string, map[int]string) {
 	tags := map[int]string{}
 	lines := strings.Split(masked, "\n")
 	keep := make([]string, 0, len(lines))
 	for i := 0; i < len(lines); i++ {
+		// The number and its display on one line. The number comes off and the
+		// display stays where it is, which is already a block of its own.
+		if m := eqNumLeadRE.FindStringSubmatch(strings.TrimSpace(lines[i])); m != nil {
+			if p, ok := soleDisplay(m[2], spans); ok {
+				if _, taken := tags[p]; !taken {
+					tags[p] = m[1]
+					keep = append(keep, m[2])
+					continue
+				}
+			}
+		}
 		m := eqNumRE.FindStringSubmatch(strings.TrimSpace(lines[i]))
 		if m == nil {
 			keep = append(keep, lines[i])
@@ -246,19 +275,40 @@ func numbers(masked string, spans []mathtex.Span) (string, map[int]string) {
 		for j < len(lines) && strings.TrimSpace(lines[j]) == "" {
 			j++
 		}
-		if j >= len(lines) {
-			keep = append(keep, lines[i])
-			continue
+		if j < len(lines) {
+			if p, ok := soleDisplay(lines[j], spans); ok {
+				if _, taken := tags[p]; !taken {
+					tags[p] = m[1]
+					i = j - 1 // the blank lines between go too, so the display keeps its block
+					continue
+				}
+			}
 		}
-		p, ok := soleDisplay(lines[j], spans)
-		if !ok {
-			keep = append(keep, lines[i])
-			continue
+		// Nothing ahead of it, so look behind. The display is already in keep,
+		// and only the last thing put there that is not blank can be it.
+		if p, ok := lastDisplay(keep, spans); ok {
+			if _, taken := tags[p]; !taken {
+				tags[p] = m[1]
+				continue
+			}
 		}
-		tags[p] = m[1]
-		i = j - 1 // the blank lines between go too, so the display keeps its block
+		keep = append(keep, lines[i])
 	}
 	return strings.Join(keep, "\n"), tags
+}
+
+// lastDisplay is the display a number written under it belongs to: the most
+// recent line that is not blank, and only when that line is a display and
+// nothing else. Anything else between the two, a word of prose or a heading,
+// means the number is not this display's.
+func lastDisplay(keep []string, spans []mathtex.Span) (int, bool) {
+	for i := len(keep) - 1; i >= 0; i-- {
+		if strings.TrimSpace(keep[i]) == "" {
+			continue
+		}
+		return soleDisplay(keep[i], spans)
+	}
+	return 0, false
 }
 
 // soleDisplay says whether a line is one display placeholder and nothing else,
@@ -305,7 +355,7 @@ func (r Renderer) unmask(s string, spans []mathtex.Span, tags map[int]string) st
 		}
 		if strings.Contains(text, `\begin{`) {
 			widened, wide := widen(text)
-			text = widened
+			text = diagrams(widened)
 			for _, w := range wide {
 				if r.Wide != nil {
 					r.Wide(r.at(sp.Line), w)

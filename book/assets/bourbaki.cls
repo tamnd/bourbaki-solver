@@ -186,6 +186,50 @@
   ItalicFont = texgyrecursor-italic.otf,
 ]
 
+% Protrusion, which is the difference between a page that was justified and a
+% page that was printed. A comma or a hyphen at the end of a line is nearly all
+% white, and a line that stops with its comma inside the measure has a notch in
+% the right margin that the eye reads as a ragged edge. microtype hangs those
+% characters a little way past the margin so the edge of the text block is the
+% edge of the letters, which is what a printing house does with metal and what
+% every Springer volume has.
+%
+% Only protrusion. Font expansion is the other half of what microtype does and
+% XeTeX cannot do it, so asking for it gets a warning on every build and nothing
+% else. Turning it off here says that was a decision.
+\RequirePackage[protrusion=true,expansion=false]{microtype}
+
+% A widow and an orphan are the two faults a reader notices without knowing the
+% words for them: one line of a paragraph alone at the top of a page, or the
+% first line alone at the bottom. LaTeX's default penalty of 150 is a preference
+% and this build overrode it in practice anyway, because \flushbottom and a
+% \parskip of zero leave the page maker almost nothing to stretch, so it took
+% the widow instead. 10000 makes it a prohibition. \displaywidowpenalty is the
+% same rule for a paragraph broken above a display, which this book is full of.
+\widowpenalty=10000
+\clubpenalty=10000
+\displaywidowpenalty=10000
+
+% An array set solid. The rows of an array are set on \baselineskip like any
+% other line, and \linespread below squeezes that to ten on eleven, which is
+% right for prose and too tight for a diagram whose rows are alternately an
+% object and an arrow hanging from it. The arrows touch the letters above them.
+% This gives the rows of every array, and so of every matrix and every table,
+% about a point and a half more, which is what the printed diagrams have.
+\renewcommand{\arraystretch}{1.15}
+
+% A labelled vertical arrow of a commutative diagram. The label is set in a box
+% of no width so that the arrow, and not the arrow and its label together, is
+% what the column centres on. book/diagram.go is what decides which cells get
+% this and why, and it only ever hands one a label with an empty cell beside it
+% for the box to hang into.
+%
+% Script size because \xrightarrow sets the labels of the horizontal arrows at
+% script size, and a diagram whose two kinds of label are two different sizes
+% looks like two diagrams.
+\newcommand{\bvarrowr}[2]{#1\rlap{$\scriptstyle\,#2$}}
+\newcommand{\bvarrowl}[2]{\llap{$\scriptstyle#2\,$}#1}
+
 % The running head face, which is the text face with the letters tracked apart.
 % The printing letterspaces the small capitals in its heads, which is what a
 % French mathematical printing of that period does, and it is why the printed
@@ -211,20 +255,42 @@
 \DeclareMathAlphabet{\mathsf}{T1}{qhv}{m}{n}
 \DeclareMathAlphabet{\mathtt}{T1}{qcr}{m}{n}
 
-% The scripts Latin Modern has nothing for. The corpus holds 239 characters of
-% Devanagari, Cyrillic, Armenian and Arabic, all of them in the historical notes
-% quoting a source in its own alphabet. A hole on the page is the worst possible
-% outcome, so if the machine has a font that covers them it is used, and if it
-% has not the audit says which characters went unset.
-\newif\ifbfallback
-\IfFontExistsTF{Arial Unicode MS}{%
-  \newfontfamily\bfallbackfont{Arial Unicode MS}\bfallbacktrue
+% The scripts a Times has nothing for. The corpus holds 239 characters of
+% Devanagari, Cyrillic, Armenian, Greek and Arabic, nearly all of them in the
+% historical notes quoting a source in its own alphabet, and the rest of them
+% OCR noise that a reader still has to be able to see in order to report. A hole
+% on the page is the worst possible outcome of either.
+%
+% FreeSerif because it is in tectonic's bundle and because it covers all five.
+% That matters more than it sounds: this used to name Arial Unicode MS and fall
+% back to Noto Serif, both of them fonts a particular machine happens to have
+% installed, so the same volume built on two machines came out with the Greek
+% set on one and a gap on the other. A face out of the bundle is the same face
+% everywhere, which is the whole reason the text fonts are named by file too.
+%
+% It is a Times-metric serif, so a Greek word inside an English sentence sits at
+% the same weight and the same x-height as the sentence around it rather than
+% announcing itself.
+%
+% book/unicode.go decides what goes inside this, and it wraps whole runs rather
+% than single characters so that no word is set in two faces.
+\IfFontExistsTF{FreeSerif.otf}{%
+  \newfontfamily\bfallbackfont{FreeSerif.otf}[
+    BoldFont       = FreeSerifBold.otf,
+    ItalicFont     = FreeSerifItalic.otf,
+    BoldItalicFont = FreeSerifBoldItalic.otf,
+  ]%
+  \newcommand{\bscript}[1]{{\bfallbackfont #1}}
 }{%
-  \IfFontExistsTF{Noto Serif}{%
-    \newfontfamily\bfallbackfont{Noto Serif}\bfallbacktrue
-  }{\bfallbackfalse}%
+  \newcommand{\bscript}[1]{#1}%
 }
-\newcommand{\bscript}[1]{\ifbfallback{\bfallbackfont #1}\else#1\fi}
+% A bookmark is a string and not a page, so a face has no meaning in one. Left
+% alone hyperref tries to expand \bfallbackfont into the outline and writes a
+% warning for every heading that quotes a word in another alphabet. This says
+% the wrapper is the identity there, which keeps the word in the bookmark and
+% drops only the face. It is the same reason the mathematics is set by newtxmath
+% and not by unicode-math, written up at the top of this file.
+\pdfstringdefDisableCommands{\let\bscript\@firstofone}
 
 % The dangerous bend. Bourbaki sets a road sign in the margin against a passage
 % a reader can go badly wrong in, and the corpus holds 35 of them. Almost no text

@@ -28,22 +28,53 @@ import (
 // Text is the prose of the corpus with the characters Latin Modern cannot set
 // turned into TeX. It runs on already-escaped text, so what it writes must be
 // TeX and not more prose.
+//
+// What the table has no entry for and the text face has no glyph for goes out
+// inside \bscript, which is the class's fallback face. Left bare it is a hole:
+// XeTeX sets nothing, warns in a log nobody reads, and the page comes out with
+// a gap in the middle of a quotation. The history volume quotes Diophantus in
+// Greek, the Rhind papyrus in Devanagari and al-Khwarizmi in Arabic, and every
+// one of those was a gap until now.
+//
+// The runs are kept whole rather than each character wrapped on its own. A face
+// change between two letters of one word is a place the typesetter may break
+// and a place the kerning stops, and the word is foreign to the reader already
+// without being set in two faces.
 func Text(s string) string {
 	if !hasNonASCII(s) {
 		return s
 	}
 	var b strings.Builder
+	run := false
+	closeRun := func() {
+		if run {
+			b.WriteString("}")
+			run = false
+		}
+	}
 	for _, r := range s {
 		if r < 128 {
+			closeRun()
 			b.WriteRune(r)
 			continue
 		}
 		if tex, ok := texRune[r]; ok {
+			closeRun()
 			b.WriteString(tex)
 			continue
 		}
+		if latin(r) {
+			closeRun()
+			b.WriteRune(r)
+			continue
+		}
+		if !run {
+			b.WriteString(`\bscript{`)
+			run = true
+		}
 		b.WriteRune(r)
 	}
+	closeRun()
 	return b.String()
 }
 
