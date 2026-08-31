@@ -44,15 +44,33 @@ func Text(s string) string {
 	if !hasNonASCII(s) {
 		return s
 	}
+	rs := []rune(s)
+	word := greekWords(rs)
 	var b strings.Builder
-	run := false
+	run, greek := false, false
 	closeRun := func() {
 		if run {
 			b.WriteString("}")
 			run = false
 		}
 	}
-	for _, r := range s {
+	closeGreek := func() {
+		if greek {
+			b.WriteString("}")
+			greek = false
+		}
+	}
+	for i, r := range rs {
+		if word[i] {
+			closeRun()
+			if !greek {
+				b.WriteString(`\bgreek{`)
+				greek = true
+			}
+			b.WriteRune(r)
+			continue
+		}
+		closeGreek()
 		if r < 128 {
 			closeRun()
 			b.WriteRune(r)
@@ -75,7 +93,59 @@ func Text(s string) string {
 		b.WriteRune(r)
 	}
 	closeRun()
+	closeGreek()
 	return b.String()
+}
+
+// greekWords marks the runes that belong to a Greek word rather than to a Greek
+// letter standing for something in the mathematics. Two Greek letters in a row
+// is a word and one on its own is a symbol, which is a cheap rule and is right
+// everywhere in this corpus: the history volume quotes Euclid, Pappus and
+// Diophantus in Greek and nowhere writes two symbols side by side in prose.
+//
+// The distinction is what makes a quotation legible. Every Greek letter has an
+// entry in the symbol table, so set letter by letter the Elements' "coincide"
+// comes out as one letter in the fallback face followed by ten separate inline
+// formulas: three faces, ten italic corrections and ten places to break, inside
+// one word. Set as a word it is a word.
+//
+// The accents are the reason it matters here and not only in principle. Latin
+// Modern has no polytonic Greek at all, so the breathing on the first letter of
+// that quotation was being dropped and the letter set without it.
+func greekWords(rs []rune) []bool {
+	in := make([]bool, len(rs))
+	for i := 0; i < len(rs); {
+		if !greekLetter(rs[i]) {
+			i++
+			continue
+		}
+		j := i
+		for j < len(rs) && greekLetter(rs[j]) {
+			j++
+		}
+		if j-i >= 2 {
+			for k := i; k < j; k++ {
+				in[k] = true
+			}
+		}
+		i = j
+	}
+	return in
+}
+
+// greekLetter is the Greek alphabet in both its blocks. It starts at 0386 so
+// that the Greek question mark and the other punctuation of the block are not
+// letters, and it stops before 1FFF so that the block's loose accents are not
+// either. A word ending in one of those would take the accent with it and a
+// French sentence ending in one would not.
+func greekLetter(r rune) bool {
+	switch {
+	case r >= 0x0386 && r <= 0x03FF: // Greek and Coptic
+		return true
+	case r >= 0x1F00 && r <= 0x1FFE: // Greek Extended, the polytonic accents
+		return true
+	}
+	return false
 }
 
 // Missing reports the characters in a string that neither the table nor Latin
@@ -86,11 +156,16 @@ func Text(s string) string {
 // It is a report and not a repair. Dropping the character would lose text and
 // substituting one would invent it, so the build sets what it can, says what it
 // could not, and leaves the decision to somebody with the page open.
+// A Greek word is not missing. It is set in the fallback face on purpose, by
+// the same rule Text uses, and reporting it would be asking somebody to open a
+// page and find nothing wrong with it.
 func Missing(s string) []rune {
 	var out []rune
 	seen := map[rune]bool{}
-	for _, r := range s {
-		if r < 128 || seen[r] {
+	rs := []rune(s)
+	word := greekWords(rs)
+	for i, r := range rs {
+		if r < 128 || seen[r] || word[i] {
 			continue
 		}
 		if _, ok := texRune[r]; ok {
@@ -237,6 +312,18 @@ var mathRune = func() map[rune]string {
 		'⁰': `^0`, '¹': `^1`, '²': `^2`, '³': `^3`, '⁴': `^4`,
 		'⁵': `^5`, '⁶': `^6`, '⁷': `^7`, '⁸': `^8`, '⁹': `^9`,
 		'⁺': `^+`, '⁻': `^-`, '⁼': `^=`, '⁽': `^(`, '⁾': `^)`,
+		// An em dash inside a formula is a minus sign the reader got wrong.
+		// There are ten of them in the corpus and nine are a minus: [-a, a] in
+		// Topologie VIII, h - 1 in Lie VI, s(x) - x in the same. The tenth is
+		// inside a \text and Math never reaches it, so the entry cannot touch
+		// the one place the character means what it looks like.
+		//
+		// Left alone it is not a dash on the page, it is nothing. XeTeX finds
+		// no mathcode for it, falls back to the operators family, which this
+		// class sets to the T1 Latin Modern, and a T1 font is eight bit and has
+		// no U+2014. The typesetter says "there is no em dash in ec-lmr10" and
+		// the interval comes out as [a, a].
+		'—': `-`,
 	})
 	return m
 }()
