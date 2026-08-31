@@ -34,6 +34,18 @@ import "strings"
 // their label above the arrow and are already centred on it.
 var verticalArrows = []string{`\Downarrow`, `\Uparrow`, `\downarrow`, `\uparrow`}
 
+// The size prefixes a delimiter can carry. These are not part of the arrow's
+// name but they are part of the arrow, and a cell can write one on either side:
+// \big\downarrow{f} puts it in front, and {\scriptstyle f}\big\downarrow puts it
+// between the label and the arrow. Taking the arrow away and leaving the prefix
+// behind in the label writes \big with nothing to size, and TeX stops with
+// "Missing delimiter (. inserted)" and ships no PDF at all. That is what the
+// English and the Vietnamese Theory of Sets did, on one cell of one diagram in
+// III SS 7, for two regenerations running.
+//
+// Longest first, so \bigg is not read as \big with a g left over.
+var delimSizes = []string{`\Bigg`, `\bigg`, `\Big`, `\big`, `\left`, `\right`}
+
 // The longest thing that will be treated as the name of a map. A cell holding
 // an arrow and then a sentence is not a labelled arrow, it is a row of the
 // diagram that lost its tab, and hanging it in a box of no width would print it
@@ -163,14 +175,29 @@ func hangLabels(body string) string {
 // a \downarrow, is the other.
 func arrowCell(cell string) (arrow, label string, after, ok bool) {
 	s := strings.TrimSpace(cell)
+	// A size prefix in front of the whole cell sizes the arrow and travels with it.
+	pre := ""
+	for _, d := range delimSizes {
+		if rest, cut := strings.CutPrefix(s, d); cut {
+			pre, s = d, strings.TrimSpace(rest)
+			break
+		}
+	}
 	for _, a := range verticalArrows {
 		if rest, cut := strings.CutPrefix(s, a); cut && !startsLetter(rest) {
 			rest = strings.TrimSpace(rest)
-			return a, rest, true, plainLabel(rest)
+			return pre + a, rest, true, plainLabel(rest)
 		}
 		if rest, cut := strings.CutSuffix(s, a); cut {
 			rest = strings.TrimSpace(rest)
-			return a, rest, false, plainLabel(rest)
+			// The other place a size prefix sits, between the label and the arrow.
+			for _, d := range delimSizes {
+				if r, c := strings.CutSuffix(rest, d); c {
+					pre, rest = d, strings.TrimSpace(r)
+					break
+				}
+			}
+			return pre + a, rest, false, plainLabel(rest)
 		}
 	}
 	return "", "", false, false

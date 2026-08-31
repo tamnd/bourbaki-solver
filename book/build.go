@@ -153,9 +153,18 @@ var (
 	cpRE        = regexp.MustCompile(`^(.*)\(U\+([0-9A-Fa-f]+)\)$`)
 	undefinedRE = regexp.MustCompile(`^! Undefined control sequence`)
 	errorRE     = regexp.MustCompile(`^! `)
-	csRE        = regexp.MustCompile(`\\([A-Za-z@]+) $`)
-	unresolvRE  = regexp.MustCompile(`LaTeX Warning: There were undefined references`)
-	outputRE    = regexp.MustCompile(`Output written on .* \((\d+) pages?`)
+	// The line that closes the box TeX prints under an overfull warning. What is
+	// between the warning and this line is the content of the box, wrapped at the
+	// log's width, and any byte at all can land at the start of one of those lines.
+	// See the inDump flag in readLog for why that matters.
+	dumpEndRE = regexp.MustCompile(`^ \[\]$`)
+	// What box content looks like: a font selection spelled out the way TeX spells
+	// one, or the [] it prints for a box it is not going to describe. No message
+	// TeX writes about a real error has either in it.
+	dumpLineRE = regexp.MustCompile(`\\[A-Z0-9]+/[a-z]+/|\[\]`)
+	csRE       = regexp.MustCompile(`\\([A-Za-z@]+) $`)
+	unresolvRE = regexp.MustCompile(`LaTeX Warning: There were undefined references`)
+	outputRE   = regexp.MustCompile(`Output written on .* \((\d+) pages?`)
 )
 
 // glyphName is how a character TeX could not set is named in the report. TeX
@@ -192,22 +201,42 @@ func (b *Build) readLog() error {
 	s := bufio.NewScanner(f)
 	s.Buffer(make([]byte, 0, 1<<20), 1<<22)
 	undefinedNext := false
+	// Whether the line being read is inside the box TeX dumps under an overfull
+	// warning rather than being something TeX is saying. The dump is the content
+	// of the box with every font change spelled out, wrapped at the log's width
+	// with no regard for what it cuts, so a line of it begins with whatever byte
+	// happened to fall there. An exclamation mark falls there often enough: it is
+	// the slot the arrow sits in in cmsy, so a French Commutative Algebra full of
+	// long exact sequences dumps line after line starting "! []". Every one of
+	// those was being reported as a typesetter error, and the volume failed a gate
+	// on a warning it had already counted correctly one line above.
+	//
+	// Being inside a dump is not enough on its own to throw a line away, because
+	// TeX can report a real error before the dump it was going to print is closed.
+	// The line has to look like box content as well, which dumpLineRE is for.
+	inDump := false
 	for s.Scan() {
 		line := s.Text()
+		if dumpEndRE.MatchString(line) || line == "" {
+			inDump = false
+		}
 		// Before the switch, because the undefined case below takes the line
 		// out of the loop and an undefined control sequence is an error like
 		// the rest of them. Deduplicated on the whole line, since one bad macro
 		// in a chapter that is set twice for the table of contents prints the
 		// same error twice and that is one fault, not two.
-		if errorRE.MatchString(line) && !seenErr[line] {
+		dump := inDump && dumpLineRE.MatchString(line)
+		if !dump && errorRE.MatchString(line) && !seenErr[line] {
 			seenErr[line] = true
 			b.Errors = append(b.Errors, strings.TrimSpace(line))
 		}
 		switch {
 		case overfullRE.MatchString(line):
 			b.Overfull++
+			inDump = true
 		case underfullRE.MatchString(line):
 			b.Underfull++
+			inDump = true
 		case undefinedRE.MatchString(line):
 			undefinedNext = true
 			continue
