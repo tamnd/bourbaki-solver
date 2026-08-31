@@ -157,3 +157,27 @@ A & \to & B \\
 		t.Errorf("the widened preamble was lost:\n%s", got)
 	}
 }
+
+// A cell that sizes its arrow. The Theory of Sets writes the label to the left
+// and a \big in front of the arrow, and taking the arrow out of the cell used
+// to leave the \big behind in the label with nothing to size. TeX stopped with
+// "Missing delimiter (. inserted)" and shipped no PDF, so the English and the
+// Vietnamese volume both went two regenerations with the previous build's file
+// left in place.
+func TestDiagramKeepsASizePrefixWithItsArrow(t *testing.T) {
+	in := `$$\begin{array}{ccc} E_\beta & \to & F_\beta \\ ` +
+		`{\scriptstyle f_{\alpha\beta}}\big\downarrow & & \big\downarrow{\scriptstyle g_{\alpha\beta}} \\ ` +
+		`E_\alpha & \to & F_\alpha \end{array}$$`
+	got := diagrams(in)
+	if strings.Contains(got, `\big}`) {
+		t.Errorf("a \\big was left in a label with nothing to size:\n%s", got)
+	}
+	for _, want := range []string{
+		`\bvarrowl{\big\downarrow}{{\scriptstyle f_{\alpha\beta}}}`,
+		`\bvarrowr{\big\downarrow}{{\scriptstyle g_{\alpha\beta}}}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("want %s in:\n%s", want, got)
+		}
+	}
+}

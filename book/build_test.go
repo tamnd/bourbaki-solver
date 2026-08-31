@@ -132,3 +132,38 @@ func TestReadLogSeesAGlyphWhoseFontNameWrapped(t *testing.T) {
 		}
 	}
 }
+
+// The box TeX dumps under an overfull warning is the content of the box with
+// every font change spelled out, wrapped at the log's width with no regard for
+// what it cuts. An exclamation mark lands at the start of a line often enough:
+// it is the slot the arrow sits in in cmsy, so a volume full of long exact
+// sequences dumps line after line starting "! []". The French Algebre X failed
+// the typesetter gate on one of those, on a warning the same log had already
+// counted correctly one line above.
+func TestReadLogDoesNotReadABoxDumpAsAnError(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "book.log")
+	log := "This is XeTeX, Version 3.141592653\n" +
+		"Overfull \\hbox (5.94576pt too wide) detected at line 7692\n" +
+		"\\T1/lmr/m/n/10 0 \\OMS/cmsy/m/n/10 ! []\\T1/lmr/m/n/10 (\\OML/cmm/m/it/10 u\n" +
+		"! [] \\OML/cmm/m/it/10 v \\OMS/cmsy/m/n/10 ! \\T1/lmr/m/n/10 0\\OML/cmm/m/it/10 :\n" +
+		" []\n" +
+		"\n" +
+		"! Undefined control sequence.\n" +
+		"l.900 \\sqleftarrow \n" +
+		"Output written on book.xdv (267 pages, 1377952 bytes).\n"
+	if err := os.WriteFile(path, []byte(log), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	b := &Build{Dir: dir, Log: path, PDF: filepath.Join(dir, "book.pdf")}
+	if err := b.readLog(); err != nil {
+		t.Fatal(err)
+	}
+	// The real error after the dump still counts, and the overfull is still one.
+	if len(b.Errors) != 1 || b.Errors[0] != "! Undefined control sequence." {
+		t.Errorf("errors = %q, want just the undefined control sequence", b.Errors)
+	}
+	if b.Overfull != 1 {
+		t.Errorf("overfull = %d, want 1", b.Overfull)
+	}
+}
