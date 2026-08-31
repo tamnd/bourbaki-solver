@@ -297,10 +297,18 @@
     ItalicFont     = FreeSerifItalic.otf,
     BoldItalicFont = FreeSerifBoldItalic.otf,
   ]%
-  \newcommand{\bscript}[1]{{\bfallbackfont #1}}
+  \newcommand{\bscript}[1]{{\bfallbackfont #1}}%
+  \newcommand{\bgreek}[1]{{\bfallbackfont #1}}%
 }{%
   \newcommand{\bscript}[1]{#1}%
+  \newcommand{\bgreek}[1]{#1}%
 }
+% \bgreek is the same face and a different name on purpose. A Greek word quoted
+% as Greek is not the same thing as a character the text face happens to lack:
+% the first is what the printing has and the second is something to go and look
+% at. Two commands means the audit can say so, and it means the day a Greek face
+% that matches Latin Modern for weight turns up in the bundle, the quotations
+% move to it and the Devanagari does not.
 % A bookmark is a string and not a page, so a face has no meaning in one. Left
 % alone hyperref tries to expand \bfallbackfont into the outline and writes a
 % warning for every heading that quotes a word in another alphabet. This says
@@ -308,7 +316,7 @@
 % drops only the face. It is the same reason the mathematics is set by ordinary
 % \mathchar declarations and not by unicode-math, written up at the top of this
 % file: hyperref has to be able to expand whatever it finds in a heading.
-\pdfstringdefDisableCommands{\let\bscript\@firstofone}
+\pdfstringdefDisableCommands{\let\bscript\@firstofone\let\bgreek\@firstofone}
 
 % The dangerous bend. Bourbaki sets a road sign in the margin against a passage
 % a reader can go badly wrong in, and the corpus holds 35 of them. Almost no text
