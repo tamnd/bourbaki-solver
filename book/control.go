@@ -119,10 +119,22 @@ func (r Renderer) emit(c cmd, name string, args []string) string {
 		return c.raw
 	}
 	if c.math {
+		// The argument goes through Math for the same reason the text-mode
+		// argument below goes through inline: what is being written here is a
+		// formula, so what is inside it has to be read as one.
+		//
+		// Without this the wrapping happened and the reading did not, and the
+		// characters inside a rescued formula went out as themselves. The
+		// corpus writes \overline{F ∩ E_n} loose in an exercise of Espaces
+		// vectoriels topologiques IV and \sqrt{12dδ} loose in chapter V, and
+		// both came out of the build with the intersection sign and the delta
+		// still spelled as characters, inside dollars, where no math font has
+		// them. Two of the six volumes that were failing "every character
+		// reached the page" were failing on nothing but that.
 		var b strings.Builder
 		b.WriteString(`$\` + name)
 		for _, a := range args {
-			b.WriteString("{" + a + "}")
+			b.WriteString("{" + Math(a) + "}")
 		}
 		b.WriteString(`$`)
 		return b.String()

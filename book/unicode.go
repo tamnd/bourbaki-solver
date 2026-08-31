@@ -312,6 +312,18 @@ var mathRune = func() map[rune]string {
 		'⁰': `^0`, '¹': `^1`, '²': `^2`, '³': `^3`, '⁴': `^4`,
 		'⁵': `^5`, '⁶': `^6`, '⁷': `^7`, '⁸': `^8`, '⁹': `^9`,
 		'⁺': `^+`, '⁻': `^-`, '⁼': `^=`, '⁽': `^(`, '⁾': `^)`,
+		// An em dash inside a formula is a minus sign the reader got wrong.
+		// There are ten of them in the corpus and nine are a minus: [-a, a] in
+		// Topologie VIII, h - 1 in Lie VI, s(x) - x in the same. The tenth is
+		// inside a \text and Math never reaches it, so the entry cannot touch
+		// the one place the character means what it looks like.
+		//
+		// Left alone it is not a dash on the page, it is nothing. XeTeX finds
+		// no mathcode for it, falls back to the operators family, which this
+		// class sets to the T1 Latin Modern, and a T1 font is eight bit and has
+		// no U+2014. The typesetter says "there is no em dash in ec-lmr10" and
+		// the interval comes out as [a, a].
+		'—': `-`,
 	})
 	return m
 }()
