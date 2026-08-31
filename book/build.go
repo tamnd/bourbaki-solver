@@ -162,9 +162,9 @@ var (
 	// one, or the [] it prints for a box it is not going to describe. No message
 	// TeX writes about a real error has either in it.
 	dumpLineRE = regexp.MustCompile(`\\[A-Z0-9]+/[a-z]+/|\[\]`)
-	csRE        = regexp.MustCompile(`\\([A-Za-z@]+) $`)
-	unresolvRE  = regexp.MustCompile(`LaTeX Warning: There were undefined references`)
-	outputRE    = regexp.MustCompile(`Output written on .* \((\d+) pages?`)
+	csRE       = regexp.MustCompile(`\\([A-Za-z@]+) $`)
+	unresolvRE = regexp.MustCompile(`LaTeX Warning: There were undefined references`)
+	outputRE   = regexp.MustCompile(`Output written on .* \((\d+) pages?`)
 )
 
 // glyphName is how a character TeX could not set is named in the report. TeX
