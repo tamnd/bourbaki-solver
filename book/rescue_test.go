@@ -172,3 +172,53 @@ func TestRescuedIsReported(t *testing.T) {
 		}
 	}
 }
+
+// An index of two characters is one subscript, not two. The table maps each
+// Unicode subscript on its own, so an OCR that wrote a_ij as aᵢⱼ came out of
+// Math as a_i_j, which TeX reads as a double subscript and stops on. That one
+// index in Algebra IX, § 10 was enough to leave the Vietnamese volume with no
+// PDF, and the corpus has ninety five of these runs.
+//
+// The last three cases are the ones that must not change: a run of one is what
+// the table already did, and the degree sign is a superscript in the table too
+// but it sets \circ, which is not something to sweep into an index.
+func TestMathCollapsesARunOfUnicodeScripts(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{`aᵢⱼ`, `a_{ij}`},
+		{`x₀₁`, `x_{01}`},
+		{`Aᵢ₊₁`, `A_{i+1}`},
+		{`Bₖ₋₁`, `B_{k-1}`},
+		{`Cᵢₖ₋₁`, `C_{ik-1}`},
+		{`x⁻ⁿ`, `x^{-n}`},
+		{`xᵢ`, `x_i`},
+		{`x²`, `x^2`},
+		{`30°`, `30^\circ`},
+	} {
+		if got := Math(c.in); got != c.want {
+			t.Errorf("Math(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The rescue must never put dollars round something that has dollars in it
+// already. mask has been over the line before this scanner sees it, so a math
+// span the corpus wrote is a placeholder built from NUL by then, and a run that
+// reached across one came back as $C($\rho$)^I$ after the placeholders went
+// home. That is the error "Missing $ inserted" and a volume that stops on it.
+// Five volumes in each of two languages were coming off the shelf with no PDF
+// for the two lines this covers.
+func TestTheRescueDoesNotReachAcrossAMathSpan(t *testing.T) {
+	for _, s := range []string{
+		`the injective homomorphism of E into C($\rho$)^I; for`,
+		`hence that L($\Phi$)|_{B_{\lambda/2}} and L($\Phi$)^{-1}|_{B} converge`,
+		`with at least one coefficient $\geq 2$ (we denote the root $a \alpha_1$ by $abcd$):`,
+	} {
+		out, err := Renderer{File: "x.md", Line: 1}.TeX(s)
+		if err != nil {
+			t.Fatalf("TeX(%q): %v", s, err)
+		}
+		if strings.Contains(out, "$$") {
+			t.Errorf("TeX(%q) = %q, want no dollars inside dollars", s, out)
+		}
+	}
+}
