@@ -262,6 +262,11 @@ func Math(s string) string {
 			b.WriteString(degree(b.String()))
 			continue
 		}
+		if tex, n := scriptRun(rs, i); n > 0 {
+			b.WriteString(tex)
+			i += n - 1
+			continue
+		}
 		if tex, ok := mathRune[r]; ok {
 			b.WriteString(tex)
 			// A command has to be told where it stops. The corpus writes the
@@ -275,6 +280,62 @@ func Math(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
+}
+
+// scriptRun reads a run of Unicode subscript or superscript characters and gives
+// back the one TeX subscript or superscript they are, with the number of runes it
+// read. It returns 0 for anything else, including a run of one, which the table
+// below handles on its own.
+//
+// The table maps each of these characters to a subscript of its own: ᵢ is _i and
+// ⱼ is _j. A printing that sets an index of two characters therefore came out as
+// a_i_j, and a_i_j is not a formula, it is the error "Double subscript" and a
+// volume that stops on it. Vietnamese Algebra IX was coming off the shelf with no
+// PDF for one aᵢⱼ in § 10, and the corpus has 95 of these runs: ₓₐ eighteen times
+// in Commutative Algebra VIII, the ₀₁ ₀₂ ₁₂ ₂₀ ₂₃ ₃₀ of the angle relations in
+// Algebra IX, ᵢ₊₁ and ₖ₋₁ and ᵢₖ₋₁ where the index is an expression.
+//
+// A run only collapses when every character in it goes the same way. A subscript
+// followed by a superscript is two decorations on one base and both belong, which
+// is what x⁻¹ᵢ is, so those are left to be written out one at a time.
+func scriptRun(rs []rune, i int) (string, int) {
+	tex, kind := script(rs[i])
+	if kind == 0 {
+		return "", 0
+	}
+	var b strings.Builder
+	b.WriteString(tex)
+	j := i + 1
+	for j < len(rs) {
+		next, k := script(rs[j])
+		if k != kind {
+			break
+		}
+		b.WriteString(next)
+		j++
+	}
+	if j-i < 2 {
+		return "", 0
+	}
+	return string(kind) + "{" + b.String() + "}", j - i
+}
+
+// script says what one Unicode subscript or superscript sets and which of the two
+// it is, and says nothing for anything else. The character it stands for has to
+// be a single one that can sit in an index on its own: the degree sign is a
+// superscript in the table as well, but it sets \circ, and a \circ swept into a
+// run with the digit beside it would change the formula rather than fix it.
+func script(r rune) (string, byte) {
+	tex, ok := mathRune[r]
+	if !ok || len(tex) != 2 || tex[0] != '_' && tex[0] != '^' {
+		return "", 0
+	}
+	switch c := tex[1]; {
+	case c >= '0' && c <= '9', c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z',
+		c == '+', c == '-', c == '=', c == '(', c == ')':
+		return string(c), tex[0]
+	}
+	return "", 0
 }
 
 // degree is the TeX for a degree sign, given what has been written before it.

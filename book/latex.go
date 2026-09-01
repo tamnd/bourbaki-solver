@@ -92,6 +92,50 @@ func (r Renderer) head(words string) string {
 	return fmt.Sprintf("\\bheadfit{%s}{%s}", r.titleText(full), r.titleText(short))
 }
 
+// unemphasised takes the Markdown emphasis markers out of a title, leaving the
+// words that were inside them.
+//
+// The contents line and the running head are the same words as the heading in a
+// different case, and neither of them wants the heading's italic. The contents
+// is set in the contents face and the head in small capitals, and a run of
+// italic inside either is markup showing through rather than anything the
+// printing does. Where manifests/toc/ has the title this never came up, because
+// the manifest holds plain words; where it has not, the title is the heading
+// itself, asterisks and all. That is how 38 contents lines across six volumes
+// came to read \emph{Modules M-plats}, with the running head title cased off the
+// backslash so that it printed \emph{modules M-plats} in the bargain.
+//
+// Only asterisks are markers here. An underscore in a title is a subscript the
+// prose rescue is about to pick up, and a run between dollars is mathematics
+// where an asterisk is an adjoint, so those are left exactly as they were.
+// The mathematics goes out of the way first rather than the string being cut on
+// the dollars and each piece done separately, because a title can put emphasis
+// round a formula and the pair of asterisks then lands in two different pieces.
+// Integration V, § 6, no. 2 is "*Structure de monoide sur $D(A)$*" and it needs
+// both of its asterisks in the same string to lose either of them.
+func unemphasised(s string) string {
+	var math []string
+	s = titleMathRE.ReplaceAllStringFunc(s, func(m string) string {
+		math = append(math, m)
+		return "\x00t" + itoa(len(math)-1) + "\x00"
+	})
+	s = boldRE.ReplaceAllString(s, `$1`)
+	s = emRE.ReplaceAllString(s, `$1$2$3`)
+	if len(math) == 0 {
+		return s
+	}
+	return titleMathBackRE.ReplaceAllStringFunc(s, func(m string) string {
+		var i int
+		fmt.Sscanf(m, "\x00t%d\x00", &i)
+		return math[i]
+	})
+}
+
+var (
+	titleMathRE     = regexp.MustCompile(`\$[^$\n]*\$`)
+	titleMathBackRE = regexp.MustCompile("\x00t(\\d+)\x00")
+)
+
 // titleText renders a title that may still have its mathematics in dollars.
 //
 // Every other string that reaches inline came out of a body mask() had already
@@ -994,6 +1038,7 @@ func (r Renderer) heading(line string) (string, bool) {
 			// and the running head have neither.
 			mark, _, notes := splitFootnotes(n[2])
 			_, contents, _ := splitFootnotes(words)
+			contents = unemphasised(contents)
 			out := fmt.Sprintf("\\bno{%s}{%s}{%s}{%s}{%s}\n\n",
 				n[1], r.inline(mark), r.titleText(contents), r.head(contents), label)
 			for _, note := range notes {

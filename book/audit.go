@@ -298,9 +298,18 @@ func (a *Audit) length(root string, v *Volume, opt AuditOptions) {
 		scale = float64(a.Have) / float64(a.Want)
 	}
 	ratio := float64(held) / float64(printed) / scale
-	a.ok("the volume holds the text the printing has", ratio >= 1-opt.Short,
-		fmt.Sprintf("%d characters against the reading's %d over %d pages, %.0f%% of it",
-			held, printed, pages, 100*ratio))
+	// Say the scaling out loud when there is any. The line used to print the
+	// two character counts and then the scaled percentage, and a reader who
+	// divided one count by the other got a different number and had no way to
+	// find out why. A volume holding one section of eight came out at "789% of
+	// it" beside two counts whose quotient is 1.02.
+	detail := fmt.Sprintf("%d characters against the reading's %d over %d pages, %.0f%% of it",
+		held, printed, pages, 100*float64(held)/float64(printed))
+	if scale < 1 {
+		detail += fmt.Sprintf(", and %.0f%% of the %d sections of %d this language holds",
+			100*ratio, a.Have, a.Want)
+	}
+	a.ok("the volume holds the text the printing has", ratio >= 1-opt.Short, detail)
 }
 
 // printingChars counts the characters in the reading of the printing, which is

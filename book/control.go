@@ -382,6 +382,20 @@ func mathRun(rs []rune, i int) (end int, dec bool) {
 func braceEnd(rs []rune, i int) (int, bool) { return groupEnd(rs, i) }
 
 // groupEnd is the same for any of the three kinds of bracket.
+//
+// A NUL is refused for the same reason a dollar is, and it is the same thing
+// wearing a different hat: by the time this scanner runs, mask has already taken
+// the corpus's own math spans out and left a placeholder built from NUL where
+// each one was. A run that reached across one of those came out with dollars
+// inside dollars. The corpus writes C($\rho$)^I in the prose of Lie I, § 7 and
+// L($\Phi$)^{-1} in Lie III, § 10, and the rescue made both of them $C($\rho$)^I$,
+// which is not a formula but the error "Missing $ inserted" and a volume that
+// stops on it. Five volumes in each of English and Vietnamese were coming off
+// the shelf with no PDF for those two lines.
+//
+// The corpus is where that gets repaired, by putting the dollars round the whole
+// formula. What this does is make sure the fault stays a fault in one line
+// instead of taking a book down with it.
 func groupEnd(rs []rune, i int) (int, bool) {
 	var close rune
 	switch rs[i] {
@@ -399,7 +413,7 @@ func groupEnd(rs []rune, i int) (int, bool) {
 		switch rs[j] {
 		case '\\':
 			j++
-		case '\n', '$':
+		case '\n', '$', 0:
 			return i, false
 		case open:
 			depth++

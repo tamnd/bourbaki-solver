@@ -2,6 +2,7 @@ package book
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 	"unicode"
 )
@@ -188,5 +189,46 @@ func TestHeadKeepsTheMathOutOfTheCasing(t *testing.T) {
 	want := `\bheadfit{$\tau$-extensions of Groups}{$\tau$-extensions of Groups}`
 	if got != want {
 		t.Errorf("head = %q, want %q", got, want)
+	}
+}
+
+// A title the manifest has not got comes off the heading with its asterisks on,
+// and the contents line and the running head are the two places that must not
+// keep them. The last case is the one worth having: an asterisk between dollars
+// is an adjoint and taking it out would change the mathematics.
+func TestUnemphasisedTakesTheMarkersOffATitle(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`*Modules M-plats*.`, `Modules M-plats.`},
+		{`*Valeurs absolues sur Q*`, `Valeurs absolues sur Q`},
+		{`**Kunneth Formula**`, `Kunneth Formula`},
+		{`*p*-vecteurs purs. Grassmanniennes`, `p-vecteurs purs. Grassmanniennes`},
+		{`Bo loc *p* cua cac nhom tu do`, `Bo loc p cua cac nhom tu do`},
+		{`Relations between S(M), TS(M) and Pol(M, A)`, `Relations between S(M), TS(M) and Pol(M, A)`},
+		{`Modules over $A^*$ and $B^*$`, `Modules over $A^*$ and $B^*$`},
+		{`*Structure de monoide sur $D(A)$*`, `Structure de monoide sur $D(A)$`},
+	}
+	for _, c := range cases {
+		if got := unemphasised(c.in); got != c.want {
+			t.Errorf("unemphasised(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// The whole path: a numbered heading with emphasis on it sets the title in
+// italic and lists it in the contents and heads the page without.
+func TestANumberedHeadingKeepsItsItalicOutOfTheContents(t *testing.T) {
+	r := Renderer{File: "x.md", Line: 1, Lang: "fr"}
+	got, _ := r.heading(`### 2. *Modules M-plats*. {#ac-i-s2-n2}`)
+	for _, want := range []string{
+		`\bno{2}{\emph{Modules M-plats}.}`,
+		`{Modules M-plats.}`,
+		`\bheadfit{Modules M-plats.}{Modules M-plats.}`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("heading = %q, want it to contain %q", got, want)
+		}
+	}
+	if strings.Count(got, `\emph`) != 1 {
+		t.Errorf("heading = %q, want the emphasis in the title and nowhere else", got)
 	}
 }
