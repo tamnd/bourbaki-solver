@@ -399,10 +399,45 @@
 % enough to read across. includemp=false because geometry's default is to count
 % that column as part of the body, and left at the default it takes 28 pt off
 % the measure for a column that is empty on most pages.
+%
+% The head box is 18 pt and the gap under it is 8.5 pt, and between them they
+% are the whole of the running head problem this class had.
+%
+% It was 12 pt and 10 pt, and the head did not fit in 12 pt. LaTeX sets the
+% head in a \vbox to \headheight, and a head line that is taller than that
+% overflows it and gets reported. That was 331 of the 363 overfull boxes in a
+% build of the French Groupes et algebres de Lie, and every other volume of the
+% library had the same thing on nearly every page of it. Between 13 and 13.5 pt
+% is enough for a body head in this volume and 15.7 pt is what its contents
+% pages want, because the head there is TABLE DES MATIERES with a grave on the
+% E; a Vietnamese head with two diacritics stacked on one letter wants more
+% again. 18 pt is over all of them with room to spare.
+%
+% Room to spare costs nothing, which is the part worth knowing. LaTeX puts a
+% \vfil above the head line inside that box, so the line hangs from the bottom
+% of the box and not the top, and the bottom of the box is \headsep above the
+% text block. Where the head sits on the page is therefore \headsep and the
+% depth of the line, and \headheight only says how far up the box is allowed to
+% go into a margin that has nothing else in it. So the number can be generous
+% and the head does not move.
+%
+% \headsep goes from 10 pt to 8.5 pt to keep the head where the reader has been
+% seeing it. While the box was overflowing, the line was pushed down out of the
+% bottom of it by about a point and a half, and that is the page every built
+% volume up to now has had. 8.5 pt puts it back in the same place, and this
+% time it is there because it was asked to be.
+%
+% The warnings read "Overfull \vbox while \output is active", which sounds like
+% the page and is not the page. It was looked for in the text block twice, once
+% in \textheight and once in the glue on the paragraph, and both times a change
+% that should have made a difference made none. That is the tell, and it is
+% worth writing down: if a page of prose is a fraction of a point too tall and
+% giving it shrink does not help, the box that is overflowing is not the one
+% holding the prose.
 \newcommand{\bpaper}{%
   \geometry{paperwidth=155mm,paperheight=235mm,%
     inner=18.6mm,outer=18.6mm,%
-    top=12mm,headheight=12pt,headsep=10pt,%
+    top=12mm,headheight=18pt,headsep=8.5pt,%
     textheight=574.1pt,footskip=8mm,%
     includemp=false,%
     marginparwidth=7mm,marginparsep=2.5mm}%

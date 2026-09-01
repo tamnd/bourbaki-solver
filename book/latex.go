@@ -50,6 +50,12 @@ type Renderer struct {
 	// the literal characters they are made of, which is visible on the page and
 	// is meant to be, and the audit counts them.
 	Stray func(where string, cs []string)
+	// Rescued collects the mathematics the corpus wrote in its prose with no
+	// dollars round it and this build put dollars round for it. It is not a
+	// complaint about the build, it is the size of a job in the corpus, and it
+	// is counted for the same reason Stray is: so that a defect somebody has
+	// worked around cannot quietly stop being anybody's problem.
+	Rescued func(where string, atoms []string)
 	// Wide collects the arrays whose preamble came out narrower than their own
 	// widest row. The preamble is widened so the build carries on, and the
 	// report is what somebody takes back to the page.

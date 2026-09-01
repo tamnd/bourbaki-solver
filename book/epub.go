@@ -632,7 +632,7 @@ func (p *pageRenderer) set(sp mathtex.Span, display bool) string {
 // to MathML rather than to dollars, and the text mode commands go to the markup
 // that means what they mean.
 func (p *pageRenderer) controls(s string) (string, []string) {
-	if !strings.ContainsRune(s, '\\') {
+	if !strings.ContainsAny(s, `\_^`) {
 		return s, nil
 	}
 	var out []string
@@ -640,6 +640,21 @@ func (p *pageRenderer) controls(s string) (string, []string) {
 	rs := []rune(s)
 	for i := 0; i < len(rs); {
 		if rs[i] != '\\' {
+			// The mathematics the corpus wrote without dollars round it, read by
+			// the same scanner the PDF uses and set as MathML rather than as
+			// dollars. It has to be here as well as there: a reader with the EPUB
+			// and a reader with the PDF are meant to be looking at the same book,
+			// and before this the EPUB showed x_i with the underscore in every
+			// one of the eighteen thousand places the PDF sets it properly.
+			if end := atom(rs, i); end > i {
+				// Through Math for the same reason the PDF does it: the run is
+				// corpus text and its Greek and its operators are written as
+				// characters, and KaTeX wants the TeX spelling of them.
+				out = append(out, p.mathml(Math(string(rs[i:end]))))
+				b.WriteString(ctlOpen + itoa(len(out)-1) + ctlClose)
+				i = end
+				continue
+			}
 			b.WriteRune(rs[i])
 			i++
 			continue
@@ -667,14 +682,33 @@ func (p *pageRenderer) controls(s string) (string, []string) {
 			i = next
 			continue
 		}
-		out = append(out, p.emit(cmd, name, args))
+		suffix := ""
+		if cmd.math {
+			if e := decorations(rs, end); e > end {
+				suffix = string(rs[end:e])
+				end = e
+			}
+		}
+		out = append(out, p.emit(cmd, name, args, suffix))
 		b.WriteString(ctlOpen + itoa(len(out)-1) + ctlClose)
 		i = end
 	}
 	return b.String(), out
 }
 
-func (p *pageRenderer) emit(c cmd, name string, args []string) string {
+// mathml is one run of TeX as the markup a reading system can set, or as the
+// TeX itself in a span the stylesheet marks when KaTeX will not read it.
+func (p *pageRenderer) mathml(tex string) string {
+	out, err := p.eng.MathML(tex, false)
+	if err != nil {
+		return "<span class=\"rawtex\">" + esc(tex) + "</span>"
+	}
+	p.epub.Math++
+	out = strings.TrimPrefix(out, `<span class="katex">`)
+	return strings.TrimSuffix(out, "</span>")
+}
+
+func (p *pageRenderer) emit(c cmd, name string, args []string, suffix string) string {
 	if c.raw != "" {
 		return escapes[c.raw]
 	}
@@ -683,13 +717,7 @@ func (p *pageRenderer) emit(c cmd, name string, args []string) string {
 		for _, a := range args {
 			tex += "{" + a + "}"
 		}
-		out, err := p.eng.MathML(tex, false)
-		if err != nil {
-			return "<span class=\"rawtex\">" + esc(tex) + "</span>"
-		}
-		p.epub.Math++
-		out = strings.TrimPrefix(out, `<span class="katex">`)
-		return strings.TrimSuffix(out, "</span>")
+		return p.mathml(tex + suffix)
 	}
 	if len(args) == 0 {
 		return words[name]

@@ -385,6 +385,18 @@ func (a *Audit) written(d *Document, opt AuditOptions) {
 		fmt.Sprintf("%d sequences over %d places, the ceiling is %d",
 			distinct(d.Stray), len(d.Stray), opt.Stray),
 		top(d.Stray, 12)...)
+	// The mathematics the corpus wrote without dollars round it. This is not
+	// checked against a ceiling and it never passes or fails, because there is
+	// nothing here for the build to get right or wrong: the run was rescued, it
+	// sets correctly, and the page reads. What the line is for is the size of
+	// the job still sitting in content/, which is 18,556 runs over 1,383 files
+	// at the time of writing. The day somebody puts the dollars in, this number
+	// goes to nothing on its own and every reader of the corpus gets what the
+	// book readers already have.
+	a.ok("mathematics the corpus left loose in its prose", true,
+		fmt.Sprintf("%d runs over %d places, wrapped in dollars by the build",
+			distinct(d.Rescued), len(d.Rescued)),
+		top(d.Rescued, 12)...)
 	a.ok("every cross reference has something to point at", len(d.Dangling) == 0,
 		fmt.Sprintf("%d references over %d places", distinct(d.Dangling), len(d.Dangling)),
 		top(d.Dangling, 12)...)
