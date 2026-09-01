@@ -31,6 +31,10 @@ type Document struct {
 	// report nobody can act on.
 	Missing []Finding
 	Stray   []Finding
+	// Rescued is the mathematics the corpus left loose in its prose, x_i and
+	// S^{-1}A and the rest, which the build wrapped in dollars so the page would
+	// read. It is a count of a defect in content/ and not of one in the build.
+	Rescued []Finding
 	// Wide is every array whose preamble was narrower than its widest row. The
 	// build widens it and carries on, and this is the list of pages somebody
 	// should go and look at, because a diagram that lost a column in the reading
@@ -272,6 +276,11 @@ func (d *Document) renderer(v *Volume, file string, head int, anchors map[string
 				d.Stray = append(d.Stray, Finding{Where: where, What: c, Count: 1})
 			}
 		},
+		Rescued: func(where string, as []string) {
+			for _, a := range as {
+				d.Rescued = append(d.Rescued, Finding{Where: where, What: a, Count: 1})
+			}
+		},
 		Aligned: func(where string) {
 			d.Aligned = append(d.Aligned, Finding{Where: where, What: "display", Count: 1})
 		},
@@ -355,6 +364,7 @@ func (d *Document) Summary(v *Volume) string {
 	}
 	report("characters no font can set", d.Missing)
 	report("control sequences in prose", d.Stray)
+	report("mathematics rescued from prose", d.Rescued)
 	report("references with no target", d.Dangling)
 	report("arrays widened to fit their own rows", d.Wide)
 	return b.String()

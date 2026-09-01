@@ -56,15 +56,28 @@ var ctlRE = regexp.MustCompile("\x00c(\\d+)\x00")
 // for. It runs before the prose is escaped, because after that there are no
 // control sequences left to find, only backslashes that have been printed.
 func (r Renderer) controls(s string) (string, []string) {
-	if !strings.ContainsRune(s, '\\') {
+	if !strings.ContainsAny(s, `\_^`) {
 		return s, nil
 	}
 	var out []string
 	var b strings.Builder
 	var stray []string
+	var rescued []string
 	rs := []rune(s)
 	for i := 0; i < len(rs); {
 		if rs[i] != '\\' {
+			// An atom is mathematics the corpus wrote without dollars round it,
+			// which is the commonest defect in the whole text layer and the one a
+			// reader sees first. atom says where one ends and why the rule is what
+			// it is.
+			if end := atom(rs, i); end > i {
+				a := string(rs[i:end])
+				rescued = append(rescued, a)
+				out = append(out, "$"+Math(a)+"$")
+				b.WriteString(ctlOpen + itoa(len(out)-1) + ctlClose)
+				i = end
+				continue
+			}
 			b.WriteRune(rs[i])
 			i++
 			continue
@@ -103,18 +116,37 @@ func (r Renderer) controls(s string) (string, []string) {
 			i = next
 			continue
 		}
-		out = append(out, r.emit(cmd, name, args))
+		// A subscript hanging off a rescued formula belongs inside the same pair
+		// of dollars as the formula. The corpus writes \alpha_i and \mathbf{Z}^n
+		// in its prose, and without this the command went into math on its own
+		// and the _i was left outside it to be printed as an underscore, which is
+		// the defect this file exists to fix showing up one character to the
+		// right of where it was fixed.
+		suffix := ""
+		if cmd.math {
+			if e := decorations(rs, end); e > end {
+				suffix = string(rs[end:e])
+				rescued = append(rescued, `\`+name+suffix)
+				end = e
+			}
+		}
+		out = append(out, r.emit(cmd, name, args, suffix))
 		b.WriteString(ctlOpen + itoa(len(out)-1) + ctlClose)
 		i = end
 	}
 	if len(stray) > 0 && r.Stray != nil {
 		r.Stray(r.at(0), stray)
 	}
+	if len(rescued) > 0 && r.Rescued != nil {
+		r.Rescued(r.at(0), rescued)
+	}
 	return b.String(), out
 }
 
-// emit is the LaTeX one control sequence and its arguments come out as.
-func (r Renderer) emit(c cmd, name string, args []string) string {
+// emit is the LaTeX one control sequence and its arguments come out as. suffix
+// is the run of subscripts and superscripts that followed it in the prose, which
+// is empty for everything except a rescued formula that had one.
+func (r Renderer) emit(c cmd, name string, args []string, suffix string) string {
 	if c.raw != "" {
 		return c.raw
 	}
@@ -136,6 +168,7 @@ func (r Renderer) emit(c cmd, name string, args []string) string {
 		for _, a := range args {
 			b.WriteString("{" + Math(a) + "}")
 		}
+		b.WriteString(Math(suffix))
 		b.WriteString(`$`)
 		return b.String()
 	}
@@ -218,6 +251,181 @@ func arguments(rs []rune, i, n int, bare bool) (args []string, end int, complete
 		i = k
 	}
 	return args, i, true
+}
+
+// The other half of the problem this file is about, and the bigger half.
+//
+// A control sequence loose in the prose is a formula the OCR set as text and
+// spelled the TeX way. Far more often it set the formula as text and spelled it
+// the way the page looks: x_i, S^{-1}A, C^nG, U^n, K[z_λ]_{λ ∈ Λ}. There is not
+// a backslash in any of those, so everything above walks straight past them, and
+// the escaper then does the only thing it can with an underscore in prose, which
+// is print it. A page of Groupes et algebres de Lie came out reading "f_p du
+// K-module g ⊗_K P_p" with the underscores showing, and that one defect is what
+// makes the built volumes look wrong before anybody gets as far as the font.
+//
+// A census over content/ counts 16,531 of these in 1,248 files. They were read
+// before this was written, the way the table above was: the commonest are
+// S^{-1} 194 times, C^r 86, x_i 71, E_i 68, and the tail is x_0, A_p, H_{i,j},
+// Ω_K, E_β. A hundred of them carry three or more letters in a subscript and
+// every one of those was looked at by hand, because that is where a false catch
+// would hide: they are O_{III}, V_{III}, E_{III} and the other roman numerals,
+// e^{ada} and e^{adb} out of Lie I § 6, L^1_{loc}, A_{red}, g_{reg} and c_{ijk}.
+// No English or French word was caught in the whole corpus, which is the answer
+// to the obvious worry about a rule that reads an underscore as mathematics.
+//
+// The run is greedy on both sides of the decoration on purpose. 687 of them are
+// followed straight on by another letter, and the letter belongs to the formula
+// every time: S^{-1}A and S^{-1}M through the whole of Commutative Algebra II,
+// C^nG in Lie II, x_rN, x_iy_j, d_{L/K}x, and the "X_1f, ..., X_rf" that Lie's
+// historical note quotes from Lie himself. Stopping at the decoration would set
+// half of each of those in mathematics and half in prose, which is worse than
+// leaving all of it alone.
+//
+// This is a rescue and not a repair. The repair is in the corpus, and it is
+// putting the dollars where they belong so that the site and the EPUB and
+// anything else reading content/ gets the same benefit. The audit counts what
+// was rescued on every build so the size of that job stays visible.
+
+// atom says where the run of mathematics starting at rs[i] ends, or returns i if
+// there is none. It must start at a letter, that letter must not be joined to
+// whatever comes before it, and the run must carry at least one subscript or
+// superscript, since a bare word is prose.
+func atom(rs []rune, i int) int {
+	if !isMathLetter(rs[i]) && rs[i] != '(' && rs[i] != '[' {
+		return i
+	}
+	if i > 0 {
+		switch p := rs[i-1]; {
+		case p == '\\' || p == '_' || p == '^' || p == '{':
+			// Joined to a control sequence, to a decoration this scanner has
+			// already read, or to a brace group. Not the head of anything.
+			return i
+		case isMathRune(p):
+			return i
+		}
+	}
+	end, dec := mathRun(rs, i)
+	if !dec {
+		return i
+	}
+	return end
+}
+
+// decorations reads the subscripts and superscripts hanging off something the
+// caller has already decided is mathematics, which is why it does not ask for a
+// letter to start with.
+func decorations(rs []rune, i int) int {
+	if i >= len(rs) || rs[i] != '_' && rs[i] != '^' {
+		return i
+	}
+	end, dec := mathRun(rs, i)
+	if !dec {
+		return i
+	}
+	return end
+}
+
+// mathRun walks letters, digits and decorations from i until it reaches
+// something that is neither, and says whether it passed a decoration on the way.
+// A trailing _ or ^ with nothing readable after it is not part of the run: it is
+// half a formula, and the half that is missing is not in the file.
+func mathRun(rs []rune, i int) (end int, dec bool) {
+	j := i
+	for j < len(rs) {
+		if isMathRune(rs[j]) {
+			j++
+			continue
+		}
+		if rs[j] == '(' || rs[j] == '[' {
+			// A bracket is part of the run only when a subscript hangs off it.
+			// The corpus writes (x_λ)_{λ ∈ Λ} and K[z_λ]_{λ ∈ Λ} in its prose and
+			// there is no way to set either of those without the bracket. Any
+			// other bracket is left where it is, because a rule that swallowed
+			// every parenthesis after a formula would take "(voir chap. II)" into
+			// mathematics with it.
+			g, ok := groupEnd(rs, j)
+			if !ok || g >= len(rs) || rs[g] != '_' && rs[g] != '^' {
+				break
+			}
+			j = g
+			continue
+		}
+		if rs[j] != '_' && rs[j] != '^' {
+			break
+		}
+		k := j + 1
+		if k >= len(rs) {
+			break
+		}
+		if rs[k] == '{' {
+			g, ok := braceEnd(rs, k)
+			if !ok {
+				break
+			}
+			j, dec = g, true
+			continue
+		}
+		if !isMathRune(rs[k]) && rs[k] != '-' && rs[k] != '+' {
+			break
+		}
+		j, dec = k+1, true
+	}
+	return j, dec
+}
+
+// braceEnd reads a balanced brace group starting at rs[i], which is an open
+// brace, and refuses one that runs over a line or holds a dollar. Either of
+// those means the brace is not the argument of a subscript but a brace the prose
+// happens to contain, and reading it as one would swallow the rest of the
+// sentence.
+func braceEnd(rs []rune, i int) (int, bool) { return groupEnd(rs, i) }
+
+// groupEnd is the same for any of the three kinds of bracket.
+func groupEnd(rs []rune, i int) (int, bool) {
+	var close rune
+	switch rs[i] {
+	case '{':
+		close = '}'
+	case '(':
+		close = ')'
+	case '[':
+		close = ']'
+	default:
+		return i, false
+	}
+	open, depth := rs[i], 0
+	for j := i; j < len(rs); j++ {
+		switch rs[j] {
+		case '\\':
+			j++
+		case '\n', '$':
+			return i, false
+		case open:
+			depth++
+		case close:
+			depth--
+			if depth == 0 {
+				return j + 1, true
+			}
+		}
+	}
+	return i, false
+}
+
+// isMathLetter is a letter a formula can be built on, which is the Latin
+// alphabet and the Greek one. The corpus writes its Greek as Greek rather than
+// as \alpha in most places, which is why the second range is here.
+func isMathLetter(r rune) bool {
+	return isLetter(r) || r >= 0x0391 && r <= 0x03C9
+}
+
+// isMathRune is what a run of mathematics may be made of between its
+// decorations: a letter, a digit, or one of the Unicode subscript and
+// superscript digits the OCR sometimes writes instead of an underscore.
+func isMathRune(r rune) bool {
+	return isMathLetter(r) || r >= '0' && r <= '9' ||
+		r >= 0x2080 && r <= 0x2089 || r >= 0x2070 && r <= 0x207F
 }
 
 func itoa(n int) string {
