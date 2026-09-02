@@ -31,6 +31,16 @@ type Facts struct {
 	// Tool is the absolute path of chatgpt-tool, which is under /home/tam on
 	// server1 and /root on server2 and server3.
 	Tool string `json:"tool"`
+	// ReaderTool is the absolute path of local-ocr, on the one box that has a
+	// card rather than a browser.
+	//
+	// It is a second field and not a smarter Tool because a host can have both
+	// and gamingpc does: chatgpt-tool is installed there and answers nothing,
+	// since the box has no signed in profile and never will. Folding the two
+	// into one path would mean the probe deciding which program a route wants,
+	// and that is the route file's business. The probe reports what is on the
+	// box and ocrHosts picks, which is the split everywhere else here.
+	ReaderTool string `json:"reader_tool,omitempty"`
 	// Serving reports whether something holds 127.0.0.1:8077.
 	Serving bool `json:"serving"`
 	Xvfb    bool `json:"xvfb"`
@@ -52,6 +62,7 @@ echo "mem_total_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)"
 echo "mem_free_mb=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)"
 echo "disk_free_mb=$(df -Pm "$HOME" | awk 'NR==2{print $4}')"
 echo "tool=$(command -v chatgpt-tool || ls "$HOME"/chatgpt-tool/.venv/bin/chatgpt-tool 2>/dev/null || echo '')"
+echo "reader_tool=$(command -v local-ocr || ls "$HOME"/local-ocr/.venv/bin/local-ocr 2>/dev/null || echo '')"
 echo "serve=$(ss -ltn 2>/dev/null | grep -c '127.0.0.1:PORT')"
 echo "xvfb=$(command -v xvfb-run || echo '')"
 echo "rsync=$(command -v rsync || echo '')"
@@ -102,6 +113,8 @@ func Probe(ctx context.Context, runner Runner, target Target) Facts {
 			facts.DiskFreeMB = number(value)
 		case "tool":
 			facts.Tool = value
+		case "reader_tool":
+			facts.ReaderTool = value
 		case "serve":
 			facts.Serving = number(value) > 0
 		case "xvfb":
@@ -112,8 +125,11 @@ func Probe(ctx context.Context, runner Runner, target Target) Facts {
 			facts.Screen = value != ""
 		}
 	}
-	if facts.Tool == "" {
-		facts.Err = "chatgpt-tool is not installed"
+	// A box with neither program on it has nothing to offer. A box with only
+	// local-ocr is a reader and is fine, so the message names both rather than
+	// calling a working card a broken browser host.
+	if facts.Tool == "" && facts.ReaderTool == "" {
+		facts.Err = "neither chatgpt-tool nor local-ocr is installed"
 	}
 	return facts
 }

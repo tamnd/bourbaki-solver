@@ -325,6 +325,7 @@ func TestAReaderCarriesItsProgramAndItsModel(t *testing.T) {
 	]}`)
 	gaming := server3
 	gaming.Name, gaming.Cores, gaming.Tool = "gamingpc", 32, "/home/gopher/chatgpt-tool/.venv/bin/chatgpt-tool"
+	gaming.ReaderTool = "/home/gopher/local-ocr/.venv/bin/local-ocr"
 	state := filepath.Join(home, "fleet.json")
 	raw, _ := json.Marshal(fleet.State{Written: time.Now(),
 		Hosts: map[string]fleet.Facts{"gamingpc": gaming, "server3": server3}})
@@ -347,11 +348,50 @@ func TestAReaderCarriesItsProgramAndItsModel(t *testing.T) {
 	if hosts[0].Model != "olmOCR-2-7B-1025-FP8" {
 		t.Errorf("Model = %q, so a page read on a 4090 would claim gpt-5 read it", hosts[0].Model)
 	}
+	// The program has to be local-ocr and not chatgpt-tool, and this box has
+	// both installed, so taking the first path the probe found is wrong in a way
+	// that does not look wrong. The chatgpt-tool on gamingpc has no signed in
+	// profile and never will, and ocr-batch there does not refuse: it goes off
+	// to register an account, hits the timeout, and reports every page in the
+	// batch with no answer. Eight pages an attempt read like a slow host.
+	if hosts[0].Tool != "/home/gopher/local-ocr/.venv/bin/local-ocr" {
+		t.Errorf("Tool = %q, want the reader's program and not the browser's", hosts[0].Tool)
+	}
 	// And the boxes are untouched. A browser host draws whichever slug the pool
 	// gives it that morning, so the route's model is not the answer for it and
 	// modelFor falls back to the run's default on purpose.
 	if hosts[1].Reader != "" || hosts[1].Model != "" {
 		t.Errorf("server3 = %+v, want a box that names neither", hosts[1])
+	}
+	if hosts[1].Tool != server3.Tool {
+		t.Errorf("server3 Tool = %q, want the chatgpt-tool the probe found", hosts[1].Tool)
+	}
+}
+
+// The reader's program is not optional. A route that names a reader and a box
+// that does not have it is a misconfiguration, and the only honest thing to do
+// with it is say so and leave the host out.
+func TestAReaderWithoutItsProgramIsRefused(t *testing.T) {
+	home := t.TempDir()
+	routes := filepath.Join(home, "routes.json")
+	write(t, routes, `{"routes":[
+		{"name":"gamingpc","host":"gpc","model":"olmOCR-2-7B-1025-FP8","reader":"local-ocr","concurrency":8},
+		{"name":"server3","wire":"chat","base_url":"http://127.0.0.1:18773/v1","model":"gpt-5","host":"server3","concurrency":4}
+	]}`)
+	gaming := server3
+	gaming.Name, gaming.Cores, gaming.Tool = "gamingpc", 32, "/home/gopher/chatgpt-tool/.venv/bin/chatgpt-tool"
+	state := filepath.Join(home, "fleet.json")
+	raw, _ := json.Marshal(fleet.State{Written: time.Now(),
+		Hosts: map[string]fleet.Facts{"gamingpc": gaming, "server3": server3}})
+	write(t, state, string(raw))
+	t.Setenv("BOURBAKI_FLEET_STATE", state)
+
+	hosts, err := ocrHosts(routes, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hosts) != 1 || hosts[0].Name != "server3" {
+		t.Fatalf("got %+v, want server3 alone and gamingpc refused", hosts)
 	}
 }
 
