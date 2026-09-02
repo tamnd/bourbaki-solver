@@ -668,7 +668,10 @@ func noLeaderLabel(line, text string, e entry, mark SectionMark, want string) (s
 		// end of the title.
 		if head, ok := oneMorePiece(rest); ok {
 			if ch2, p2, ok := readLabel(head.tok+" "+tok, want); ok && ch2 == ch && p2 == p {
-				rest, tok = head.rest, head.tok+" "+tok
+				// Only the line matters from here. The loop classifies rest and
+				// returns on the next statement either way, so the longer token
+				// has nowhere left to go.
+				rest = head.rest
 			}
 		}
 		got := classify(rest, mark)
