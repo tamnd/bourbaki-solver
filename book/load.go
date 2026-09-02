@@ -281,8 +281,23 @@ func loadSection(root, path, lang string) (*Section, error) {
 	// pages. The words are already on the page. This reads them off it.
 	if f.Meta.TranslatedFrom != "" {
 		h1, h2 := bodyTitles(f.Body)
-		if kind == corpus.KindFront && h1 != "" {
-			s.ChapterTitle = h1
+		if kind == corpus.KindFront {
+			// A chapter front is written two ways in the corpus and only one of
+			// them was being read. Topological Vector Spaces opens a chapter
+			// with the numeral on its own line and the title under it, "##
+			// CHUONG I" then "# Cac khong gian vecto topo trên mot vanh chia
+			// dinh gia", so h1 is the title and this has always worked. Theory
+			// of Sets and Lie IX put both on one line, "## CHUONG II Ly thuyet
+			// tap hop", so there is no h1 at all and the chapter fell back to
+			// the untranslated chapter_title in the front matter. That is why a
+			// Vietnamese Theory of Sets was set with THEORY OF SETS over its
+			// Vietnamese sections while a Vietnamese Topological Vector Spaces
+			// was set correctly. The words were on the page in both cases.
+			if h1 != "" {
+				s.ChapterTitle = h1
+			} else if t := chapterHeadTitle(h2); t != "" {
+				s.ChapterTitle = t
+			}
 		}
 		if t := sectionTitle(cmp.Or(h2, h1), f.Meta.Section); t != "" {
 			s.Title = t
@@ -358,6 +373,24 @@ func bodyTitles(body string) (h1, h2 string) {
 		}
 	}
 	return
+}
+
+// chapterHeadRE is a chapter front heading that carries the numeral and the
+// title on one line, in any of the three languages the corpus is written in.
+// The (*) is a footnote marker some chapters take on the numeral itself.
+var chapterHeadRE = regexp.MustCompile(`(?i)^\s*(?:chương|chapitre|chapter)\s+([0-9]+|[ivxlcdm]+)\s*(?:\(\*+\))?\s*[.:]?\s*(.*)$`)
+
+// chapterHeadTitle is the title out of such a heading, or the empty string when
+// the heading is the numeral and nothing else. Most chapters are in the second
+// state, "## CHUONG II" with the title nowhere on the page, and those have to
+// keep falling through to the front matter rather than being given an empty
+// title here.
+func chapterHeadTitle(h string) string {
+	m := chapterHeadRE.FindStringSubmatch(h)
+	if m == nil {
+		return ""
+	}
+	return strings.TrimSpace(m[2])
 }
 
 // loadExercises fills in the exercises of every § of one chapter.
