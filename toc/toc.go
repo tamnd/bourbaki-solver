@@ -70,6 +70,12 @@ type Options struct {
 	Title string
 	// Grammar is detected when nil.
 	Grammar *Grammar
+	// FrontMatterPDF is the last pdf page of what the manifest declares as the
+	// note to the reader and the introduction, and is 0 for a volume that
+	// declares neither. It is here for one check, on where a chapter opens, and
+	// what it says there is that a span starting before this page is a span the
+	// page map guessed. See validate.
+	FrontMatterPDF int
 }
 
 // Result is what one volume's contents yielded.
@@ -166,8 +172,20 @@ var (
 	// short run of label characters at the end of the line, in up to three
 	// pieces where the scan put spaces: the 2003 scan sets V.10 as "V1. 10" and
 	// the 2004 Integration sets IV.110 as "IV. 11 0".
+	//
+	// The Book in front of it is its own piece and not part of the first one,
+	// because the pieces after the first are four characters wide and a whole
+	// label does not fit in four. The French Theorie des ensembles is the volume
+	// that prints the Book in its own table, "INTRODUCTION ..... E I.7", and it
+	// read as far as E II.9 and then stopped: "E II.30" is the Book, a space,
+	// and six characters, so no split of it fitted the pattern and every line
+	// from § 5 of chapter II onwards was dropped. That is two thirds of the
+	// volume, chapters III and IV among them.
+	//
+	// It stays inside the capture because readLabel is where a label is cut, and
+	// what it is given has to be the whole of what the line ends with.
 	labelTailRe = regexp.MustCompile(
-		leader + `\s*([A-Za-z0-9.,\-|·]{1,8}(?:\s[A-Za-z0-9.,\-|·]{1,4}){0,2})\s*$`)
+		leader + `\s*((?:[A-Z]{1,3}\s)?[A-Za-z0-9.,\-|·]{1,8}(?:\s[A-Za-z0-9.,\-|·]{1,4}){0,2})\s*$`)
 
 	// The 2003 scan does not always read the word CHAPTER itself: the line
 	// that opens chapter IV comes out "CHAP-1 ER IV." So the word is matched
@@ -347,6 +365,50 @@ const labelSeparators = ".,·•-oO"
 // 2004 Integration sets the run of exercises of chapter II § 1 as "ILl5", which
 // is II.15 and is also III.5, and the entry is read while chapter II is open.
 func readLabel(tok, want string) (chapter string, page int, found bool) {
+	if ch, p, ok := readLabelBody(tok, want); ok {
+		return ch, p, ok
+	}
+	// A contents that points at the Book as well as the chapter gets a second
+	// reading with the Book taken off. Most of the library prints the chapter
+	// alone in its table, "I. 1" and "IV. 110", and that is what this was
+	// written for. The French Theorie des ensembles prints the whole label,
+	// "INTRODUCTION ..... E I.7", and there is no way to read EI.7 as a numeral
+	// and a page, so the volume yielded no contents line at all and the parser
+	// reported it as having no table of contents.
+	//
+	// It is a second pass and not a looser first one because the field being
+	// dropped is a field the other volumes need. Only a whole field goes, only
+	// where it is one to three letters with no separator in it, and only where
+	// it is not itself a numeral, which is what keeps "I 5" and "V 12" intact.
+	if rest, ok := withoutBook(tok); ok {
+		return readLabelBody(rest, want)
+	}
+	return "", 0, false
+}
+
+// withoutBook drops the Book prefix from a label, and reports whether there was
+// one to drop.
+func withoutBook(tok string) (string, bool) {
+	fields := strings.Fields(tok)
+	if len(fields) < 2 {
+		return tok, false
+	}
+	head := fields[0]
+	if len(head) > 3 {
+		return tok, false
+	}
+	for _, r := range head {
+		if r < 'A' || r > 'Z' {
+			return tok, false
+		}
+	}
+	if ch, ok := readRoman(head); ok && isCanonicalRoman(ch) {
+		return tok, false
+	}
+	return strings.Join(fields[1:], " "), true
+}
+
+func readLabelBody(tok, want string) (chapter string, page int, found bool) {
 	// What is trimmed off the end is punctuation the scanner added, and the
 	// letters the separator is misread as are not trimmed there: the 1987 scan
 	// sets II.10 as "II.lO", and a trim that took the O for a stray separator
@@ -594,6 +656,21 @@ func noLeaderLabel(line, text string, e entry, mark SectionMark, want string) (s
 		if !ok || ch != want {
 			continue
 		}
+		// The Book in front of the label is part of the label and not the last
+		// word of the title. Taking one more piece only counts where it reads
+		// as the same chapter and the same page, which is what a Book prefix
+		// does and what a word of a title does not.
+		//
+		// The French Theorie des ensembles is the volume that needs it. No. 5
+		// of chapter II § 6 runs the width of the line, so the printing sets a
+		// period where it sets a leader: "5. Applications compatibles avec des
+		// relations d'equivalence. E II.44". Stopping at II.44 left the E on the
+		// end of the title.
+		if head, ok := oneMorePiece(rest); ok {
+			if ch2, p2, ok := readLabel(head.tok+" "+tok, want); ok && ch2 == ch && p2 == p {
+				rest, tok = head.rest, head.tok+" "+tok
+			}
+		}
 		got := classify(rest, mark)
 		if got.kind != e.kind || got.number != e.number || got.numeral != e.numeral {
 			return text, tail{}, false, e
@@ -601,6 +678,26 @@ func noLeaderLabel(line, text string, e entry, mark SectionMark, want string) (s
 		return rest, tail{chapter: ch, page: p}, true, got
 	}
 	return text, tail{}, false, e
+}
+
+// labelHead is a line with the last space separated piece taken off it.
+type labelHead struct {
+	rest string
+	tok  string
+}
+
+// oneMorePiece takes the last space separated piece off a line, where that
+// piece could be part of a label.
+func oneMorePiece(line string) (labelHead, bool) {
+	i := strings.LastIndexAny(line, " \t")
+	if i < 0 {
+		return labelHead{}, false
+	}
+	tok := strings.TrimLeft(line[i:], " \t")
+	if !labelPieceRe.MatchString(tok) {
+		return labelHead{}, false
+	}
+	return labelHead{rest: strings.TrimRight(line[:i], " \t"), tok: tok}, true
 }
 
 // kind is what a contents line announces.

@@ -541,7 +541,23 @@ var (
 	// since a badly scanned proof is full of dots, and it cost four pages of
 	// Lie chapters 4 to 6 their running heads.
 	leaderRe = regexp.MustCompile(`\.\s*\.`)
-	entryRe  = regexp.MustCompile(`\.\s*\.\s*\.\s*\.[\s.]*\s\s*\d[\d ]*$`)
+
+	// A contents entry points at a bare page number in the volumes that print
+	// bare page numbers and at a page label in the volumes that print labels,
+	// and only the first was written down. The French Theorie des ensembles is
+	// the whole cost of that: every line of its table reads "INTRODUCTION"
+	// followed by a leader and "E I.7", so no line ended in a digit that was not
+	// preceded by letters, no page of the table counted as a table, and the
+	// first line of it was read as a running head saying chapter I page 7. That
+	// landed on pdf 299, between IV.95 and IV.98, and stretched chapter I from
+	// the front of the volume to the back of it.
+	//
+	// The label form here is headLabelRe's, loosened the same way and for the
+	// same reason, and it is optional rather than a second pattern because a
+	// volume may print both: the label volumes number their own front matter
+	// with labels and their fascicule de resultats without one.
+	entryRe = regexp.MustCompile(
+		`\.\s*\.\s*\.\s*\.[\s.]*\s\s*(?:[A-Z]{1,3}\s*[.\s]\s*[IVXLCDM1l|][IVXLCDM1l| ]{0,4}[.,]\s*)?\d[\d ]*$`)
 )
 
 // isContents reports whether a page is part of a volume's table of contents.
@@ -688,6 +704,39 @@ func headLines(page string, n int) []string {
 	return out
 }
 
+// headLabelLines returns the lines a labelled volume can read a running head
+// off, which is the first few except on a table of contents.
+//
+// It is headLineOf's rule applied to the label grammar, and it was missing
+// there. headLineOf skips a leader line on a contents page because the entries
+// under the head look more like a head than the head does, and that reasoning
+// does not depend on which grammar prints the number. The label grammar was
+// reading the raw first lines instead, and the French Theorie des ensembles is
+// what that costs: its table of contents opens on pdf 299, a page with no folio
+// on it, and the first line of the table is "INTRODUCTION" followed by a leader
+// and "E I.7". Read as a head that is chapter I page 7 arriving between page
+// IV.95 and page IV.98, which put the last page of the volume's back matter
+// into its first chapter and stretched chapter I over 298 leaves.
+//
+// Two lines rather than four, because that is what the label grammar asked for
+// before and a label sits on the head line or the one under it.
+func headLabelLines(page string, n int) []string {
+	if !isContents(page) {
+		return headLines(page, n)
+	}
+	var out []string
+	for _, l := range headLines(page, n+2) {
+		if leaderRe.MatchString(l) {
+			continue
+		}
+		out = append(out, l)
+		if len(out) == n {
+			break
+		}
+	}
+	return out
+}
+
 // footLine returns the last non-blank line of a page. Only the last one: a
 // display formula can leave a bare integer on the second to last line, and page
 // 350 of the 1998 scan ends "1" then "326", so looking any further up reads the
@@ -799,7 +848,7 @@ func readAnchorsPrefix(pages []string, folios []int, labels []string, g Grammar,
 		}
 		switch g {
 		case HeadLabel:
-			for _, l := range headLines(pg, 2) {
+			for _, l := range headLabelLines(pg, 2) {
 				pre, ch, p, ok := readHeadLabel(l)
 				if !ok || !want[ch] {
 					continue

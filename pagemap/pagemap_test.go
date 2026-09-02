@@ -1324,3 +1324,51 @@ func TestAnOpenerThatDoesNotReadPageOneIsStillAMisread(t *testing.T) {
 		t.Errorf("the fit took the opener back, want it left as the misread it is")
 	}
 }
+
+// A table of contents that points at page labels is still a table of contents.
+// The French Theorie des ensembles prints one, and the entry pattern only knew
+// the form that ends in a bare number, so no page of the table counted as a
+// table.
+func TestAContentsThatPointsAtLabelsIsRecognised(t *testing.T) {
+	contents := "INTRODUCTION ..................................................... E I.7\n" +
+		"CHAPITRE I. — DESCRIPTION DE LA MATHÉMATIQUE FORMELLE ............ E I.14\n" +
+		"§ 1. Termes et relations ............................................. E I.14\n" +
+		"    1. Signes et assemblages ....................................... E I.14\n"
+	if !isContents(contents) {
+		t.Error("a table of contents pointing at page labels was not recognised as one")
+	}
+	// The bare number form still works and prose still does not, so the looser
+	// entry has not turned every page with dots on it into a contents.
+	body := head("42                    ALGÈBRES DE LIE                    Ch. I") +
+		"\n	x1 . . . xn = 0\net donc a1, . . . , an engendrent g.\n"
+	if isContents(body) {
+		t.Error("a page of ordinary text was taken for a table of contents")
+	}
+}
+
+// The label grammar reads a running head off the first lines of the page, and
+// on a table of contents the entries under the head look more like a head than
+// the head does. The bare number grammar has skipped them since Lie chapitre 1;
+// the label grammar did not, and pdf 299 of the French Theorie des ensembles is
+// what that cost. That page opens the table, carries no folio of its own, and
+// its first line is "INTRODUCTION" then a leader then "E I.7". Read as a head it
+// puts chapter I page 7 between IV.95 and IV.98.
+func TestAContentsEntryIsNotReadAsALabelledHead(t *testing.T) {
+	page := "INTRODUCTION ..................................................... E I.7\n" +
+		"\n" +
+		"CHAPITRE I. — DESCRIPTION DE LA MATHÉMATIQUE FORMELLE ............ E I.14\n" +
+		"§ 1. Termes et relations ............................................. E I.14\n" +
+		"    1. Signes et assemblages ....................................... E I.14\n"
+	as, _ := readAnchorsPrefix([]string{page}, nil, []string{""},
+		HeadLabel, []string{"I", "II", "III", "IV"})
+	if len(as) != 0 {
+		t.Errorf("%d anchors off a table of contents, want none: %v", len(as), as)
+	}
+	// The head of a page that is not a contents is still read, which is the
+	// whole point of the grammar.
+	as, _ = readAnchorsPrefix([]string{head("E I.15    TERMES ET RELATIONS")},
+		nil, []string{""}, HeadLabel, []string{"I"})
+	if len(as) != 1 || as[0].chapter != "I" || as[0].page != 15 {
+		t.Errorf("anchors %v, want one reading of I.15", as)
+	}
+}
