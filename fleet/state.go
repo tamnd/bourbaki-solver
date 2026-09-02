@@ -93,6 +93,16 @@ func (s State) Tool(host string) (string, bool) {
 	return facts.Tool, true
 }
 
+// ReaderTool is the local-ocr path discovered on a host, for a route that names
+// a reader other than chatgpt-tool.
+func (s State) ReaderTool(host string) (string, bool) {
+	facts, ok := s.Hosts[host]
+	if !ok || facts.ReaderTool == "" {
+		return "", false
+	}
+	return facts.ReaderTool, true
+}
+
 // Find returns the tunnel for a route.
 func (s State) Find(route string) (Tunnel, bool) {
 	for _, value := range s.Tunnels {

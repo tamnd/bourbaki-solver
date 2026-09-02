@@ -180,6 +180,36 @@ func TestProbeReportsAMissingTool(t *testing.T) {
 	}
 }
 
+// The reader's program is its own fact. gamingpc has chatgpt-tool on it as well,
+// and that one has no signed in profile and never will, so a probe that reports
+// one path for both leaves ocr run no way to tell them apart.
+func TestProbeReportsTheReadersProgramSeparately(t *testing.T) {
+	runner := &fakeRunner{out: map[string]string{"gpc": "host=GamingPC\ncores=32\n" +
+		"tool=/home/gopher/chatgpt-tool/.venv/bin/chatgpt-tool\n" +
+		"reader_tool=/home/gopher/local-ocr/.venv/bin/local-ocr\n"}}
+	facts := Probe(context.Background(), runner, Target{Name: "gamingpc", Host: "gpc", Port: 8077})
+	if facts.Err != "" {
+		t.Fatalf("Err = %q", facts.Err)
+	}
+	if facts.ReaderTool != "/home/gopher/local-ocr/.venv/bin/local-ocr" {
+		t.Errorf("ReaderTool = %q", facts.ReaderTool)
+	}
+	if facts.Tool != "/home/gopher/chatgpt-tool/.venv/bin/chatgpt-tool" {
+		t.Errorf("Tool = %q, want the browser's program left where it was", facts.Tool)
+	}
+}
+
+// A box with a card and no browser is a reader, not a broken host, so the
+// probe's own error must not call it one.
+func TestABoxWithOnlyTheReaderIsNotAnError(t *testing.T) {
+	runner := &fakeRunner{out: map[string]string{"gpc": "host=GamingPC\ncores=32\ntool=\n" +
+		"reader_tool=/home/gopher/local-ocr/.venv/bin/local-ocr\n"}}
+	facts := Probe(context.Background(), runner, Target{Name: "gamingpc", Host: "gpc", Port: 8077})
+	if facts.Err != "" {
+		t.Errorf("Err = %q, want a reader with no chatgpt-tool reported as fine", facts.Err)
+	}
+}
+
 // One unreachable host must not lose the answers from the two that replied.
 func TestProbeAllKeepsGoing(t *testing.T) {
 	runner := &fakeRunner{

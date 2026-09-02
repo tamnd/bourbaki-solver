@@ -102,6 +102,30 @@ type Route struct {
 	// claim gpt-5 read a page that olmOCR read. And the batch knows the far end
 	// opens no browser, which is what needsDisplay is for.
 	Reader string `json:"reader,omitempty"`
+
+	// ReaderURL is where the reader's own model server answers, on the box
+	// itself.
+	//
+	// It is not BaseURL and must not be folded into it. BaseURL means this
+	// route answers questions over HTTP, and that is what puts a route into the
+	// pool that translate and solve draw from. gamingpc answers no questions:
+	// it has a vLLM on it that reads page images and nothing that will hold a
+	// conversation, and a route file that says otherwise sends it a chunk of
+	// Bourbaki to put into Vietnamese. Two URLs because they are two claims.
+	ReaderURL string `json:"reader_url,omitempty"`
+
+	// ServedModel is what the reader's own model server calls the weights on
+	// the wire, which is not what the corpus calls them.
+	//
+	// Model above is the slug that goes into a page's front matter, and it has
+	// to name the weights: olmOCR-2-7B-1025-FP8, pinned by revision, so a
+	// reading can be reproduced. The vLLM in front of the card is started per
+	// entry in the reader's shortlist and answers to that entry's name, which
+	// is reader-a. Sending the corpus slug over the wire gets a 404 for a model
+	// the server has never heard of, and sending the served name into the front
+	// matter would record a page as read by "reader-a", which names nothing a
+	// year from now. They are two different questions and this is the second.
+	ServedModel string `json:"served_model,omitempty"`
 }
 
 // WireChat is the only wire: POST /v1/chat/completions, streaming.
@@ -361,6 +385,7 @@ func Default() Registry {
 		{
 			Name: "gamingpc", Wire: WireChat, Host: "gpc",
 			Reader: LocalOCRReader, Model: LocalOCRModel,
+			ReaderURL: LocalOCRReaderURL, ServedModel: LocalOCRServedModel,
 			Rank: 5, Concurrency: 8, Timeout: Duration(20 * time.Minute),
 			Note: "a 4090 in the next room, reads pages and answers no questions",
 		},
@@ -447,6 +472,17 @@ const DefaultModel = "gpt-5"
 const (
 	LocalOCRReader = "local-ocr"
 	LocalOCRModel  = "olmOCR-2-7B-1025-FP8"
+
+	// LocalOCRBaseURL is where that reader's vLLM answers on the box itself,
+	// and LocalOCRServedModel is what it calls the weights on the wire.
+	//
+	// The port is not arbitrary and is not local-ocr's default. The shortlist
+	// there gives every candidate its own port so two readers can be up at once
+	// during a bake off, and reader-a, the olmOCR entry, is on 8801. The batch
+	// tool's own default is 8000, which nothing serves, so leaving these unset
+	// is not a smaller configuration, it is a run that connects to nothing.
+	LocalOCRReaderURL   = "http://127.0.0.1:8801/v1"
+	LocalOCRServedModel = "reader-a"
 )
 
 // KeyEnv is the environment variable every route reads its key from. The key

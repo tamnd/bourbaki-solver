@@ -66,6 +66,17 @@ type Host struct {
 	// as it did. The batch protocol itself is unchanged: same directories, same
 	// detached start, same poll on a file count.
 	Reader string
+	// BaseURL and ServedModel are where the reader's model server answers and
+	// what it calls the weights, and they are read only when Reader is set.
+	//
+	// Neither has a default worth having. local-ocr falls back to port 8000 and
+	// a model called "reader", and the vLLM in front of the card is started per
+	// entry in the shortlist, so it is on 8801 answering to reader-a. The two
+	// never meet, and what that looks like from here is not a refusal but eight
+	// pages of "ConnectError: All connection attempts failed" three minutes
+	// apart, which reads exactly like a box under load.
+	BaseURL     string
+	ServedModel string
 	// Lanes is -j, how many pages the host reads at once. Measured, not guessed:
 	// each lane is a Chrome profile and a browser needs about a gigabyte.
 	//
@@ -631,11 +642,37 @@ func (b Batch) headGrammar() string {
 	return "LOCAL_OCR_HEAD_GRAMMAR=" + quote(b.Grammar) + " "
 }
 
+// readerEndpoint tells a reader where its model server is and what that server
+// calls the weights, in front of the launcher beside the two above.
+//
+// An ssh command runs a non interactive shell, and the stock Ubuntu bashrc
+// returns on the first line when the shell is not interactive, so nothing the
+// login environment holds reaches a batch. Every other fact this run knows
+// about a host travels in front of the command for that reason, and these two
+// travel the same way rather than through a file on the box that a rebuild of
+// the box would lose.
+//
+// Empty for a browser host, which has no model server of its own and would not
+// know what to do with the names.
+func (b Batch) readerEndpoint() string {
+	if strings.TrimSpace(b.Host.Reader) == "" {
+		return ""
+	}
+	out := ""
+	if url := strings.TrimSpace(b.Host.BaseURL); url != "" {
+		out += "LOCAL_OCR_BASE_URL=" + quote(url) + " "
+	}
+	if name := strings.TrimSpace(b.Host.ServedModel); name != "" {
+		out += "LOCAL_OCR_MODEL=" + quote(name) + " "
+	}
+	return out
+}
+
 func (b Batch) start(ctx context.Context, _, in, out, prompt, logFile string) (int, error) {
 	command := fmt.Sprintf(
-		"%s%s%s %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
+		"%s%s%s%s %s ocr-batch %s %s -j %d --rate-delay %s --ext png "+
 			"--skip-existing --recursive --timeout %d --prompt \"$(cat %s)\" >%s 2>&1 </dev/null & echo $!",
-		b.headLabel(), b.headGrammar(), b.launcher(), quote(b.Host.Tool), quote(in), quote(out),
+		b.headLabel(), b.headGrammar(), b.readerEndpoint(), b.launcher(), quote(b.Host.Tool), quote(in), quote(out),
 		b.Host.lanes(), strconv.FormatFloat(b.Host.rateDelay(), 'f', -1, 64),
 		int(b.Host.pageTimeout().Seconds()), quote(prompt), quote(logFile))
 

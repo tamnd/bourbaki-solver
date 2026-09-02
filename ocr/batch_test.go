@@ -662,6 +662,43 @@ func TestAHostThatOpensNoBrowserIsNotAskedForADisplay(t *testing.T) {
 	}
 }
 
+// A reader has to be told where its model server is. local-ocr defaults to port
+// 8000 and a model called "reader", and the vLLM in front of the card is on
+// 8801 answering to reader-a, so a start command with neither in it does not
+// refuse: every page comes back "ConnectError: All connection attempts failed"
+// after the full per page timeout, which reads like a box under load rather
+// than a run pointed at nothing.
+func TestAReaderIsToldWhereItsModelServerIs(t *testing.T) {
+	machine := &box{pid: 7, perPoll: 10}
+	work := batch(t, machine, 2)
+	work.Host = Host{Name: "gpc", Tool: "/home/gopher/local-ocr/.venv/bin/local-ocr",
+		Reader: "local-ocr", BaseURL: "http://127.0.0.1:8801/v1", ServedModel: "reader-a", Lanes: 4}
+	if _, err := work.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	command := machine.commands[1]
+	for _, want := range []string{"LOCAL_OCR_BASE_URL=", "8801", "LOCAL_OCR_MODEL=", "reader-a"} {
+		if !strings.Contains(command, want) {
+			t.Errorf("the start command has no %q in it:\n%s", want, command)
+		}
+	}
+}
+
+// And a browser host is left exactly as it was. server3 has no model server of
+// its own, and naming one for it would be a fact about a machine that is not
+// true of that machine.
+func TestABoxDrivingAChromeIsToldNothingAboutAModelServer(t *testing.T) {
+	machine := &box{pid: 7, perPoll: 10}
+	work := batch(t, machine, 2)
+	work.Host.BaseURL, work.Host.ServedModel = "http://127.0.0.1:8801/v1", "reader-a"
+	if _, err := work.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(machine.commands[1], "LOCAL_OCR_BASE_URL") {
+		t.Errorf("a browser host was sent a reader's endpoint:\n%s", machine.commands[1])
+	}
+}
+
 func TestABoxDrivingAChromeIsStillAskedForADisplay(t *testing.T) {
 	host := Host{Name: "server2", Tool: "/usr/local/bin/chatgpt-tool", Lanes: 4}
 	if !host.needsDisplay() {

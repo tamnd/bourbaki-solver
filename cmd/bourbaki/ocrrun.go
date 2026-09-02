@@ -545,10 +545,29 @@ func boxes(routeFile, names string, lanesFor laneRule, work string, taken bool) 
 			refused = append(refused, value.Name+": no ssh host in "+path)
 			continue
 		}
-		tool, ok := state.Tool(value.Name)
-		if !ok {
-			refused = append(refused, value.Name+": no chatgpt-tool path, run bourbaki doctor")
-			continue
+		// A route that names a reader is driven by that reader's program, not by
+		// chatgpt-tool, and the two are not interchangeable. gamingpc has both
+		// installed and the chatgpt-tool there has no signed in profile, so
+		// running it does not fail loudly: it goes off to register an account,
+		// times out, and reports eight pages with no answer. That is a whole
+		// volume's worth of wall clock spent looking like a slow host rather
+		// than a misrouted one, which is why the reader path is a refusal here
+		// and not a fallback.
+		var tool string
+		if reader := strings.TrimSpace(value.Reader); reader != "" {
+			path, ok := state.ReaderTool(value.Name)
+			if !ok {
+				refused = append(refused, value.Name+": the route reads with "+reader+" and the box has no "+reader+", run bourbaki fleet probe")
+				continue
+			}
+			tool = path
+		} else {
+			path, ok := state.Tool(value.Name)
+			if !ok {
+				refused = append(refused, value.Name+": no chatgpt-tool path, run bourbaki doctor")
+				continue
+			}
+			tool = path
 		}
 		lanes, why := lanesFor(value, state.Hosts[value.Name])
 		if lanes <= 0 {
@@ -565,6 +584,8 @@ func boxes(routeFile, names string, lanesFor laneRule, work string, taken bool) 
 		if reader := strings.TrimSpace(value.Reader); reader != "" {
 			host.Reader = reader
 			host.Model = value.Model
+			host.BaseURL = value.ReaderURL
+			host.ServedModel = value.ServedModel
 		}
 		out = append(out, host)
 	}
