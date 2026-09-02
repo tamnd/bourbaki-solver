@@ -188,6 +188,11 @@ func loadChapter(root, langDir, book, numeral, lang string) (*Chapter, error) {
 		}
 	}
 	sortSections(c.Sections)
+	// The corpus copies chapter_title across a translation unchanged, so what
+	// the loop above read is the source printing's language and not the one
+	// being built. chapterTitle puts the built language's title back where
+	// there is one, and returns what the corpus said where there is not.
+	c.Title = chapterTitle(book, numeral, lang, c.Title)
 	if err := loadExercises(root, dir, c.Sections); err != nil {
 		return nil, err
 	}
