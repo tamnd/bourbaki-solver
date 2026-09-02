@@ -104,7 +104,8 @@ func tocBuild(args []string) error {
 			return fmt.Errorf("%s: %w", b.ID, err)
 		}
 		res, err := toc.Parse(pages, pm, toc.Options{
-			Book: b.ID, Chapters: b.Chapters, Title: b.Title})
+			Book: b.ID, Chapters: b.Chapters, Title: b.Title,
+			FrontMatterPDF: frontMatterPDF(&b)})
 		if err != nil {
 			fmt.Printf("%s  %v\n", b.ID, err)
 			failed++
@@ -184,6 +185,23 @@ func tocBuild(args []string) error {
 // leaving a stale one in place with nothing to say it is stale.
 //
 // A volume with no such page has none of this happen to it.
+// frontMatterPDF is the last pdf page the manifest gives to the note to the
+// reader and the introduction, and 0 for a volume that declares neither.
+//
+// The contents reader wants it for one check, on where a chapter opens against
+// where the page map starts it. A volume that numbers its front matter inside
+// chapter I puts real folios reading chapter I on leaves that are not chapter I,
+// and this is the only thing in the corpus that knows where those leaves stop.
+func frontMatterPDF(b *corpus.Book) int {
+	last := 0
+	for _, part := range []*corpus.Introduction{b.ReaderNote, b.Introduction} {
+		if part != nil && part.LastPDFPage > last {
+			last = part.LastPDFPage
+		}
+	}
+	return last
+}
+
 func contentsReadings(root, book string) (map[int]string, error) {
 	paths, err := filepath.Glob(filepath.Join(corpus.PagesDir(root, book), "*.md"))
 	if err != nil {

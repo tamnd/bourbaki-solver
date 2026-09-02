@@ -81,7 +81,19 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 		// because it needs no measurement to be right. A chapter of a bound
 		// volume never opens on the first leaf of the file, that leaf is the
 		// cover, so this gives up nothing anywhere it matters.
-		if c.Page != sp.FirstPage && sp.FirstPDF > 1 {
+		//
+		// The second test is the same fact about a volume that numbers its own
+		// front matter inside chapter I. The French Theorie des ensembles does:
+		// its note to the reader is printed E I.1 to E I.6 and its introduction
+		// E I.7 to E I.13, so the page map reads real folios saying chapter I as
+		// far back as pdf 9 and runs the span from pdf 2, one leaf after the
+		// cover rather than on it. The numbering is not in dispute there either.
+		// The contents says CHAPITRE I at E I.14 and lists the introduction
+		// above it at E I.7, and both are right. Where the manifest has been
+		// told which leaves are the note to the reader and the introduction, a
+		// span reaching back into them is the map filling in a boundary nothing
+		// gave it, exactly as a span reaching back to the cover is.
+		if c.Page != sp.FirstPage && sp.FirstPDF > 1 && sp.FirstPDF > opt.FrontMatterPDF {
 			add(c.Numeral, 0, "the contents starts it at printed page %d, the page map at %d",
 				c.Page, sp.FirstPage)
 		}
