@@ -498,7 +498,7 @@ func tocVerify(args []string) error {
 		if !ok {
 			return fmt.Errorf("%s is in %s but not in %s", bt.ID, corpus.TOCPath(root, bt.ID), corpus.BooksPath(root))
 		}
-		// pageText and not volumeText, which is the whole of what this check
+		// bestPageText and not volumeText, which is the whole of what this check
 		// used to be able to see. volumeText is the layer the PDF carries and
 		// three volumes carry none: alg-x-fr, top-v-x and ac-i-vii. For those it
 		// hands back empty pages, every heading misses, and the report reads as
@@ -506,10 +506,16 @@ func tocVerify(args []string) error {
 		// scored 0 of 68 the first time its contents was read, on a map whose
 		// own numbers come off the pages and validate clean.
 		//
-		// Nothing moves for the forty volumes that do have a layer, because
-		// pageText goes to it for them and this is the same text it was reading
-		// before.
-		pages, err := pageText(ctx, root, *b)
+		// And bestPageText rather than pageText, which went to the PDF's layer
+		// for every volume that had one however bad it was. On a scanned volume
+		// that layer is the scanner's own OCR and this project has read the same
+		// pages far better since; the § that this check is built on is the
+		// character the old layer drops most. It took the shelf from 6373 of
+		// 6513 headings to 6499, and the 31 headings this check reported as
+		// printed on a page the contents does not name to none: every one of the
+		// 31 was the scanner's layer losing a mark, not the corpus putting a
+		// heading in the wrong place. See bestPageText.
+		pages, err := bestPageText(ctx, root, *b)
 		if err != nil {
 			return err
 		}
