@@ -382,9 +382,18 @@ func isASCIILetter(r rune) bool { return 'a' <= r && r <= 'z' || 'A' <= r && r <
 // list is mathematics: \in 120 times, \leq 48, \mathbf 39, \alpha 28, \otimes
 // 27, and a tail of Greek letters and operators one and two at a time.
 //
-// The footnote three are #448, which records them as the conventions the pages
-// carry and leaves the choice between them open. Reporting them now would put
-// 71 pages into the rejected column for a decision that has not been made.
+// Of the footnote three only \footnote is left, which is #448 decided. The
+// corpus keeps two conventions and not three: the markdown form, [^n] where the
+// note is called and [^n]: text at the foot, which is what the 212 definitions
+// already in the corpus use and the only one of the three that records which
+// note belongs to which call; and inline \footnote{...}, 82 places that both
+// builders now set correctly and that carry their text where they stand.
+// \footnotetext is gone, all 33 of it, because it takes its marker from the
+// counter rather than from its argument and the readings had put the printed
+// marker inside the argument, so the note printed under whatever number the
+// last real footnote left behind. There are 0 places of it in pages/ and 0 of
+// \footnotemark, and both are out of this list so that a reading which brings
+// one back is rejected rather than assembled.
 //
 // The text-mode commands are the corpus setting text, which is what they are
 // for. \textsuperscript is 54 places and nearly all of them are French
@@ -395,8 +404,6 @@ func isASCIILetter(r rune) bool { return 'a' <= r && r <= 'z' || 'A' <= r && r <
 // Stone-\v{C}ech.
 var proseTeX = map[string]bool{
 	`\footnote`:        true,
-	`\footnotemark`:    true,
-	`\footnotetext`:    true,
 	`\emph`:            true,
 	`\textit`:          true,
 	`\textbf`:          true,

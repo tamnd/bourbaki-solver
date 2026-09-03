@@ -195,10 +195,15 @@ func TestRule2FindsTeXOutsideEveryMathSpan(t *testing.T) {
 		// letter, and the corpus sets them on purpose.
 		{"a markdown escape", `The file is named a\_b and the star is \*.`, false},
 		{"an escaped dollar in the prose", `The prize was \$100 in all.`, false},
-		// #448 records the footnote commands as one of three conventions the
-		// corpus writes into the prose deliberately. They stand until it is
-		// settled one way or the other.
+		// #448 settled on two conventions. Inline \footnote{...} is one of
+		// them, 82 places that both builders set correctly, so it stands.
 		{"a footnote command", `Le theoreme\footnote{Voir le chapitre III.} est classique.`, false},
+		// \footnotetext is the one that was dropped, because it takes its
+		// marker from the counter and the readings had put the printed marker
+		// inside the argument. There are none left in pages/, and a reading
+		// that writes one is now a page to read again.
+		{"a footnotetext command", `\footnotetext{1 Voir le chapitre III.}`, true},
+		{"a footnotemark command", `Le theoreme\footnotemark{} est classique.`, true},
 		// A backslash at the end of a line is a line break, not a command, and
 		// eating the newline after it would misreport every line below.
 		{"a trailing backslash", "The line ends here \\\nand carries on." + filler, false},
