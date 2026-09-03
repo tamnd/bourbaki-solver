@@ -510,6 +510,23 @@ func SectionPath(root, lang string, m SectionFrontMatter) string {
 		if m.Filename != "" {
 			name = m.Filename
 		}
+	case KindNotation:
+		// The two indexes belong to no chapter, like an introduction, so they
+		// land beside the chapter directories rather than inside one. The name
+		// is lower case for the same reason historical_note.md is: the chapter
+		// directories are roman numerals, so a name has to start below A to
+		// sort after VIII, and these come after everything in the book.
+		name = "index_of_notation.md"
+		if m.Filename != "" {
+			name = m.Filename
+		}
+	case KindTerminology:
+		// After the index of notation, which is the order the printing sets
+		// them in and, as it happens, alphabetical order too.
+		name = "index_of_terminology.md"
+		if m.Filename != "" {
+			name = m.Filename
+		}
 	case KindHistorical:
 		// The note comes after everything, including the appendices, so its
 		// name has to sort after a leading A. It is the only file here named

@@ -141,7 +141,14 @@ func (p Piece) Extraction() string {
 // beyond its own first and last page: the § that opens the chapter shares a page
 // with the chapter title, and the historical note ends where the volume's back
 // matter begins.
-func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile) ([]Piece, error) {
+//
+// stop is the last page of the volume this chapter may reach, and 0 where there
+// is nothing after it. It matters only for the last chapter, which has no next
+// chapter to stop it: without it the historical note runs to the end of the PDF
+// and takes the bibliography, both indexes and the publisher's blurb on the
+// inside of the back cover with it. See backMatterPDF, which is where the number
+// comes from and where the volume that measured the damage is written down.
+func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile, stop int) ([]Piece, error) {
 	pr, err := printingOf(lang)
 	if err != nil {
 		return nil, err
@@ -151,6 +158,9 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 		return nil, err
 	}
 	last := chapterEnd(ch, pages, pr)
+	if stop > 0 && stop < last {
+		last = stop
+	}
 	runs := make([][][]part, len(out))
 	for i, s := range spans {
 		end := span{page: last + 1}

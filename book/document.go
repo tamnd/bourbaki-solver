@@ -153,10 +153,98 @@ func Write(v *Volume) (*Document, error) {
 			return nil, err
 		}
 	}
+	// The two indexes stand after the last chapter, which is where the printing
+	// puts them. They are set the way the front matter is, as unnumbered
+	// divisions with a contents line and a running head of their own, and their
+	// text goes inside an environment that sets one entry to a line.
+	if v.Notation != nil || v.Terminology != nil {
+		b.WriteString("\\backmatter\n")
+	}
+	for _, f := range []struct {
+		sec      *Section
+		fallback string
+		anchor   string
+	}{
+		{v.Notation, "Index of Notation", "notation"},
+		{v.Terminology, "Index of Terminology", "terminology"},
+	} {
+		if f.sec == nil {
+			continue
+		}
+		title := f.sec.Title
+		if title == "" {
+			title = f.fallback
+		}
+		fmt.Fprintf(&b, "\n\\bunnumbered{%s}{%s}{%s}\n", escapeTeX(title),
+			escapeTeX(listed(title, v.Lang)), f.anchor)
+		tex, err := d.entries(v, f.sec, anchors)
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString("\\begin{bindex}\n" + tex + "\\end{bindex}\n")
+	}
 	b.WriteString("\\end{document}\n")
 	d.TeX = b.String()
 	d.index()
 	return d, nil
+}
+
+// entries renders an index, which is a file whose lines are its structure.
+//
+// Every other file in the corpus is prose, where a run of lines with no blank
+// line between them is one paragraph and setting it as one is right. An index is
+// the opposite: page 701 of the English Algebra I to III sets 46 entries down
+// the page, one to a line, and a renderer that treated them as prose would run
+// the whole of the index of terminology into a single paragraph of 1400 words,
+// which is not a defect anybody would have to look twice at.
+//
+// So each line of an index becomes its own paragraph before the ordinary
+// renderer sees it, and the class sets the paragraph shape. A display is left
+// alone, because a display is already several lines that belong together and
+// splitting it would put a blank line between $$ and the formula under it, and
+// the index of notation is where the displays are: 21 of the 24 entries on page
+// 693 are formulae the reading set as displays because that is what they look
+// like on the page.
+func (d *Document) entries(v *Volume, s *Section, anchors map[string]bool) (string, error) {
+	r := d.renderer(v, s.Path, s.Head, anchors)
+	tex, err := r.TeX(oneEntryToALine(StripTitle(s.Body)))
+	if err != nil {
+		return "", err
+	}
+	d.Files++
+	return mark(s.Path) + tex, nil
+}
+
+// oneEntryToALine makes every line of an index a paragraph of its own, except
+// the lines of a display, which stay the one block they were written as.
+//
+// It walks lines rather than blocks because the two readings of the English
+// Algebra I to III disagree about blank lines: the index of notation puts one
+// between every pair of entries down to page 676 and then none at all, and the
+// index of terminology has none anywhere. A blocks-first pass that kept any
+// block holding $$ intact therefore left the whole packed tail of the notation
+// index, 130 entries with four displays in it, as a single paragraph, which is
+// the run-together shape this function exists to prevent.
+func oneEntryToALine(body string) string {
+	var out []string
+	display := false
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case strings.TrimSpace(line) == "$$":
+			if display {
+				out[len(out)-1] += "\n" + line
+			} else {
+				out = append(out, line)
+			}
+			display = !display
+		case display && len(out) > 0:
+			out[len(out)-1] += "\n" + line
+		case strings.TrimSpace(line) == "":
+		default:
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n\n")
 }
 
 // index reads the source markers back off the finished document.
@@ -231,7 +319,15 @@ func (d *Document) chapter(b *strings.Builder, v *Volume, c *Chapter, anchors ma
 		if label == "" {
 			label = fmt.Sprintf("ch-%s-s%d", strings.ToLower(c.Numeral), s.Number)
 		}
-		fmt.Fprintf(b, "\n\\bsection{%s}{%s}{%s}\n", escapeTeX(s.Heading()), escapeTeX(s.Title), label)
+		// The contents line comes off manifests/toc/ where the volume was printed
+		// in this language, and falls back to the head where it was not, which is
+		// the same rule the numbered subsections have had since they were set.
+		list := s.Listed
+		if list == "" {
+			list = s.Title
+		}
+		fmt.Fprintf(b, "\n\\bsection{%s}{%s}{%s}{%s}\n", escapeTeX(s.Heading()),
+			escapeTeX(s.Title), escapeTeX(list), label)
 		tex, err := d.body(v, s, anchors)
 		if err != nil {
 			return err

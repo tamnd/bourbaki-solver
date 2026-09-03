@@ -302,6 +302,17 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 		was.Introduction, corpus.KindIntroduction); err != nil {
 		return nil, nil, sum, err
 	}
+	// The two indexes stand at the other end of the book and are assembled here
+	// beside the front matter because the assembler makes no distinction: both
+	// ends are a run of pages the manifest names and the chapters do not walk.
+	if rec.NotationIndex, err = front(b.NotationIndex, "index of notation", notationFile,
+		was.NotationIndex, corpus.KindNotation); err != nil {
+		return nil, nil, sum, err
+	}
+	if rec.TerminologyIndex, err = front(b.TerminologyIndex, "index of terminology", terminologyFile,
+		was.TerminologyIndex, corpus.KindTerminology); err != nil {
+		return nil, nil, sum, err
+	}
 	// carry is what a skipped chapter leaves behind: the entries the run that did
 	// assemble it wrote. They go back in the order the table of contents puts
 	// them, which is where this is called from, so a volume assembled chapter by
@@ -335,7 +346,11 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 				continue
 			}
 		}
-		pieces, err := assemble.Chapter(b.Book, lang, ch, pages)
+		stop := 0
+		if back := backMatterPDF(*b); back > 0 {
+			stop = back - 1
+		}
+		pieces, err := assemble.Chapter(b.Book, lang, ch, pages, stop)
 		if err != nil {
 			// A chapter read through whose structure still does not check out.
 			// Integration I to VI is the case: chapter I and chapter II are whole
@@ -664,7 +679,41 @@ func chapterSpan(b corpus.Book, chapters []corpus.Chapter, i int) (from, to int)
 	if i+1 < len(chapters) {
 		return from, chapters[i+1].PDFPage - 1
 	}
+	if back := backMatterPDF(b); back > from {
+		return from, back - 1
+	}
 	return from, b.Pages
+}
+
+// backMatterPDF is the first pdf page the manifest gives to an index, and 0 for
+// a volume that declares neither.
+//
+// The last chapter of a volume runs to the last page of the PDF, because there
+// is no next chapter to stop it and nothing else knew where the book ends. What
+// comes after the last chapter is the bibliography, then the two indexes, then
+// whatever the publisher printed on the inside of the back cover, and all of it
+// went into the last file of the last chapter, which is the historical note.
+//
+// The English Algebra I to III is the measure of it. The note to chapter III is
+// pages 679 to 690; the committed file is pages 679 to 734 and 1805 lines, and
+// what is in it after the note is the bibliography, eight pages of the index of
+// notation, thirty three pages of the index of terminology, and the paragraph
+// on the back cover that begins "This is the soft-cover reprint of the English
+// translation of 1974". A reader who opened the historical note of Algebra III
+// got the whole back of the book.
+//
+// So a declared index stops the last chapter, the way the next chapter stops
+// every other one. The bibliography deliberately does not: it is the list of
+// works the historical note cites by number, it is printed immediately after
+// the note and it is no use anywhere else, so it stays with it.
+func backMatterPDF(b corpus.Book) int {
+	first := 0
+	for _, part := range []*corpus.Introduction{b.NotationIndex, b.TerminologyIndex} {
+		if part != nil && (first == 0 || part.FirstPDFPage < first) {
+			first = part.FirstPDFPage
+		}
+	}
+	return first
 }
 
 // unread are the pages of a run that are not in pages.

@@ -35,6 +35,14 @@ type BookSections struct {
 	ReaderNote   *SectionRecord    `yaml:"reader_note,omitempty"`
 	Introduction *SectionRecord    `yaml:"introduction,omitempty"`
 	Chapters     []ChapterSections `yaml:"chapters"`
+	// NotationIndex and TerminologyIndex are the two lists the printing sets
+	// after the last chapter. They come after Chapters here because they come
+	// after the chapters in the book, and they are counted like anything else:
+	// the index of terminology of the English Algebra I to III is 33 pages, and
+	// 33 pages of a volume that nothing accounts for is 33 pages nobody notices
+	// are missing.
+	NotationIndex    *SectionRecord `yaml:"notation_index,omitempty"`
+	TerminologyIndex *SectionRecord `yaml:"terminology_index,omitempty"`
 }
 
 // ChapterSections is one chapter.
@@ -79,7 +87,39 @@ const (
 	KindSection    = "section"
 	KindAppendix   = "appendix"
 	KindHistorical = "historical"
+	// KindNotation and KindTerminology are the volume's two indexes, which
+	// stand after the last chapter and belong to no chapter, the same way an
+	// introduction stands before the first and belongs to none.
+	//
+	// They are worth having as text and not only as pictures of pages because
+	// of how the printing writes them. "Abelian group: I, § 4, no. 2" names a
+	// chapter, a § and a numbered subsection, not a page, so every line of both
+	// indexes is a reference into a structure this corpus already has, and a
+	// rebuilt book can carry the index through unchanged and check every line
+	// of it against itself. An index of pages could not survive a rebuild,
+	// since the rebuilt volume paginates its own way; an index of nos. is the
+	// same index in any setting of the same text.
+	KindNotation    = "notation"
+	KindTerminology = "terminology"
 )
+
+// Chapterless says whether a file of this kind belongs to no chapter.
+//
+// Four kinds do: the note to the reader and the Book's introduction at the
+// front, and the index of notation and the index of terminology at the back.
+// They sit beside the chapter directories rather than in one, and an empty
+// chapter in their front matter is what says so rather than a field somebody
+// forgot, so every rule that reads the chapter of a file has to know about
+// them. Written once here because the list grew from two to four and the two
+// places that had it spelled out inline would each have been a rule that
+// quietly refused every index in the corpus.
+func Chapterless(kind string) bool {
+	switch kind {
+	case KindIntroduction, KindReader, KindNotation, KindTerminology:
+		return true
+	}
+	return false
+}
 
 // LoadSections reads manifests/sections.yaml. A missing file is an empty
 // manifest, so the first assemble works on a fresh repo.
