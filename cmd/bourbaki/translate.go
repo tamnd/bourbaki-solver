@@ -1014,13 +1014,19 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 //
 // Transport is left alone. A complaint of that rule is not an answer the audit
 // disliked, it is no answer at all, and there is nothing to keep.
+//
+// Refusal is left alone for the same reason. A rate limit page comes back as a
+// successful answer and reads as one to everything below the audit, so if -raw
+// waived it the message would be written into the corpus under a full set of
+// headers and a matching source hash, and would then look finished to every
+// later pass. Eight sections were found in that state before this was added.
 func takeRaw(raw bool, bad []translate.Problem, j job, c translate.Chunk, logf func(string, ...any)) []translate.Problem {
 	if !raw || len(bad) == 0 || transportOnly(bad) {
 		return bad
 	}
 	var kept []translate.Problem
 	for _, p := range bad {
-		if p.Rule == "transport" || p.Rule == translate.RuleTag {
+		if p.Rule == "transport" || p.Rule == translate.RuleTag || p.Rule == translate.RuleRefusal {
 			kept = append(kept, p)
 			continue
 		}
