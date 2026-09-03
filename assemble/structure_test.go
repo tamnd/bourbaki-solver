@@ -474,6 +474,71 @@ func TestSentenceEnd(t *testing.T) {
 	}
 }
 
+// The rest of the citation form the books use, in the shape that does the
+// damage: the reference that closes on its own number, so that the number reads
+// as the marker of the exercise the § is next expecting.
+func TestSentenceEndOnTheCitationsTheBooksPrint(t *testing.T) {
+	for _, s := range []string{
+		"montrer que si X est un espace inépuisable (IX, p. 112, exerc.",
+		"the strong dual of E is exhaustible (III, p. 49, exerc.",
+		"is complete ($cf.$ III, p. 20, th.",
+		"a countable base for the bornology (II, p. 34, prop.",
+		"Every Fréchet space has the property (GDF) (I, p. 19, cor.",
+		"si la bornologie canonique (III, p. 3, déf.",
+		"is archimedean (VI, p. 35, Ex.",
+		"of the same section (VIII, p. 129, Exer.",
+		"$\\mathbf{Z}[\\sqrt{D}]$ lorsque $D \\equiv 1$ (mod.",
+		"§ 2, n° 2, prop. 2 et VIII, § 1, n° 3, rem.",
+		"We will see later (Sect.",
+		"si G est dénombrable à l’infini : cf. App.",
+	} {
+		if sentenceEnd(s) {
+			t.Errorf("sentenceEnd(%q) = true", first(s, 50))
+		}
+	}
+}
+
+// The citation that cost § 5 of chapter IX of Topologie generale in French its
+// twenty fifth exercise and everything printed after it.
+func TestItemStartIgnoresACitationOfAnExercise(t *testing.T) {
+	s := "25) Soit R une relation d’équivalence ouverte dans un espace topologique X. " +
+		"Montrer que si X est un espace inépuisable (IX, p. 112, exerc. 7) (resp. un espace de Baire), X/R est inépuisable."
+	if i, _ := itemStart(s, 7); i >= 0 {
+		t.Errorf("itemStart(%q, 7) found an exercise at %d", first(s, 40), i)
+	}
+	if i, _ := itemStart(s, 25); i != 0 {
+		t.Errorf("itemStart(%q, 25) = %d, want 0", first(s, 40), i)
+	}
+}
+
+// The bold closes between the number and the bracket. All seven in the corpus
+// are here in the two shapes it is written in.
+func TestTheBoldCanCloseBeforeTheBracket(t *testing.T) {
+	for _, s := range []struct {
+		line string
+		n    int
+	}{
+		{"**T 1**) Let $E$ be a locally convex metrizable space, and $E'_b$ its strong dual.", 1},
+		{"**T 2**) An infra-barrelled space is semi-barrelled.", 2},
+		{"**T 25**) Let $E$ be a Banach space satisfying the first axiom of countability.", 25},
+		{"**¶ 15**) Soit $A$ un anneau. Montrer que tout $A$-module à gauche $E$ est plat.", 15},
+		{"**¶ 18**) Soit $A$ un anneau absolument plat (exerc. 17).", 18},
+		{"**¶ 28**) Soient $A$ un corps commutatif de caractéristique 2.", 28},
+	} {
+		m := exNumRE.FindStringSubmatch(s.line)
+		if m == nil {
+			t.Errorf("exNumRE does not match %q", first(s.line, 40))
+			continue
+		}
+		if got, _ := strconv.Atoi(m[2]); got != s.n {
+			t.Errorf("exNumRE on %q read %q, want %d", first(s.line, 40), m[2], s.n)
+		}
+		if _, pilcrow := marksOf(m[1]); pilcrow == "" {
+			t.Errorf("marksOf(%q) found no pilcrow", m[1])
+		}
+	}
+}
+
 func TestExercisesReadsTheMarks(t *testing.T) {
 	in := blocks(
 		"### Exercises",

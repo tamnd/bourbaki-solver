@@ -939,9 +939,18 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // argument, the second of them opening "Cas général". Those four are the whole
 // of the capital-and-space form outside the four letters taken here, so the set
 // is not a guess at what a model might do, it is the corpus counted.
+//
+// The bold can close between the number and the bracket as well as after it.
+// Extraction writes the mark and the number inside one span of bold and the
+// bracket outside it, "**T 1**)" and "**¶ 15**)", and the form was worth the
+// two bytes it costs: the whole corpus holds seven of them and three are the
+// first exercise of their §, which is the one exercise a § cannot do without.
+// § 3 of chapter IV of Topological Vector Spaces opens on "**T 1**)" and came
+// out with two exercises against the eighteen on its pages, both of them
+// halves of a citation, because the run never found its first.
 var exNumRE = regexp.MustCompile(
 	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†|§)[ \t]*|[TQJΠ][ \t]+)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
-		`(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
+		`(?:\*\*)?(\d+)(?:\*\*)?[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // marks are the star and the pilcrow a book can set in front of an exercise
 // number. The bold that extraction writes around the number of some of them is
@@ -1275,7 +1284,29 @@ var pilcrowBefore = regexp.MustCompile(`\$?\s*(?:\\P|¶)\s*\$?\s*$`)
 // number the § is very likely to be up to: "(Chapter II, § 6, no. 3)" in the
 // second exercise of § 1 of chapter III of Theory of Sets was read as the start
 // of the third, which cost that § the twenty exercises printed after it.
-var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])(?:no|nos|p|pp|cf|fig|chap|vol|resp|art)\.$`)
+//
+// The list was a page reference and little else, and the rest of the citation
+// form the books use was missing from it, so every other kind of cross
+// reference read as a marker. "exerc." is the worst of them: § 5 of chapter IX
+// of Topologie generale in French opens its twenty fifth on "montrer que si X
+// est un espace inépuisable (IX, p. 112, exerc. 7)", the seven of that citation
+// read as the seventh exercise of the §, and the § came out with seven
+// exercises against the thirty the English has. Exercises 5, 6 and 7 of it were
+// all halves of a sentence cut at a citation, two of them a body of one full
+// stop.
+//
+// Every abbreviation here was counted in the corpus before it went in, in the
+// one shape that can do the damage, the citation that closes on the number:
+// prop. 13090, exerc. 5595, th. 4445, cor. 2180, déf. 1440, Exer. 680, Ex. 234,
+// mod. 82, rem. 6, App. 6, Sect. 4. Every distinct match of the smaller ones was
+// read; "mod. 4)" is a congruence and the others are citations. None of them can
+// cost a real marker, because a marker at the head of a block is matched by
+// exNumRE at offset zero and never reaches here, and a marker set inside a
+// paragraph directly behind the word "prop." or "exerc." is a thing the books
+// do not print.
+var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])` +
+	`(?:no|nos|p|pp|cf|fig|chap|vol|resp|art` +
+	`|prop|exerc|exer|ex|th|cor|déf|def|mod|rem|app|sect)\.$`)
 
 // closingMarks are the marks that can stand between the end of a sentence and
 // the number after it: the space and the newline, the dollar of a span the mark
