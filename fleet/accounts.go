@@ -77,6 +77,14 @@ type Accounts struct {
 	// used to print the transport error into a row of counts, so a box that was
 	// merely slow read the same as a box with every profile banned.
 	TimedOut bool
+
+	// Asks, AnsweredAsks and NoComposer are what asking this host has recently
+	// come to, filled in from the Ledger and zero where nothing has asked it.
+	// The counts above say what the host has; these say whether any of it
+	// works. See Ledger for the run that made the distinction necessary.
+	Asks         int
+	AnsweredAsks int
+	NoComposer   int
 }
 
 // accountsScript finds chatgpt-tool the way the probe finds it, because the
@@ -273,10 +281,18 @@ func Wait(boards []Accounts) time.Duration {
 // and printing zeroes for it in the account columns would be true and
 // misleading. A host that never answered has neither, and is not the same state
 // as a host that answered and has nothing ready.
+//
+// The taking column is the one column here that is not read off the host. It is
+// answered out of recently asked, from the Ledger, and it is here because the
+// six counted columns can all be right about a host that will not take a
+// prompt: 21 verified, 10 ready and idle, and 720 asks in a week that never
+// reached a composer. Where the record says that, the last column says it
+// instead of saying the host is free now, because the last column is what
+// somebody deciding where to send a page reads.
 func AccountsTable(boards []Accounts) string {
 	var out strings.Builder
-	fmt.Fprintf(&out, "%-8s  %8s  %5s  %6s  %6s  %5s  %s\n",
-		"host", "verified", "ready", "banned", "locked", "stale", "first one back")
+	fmt.Fprintf(&out, "%-8s  %8s  %5s  %6s  %6s  %5s  %7s  %s\n",
+		"host", "verified", "ready", "banned", "locked", "stale", "taking", "first one back")
 	for _, board := range boards {
 		if board.TimedOut {
 			fmt.Fprintf(&out, "%-8s  did not answer inside the deadline, so nothing is known about it\n", board.Host)
@@ -308,8 +324,20 @@ func AccountsTable(boards []Accounts) string {
 		default:
 			back = "any minute"
 		}
-		fmt.Fprintf(&out, "%-8s  %8d  %5d  %6d  %6d  %5d  %s\n",
-			board.Host, board.Verified, board.Ready, board.Banned, board.Locked, board.Stale, back)
+		// A host that will not compose overrules whatever the counts made of
+		// it, including a cooldown: the profiles come back and the composer
+		// still does not take the prompt, so saying when the ban lifts is
+		// answering a question nobody asked.
+		if board.NotTaking() {
+			back = fmt.Sprintf("ready on paper, but %d of its last %d asks never reached a composer",
+				board.NoComposer, board.Asks)
+		}
+		taking := "-"
+		if board.Asks > 0 {
+			taking = fmt.Sprintf("%d/%d", board.AnsweredAsks, board.Asks)
+		}
+		fmt.Fprintf(&out, "%-8s  %8d  %5d  %6d  %6d  %5d  %7s  %s\n",
+			board.Host, board.Verified, board.Ready, board.Banned, board.Locked, board.Stale, taking, back)
 	}
 	return out.String()
 }

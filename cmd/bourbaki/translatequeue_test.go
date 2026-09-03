@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tamnd/bourbaki-solver/fleet"
 	"github.com/tamnd/bourbaki-solver/glossary"
 	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/queue"
@@ -471,7 +472,7 @@ func TestAProviderThatWillNotAnswerDoesNotKillTheChunks(t *testing.T) {
 	for run := 1; run <= 4; run++ {
 		// A breaker each time round, because each pass of this loop stands for a
 		// separate run and a breaker is held for one run.
-		_, _, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, newBreaker(breakAfter, breakHold), g,
+		_, _, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, newBreaker(breakAfter, breakHold), fleet.NewLedger(), g,
 			"en", "vi", "vi", "prompt-v1", j, false, false, false, false, chunkDeadline, func(string, ...any) {})
 		if len(problems) == 0 {
 			t.Fatalf("run %d: the section was written by a host that answers nothing", run)
@@ -520,7 +521,7 @@ func TestAHostThatStoppedAnsweringIsNotAskedForTheNextFile(t *testing.T) {
 	// the first refusal so that one file is enough to trip it.
 	brk := newBreaker(1, time.Hour)
 
-	_, _, first, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, brk, g,
+	_, _, first, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, brk, fleet.NewLedger(), g,
 		"en", "vi", "vi", "prompt-v1", section(), false, false, false, false, chunkDeadline, func(string, ...any) {})
 	if len(problems) == 0 {
 		t.Fatal("the first file was written by a host that answers nothing")
@@ -529,7 +530,7 @@ func TestAHostThatStoppedAnsweringIsNotAskedForTheNextFile(t *testing.T) {
 		t.Fatal("the first file was never asked for, so there is nothing to retire the host over")
 	}
 
-	_, _, second, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, brk, g,
+	_, _, second, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, brk, fleet.NewLedger(), g,
 		"en", "vi", "vi", "prompt-v1", section(), false, false, false, false, chunkDeadline, func(string, ...any) {})
 	if second != 0 {
 		t.Fatalf("the second file cost %d asks on a host that was out of the run", second)
@@ -565,7 +566,7 @@ func TestRawStillRefusesAFileThatIsShortAChunk(t *testing.T) {
 	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "element", VI: "phần tử"}}}
 	host := ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false", Lanes: 1}
 
-	body, _, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, newBreaker(breakAfter, breakHold), g,
+	body, _, _, problems := translateFile(context.Background(), root, q, []ocr.Host{host}, newBreaker(breakAfter, breakHold), fleet.NewLedger(), g,
 		"en", "vi", "vi", "prompt-v1", j, false, false, false, true, chunkDeadline, func(string, ...any) {})
 	if len(problems) == 0 {
 		t.Fatal("-raw wrote a section out of chunks that were never answered")
@@ -803,7 +804,7 @@ func TestARunStoppedWithChunksOutstandingWritesNothing(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	host := ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false", Lanes: 1}
-	body, _, _, problems := translateFile(ctx, root, q, []ocr.Host{host}, newBreaker(breakAfter, breakHold), nil,
+	body, _, _, problems := translateFile(ctx, root, q, []ocr.Host{host}, newBreaker(breakAfter, breakHold), fleet.NewLedger(), nil,
 		"en", "vi", "vi", "prompt-v1", j, false, false, false, true, chunkDeadline, func(string, ...any) {})
 	if len(problems) == 0 {
 		t.Fatal("a run stopped after one chunk of three handed back a section")
@@ -888,5 +889,39 @@ func TestTheChunkNameFollowsTheTextAndNotItsNumber(t *testing.T) {
 	}
 	if err := ocr.ValidBatchID(chunkID("vi", src, one, 1)); err != nil {
 		t.Fatalf("the name is not one a host will take: %v", err)
+	}
+}
+
+// What the run learned about a host has to outlive the run, because the fleet
+// board that sends the next batch of lanes somewhere is a separate process
+// tomorrow morning. The breaker is deliberately this run only; the ledger is
+// the half that gets written down.
+//
+// The host here answers nothing, so every ask ends in transport, and that is
+// exactly the case fleet accounts could not see before: the account table on a
+// box like this reads verified and ready throughout.
+func TestWhatTheAsksCameToIsWrittenDownForTheBoard(t *testing.T) {
+	q, root := openQueue(t)
+	g := &glossary.Glossary{Version: 1, Terms: []glossary.Term{{EN: "element", VI: "phần tử"}}}
+	host := ocr.Host{Name: "nowhere.invalid", Tool: "/usr/bin/false", Lanes: 1}
+	led := fleet.NewLedger()
+
+	_, _, asked, problems := translateFile(context.Background(), root, q, []ocr.Host{host},
+		newBreaker(breakAfter, breakHold), led, g,
+		"en", "vi", "vi", "prompt-v1", section(), false, false, false, false, chunkDeadline, func(string, ...any) {})
+	if len(problems) == 0 || asked == 0 {
+		t.Fatalf("the file came back written after %d asks, want a host that answers nothing to fail", asked)
+	}
+	notes, byKind := led.Recent(host.Name, fleet.LedgerWindow)
+	if notes == 0 {
+		t.Fatal("nothing was written down about a host that refused every ask")
+	}
+	if byKind[fleet.Answered] != 0 {
+		t.Errorf("the record holds %d answers from a host that answered nothing", byKind[fleet.Answered])
+	}
+	// And it is filed against the host, which is the only key the board has:
+	// the account table drops the address of every profile on purpose.
+	if asks, _ := led.Recent("somewhere.else", fleet.LedgerWindow); asks != 0 {
+		t.Errorf("%d asks were filed against a host that was never asked", asks)
 	}
 }
