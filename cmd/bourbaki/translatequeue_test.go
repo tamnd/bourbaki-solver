@@ -848,3 +848,45 @@ func TestRawDoesNotWaiveAMissingAttributeBlock(t *testing.T) {
 		})
 	}
 }
+
+// A re-cut section must miss the scratch directory of the split before it, not
+// land in it.
+//
+// ChunkChars and ChunkSpans decide where a section is cut, and the comment over
+// ChunkSpans records that tightening it turned 479 chunks into 1552. Anyone
+// loosening it again re-cuts every section that is not finished, and chunk 7 of
+// the new split is a different passage of the book carrying the same number 7.
+// The queue keys a job on a hash of the body and readAccepted compares that hash
+// before it takes an answer, so both of those miss and ask again, which is
+// right. The host directory was the one name left keyed on the number alone.
+func TestTheChunkNameFollowsTheTextAndNotItsNumber(t *testing.T) {
+	one := translate.Chunk{Index: 7, Of: 26, Body: "Let $x$ be an element of $E$."}
+	two := translate.Chunk{Index: 7, Of: 19, Body: "Let $y$ be an element of $F$."}
+	src := "content/en/alg/VIII/03_s3_simple_modules.md"
+
+	if a, b := chunkID("vi", src, one, 1), chunkID("vi", src, two, 1); a == b {
+		t.Fatalf("two different chunk 7s are both asked in %s", a)
+	}
+	// And the same text keeps the same name, or every run would ask in a new
+	// directory and -keep would have nothing to look at twice.
+	if a, b := chunkID("vi", src, one, 1), chunkID("vi", src, one, 1); a != b {
+		t.Fatalf("the same chunk got two names, %s and %s", a, b)
+	}
+	// The things that were already in the name are still telling it apart.
+	for _, c := range []struct {
+		name string
+		got  string
+	}{
+		{"the attempt", chunkID("vi", src, one, 2)},
+		{"the language", chunkID("zh", src, one, 1)},
+		{"the source file", chunkID("vi", src+"x", one, 1)},
+		{"the chunk number", chunkID("vi", src, translate.Chunk{Index: 8, Of: 26, Body: one.Body}, 1)},
+	} {
+		if c.got == chunkID("vi", src, one, 1) {
+			t.Errorf("%s no longer tells two chunks apart: both are %s", c.name, c.got)
+		}
+	}
+	if err := ocr.ValidBatchID(chunkID("vi", src, one, 1)); err != nil {
+		t.Fatalf("the name is not one a host will take: %v", err)
+	}
+}
