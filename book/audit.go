@@ -188,6 +188,7 @@ func BelowFloor(root string, v *Volume, floor float64) error {
 func Inspect(root string, v *Volume, d *Document, b *Build, e *EPUB, opt AuditOptions) *Audit {
 	a := &Audit{Volume: v.Meta.ID, Lang: v.Lang, Title: v.Title, Doc: d, Build: b, EPUB: e}
 	a.structure(v)
+	a.listed(v)
 	a.coverage(root, v, opt)
 	a.length(root, v, opt)
 	a.written(d, opt)
@@ -273,6 +274,62 @@ func (a *Audit) structure(v *Volume) {
 // than being counted during the render, because the audit has to be able to run
 // over a volume the writer refused.
 var subsectionRE = regexp.MustCompile(`(?m)^###\s+(\d+)\.\s`)
+
+// listed asks whether the contents the book builds is the contents the volume
+// prints. The titles it sets come out of content/, and manifests/toc/ is an
+// independent reading of the volume's own contents pages, corrected by hand
+// against the printing where the scan got it wrong. Two sources for one fact,
+// so they can be held against each other.
+//
+// It is only asked of a build in the language the volume was printed in, since
+// the manifest is that printing's contents and there is no Vietnamese printing
+// of Algebra to hold a Vietnamese build against. Those come back with nothing
+// to compare and pass, which is the honest answer rather than a pass for a
+// check that did not run: the detail says how many were compared.
+//
+// The check found something the first time it was run, and not drift. Chapter
+// VIII of Algebra prints twenty one §§ and then four appendices numbered from
+// one again, and the printed contents was keyed on the number alone, so
+// appendix 1 overwrote § 1 and the four §§ opening the chapter carried the
+// appendices' subsection titles into their contents lines. Seventeen §§ across
+// the library. With that fixed, all 134 chapters and all 855 §§ of the library
+// agree, which is the result worth having a gate on: the corpus has not drifted
+// from the printing anywhere, and this says so every time a book is built.
+func (a *Audit) listed(v *Volume) {
+	var differ []string
+	n := 0
+	for _, c := range v.Chapters {
+		if c.Listed != "" {
+			n++
+			if !sameTitle(c.Title, c.Listed, v.Lang) {
+				differ = append(differ, fmt.Sprintf("chapter %s is %q in content and %q in the printed contents",
+					c.Numeral, c.Title, c.Listed))
+			}
+		}
+		for _, s := range c.Sections {
+			if s.Listed == "" {
+				continue
+			}
+			n++
+			if !sameTitle(s.Title, s.Listed, v.Lang) {
+				differ = append(differ, fmt.Sprintf("chapter %s %s is %q in content and %q in the printed contents",
+					c.Numeral, s.Heading(), s.Title, s.Listed))
+			}
+		}
+	}
+	a.ok("the titles agree with the volume's own printed contents", len(differ) == 0,
+		fmt.Sprintf("%d compared, %d differ", n, len(differ)), differ...)
+}
+
+// sameTitle compares a title in content/ with the same title in the printed
+// contents. The printing sets a chapter title in capitals on the chapter's
+// opening page and in the contents, and sets a § title in capitals on the page
+// and in sentence case in the contents, and content/ carries whichever of the
+// two the file was assembled from. Case is therefore not a disagreement here
+// and a word is.
+func sameTitle(a, b, lang string) bool {
+	return listed(a, lang) == listed(b, lang)
+}
 
 func subsectionNumbers(body string) []int {
 	var out []int
