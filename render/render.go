@@ -515,9 +515,25 @@ func ReadManifest(root, book string) (Manifest, error) {
 // One that is already on disk from the same image is left where it is. Nothing
 // about it can have changed, and rewriting it only to move the generated stamp
 // puts five files with no ink on them into a pull request somebody has to read.
+//
+// The manifest here is the merged one, so it holds every page the volume has
+// ever rendered and not only the pages of this run. A render that named its
+// pages is held to them: ocr run -window renders a few dozen pages at a time and
+// calls this once per window, and without that it would walk all 734 page files
+// of the volume forty times over to write nothing.
 func writeBlanks(options Options, manifest Manifest) error {
+	var asked map[int]bool
+	if len(options.Only) > 0 {
+		asked = make(map[int]bool, len(options.Only))
+		for _, page := range options.Only {
+			asked[page] = true
+		}
+	}
 	for _, page := range manifest.Pages {
 		if !page.Blank {
+			continue
+		}
+		if asked != nil && !asked[page.Page] {
 			continue
 		}
 		if blankAlreadyWritten(corpus.PagePath(options.Corpus, options.Book, page.Page), page.SHA256) {

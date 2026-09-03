@@ -1620,3 +1620,31 @@ func TestSalvageIsOffByDefault(t *testing.T) {
 		t.Errorf("salvaged %d and killed %d, want 0 and 1: %s", report.Salvaged, report.Dead, report.Summary())
 	}
 }
+
+// Only bounds leasing as well as filling.
+//
+// A window is the next few pages the queue is waiting on and those are not
+// contiguous. On hist the 130 pages left behind ran from 1 to 299 with
+// everything between them already read, and only the window has an image on
+// disk, because only the window was rendered. A run bounded by 1 and 299 would
+// lease a page whose image was swept two windows ago and send a batch at a file
+// that is not there.
+func TestARunTakesOnlyThePagesOfItsWindow(t *testing.T) {
+	r := &Runner{First: 1, Last: 299, Only: map[int]bool{1: true, 299: true}}
+	for _, c := range []struct {
+		page int
+		want bool
+	}{{1, true}, {2, false}, {150, false}, {299, true}, {300, false}} {
+		if got := r.inRange(Target("hist", c.page)); got != c.want {
+			t.Errorf("page %d is taken: %v, want %v", c.page, got, c.want)
+		}
+	}
+	// A run with no window is the run there was before, and a range on its own
+	// still means what it meant.
+	if plain := (&Runner{}); !plain.inRange(Target("hist", 150)) {
+		t.Error("a run with no range and no window passed over a page")
+	}
+	if ranged := (&Runner{First: 10, Last: 20}); ranged.inRange(Target("hist", 21)) {
+		t.Error("a run bounded at 20 took page 21")
+	}
+}
