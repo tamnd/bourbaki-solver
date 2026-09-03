@@ -137,6 +137,22 @@ chapter III went over the same routes. A run on a slow day is worth more time
 per question. It is still a cap, and a lane that spends it has still spent it
 doing nothing, so raise it for the run that needs it rather than in the file.
 
+A host that keeps refusing to read the question is taken out of the run. The
+host list is a preference order and a host that refuses is still a host, so a
+box with every account in a rate limit cooldown gets picked, says so in under a
+second, and gets picked again for the next file, because until now the lane that
+retired over it was started fresh for every file. A twenty six chunk section
+whose chunks were all answered inside nineteen minutes cost 377 asks that way
+and was still not written half an hour later. Three refusals running now put the
+host aside for twenty minutes, after which it is let back to try once. Nothing is
+lost by it: a chunk nobody read is released with its attempts intact and goes to
+whichever route is still answering.
+
+The run says how many asks it cost, which is the number that says whether it
+went well and is not the number of chunks. A chunk that has been asked more than
+six times in one run says so on the line as it happens, six being the most a
+chunk that is merely difficult can cost.
+
 Every question and every answer is kept under work/translate, which is not in
 the repository. What goes in the repository is the file, and the file is only
 written when the audit found nothing.
@@ -349,9 +365,15 @@ func runTranslate(args []string) error {
 	}
 
 	run := runID(tree, promptHash, jobs)
-	var written, refused int
+	// One breaker for the run, and this line is the whole of the fix it belongs
+	// to. Lanes are started inside translateFile, so a host retired while one
+	// file was being translated was started again for the next file and the one
+	// after; held out here, it stays out.
+	brk := newBreaker(breakAfter, breakHold)
+	var written, refused, asks int
 	for _, job := range jobs {
-		body, model, problems := translateFile(ctx, root, q, hosts, g, *from, *lang, tree, promptHash, job, *force, *redoSmall, *keep, *rawText, *deadline, logf)
+		body, model, asked, problems := translateFile(ctx, root, q, hosts, brk, g, *from, *lang, tree, promptHash, job, *force, *redoSmall, *keep, *rawText, *deadline, logf)
+		asks += asked
 		if len(problems) > 0 {
 			refused++
 			logf("%s: refused, nothing written", job.source)
@@ -370,7 +392,13 @@ func runTranslate(args []string) error {
 			break
 		}
 	}
-	fmt.Printf("translate: %d files written, %d refused, %d were already current\n", written, refused, skipped)
+	// The ask count is in the summary because it is the number that says whether
+	// a run went well, and it is not the number of chunks. A twenty six chunk
+	// section that cost 377 asks looks exactly like one that cost 27 in every
+	// other line this prints, and finding out took counting rows in the usage
+	// log.
+	fmt.Printf("translate: %d files written, %d refused, %d were already current, %d asks\n",
+		written, refused, skipped, asks)
 	return ctx.Err()
 }
 
@@ -772,10 +800,13 @@ func freshOnly(hosts []ocr.Host) map[string]func(queue.Job) bool {
 	return want
 }
 
-func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, g *glossary.Glossary, from, lang, tree, promptHash string, j job, force, redoSmall, keep, raw bool, deadline time.Duration, logf func(string, ...any)) (string, string, []translate.Problem) {
+// The third return is how many times this file was asked for, which the run
+// adds up. It counts leases and not answers, because the whole point of the
+// number is the asks that were not answers.
+func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, brk *breaker, g *glossary.Glossary, from, lang, tree, promptHash string, j job, force, redoSmall, keep, raw bool, deadline time.Duration, logf func(string, ...any)) (string, string, int, []translate.Problem) {
 	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force, redoSmall)
 	if err != nil {
-		return "", "", []translate.Problem{{Rule: "queue", Msg: err.Error()}}
+		return "", "", 0, []translate.Problem{{Rule: "queue", Msg: err.Error()}}
 	}
 	if len(have) > 0 {
 		logf("%s: %d of %d chunks were answered by an earlier run", j.source, len(have), len(j.chunks))
@@ -788,12 +819,39 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 	fresh := freshOnly(hosts)
 	var wg sync.WaitGroup
 	var mu sync.Mutex
+	// asks is per chunk of this file and total is their sum. They are kept here
+	// rather than in askChunk because a chunk is asked for by whichever lane
+	// leases it, and the number worth saying out loud is how many times the
+	// chunk has been round, not how many times this lane has.
+	asks := map[int]int{}
+	total := 0
+	// A host inside its hold is not started at all, which is where the saving
+	// is: the retirement that was already here happens after the ask.
+	var live []ocr.Host
 	for _, host := range hosts {
+		if brk.Out(host.Name) {
+			logf("%s: still out from earlier in this run, so no lane is started on it", host.Name)
+			continue
+		}
+		live = append(live, host)
+	}
+	if len(live) == 0 {
+		// Said rather than silently asking nobody, which would refuse the file
+		// with its chunks pending and no line anywhere saying why.
+		return "", "", 0, []translate.Problem{{Rule: "transport",
+			Msg: "every host is out for this run, so nothing was asked"}}
+	}
+	for _, host := range live {
 		for lane := 0; lane < host.Lanes; lane++ {
 			wg.Add(1)
 			go func(host ocr.Host) {
 				defer wg.Done()
-				for ctx.Err() == nil {
+				// Tested every time round and not once at the top, because it is
+				// the sibling lanes on this host that trip it: nine of them
+				// refused in the same few seconds is exactly the shape the
+				// breaker is for, and a lane that took its work before that and
+				// comes back after should not take more.
+				for ctx.Err() == nil && !brk.Out(host.Name) {
 					item, err := q.LeaseWhere(queue.StageTranslate, host.Name, group, fresh[host.Name], chunkLeaseFor(deadline))
 					if errors.Is(err, queue.ErrEmpty) {
 						return
@@ -811,6 +869,21 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 							logf("%s: %v", host.Name, err)
 						}
 						continue
+					}
+					mu.Lock()
+					asks[index]++
+					times := asks[index]
+					total++
+					mu.Unlock()
+					if times > manyAsks {
+						// The one line that would have shown the 377 while it was
+						// happening. Every other line about a chunk says which
+						// chunk it is and none of them say how many times this run
+						// has been round it, so a chunk going round in a circle
+						// prints the same line over and over and reads like
+						// progress.
+						logf("%s chunk %d of %d: this is ask %d for it in this run",
+							j.source, c.Index, c.Of, times)
 					}
 					text, model, bad := askChunk(ctx, root, host, g, from, lang, j, c, keep, raw, deadline, logf)
 					if len(bad) > 0 && ctx.Err() != nil {
@@ -845,7 +918,27 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 							logf("%s: %v", host.Name, err)
 						}
 						logf("%s: this lane is done for now, %s", host.Name, bad[0].Msg)
+						// And the host goes with the lane once it has done this
+						// enough times, for the rest of the run. Counted here
+						// rather than on outOfTurns, because the host that cost
+						// the 377 was not out of turns in any of the three
+						// wordings that test knows: it had accounts, all of them
+						// were busy, and it said so in its own words. What the
+						// breaker needs to know is that the question was never
+						// read, which is what transportOnly already establishes.
+						if brk.Refused(host.Name) {
+							logf("%s: refused %d times running, so it is out of this run for %s",
+								host.Name, brk.After, brk.Hold)
+						}
 						return
+					}
+					// Past that point the question was read, and whether the
+					// answer was any good is a question the breaker has no
+					// interest in: a host refused by the rules is a host that is
+					// up. The exception is this machine failing rather than the
+					// far end, which would otherwise clear a streak that is real.
+					if !localFault(bad) {
+						brk.Answered(host.Name)
 					}
 					if len(bad) > 0 {
 						state, err := q.Fail(item, bad[0].String())
@@ -947,7 +1040,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 		}
 	}
 	if len(problems) > 0 {
-		return "", "", problems
+		return "", "", total, problems
 	}
 	// Again on the join, and not because askChunk missed anything. A chunk an
 	// earlier run answered comes back off the queue and never goes through
@@ -997,16 +1090,16 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 			}
 		}
 		if !raw {
-			return "", "", ps
+			return "", "", total, ps
 		}
 		if len(hard) > 0 {
-			return "", "", hard
+			return "", "", total, hard
 		}
 		for _, p := range ps {
 			logf("%s: taken raw at the join, %s: %s", j.source, p.Rule, p.Msg)
 		}
 	}
-	return body, modelsUsed(models), nil
+	return body, modelsUsed(models), total, nil
 }
 
 // takeRaw drops the complaints about a chunk and logs each one, when the run was
@@ -1237,6 +1330,25 @@ func transportOnly(bad []translate.Problem) bool {
 		}
 	}
 	return true
+}
+
+// manyAsks is where a chunk's ask count stops being ordinary. A chunk gets two
+// asks a lease and three leases before it dies, so six is the most a chunk that
+// is merely difficult can cost. Past that it is going round rather than being
+// worked on, because the asks that do not spend an attempt are the ones that
+// never reached a model, and the run should say so while it is still running.
+const manyAsks = 6
+
+// localFault says the complaint is this machine's and not the host's: a question
+// that would not build and an answer that would not archive both happen on this
+// side of the ssh, and neither is evidence about whether the far end is serving.
+func localFault(bad []translate.Problem) bool {
+	for _, p := range bad {
+		if p.Rule == "prompt" || p.Rule == "archive" {
+			return true
+		}
+	}
+	return false
 }
 
 // outOfTurns says the far end has just told us it has nothing left to spend,
