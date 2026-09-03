@@ -878,6 +878,32 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // after it. The rule that a marker counts only when it carries the number the §
 // is up to holds them down as well.
 //
+// That is the control word a text layer writes. The sign itself is the same
+// misreading and the commoner one, and until now the pattern could not read it:
+// 1603 lines of the two printings and the pages open on a literal § and a
+// number. § 6 of chapter I of Algebra stopped at its eighth exercise where the
+// volume prints 41, and § 7 at its third where the volume prints 40, on the
+// "**§ 4.**" that opens its fourth. Nothing was lost when a § stalled, only
+// misfiled: the rest of the section was appended to the last exercise the
+// assembler had managed to open, which is why s7/03.md is 34043 bytes against
+// 236 and 439 for the two exercises in front of it.
+//
+// A section heading is the other thing a § and a number spell, and three things
+// keep this off them. A marker counts only when it carries the number the § is
+// up to, as above. The heading of a § is not inside the exercise block that
+// exercises() reads. And the cross reference set on a line of its own, "§ 4.3",
+// cannot match at all, because the pattern wants a space, a bold or a dollar
+// after the full stop and a cross reference puts a digit there. What is left is
+// 21 historical notes that list their own contents, "§ 1. Topological vector
+// spaces" against a dot leader. Those are read by itemOpen, which only ever
+// refuses to glue two blocks together, and a table of contents is not the second
+// half of a sentence broken over a page, so refusing is the right answer anyway.
+//
+// It moves 29 sections and takes 279 exercises back out of the bodies they had
+// been glued into, and costs no section an exercise. 14 of the 29 land exactly
+// on the count the other printing of the same book assembles on its own, § 6 and
+// § 7 of Algebra I among them.
+//
 // The dagger is the same swap again and a bigger one. A model reading a page
 // image gives the pilcrow as a dagger 64 times, across nine volumes in both
 // languages, and page 95 of Algebra 4 to 7 is the case that found it: the
@@ -890,7 +916,7 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // puts a dagger in front of a number. Those 66 are footnote marks, which sit
 // inside a sentence or against the word they hang off.
 var exNumRE = regexp.MustCompile(
-	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
+	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†|§)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
 		`(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // marks are the star and the pilcrow a book can set in front of an exercise
@@ -907,8 +933,10 @@ func marksOf(prefix string) (star, pilcrow string) {
 			return markOf(prefix, "*"), p
 		}
 	}
-	if p := markOf(prefix, "†"); p != "" {
-		return markOf(prefix, "*"), p
+	for _, c := range []string{"†", "§"} {
+		if p := markOf(prefix, c); p != "" {
+			return markOf(prefix, "*"), p
+		}
 	}
 	return markOf(prefix, "*"), markOf(prefix, "¶")
 }
