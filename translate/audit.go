@@ -70,6 +70,7 @@ const (
 	RuleLanguage     = "language"
 	RuleBibliography = "bibliography"
 	RuleScript       = "script"
+	RuleRefusal      = "refusal"
 )
 
 // Audit compares a translated body with the English it was made from.
@@ -88,6 +89,7 @@ func Audit(lang, en, tr string) []Problem {
 		return []Problem{{Rule: RuleCommentary, Msg: "the answer is empty"}}
 	}
 	out = append(out, auditFrontMatter(tr)...)
+	out = append(out, auditRefusal(tr)...)
 	out = append(out, auditCommentary(tr)...)
 	out = append(out, auditMath(en, tr)...)
 	out = append(out, auditAttrs(en, tr)...)
@@ -112,6 +114,40 @@ func auditFrontMatter(tr string) []Problem {
 	}
 	return []Problem{{Rule: RuleFrontMatter, Line: 1,
 		Msg: "opens with a front matter fence, and the front matter is written by the tool"}}
+}
+
+// providerKinds are the textguard leaks that are the provider talking rather
+// than the model answering: a rate limit or a block from the gateway, and a
+// model declining the work. The transport returns both as a successful answer
+// because from its side they are one, a page came back with a body in it.
+//
+// These were already found, and by this same check. They were reported under
+// RuleCommentary along with narration, and -raw waives commentary, so the
+// message was written to the corpus under a full set of headers with a matching
+// source hash and looked finished to every pass after it. Eight sections of the
+// Vietnamese corpus were sitting in that state, each one holding "Unusual
+// activity has been detected from your device. Try again later." and a request
+// id. So the detection was never the gap; the waiver was. Giving these two
+// kinds a rule of their own is what lets takeRaw refuse to waive them without
+// also refusing to waive a model that narrated its translation.
+var providerKinds = map[string]bool{"gateway": true, "refusal": true}
+
+// Invariant 6a. A message from the provider is not a translation.
+//
+// Never waived by -raw. -raw exists to keep an answer the audit disliked, on the
+// grounds that a flawed translation is still a translation and is worth having
+// while the corpus is being filled. A refusal is not a translation at all and
+// there is nothing in it to fix later, which puts it with the transport failures
+// rather than with the audit.
+func auditRefusal(tr string) []Problem {
+	var out []Problem
+	for _, leak := range textguard.Check(tr) {
+		if providerKinds[leak.Kind] {
+			out = append(out, Problem{Rule: RuleRefusal, Line: leak.Line,
+				Msg: fmt.Sprintf("the answer is a message from the provider, not a translation, %s: %q", leak.Kind, leak.Detail)})
+		}
+	}
+	return out
 }
 
 // narration is a model saying what it has just done, in the words it says it in
@@ -146,6 +182,12 @@ var narration = []string{
 func auditCommentary(tr string) []Problem {
 	var out []Problem
 	for _, leak := range textguard.Check(tr) {
+		// The provider kinds are reported by auditRefusal instead, under a rule
+		// -raw does not waive. Reporting them here as well would say one bad
+		// answer twice and would put the count of problems out.
+		if providerKinds[leak.Kind] {
+			continue
+		}
 		out = append(out, Problem{Rule: RuleCommentary, Line: leak.Line,
 			Msg: fmt.Sprintf("%s: %q", leak.Kind, leak.Detail)})
 	}

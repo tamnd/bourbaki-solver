@@ -842,3 +842,55 @@ func ellipsisFor(s string) string {
 	}
 	return s[:70] + "..."
 }
+
+// The body here is the one that was actually written. Exercise 6 of §2 of
+// chapter VII of Commutative Algebra sat in the corpus as this line, under a
+// full set of headers whose source hash matched, so every measure the corpus
+// had called it a finished translation.
+const refusalBody = "Unusual activity has been detected from your device. Try again later. (f9febec6-5f0d-4655-b3bf-46117deaddeb)"
+
+func has(ps []Problem, rule string) bool {
+	for _, p := range ps {
+		if p.Rule == rule {
+			return true
+		}
+	}
+	return false
+}
+
+func TestAProviderMessageIsRefused(t *testing.T) {
+	ps := Audit("vi", en, refusalBody)
+	if !has(ps, RuleRefusal) {
+		t.Fatalf("a provider message was not read as one: %v", rules(ps))
+	}
+}
+
+// The rule a provider message is reported under is the whole point of it, so
+// this is checked rather than assumed. Under RuleCommentary the message was
+// waived by -raw and written to the corpus.
+func TestAProviderMessageIsNotReportedAsCommentary(t *testing.T) {
+	for _, p := range Audit("vi", en, refusalBody) {
+		if p.Rule == RuleCommentary {
+			t.Fatalf("reported as commentary, which -raw waives: %v", p)
+		}
+	}
+}
+
+func TestNarrationIsStillCommentary(t *testing.T) {
+	// The other half of the split. Narration stays waivable, because a model
+	// that announced its translation did still translate.
+	bad := "Here is the translation:\n\n" + vi
+	ps := Audit("vi", en, bad)
+	if !has(ps, RuleCommentary) {
+		t.Fatalf("narration was not reported as commentary: %v", rules(ps))
+	}
+	if has(ps, RuleRefusal) {
+		t.Fatalf("narration was read as a provider message: %v", ps)
+	}
+}
+
+func TestAGoodTranslationIsNotReadAsARefusal(t *testing.T) {
+	if ps := Audit("vi", en, vi); has(ps, RuleRefusal) {
+		t.Fatalf("the reference translation was read as a provider message: %v", ps)
+	}
+}
