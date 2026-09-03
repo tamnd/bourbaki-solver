@@ -316,6 +316,11 @@ func TestItemOpenOnRealMarkers(t *testing.T) {
 		"§ 11. A topological space is said to be solvable.",
 		"§ 9) Soient E un espace vectoriel de dimension $n$.",
 		"**§ 27.** (a) Let A be a commutative ring.",
+		// The pilcrow read as a letter. All four are cut out of the pages.
+		"**T 17) Let A be the set of increasing maps.",
+		"T 6) On suppose G simplement connexe.",
+		"**Q 11) Soit (W, S) un système de Coxeter.",
+		`**Π 13)** \* We keep the general hypothesis.`,
 	} {
 		if !itemOpen(s) {
 			t.Errorf("itemOpen(%q) = false", s)
@@ -331,6 +336,13 @@ func TestItemOpenOnRealMarkers(t *testing.T) {
 		// Lie hold six of them.
 		"§ 4.3",
 		"§ 1.10",
+		// A label is a capital against its number with no space, and the corpus
+		// writes 307 of them. A is a case of an argument and not a mark, which
+		// is why it is not one of the four letters read as a pilcrow.
+		"C1. The space is Hausdorff.",
+		"S2. Let A be a ring.",
+		"E1) The module is free.",
+		"A 2) *Cas général* ($p = 1$).",
 	} {
 		if itemOpen(s) {
 			t.Errorf("itemOpen(%q) = true", s)
