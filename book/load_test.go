@@ -67,3 +67,23 @@ func TestPickTakesTheTreeThatHasTheFile(t *testing.T) {
 		t.Errorf("with one tree the answer was %s, want content/en", got)
 	}
 }
+
+// Bourbaki numbers the appendices of a chapter from one alongside the §§, and
+// corpus.Section holds both in the same field, so a printed contents keyed on
+// the number alone loses one to the other. Chapter VIII of Algebra prints
+// twenty one §§ and then four appendices, and appendix 1 overwrote § 1: the
+// built book listed the subsections of "Algebras without Unit Element" under a
+// § called "Artinian Modules and Noetherian Modules". Seventeen §§ in the
+// library were wrong this way, four in each printing of Algebra VIII, two in
+// the French Topologie IX and one in Lie VII.
+func TestAnAppendixAndASectionOfTheSameNumberAreNotTheSameEntry(t *testing.T) {
+	if printedKey("VIII", 1, false) == printedKey("VIII", 1, true) {
+		t.Fatalf("§ 1 and appendix 1 of chapter VIII share the key %q",
+			printedKey("VIII", 1, false))
+	}
+	// The § keeps the plain key it always had, so nothing that was right
+	// before this moves.
+	if got := printedKey("VIII", 1, false); got != "VIII/1" {
+		t.Errorf("§ 1 of chapter VIII is keyed %q, want VIII/1", got)
+	}
+}

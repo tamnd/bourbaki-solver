@@ -100,8 +100,13 @@ func loadContentsTitles(root string, v *Volume) error {
 		return fmt.Errorf("%s: %w", corpus.TOCPath(root, v.Meta.ID), err)
 	}
 	printed := map[string]map[int]string{}
+	chapterTitle := map[string]string{}
+	sectionTitle := map[string]string{}
 	for _, c := range bt.Chapters {
+		chapterTitle[c.Numeral] = strings.TrimSpace(c.Title)
 		for _, s := range c.Sections {
+			key := printedKey(c.Numeral, s.Number, s.Appendix)
+			sectionTitle[key] = strings.TrimSpace(s.Title)
 			byNo := map[int]string{}
 			for _, ss := range s.Subsections {
 				if ss.Title != "" {
@@ -109,19 +114,40 @@ func loadContentsTitles(root string, v *Volume) error {
 				}
 			}
 			if len(byNo) > 0 {
-				printed[fmt.Sprintf("%s/%d", c.Numeral, s.Number)] = byNo
+				printed[key] = byNo
 			}
 		}
 	}
 	for _, c := range v.Chapters {
+		c.Listed = chapterTitle[c.Numeral]
 		for _, s := range c.Sections {
-			if s.Kind == corpus.KindAppendix {
-				continue
-			}
-			s.Contents = printed[fmt.Sprintf("%s/%d", c.Numeral, s.Number)]
+			key := printedKey(c.Numeral, s.Number, s.Kind == corpus.KindAppendix)
+			s.Contents = printed[key]
+			s.Listed = sectionTitle[key]
 		}
 	}
 	return nil
+}
+
+// printedKey names one § of one chapter in the printed contents. The appendix
+// flag is part of the name and not a detail, because Bourbaki numbers the
+// appendices of a chapter from one alongside the §§ and corpus.Section holds
+// both in the same field.
+//
+// Keying on the number alone was a bug with a shape worth writing down. Chapter
+// VIII of Algebra prints twenty one §§ and then four appendices, so appendix 1
+// overwrote § 1 and the four §§ that open the chapter took the subsection titles
+// of the four appendices into their contents lines: the built book listed
+// "Algebras without Unit Element" under a § called "Artinian Modules and
+// Noetherian Modules". The consuming loop skipped appendices, which hid it from
+// the appendix side while leaving the §§ wrong, and it is four §§ in each of the
+// two printings of Algebra VIII, two in the French Topologie IX and one in Lie
+// VII, seventeen in the library.
+func printedKey(numeral string, number int, appendix bool) string {
+	if appendix {
+		return fmt.Sprintf("%s/app%d", numeral, number)
+	}
+	return fmt.Sprintf("%s/%d", numeral, number)
 }
 
 // loadChapter reads content/<lang>/<book>/<numeral>/.
