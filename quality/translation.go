@@ -11,6 +11,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/glossary"
 	"github.com/tamnd/bourbaki-solver/mathtex"
+	"github.com/tamnd/bourbaki-solver/textguard"
 	"github.com/tamnd/bourbaki-solver/translate"
 )
 
@@ -64,6 +65,8 @@ func init() {
 			Title: "no translation was written on the free gateway", Run: l15, Need: needTranslations},
 		Check{ID: "L16", Group: Translation, Hard: true,
 			Title: "no paragraph of the machine English came back in French", Run: l16, Need: needTranslations},
+		Check{ID: "L17", Group: Translation, Hard: true,
+			Title: "no translation is a provider error", Run: l17, Need: needTranslations},
 	)
 }
 
@@ -1063,4 +1066,62 @@ func BookOf(d Doc) string {
 		return d.Exercise.Book
 	}
 	return ""
+}
+
+// L17. No translation is a provider error.
+//
+// A refusal that arrives as an HTTP error, or as an empty body, is caught on
+// the write path and the file is left alone. A refusal that arrives as a well
+// formed answer whose text happens to be an error message is written to disk
+// with full front matter, a translation_model, a translation_run and a
+// source_content_sha256, and from that moment it is indistinguishable from a
+// translation that worked. It survives -stale and it survives -redo-small if it
+// is long enough, and nothing will ever visit it again: it is current, its
+// source hash matches, and nothing marks it as suspect.
+//
+// Ten of them were in the corpus before anybody noticed, and they were noticed
+// because somebody was reading the Vietnamese note to the reader for an
+// unrelated reason. Nine were nothing but the sentence "Unusual activity has
+// been detected from your device. Try again later." and a trace id; the tenth
+// had it as one paragraph of fifty eight. So the file has to be read rather
+// than its front matter, and a paragraph counts as much as a whole body.
+//
+// textguard already holds the phrases, because the same answers reach the
+// reading side and are refused there. What is checked here is the three kinds
+// that are the provider talking instead of the model working -- the anti abuse
+// gateway, a model declining, and a model saying the attachment never arrived
+// -- together with a body that is empty, since the same fault can produce one.
+// The kinds textguard has for a model narrating its work are deliberately not
+// checked: they are phrases that a translation of mathematical prose can
+// legitimately contain, and this rule is hard.
+//
+// tamnd/bourbaki-solver#471.
+func l17(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		if d.Lang == "" || d.Lang == "en" {
+			continue
+		}
+		for _, leak := range textguard.Check(d.Body) {
+			if !providerError[leak.Kind] {
+				continue
+			}
+			line := 1
+			if leak.Line > 0 {
+				line = d.BodyLine(leak.Line)
+			}
+			out = append(out, Finding{File: d.Path, Line: line, Msg: fmt.Sprintf(
+				"the translation is the provider talking and not a translation (%s): %s",
+				leak.Kind, leak.Detail)})
+		}
+	}
+	return out, nil
+}
+
+// providerError is the textguard kinds that mean no translation was made.
+var providerError = map[string]bool{
+	"gateway":  true,
+	"refusal":  true,
+	"no-image": true,
+	"empty":    true,
 }

@@ -775,3 +775,57 @@ func TestL16LeavesTheOtherLanguagesAlone(t *testing.T) {
 		t.Fatalf("got %d findings on a vi file, want none: %v", len(got), got)
 	}
 }
+
+// tamnd/bourbaki-solver#471. Ten files held a provider throttle message where
+// the translation should be, written with full front matter and a source hash
+// that matched, so nothing downstream could tell them from work that had been
+// done. Nine were nothing but the sentence; the tenth had it as one paragraph
+// of fifty eight, which is why the whole body is read and not just its opening.
+func TestL17FindsAProviderErrorWrittenAsATranslation(t *testing.T) {
+	const throttle = "Unusual activity has been detected from your device. " +
+		"Try again later. (f9febec6-5f0d-4655-b3bf-46117deaddeb)"
+	for _, c := range []struct {
+		name string
+		vi   string
+		want int
+		line int
+	}{
+		{"the whole body", throttle, 1, 1},
+		{"one paragraph of many", "Cho $A$ là một vành.\n\n" + throttle + "\n\nMọi môđun là nửa đơn.", 1, 3},
+		{"an empty body", "   \n", 1, 1},
+		{"an honest translation", "Cho $A$ là một vành.", 0, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			out, err := l17(&Corpus{Docs: pairDocs("Let $A$ be a ring.", c.vi)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(out) != c.want {
+				t.Fatalf("got %d findings, want %d: %v", len(out), c.want, out)
+			}
+			if c.want == 0 {
+				return
+			}
+			if out[0].Line != c.line {
+				t.Errorf("the finding is on line %d, want %d", out[0].Line, c.line)
+			}
+			if out[0].File != "content/vi/alg/VIII/01_s1.md" {
+				t.Errorf("the finding names %s, want the translation", out[0].File)
+			}
+		})
+	}
+}
+
+// The kinds textguard keeps for a model narrating its work are not this rule's
+// business. "Let us first note that" is a sentence Bourbaki writes, and a rule
+// that is hard cannot be spending its findings on prose that is merely fluent.
+func TestL17LeavesTheNarrationKindsAlone(t *testing.T) {
+	out, err := l17(&Corpus{Docs: pairDocs("Let $A$ be a ring.",
+		"Đây là bản dịch của trang. Cho $A$ là một vành.")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 0 {
+		t.Errorf("got %d findings, want none: %v", len(out), out)
+	}
+}
