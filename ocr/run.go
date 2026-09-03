@@ -1602,14 +1602,21 @@ func (r *Runner) write(host Host, value task, text string) (changes []FaceChange
 	}
 	path := corpus.PagePath(r.Root, r.Book, value.page)
 	replaced, native := carry(&meta, path)
+	// Only against a native reading. A scanned volume has no text layer to be
+	// the better witness, so there is nothing to compare and nothing to say.
+	//
+	// The script capitals are put back before the page is written and the faces
+	// are counted after, so what the report lists is what is on disk. Doing it
+	// the other way round would report a change the file does not have.
+	if native {
+		body = restoreScript(replaced, body)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
 	}
 	if err := (corpus.PageFile{Meta: meta, Body: body}).Write(path); err != nil {
 		return nil, err
 	}
-	// Only against a native reading. A scanned volume has no text layer to be
-	// the better witness, so there is nothing to compare and nothing to say.
 	if native {
 		changes = faceChanges(value.page, replaced, body)
 	}

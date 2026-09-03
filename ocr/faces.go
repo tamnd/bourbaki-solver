@@ -112,10 +112,15 @@ func faces(text string) map[[2]string]int {
 	return out
 }
 
-// faceCommand matches \mathbf{Sp}, \mathbf S and the fraktur and script forms.
-// The braced alternative comes first so that \mathbf{S} is read as a group
-// rather than as a bare brace.
-var faceCommand = regexp.MustCompile(`\\(mathbf|mathfrak|mathscr)\s*(?:\{([^{}]*)\}|([A-Za-z]))`)
+// faceCommand matches \mathbf{Sp}, \mathbf S and the fraktur, script and
+// calligraphic forms. The braced alternative comes first so that \mathbf{S} is
+// read as a group rather than as a bare brace.
+//
+// mathcal is here so that a letter moving between the two script faces is
+// reported as the move it is. Without it \mathscr{T} becoming \mathcal{T} read
+// as thirty losses of \mathscr{T} with nothing gaining them, which is a report
+// that says a face went and cannot say where.
+var faceCommand = regexp.MustCompile(`\\(mathbf|mathfrak|mathscr|mathcal)\s*(?:\{([^{}]*)\}|([A-Za-z]))`)
 
 // plainLetters counts the single letters of a stretch of mathematics that carry
 // no face command. A letter is single when what sits either side of it is not a
@@ -163,6 +168,72 @@ func mathSpans(text string) []string {
 	}
 	return spans
 }
+
+// restoreScript puts back the script capitals a reading from a picture spelled
+// calligraphic, and it is the one face the run corrects rather than reports.
+//
+// The general rule is the right one and this is a narrower claim than the rule
+// it stands beside. On a born digital volume the extractor reads the font name
+// out of the PDF and the model guesses a typeface from pixels at 300 dpi, so
+// the text layer is not merely right more often, it has evidence the model does
+// not have at all. Page 76 of Algebra VIII is the shape of it: thirty
+// \mathscr in the native reading, thirty \mathcal in the reading that replaced
+// it, and nothing else about the mathematics changed. Corpus wide both
+// spellings are in heavy use, so the two are not interchangeable and a page
+// that ends up with one of each is a page spelling one printed glyph two ways.
+//
+// The claim is narrowed four ways and every one of them matters. Only against a
+// native reading, which the caller decides. Only that pair of faces. Only that
+// direction, calligraphic back to script and never the other way. And only for
+// a letter the native reading set in script and did not also set calligraphic,
+// so a page that really did distinguish the two is left exactly as it is.
+//
+// Whether such a page exists was the thing to check before writing this, and
+// the corpus says no. 139 pages use both commands, and on 137 of them no letter
+// takes both faces, which is two different letters and not a distinction. The
+// two that remain, page 42 of int-ix-fr and page 258 of int-vii-ix, are both
+// OCR readings spelling the same letter both ways within the page: \mathcal{C}
+// nine times against \mathscr{C} four on one, \mathcal{F} four against
+// \mathscr{F} one on the other. That is one reader being inconsistent and not
+// a book printing two glyphs, and neither page is native, so neither is
+// reachable from here anyway.
+//
+// The replacement is not limited to math spans because it does not need to be.
+// A face command outside mathematics is not something these volumes set, and
+// rule 2 reports any bare TeX outside a span as a defect, so a \mathcal in
+// prose is already a finding rather than a thing to preserve.
+func restoreScript(was, now string) string {
+	before := faces(was)
+	want := map[string]bool{}
+	for key := range before {
+		if key[0] == "mathscr" {
+			want[key[1]] = true
+		}
+	}
+	for key := range before {
+		if key[0] == "mathcal" {
+			delete(want, key[1])
+		}
+	}
+	if len(want) == 0 {
+		return now
+	}
+	return calLetter.ReplaceAllStringFunc(now, func(match string) string {
+		m := calLetter.FindStringSubmatch(match)
+		letter := m[1]
+		if letter == "" {
+			letter = m[2]
+		}
+		if !want[letter] {
+			return match
+		}
+		return `\mathscr{` + letter + `}`
+	})
+}
+
+// calLetter matches \mathcal{C} and \mathcal C, and only a single letter,
+// because a script capital is one letter and a group of two is something else.
+var calLetter = regexp.MustCompile(`\\mathcal\s*(?:\{([A-Za-z])\}|([A-Za-z]))`)
 
 // faceChanges is every letter whose face count differs between two readings of
 // the same page, worst first.

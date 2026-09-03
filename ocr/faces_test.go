@@ -118,3 +118,64 @@ func TestAPageWithNoReadingBeforeItReportsNothing(t *testing.T) {
 		t.Errorf("faceChanges = %v, want the two faces of the new reading", changes)
 	}
 }
+
+// Page 76 of Algebra VIII is the shape of it: thirty script capitals in the
+// native reading, thirty calligraphic in the reading that replaced it, and
+// nothing else about the mathematics changed.
+func TestAScriptCapitalIsPutBackWhenAPictureSpelledItCalligraphic(t *testing.T) {
+	was := `Relations between $\mathscr{T}$ and $\mathscr{H}$, where $\mathscr{T}$ is a topology.`
+	now := `Relations between $ \mathcal{T} $ and $ \mathcal{H} $, where $ \mathcal{T} $ is a topology.`
+	got := restoreScript(was, now)
+	want := `Relations between $ \mathscr{T} $ and $ \mathscr{H} $, where $ \mathscr{T} $ is a topology.`
+	if got != want {
+		t.Errorf("got  %s\nwant %s", got, want)
+	}
+}
+
+// Only that direction, that pair, and only for a letter the native reading
+// settled. Everything else is left for the report to raise with a human.
+func TestRestoreScriptIsNarrow(t *testing.T) {
+	for _, c := range []struct {
+		why      string
+		was, now string
+		want     string
+	}{
+		{"a letter the native reading never set in script",
+			`$\mathscr{T}$`, `$\mathcal{F}$`, `$\mathcal{F}$`},
+		{"the other direction is never taken",
+			`$\mathcal{T}$`, `$\mathscr{T}$`, `$\mathscr{T}$`},
+		{"a letter the native reading set both ways is a real distinction",
+			`$\mathscr{C}$ and $\mathcal{C}$`, `$\mathcal{C}$`, `$\mathcal{C}$`},
+		{"another face is not this rule's business",
+			`$\mathscr{T}$ and $\mathbf{R}$`, `$\mathcal{T}$ and $\mathrm{R}$`,
+			`$\mathscr{T}$ and $\mathrm{R}$`},
+		{"a group of two letters is not a script capital",
+			`$\mathscr{T}$`, `$\mathcal{Tr}$`, `$\mathcal{Tr}$`},
+		{"the unbraced spelling is reached and normalised",
+			`$\mathscr{T}$`, `$\mathcal T$`, `$\mathscr{T}$`},
+		{"a native reading with no script capital changes nothing",
+			`$\mathbf{R}$`, `$\mathcal{T}$`, `$\mathcal{T}$`},
+	} {
+		t.Run(c.why, func(t *testing.T) {
+			if got := restoreScript(c.was, c.now); got != c.want {
+				t.Errorf("got  %s\nwant %s", got, c.want)
+			}
+		})
+	}
+}
+
+// Without mathcal among the faces, a letter moving between the two script
+// spellings reported as a loss with nothing gaining it.
+func TestASwapBetweenTheTwoScriptFacesIsReportedAsBoth(t *testing.T) {
+	changes := faceChanges(76, `$\mathscr{T}$ $\mathscr{T}$`, `$\mathcal{T}$ $\mathcal{T}$`)
+	got := map[string][2]int{}
+	for _, c := range changes {
+		got[c.Face] = [2]int{c.Was, c.Now}
+	}
+	if got["mathscr"] != [2]int{2, 0} {
+		t.Errorf("mathscr = %v, want the two it lost", got["mathscr"])
+	}
+	if got["mathcal"] != [2]int{0, 2} {
+		t.Errorf("mathcal = %v, want the two it gained", got["mathcal"])
+	}
+}
