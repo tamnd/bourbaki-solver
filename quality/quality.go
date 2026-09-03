@@ -267,6 +267,27 @@ func (o Options) Selected(id string) bool {
 	return false
 }
 
+// wantsRefs answers whether this run has any rule in it that reads the
+// reference graph, which decides whether Load builds one.
+//
+// It asks the group rather than naming R01, R02 and R03, so that a fourth
+// reference rule is loaded for by being registered in the group and nobody has
+// to remember this list. A run with no -only takes every rule and so builds the
+// graph, which is what bourbaki report and CI both do.
+//
+// Corpus.Refs is nil when it was not built, and the two places outside the R
+// rules that read it, the report's summary line and its JSON, already test for
+// that and leave the reference counts out. Leaving them out is the honest
+// answer: a run narrowed to -only M01 did not count any references.
+func (o Options) wantsRefs() bool {
+	for _, c := range checks {
+		if c.Group == References && o.Selected(c.ID) {
+			return true
+		}
+	}
+	return false
+}
+
 func parseSet(names []string) (map[string]bool, error) {
 	out := map[string]bool{}
 	for _, raw := range names {
