@@ -67,6 +67,22 @@ func Load(root, id, lang string) (*Volume, error) {
 		}
 		v.Intro = intro
 	}
+	if x := meta.NotationIndex; x != nil {
+		name := frontName(x.File, "index_of_notation.md")
+		index, err := loadFront(root, pick(dirs, meta.Book, name), meta.Book, lang, name)
+		if err != nil {
+			return nil, err
+		}
+		v.Notation = index
+	}
+	if x := meta.TerminologyIndex; x != nil {
+		name := frontName(x.File, "index_of_terminology.md")
+		index, err := loadFront(root, pick(dirs, meta.Book, name), meta.Book, lang, name)
+		if err != nil {
+			return nil, err
+		}
+		v.Terminology = index
+	}
 	if err := loadContentsTitles(root, v); err != nil {
 		return nil, err
 	}
