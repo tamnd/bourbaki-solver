@@ -275,6 +275,18 @@ const smallTypeSup = `\$\^\*\$`
 // body it belongs to.
 var smallTypeOpen = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup + `)`)
 
+// smallTypeMark is either of them or the escaped bare star, at the front of
+// whatever carries it.
+//
+// The escaped spelling is the one the members of a run use. A head is written
+// by a printing that sets the mark as mathematics and it comes through as $*$,
+// but the star in front of "\* 2) The real line $\mathbf{R}$ is locally
+// compact" is a plain star, escaped because Markdown would otherwise read it as
+// emphasis, and all eight members of runs that open on the mark are spelled
+// that way. See closingMarks, which had to learn the same spelling for the same
+// reason.
+var smallTypeMark = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup + `|\\\*)`)
+
 // headName is the name a printing gives a result, in parentheses between the
 // kind and the dash: "Theorem 1 (Wedderburn). —", "Théorème 2 (« lemme de
 // Nakayama »). —". Both grammars have a branch for it and neither sets anything
