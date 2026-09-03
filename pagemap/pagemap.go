@@ -1930,6 +1930,50 @@ func (m *Map) BodyPages() int {
 	return n
 }
 
+// ReadPages is the number of body pages whose number was read off the page
+// rather than worked out from a neighbour. It is what BodyPages is measured
+// against to say how much of a map is standing on evidence.
+func (m *Map) ReadPages() int {
+	n := 0
+	for _, e := range m.Entries {
+		if e.Confidence.Printed() {
+			n++
+		}
+	}
+	return n
+}
+
+// LongestUnread is the longest run of consecutive pages carried by arithmetic
+// alone, and where it is.
+//
+// It says something the share does not. Ten anchors spread evenly through a
+// volume and ten all in the first chapter give the same share and are worth
+// different amounts, because a fit is only as good as its nearest anchor: a
+// volume that steps in the middle of a long unread stretch is wrong from the
+// step to the end of the stretch and nothing in the map says so. Front matter
+// does not count, having no number to read.
+func (m *Map) LongestUnread() (pages, from, to int) {
+	run, start := 0, 0
+	for _, e := range m.Entries {
+		if e.Confidence == Unknown {
+			run = 0
+			continue
+		}
+		if e.Confidence.Printed() {
+			run = 0
+			continue
+		}
+		if run == 0 {
+			start = e.PDFPage
+		}
+		run++
+		if run > pages {
+			pages, from, to = run, start, e.PDFPage
+		}
+	}
+	return pages, from, to
+}
+
 // Lookup returns the entry for a PDF page.
 func (m *Map) Lookup(pdfPage int) (Entry, bool) {
 	if pdfPage < 1 || pdfPage > len(m.Entries) {

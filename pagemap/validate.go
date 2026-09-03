@@ -25,6 +25,69 @@ func (p Problem) String() string {
 	return p.Detail
 }
 
+// MinReadShare and MaxUnreadShare are what a fit has to be standing on before
+// it counts as a fit. The first is the share of body pages whose number was
+// read off the page; the second caps the longest single run of pages carried by
+// arithmetic alone, as a share of the body.
+//
+// Both numbers were picked from the corpus rather than chosen. Over the 44 maps
+// the share read runs 0.5 per cent for top-v-x and then nothing until 15.3 for
+// lie-i-fr and var-fr, and up from there, so a floor anywhere in that gap costs
+// nothing and 5 is the round number in the middle of it. The longest unread run
+// is 73 per cent of the body for top-v-x and then nothing until 26.5 for
+// alg-ix-fr, 24.3 for lie-i-fr and 12 for var-fr, so half the volume is again
+// well clear of everything the corpus actually has.
+//
+// They are deliberately not tight. This is the check that stops a map being
+// published that is not a fit at all, not a measure of how good a fit is; the
+// coverage table is where a map that is thin but honest gets reported.
+// MinBodyPages is the size below which neither share is asked, because a share
+// over a handful of pages is not a measurement: two unread pages out of three
+// is 67 per cent and says nothing at all. The smallest volume in the corpus is
+// the 61 body pages of lie-vii-viii-fr, a fascicule, so this is well under
+// anything real and well over the fixtures that exercise the other checks.
+const (
+	MinReadShare   = 0.05
+	MaxUnreadShare = 0.50
+	MinBodyPages   = 20
+)
+
+// standing refuses a map that no reading supports, which Validate cannot
+// otherwise catch because there is nothing wrong with it.
+//
+// Every other check here is for a map that contradicts itself. One anchor
+// extrapolated across a volume contradicts nothing: top-v-x is 372 pages,
+// foot-number, with no text layer, and the reading kept the foot number on one
+// page of them. The offset from that one page carried across the other 365
+// validates, is written, and from then on the volume reads as mapped, the
+// coverage table counts its pages, and every page the fitter got wrong is
+// quoted back by everything that asks. A volume that steps anywhere at all,
+// which most of them do, is then wrong from the step to the end with nothing
+// saying so.
+//
+// So the refusal is not that the map is inconsistent, it is that it is not
+// evidence. The file was being left out of the corpus by hand, which is not a
+// thing that should need doing by hand.
+func (m *Map) standing() []Problem {
+	body := m.BodyPages()
+	if body < MinBodyPages {
+		return nil // The empty fit has its own problem, above.
+	}
+	var probs []Problem
+	read := m.ReadPages()
+	if share := float64(read) / float64(body); share < MinReadShare {
+		probs = append(probs, Problem{
+			Detail: fmt.Sprintf("%d of %d body pages carry a number that was read, %.1f%%, under the %.0f%% a fit is held to: this is one reading extrapolated and not a fit",
+				read, body, share*100, MinReadShare*100)})
+	}
+	if run, from, to := m.LongestUnread(); float64(run) > MaxUnreadShare*float64(body) {
+		probs = append(probs, Problem{PDFPage: from,
+			Detail: fmt.Sprintf("pdf %d to %d, %d pages, carry no number that was read, over the %.0f%% of the volume a single stretch is held to",
+				from, to, run, MaxUnreadShare*100)})
+	}
+	return probs
+}
+
 // Validate checks the map against itself. The point is that a printed page
 // sequence is highly constrained, so most ways of getting it wrong show up as
 // an arithmetic inconsistency rather than as a plausible wrong number.
@@ -43,6 +106,8 @@ func (m *Map) Validate() []Problem {
 			Detail: fmt.Sprintf("none of the %d pages was mapped, so the fit found nothing",
 				len(m.Entries))})
 	}
+
+	probs = append(probs, m.standing()...)
 
 	stepAt := map[int]Step{}
 	for _, s := range m.Steps {
