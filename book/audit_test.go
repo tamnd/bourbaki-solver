@@ -374,3 +374,126 @@ func TestCoverageStillReportsASectionThatIsNotThere(t *testing.T) {
 		t.Errorf("missing is %v, want the § 2 of the printing", missing)
 	}
 }
+
+// The front matter and the back matter are the two parts of the build with no
+// other check watching them, which is the whole reason matter exists. A volume
+// can lose its title page and pass every other check in the file: the chapters
+// the manifest names are still there, the §§ still run without a gap, and four
+// leaves are half of one per cent of the text length.
+func TestTheFrontAndBackMatterAreBoundIntoAVolumeThisPackageWrote(t *testing.T) {
+	v := sample()
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	for _, c := range a.Checks {
+		if !c.OK {
+			t.Errorf("%s failed on a document this package just wrote: %s %v", c.Name, c.Detail, c.Notes)
+		}
+	}
+}
+
+// The check has to name the part that went, because "the front matter is not
+// bound in" sends whoever reads it back through document.go to work out which
+// of the five it means.
+func TestTheFrontMatterCheckNamesThePartThatIsNotThere(t *testing.T) {
+	v := sample()
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.TeX = strings.Replace(d.TeX, "\\btitlepage\n", "", 1)
+	a := &Audit{}
+	a.matter(v, d)
+	c := find(t, a, "front matter is bound in")
+	if c.OK {
+		t.Error("a document with no title page passed the front matter check")
+	}
+	if !strings.Contains(strings.Join(c.Notes, " "), `\btitlepage`) {
+		t.Errorf("the check does not name the part that went: %v", c.Notes)
+	}
+}
+
+// The edition line is asked for only where the manifest carries one, so a
+// printing that does not say which edition it is passes rather than failing for
+// a line it has no text for.
+func TestTheEditionLineIsOnlyAskedForWhereThePrintingHasOne(t *testing.T) {
+	v := sample()
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	if c := find(t, a, "front matter is bound in"); !c.OK {
+		t.Errorf("a volume with no edition in its manifest failed: %s %v", c.Detail, c.Notes)
+	}
+	v.Meta.Edition = "Second edition"
+	d, err = Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(d.TeX, `\bedition{Second edition}`) {
+		t.Fatal("the writer did not set the edition line the manifest carries")
+	}
+	d.TeX = strings.Replace(d.TeX, `\bedition{Second edition}`, "", 1)
+	a = &Audit{}
+	a.matter(v, d)
+	if c := find(t, a, "front matter is bound in"); c.OK {
+		t.Error("a volume whose manifest names an edition passed without the edition line")
+	}
+}
+
+// The back matter is conditional on what the volume holds and not on a fixed
+// list. Some printings set the Historical Note as a Book of its own and some as
+// an appendix to a chapter, and not every one carries both indexes, so a volume
+// with none of the three has nothing to bind and passes.
+func TestAVolumeWithNoIndexesAndNoHistoricalNoteHasNoBackMatterToBind(t *testing.T) {
+	v := sample()
+	v.Chapters[0].Historical = nil
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	c := find(t, a, "back matter is bound in")
+	if !c.OK {
+		t.Errorf("a volume with nothing to bind at the back failed: %s %v", c.Detail, c.Notes)
+	}
+	if !strings.Contains(c.Detail, "0 of 0") {
+		t.Errorf("detail = %q, want it to say there was nothing to bind", c.Detail)
+	}
+}
+
+// An index that is dropped on the way out is the fault this half of the check
+// is for. The two indexes are the last thing in the document, so a writer that
+// stops early loses them and leaves everything above them intact.
+func TestTheBackMatterCheckFindsAnIndexThatDidNotReachTheDocument(t *testing.T) {
+	v := sample()
+	v.Notation = &Section{
+		Kind: corpus.KindNotation, Title: "Index of Notation",
+		Body: "$x$, I, § 1, no. 1\n", Path: "content/en/alg/I/notation.md", Head: 1, Lang: "en",
+	}
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	if c := find(t, a, "back matter is bound in"); !c.OK {
+		t.Fatalf("a volume whose index was written failed: %s %v", c.Detail, c.Notes)
+	}
+	d.TeX = strings.Replace(d.TeX, "{notation}", "{dropped}", 1)
+	a = &Audit{}
+	a.matter(v, d)
+	c := find(t, a, "back matter is bound in")
+	if c.OK {
+		t.Error("a document with no index of notation in it passed the back matter check")
+	}
+	if !strings.Contains(strings.Join(c.Notes, " "), "notation") {
+		t.Errorf("the check does not name the index that went: %v", c.Notes)
+	}
+}
