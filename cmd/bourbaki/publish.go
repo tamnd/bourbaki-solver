@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -136,18 +137,37 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		return err
 	}
 	fmt.Printf("publish: %d pages\n", len(wrote))
+
+	// Every page the build could not set, all of them at once. The build carries
+	// on past one of these so that a run over twenty thousand files says
+	// everything it found, rather than costing a ten minute pass per fault; this
+	// is the other end of that, and it is what makes the run fail. It is
+	// returned rather than printed alone so the exit code and the message agree.
+	var unreadable error
+	if n := len(site.Unreadable); n > 0 {
+		var b strings.Builder
+		fmt.Fprintf(&b, "publish: %d pages could not be built:", n)
+		for _, u := range site.Unreadable {
+			fmt.Fprintf(&b, "\n\t%s", u.Err)
+		}
+		unreadable = errors.New(b.String())
+	}
+
 	broken := map[string]int{}
 	if n := len(site.Broken); n > 0 {
-		// On standard error and named a site that cannot be published, because
-		// this is the one build whose output looks finished and is not.
+		// Stated and not judged. A formula marked broken is a fact about the
+		// corpus that this run reports at every build; whether it is enough to
+		// stop a build is the ceiling's to say, and saying "not publishable"
+		// here contradicted the zero this exits with when every family is under
+		// its ceiling.
 		files := map[string]bool{}
 		for _, ref := range site.Broken {
 			file, _, _ := strings.Cut(ref.At, ":")
 			files[file] = true
 			broken[volumeOf(file)]++
 		}
-		fmt.Fprintf(os.Stderr, "publish: %d formulae are marked broken across %d files, "+
-			"so this site is not publishable. Run bourbaki audit -only P04 for the list.\n", n, len(files))
+		fmt.Fprintf(os.Stderr, "publish: %d formulae are marked broken across %d files. "+
+			"Run bourbaki audit -only P04 for the list.\n", n, len(files))
 	}
 	if ceiling.set() {
 		// Said even at zero, because the run that clears the last one is the run
@@ -158,6 +178,9 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 		if err := ceiling.check(broken); err != nil {
 			return err
 		}
+	}
+	if unreadable != nil {
+		return unreadable
 	}
 	if *check {
 		return nil
