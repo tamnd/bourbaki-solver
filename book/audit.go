@@ -189,6 +189,7 @@ func Inspect(root string, v *Volume, d *Document, b *Build, e *EPUB, opt AuditOp
 	a := &Audit{Volume: v.Meta.ID, Lang: v.Lang, Title: v.Title, Doc: d, Build: b, EPUB: e}
 	a.structure(v)
 	a.listed(v)
+	a.indexed(v)
 	a.coverage(root, v, opt)
 	a.length(root, v, opt)
 	a.written(d, opt)
@@ -319,6 +320,63 @@ func (a *Audit) listed(v *Volume) {
 	}
 	a.ok("the titles agree with the volume's own printed contents", len(differ) == 0,
 		fmt.Sprintf("%d compared, %d differ", n, len(differ)), differ...)
+}
+
+// indexRefRE is the chapter numeral opening a reference in a printed index.
+// Bourbaki's indexes point at a place in the argument rather than at a page,
+// "Abelian group: I, § 4, no. 2." in the English setting and "Anneau gradué :
+// III, 3, 1." in the French, and the English Commutative Algebra runs the three
+// together as "VII.1.1". All three shapes put the numeral straight after the
+// colon that ends the entry's headword, so one pattern reads all of them.
+var indexRefRE = regexp.MustCompile(`:\s*\**([IVXL]+)\s*[.,]`)
+
+// indexed asks whether every reference in the two indexes names a chapter this
+// volume actually has. It is the one check in the audit that reads the back
+// matter, and it is worth having because the indexes are transcribed off the
+// scan rather than generated: a reference is a numeral in a run of numerals,
+// which is exactly the shape OCR loses, and nothing else in the build would
+// ever notice. A reader who follows a wrong reference has no way back.
+//
+// Run over the library the first time, it read 11663 references and rejected
+// six, all in four printings and all single-numeral misreads that the entry's
+// neighbours settle at once, since an index keeps alphabetical order. Topology
+// I to IV had "General term of a series : VI, 5, 6." between a III entry and a
+// IV entry, and TG III § 5 is infinite sums and products. Topology V to X had
+// "Space, pseudo-compact : XI, 1, Exercise 21." in a book with ten chapters,
+// between two IX and X entries. Commutative Algebra I to VII had two VIII
+// references in a book with seven chapters, one of them followed immediately by
+// three more entries on the same divisors at VII.1.1.
+//
+// Repairing those turned up the larger defect underneath, which this check
+// could not see and a count of what it can see does find: the same Commutative
+// Algebra index had 140 references whose numeral had come back from the scan as
+// digits, II as 11 and III as 111 and I as 1 and VI as V1, so they were not
+// references to any chapter and not roman numerals either. The library went
+// from 11663 readable references to 11803 once they were roman again.
+func (a *Audit) indexed(v *Volume) {
+	var wrong []string
+	refs := 0
+	have := map[string]bool{}
+	for _, numeral := range v.Meta.Chapters {
+		have[numeral] = true
+	}
+	for _, s := range []*Section{v.Notation, v.Terminology} {
+		if s == nil {
+			continue
+		}
+		for i, line := range strings.Split(s.Body, "\n") {
+			for _, m := range indexRefRE.FindAllStringSubmatch(line, -1) {
+				refs++
+				if !have[m[1]] {
+					wrong = append(wrong, fmt.Sprintf("%s:%d: %s names chapter %s, and the volume has %s",
+						s.Path, i+1, firstLine(strings.TrimSpace(line), "an entry"),
+						m[1], strings.Join(v.Meta.Chapters, ", ")))
+				}
+			}
+		}
+	}
+	a.ok("every reference in the indexes names a chapter of this volume", len(wrong) == 0,
+		fmt.Sprintf("%d references, %d wrong", refs, len(wrong)), wrong...)
 }
 
 // sameTitle compares a title in content/ with the same title in the printed

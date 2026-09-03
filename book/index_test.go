@@ -1,6 +1,11 @@
 package book
 
-import "testing"
+import (
+	"strings"
+	"testing"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
+)
 
 // TestAnIndexEntryBecomesAParagraphAndADisplayStaysOneBlock is the shape the
 // English Algebra I to III index of notation actually has on disk. Its first
@@ -45,5 +50,57 @@ func TestADisplayThatOpensAnIndexKeepsItsFormula(t *testing.T) {
 	want := "$$\nx \\top y\n$$\n\n$0$: I, § 2."
 	if got != want {
 		t.Errorf("oneEntryToALine gave %q, want %q", got, want)
+	}
+}
+
+// TestAnIndexReferenceToAChapterTheVolumeHasNotGotIsRejected is the six
+// findings the check made the first time it was run over the library, one line
+// each, standing for the four printings they came from. Every one of them is a
+// numeral that came back wrong from the scan, and every one of them is settled
+// by the entries around it, because an index is in alphabetical order and a
+// misread numeral does not move its entry.
+func TestAnIndexReferenceToAChapterTheVolumeHasNotGotIsRejected(t *testing.T) {
+	v := &Volume{
+		Meta: corpus.Book{ID: "top-v-x", Chapters: []string{"V", "VI", "VII", "VIII", "IX", "X"}},
+		Terminology: &Section{
+			Kind: corpus.KindTerminology,
+			Path: "content/en/top/index_of_terminology_v_x.md",
+			Body: "Space, Polish : IX, 6, 1.\n" +
+				"Space, pseudo-compact : XI, 1, Exercise 21.\n" +
+				"Space, real-compact : X, 4, Exercise 17.\n",
+		},
+	}
+	a := &Audit{}
+	a.indexed(v)
+
+	if len(a.Checks) != 1 {
+		t.Fatalf("indexed made %d checks, want 1", len(a.Checks))
+	}
+	c := a.Checks[0]
+	if c.OK {
+		t.Errorf("a reference to chapter XI of a volume that ends at X passed: %s", c.Detail)
+	}
+	if c.Detail != "3 references, 1 wrong" {
+		t.Errorf("detail is %q, want %q", c.Detail, "3 references, 1 wrong")
+	}
+	if len(c.Notes) != 1 || !strings.Contains(c.Notes[0], "pseudo-compact") {
+		t.Errorf("notes are %q, want the pseudo-compact line", c.Notes)
+	}
+}
+
+// TestAVolumeWithNoIndexPassesTheIndexCheck is four of the forty four printings
+// the library builds: two of the three volumes of the historical notes and two
+// French volumes whose printing binds no index at all. They have to come back a
+// pass with nothing compared rather than a pass for a check that did not run,
+// which is what the detail says.
+func TestAVolumeWithNoIndexPassesTheIndexCheck(t *testing.T) {
+	a := &Audit{}
+	a.indexed(&Volume{Meta: corpus.Book{ID: "hist", Chapters: []string{"I"}}})
+
+	if len(a.Checks) != 1 || !a.Checks[0].OK {
+		t.Fatalf("a volume with no index did not pass: %+v", a.Checks)
+	}
+	if a.Checks[0].Detail != "0 references, 0 wrong" {
+		t.Errorf("detail is %q, want %q", a.Checks[0].Detail, "0 references, 0 wrong")
 	}
 }
