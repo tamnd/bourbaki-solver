@@ -192,3 +192,47 @@ func TestAChapterThePrintingHasIsNotMadeNominal(t *testing.T) {
 		t.Error("chapter I of Algebre came back nominal")
 	}
 }
+
+// A page the rebuild could not resolve. hist § 19 is printed on 203, the page
+// map steps from pdf 204 (printed 202) to pdf 205 (printed 204), and 203 is in
+// the gap, so the rebuild comes back with nothing where the manifest had 205.
+func TestAPageTheRebuildCouldNotResolveKeepsTheOneTheManifestHad(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "1", Page: 1, PDFPage: 9,
+		Sections: []corpus.Section{{Number: 19, Page: 203, PDFPage: 205,
+			Subsections: []corpus.Subsection{{Number: 1, Page: 203, PDFPage: 205}}}}}}
+	fresh := []corpus.Chapter{{Numeral: "1", Page: 1, PDFPage: 9,
+		Sections: []corpus.Section{{Number: 19, Page: 203, PDFPage: 0,
+			Subsections: []corpus.Subsection{{Number: 1, Page: 203, PDFPage: 0}}}}}}
+
+	out, kept := KeepTitles(old, fresh)
+	if got := out[0].Sections[0].PDFPage; got != 205 {
+		t.Errorf("§ 19 is on pdf page %d, want the 205 the manifest had", got)
+	}
+	if got := out[0].Sections[0].Subsections[0].PDFPage; got != 205 {
+		t.Errorf("§ 19 no. 1 is on pdf page %d, want the 205 the manifest had", got)
+	}
+	// Only titles are reported. A page that was held on to is not a reading
+	// somebody made and then had undone, it is a reading nobody got.
+	if len(kept) != 0 {
+		t.Errorf("reported %v, want nothing", kept)
+	}
+}
+
+// The other half of the rule, and the half the file was written for: a page the
+// rebuild did resolve is taken however far it is from the one before it, since
+// that is the page map or an erratum doing its job.
+func TestAPageTheRebuildDidResolveReplacesTheOneTheManifestHad(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "I", Page: 1, PDFPage: 9,
+		Sections: []corpus.Section{{Number: 1, Page: 3, PDFPage: 11}}}}
+	fresh := []corpus.Chapter{{Numeral: "I", Page: 1, PDFPage: 13,
+		Sections: []corpus.Section{{Number: 1, Page: 5, PDFPage: 17}}}}
+
+	out, _ := KeepTitles(old, fresh)
+	if out[0].PDFPage != 13 || out[0].Page != 1 {
+		t.Errorf("chapter I is on page %d, pdf %d, want 1 and the new 13",
+			out[0].Page, out[0].PDFPage)
+	}
+	if s := out[0].Sections[0]; s.Page != 5 || s.PDFPage != 17 {
+		t.Errorf("§ 1 is on page %d, pdf %d, want the new 5 and 17", s.Page, s.PDFPage)
+	}
+}
