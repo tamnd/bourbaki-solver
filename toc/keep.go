@@ -39,6 +39,16 @@ import (
 // survives intact. Only when the map cannot resolve the printed page does the
 // number the manifest had stand, and that is the other half of this.
 //
+// The historical note and the exercise run of a chapter, and the exercise run
+// of a §, are kept on the same terms. They are locators rather than numbers, so
+// the reading that fails comes back nil rather than zero, and nil is read the
+// same way: chapter V of evt-i-v opens its note on pdf 338, the page carries
+// the running head HISTORICAL NOTE and a manual flag saying the opening was
+// filed by hand because the reading had put the title through as prose, and a
+// whole-shelf rebuild dropped the locator without a word. A locator the
+// manifest has and the rebuild does not is kept and reported; one the rebuild
+// found is taken, with its printed page held to the rule above.
+//
 // hist § 19 is that other half. It is printed on page 203, the page map runs
 // pdf 204 to printed 202 and pdf 205 to printed 204, and printed 203 is the
 // missing leaf in the step between them, so the rebuild resolves it to nothing
@@ -100,6 +110,8 @@ func KeepTitles(old, fresh []corpus.Chapter, pm *pagemap.Map) ([]corpus.Chapter,
 		chapter.Nominal = chapter.Nominal || was.Nominal
 		chapter.Title, kept = keep(where, was.Title, chapter.Title, kept)
 		chapter.Page, chapter.PDFPage, kept = keepPage(where, was.Page, was.PDFPage, chapter.Page, chapter.PDFPage, pm, kept)
+		chapter.Historical, kept = keepLocator(where, "historical note", was.Historical, chapter.Historical, pm, kept)
+		chapter.Exercises, kept = keepLocator(where, "exercises", was.Exercises, chapter.Exercises, pm, kept)
 		chapter.Sections, kept = keepSections(where, chapter.Numeral, pm, was.Sections, chapter.Sections, kept)
 		chapter.Subsections, kept = keepSubsections(where, chapter.Numeral, pm, was.Subsections, chapter.Subsections, kept)
 		out[i] = chapter
@@ -132,6 +144,7 @@ func keepSections(where, numeral string, pm *pagemap.Map, old, fresh []corpus.Se
 		}
 		section.Title, kept = keep(name, was.Title, section.Title, kept)
 		section.Page, section.PDFPage, kept = keepPage(name, was.Page, was.PDFPage, section.Page, section.PDFPage, pm, kept)
+		section.Exercises, kept = keepLocator(name, "exercises", was.Exercises, section.Exercises, pm, kept)
 		section.Subsections, kept = keepSubsections(name, numeral, pm, was.Subsections, section.Subsections, kept)
 		out[i] = section
 	}
@@ -201,4 +214,23 @@ func keepPage(where string, wasPage, wasPDF, page, pdf int, pm *pagemap.Map, kep
 	}
 	return wasPage, pdf, append(kept, Retitle{Where: where, What: "printed page",
 		Was: fmt.Sprint(wasPage), Now: fmt.Sprint(page)})
+}
+
+// keepLocator decides one optional locator. Absent is nil here rather than
+// zero, and it means what zero means: not a reading that came back different
+// but a reading that did not come back. See the file comment and evt-i-v.
+func keepLocator(where, what string, was, now *corpus.Locator, pm *pagemap.Map, kept []Retitle) (*corpus.Locator, []Retitle) {
+	switch {
+	case was == nil:
+		return now, kept
+	case now == nil:
+		// The manifest has one and the rebuild lost it. Its printed page is
+		// still a printed page, so it goes through the map like any other.
+		page, pdf, kept := keepPage(where, was.Page, was.PDFPage, 0, 0, pm, kept)
+		return &corpus.Locator{Page: page, PDFPage: pdf},
+			append(kept, Retitle{Where: where, What: what,
+				Was: fmt.Sprint(was.Page), Now: "nothing"})
+	}
+	page, pdf, kept := keepPage(where+" "+what, was.Page, was.PDFPage, now.Page, now.PDFPage, pm, kept)
+	return &corpus.Locator{Page: page, PDFPage: pdf}, kept
 }
