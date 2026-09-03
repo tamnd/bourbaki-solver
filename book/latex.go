@@ -1162,7 +1162,22 @@ var (
 	// reading "!Figure 2". And at all, because an image handed to the reference
 	// check is a reference to a file, and the check is about anchors, so every one
 	// of the 62 was counted as a cross reference pointing at nothing.
-	imageRE = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]*)\)`)
+	//
+	// The target may hold spaces, which is not what Markdown says and is what
+	// this corpus has. Ten of the links are that shape. Nine are a caption
+	// standing where the target goes, "![Eleven Coxeter graphs](Fig. 2)", and
+	// they are in the English and the French too, so they came out of the
+	// reading rather than out of a translation. The tenth translated the file
+	// name: the English points at coxeter_graphs_rank_4_coefficient_6.png and
+	// the Vietnamese at "coxeter_graphs_hạng_4_hệ số_6.png".
+	//
+	// Requiring no space meant none of the ten matched, and an unmatched image
+	// is not left alone: the exclamation mark and the brackets go through as
+	// prose and the underscores in the target reach TeX as subscripts. That is
+	// what stopped the Vietnamese Lie IV-VI, both editions of it, with "! Double
+	// subscript" on a file name. Since only the alt text is used, allowing a
+	// space in the part that is thrown away costs nothing and takes all ten.
+	imageRE = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]*)\)`)
 )
 
 // inline renders the inside of a paragraph or a heading.
