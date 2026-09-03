@@ -50,7 +50,9 @@ flags:
   -hosts    only these hosts, by name, comma separated
   -wait     wait this long for a host to come up
   -keep     leave the scratch directories on the hosts
-  -write    put the run in reports/eval.json, which the scorecard reads
+  -write    put the run in reports/eval.json, which the scorecard reads.
+            A run that was stopped before the whole set was answered is not
+            written, because the file is the estimate everything else quotes.
   -json     the outcomes as JSON
   -dry-run  say what would be judged and ask nothing
 `
@@ -182,23 +184,42 @@ func runSolveEval(args []string) error {
 		outcomes = append(outcomes, out)
 		score.Add(out)
 	}
+	run := benchmark.Run{Ran: time.Now().UTC().Format(time.RFC3339), Set: where,
+		Of: len(work), Outcomes: outcomes, Score: score}
 	if f.write {
-		run := benchmark.Run{Ran: time.Now().UTC().Format(time.RFC3339), Set: where,
-			Outcomes: outcomes, Score: score}
-		if err := run.Save(root); err != nil {
+		// A partial run does not go in. reports/eval.json is the current
+		// estimate the scorecard quotes and the milestone is judged on, and a
+		// fifth of the set is not an estimate of the set: a five hour run that
+		// was stopped left 4 outcomes where the committed result had 20, and a
+		// false reject rate of zero where the real one was 4 in 10.
+		//
+		// Refusing costs the caller the run, which is why the refusal says how
+		// to keep it. -json prints the same Run to stdout, partial and all, and
+		// it is the right place for a fragment: it goes where the caller put it
+		// rather than over the number everything else reads.
+		if run.Partial() {
+			fmt.Fprintf(os.Stderr,
+				"solve eval: stopped with %d of %d answered, so %s was left as it was; re-run, or use -json to keep this one\n",
+				len(outcomes), len(work), benchmark.RunPath(root))
+		} else if err := run.Save(root); err != nil {
 			return err
 		}
 	}
 	if f.asJSON {
 		e := json.NewEncoder(os.Stdout)
 		e.SetIndent("", "  ")
-		if err := e.Encode(benchmark.Run{Set: where, Outcomes: outcomes, Score: score,
-			Rates: evalRates(score)}); err != nil {
+		out := run
+		out.Ran, out.Rates = "", evalRates(score)
+		if err := e.Encode(out); err != nil {
 			return err
 		}
 		return ctx.Err()
 	}
 	printEval(outcomes, score)
+	if run.Partial() {
+		fmt.Printf("\npartial  %d of %d answered, so these are the rates of a part of the set\n",
+			len(outcomes), len(work))
+	}
 	printCounts(counts, "agreed", "differed")
 	return ctx.Err()
 }
