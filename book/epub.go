@@ -297,6 +297,11 @@ func (d *doc) anchorOrName() string {
 // exercises writes a whole chapter's exercises, gathered under one heading with
 // the §§ named inside it, which is where the printing puts them.
 func (d *doc) exercises(v *Volume, eng *katex.Renderer, where map[string]string, e *EPUB, b *strings.Builder) error {
+	// One list for the whole file. An exercise is rendered on its own, so a list
+	// per exercise would number every note 1 and give every one the same id, and
+	// a document with the same id in it forty times is a document where a mark
+	// takes the reader to the first note rather than to its own.
+	notes := &noteList{}
 	for _, s := range d.chapter.Sections {
 		if len(s.Exercises) == 0 {
 			continue
@@ -317,7 +322,7 @@ func (d *doc) exercises(v *Volume, eng *katex.Renderer, where map[string]string,
 			}
 			p := &pageRenderer{
 				file: x.Path, line: x.Head, lang: v.Lang,
-				eng: eng, where: where, doc: d.Name, epub: e,
+				eng: eng, where: where, doc: d.Name, epub: e, notes: notes,
 			}
 			body, err := p.render(StripTitle(x.Body))
 			if err != nil {
@@ -334,6 +339,7 @@ func (d *doc) exercises(v *Volume, eng *katex.Renderer, where map[string]string,
 			fmt.Fprintf(b, "<div class=\"exercise\" id=\"%s\">\n%s</div>\n", esc(id), lead(body, num))
 		}
 	}
+	b.WriteString(notes.flush())
 	return nil
 }
 
@@ -367,6 +373,19 @@ type pageRenderer struct {
 	doc      string
 	epub     *EPUB
 
+	// notes is the footnotes of the document this body is going into, which is
+	// not always this body: a chapter's exercises are rendered one at a time and
+	// their notes belong at the end of the one file that holds them all.
+	notes *noteList
+
+	// spans and tags are this body's mathematics, so that emit can render the
+	// argument of a text mode command as prose. Everything else is handed them
+	// as arguments; emit is reached through controls, which is inside inline,
+	// and threading them down that far would be four signatures changed to say
+	// what the renderer already knows.
+	spans []mathtex.Span
+	tags  map[int]string
+
 	sub  []subnav
 	math bool
 }
@@ -385,6 +404,18 @@ func (p *pageRenderer) render(body string) (string, error) {
 		return "", err
 	}
 	masked, tags := numbers(masked, spans)
+	masked = footnotes(masked)
+	p.spans, p.tags = spans, tags
+
+	// A note the page calls goes to the end of this document, because a reading
+	// system paginates for itself and there is no foot of a page to put one at.
+	// The list is the caller's when the caller supplied one, which is how a
+	// chapter's exercises, each rendered on its own, gather their notes into one
+	// run at the end of the file that holds them all rather than one run apiece.
+	own := p.notes == nil
+	if own {
+		p.notes = &noteList{}
+	}
 
 	var b strings.Builder
 	// state holds a statement head waiting for the paragraph it belongs to. The
@@ -434,6 +465,9 @@ func (p *pageRenderer) render(body string) (string, error) {
 		b.WriteString("<p>" + text + "</p>\n")
 	}
 	flushState()
+	if own {
+		b.WriteString(p.notes.flush())
+	}
 	return b.String(), nil
 }
 
@@ -725,7 +759,16 @@ func (p *pageRenderer) emit(c cmd, name string, args []string, suffix string) st
 	if m, ok := accent[name]; ok && len(args) == 1 {
 		return esc(args[0]) + m
 	}
-	inner := esc(args[0])
+	// A text mode argument is prose and is rendered as prose, which is what the
+	// LaTeX writer does with the same command and what this one only escaped.
+	// Escaping alone was enough while the only thing inside a \footnote was
+	// words. It stopped being enough when the Markdown notes started arriving
+	// here, because a note carries formulae like any other sentence and the
+	// masking put a placeholder where each one was: the placeholder is built out
+	// of NUL, so a note with mathematics in it wrote a NUL into the XHTML and the
+	// chapter would not parse. Chapter IV of Set Theory is the one that caught
+	// it, on the historical note.
+	inner := p.inline(args[0], p.spans, p.tags)
 	switch name {
 	case "emph", "textit":
 		return "<em>" + inner + "</em>"
@@ -733,11 +776,16 @@ func (p *pageRenderer) emit(c cmd, name string, args []string, suffix string) st
 		return "<strong>" + inner + "</strong>"
 	case "textsuperscript":
 		return "<sup>" + inner + "</sup>"
-	case "footnote", "footnotetext":
-		// A reading system paginates for itself, so there is no foot of a page
-		// to put a note at. It goes where the printing's own footnote marker is,
-		// set apart, which is what every EPUB of a mathematics book does.
-		return "<span class=\"footnote\">" + inner + "</span>"
+	case "footnote":
+		return p.notes.call(inner)
+	case "footnotetext":
+		// A \footnotetext is a note the reading found at the foot of a page
+		// without finding where it was called from, so there is no mark to set
+		// and none is invented. The note still goes to the end of the document
+		// with the rest, unnumbered, which says what the page says: this note
+		// belongs somewhere on these words.
+		p.notes.orphan(inner)
+		return ""
 	case "hspace":
 		return " "
 	}
@@ -1149,7 +1197,12 @@ div.display .eqno { float: left; }
 .tag { font-family: monospace; font-size: 0.7em; color: #777; margin-left: 0.4em; }
 .exnum { font-weight: bold; }
 div.exercise { margin: 0.6em 0; }
-.footnote { font-size: 0.85em; }
+.fnmark { font-size: 0.75em; vertical-align: super; line-height: 0; }
+.fnmark a { text-decoration: none; }
+aside.notes { margin-top: 2em; font-size: 0.85em; }
+.notesrule { width: 30%; margin: 0 0 0.6em 0; border: 0; border-top: 1px solid #999; }
+.fn { margin: 0.35em 0; text-indent: 0; }
+.fnback { text-decoration: none; font-weight: bold; margin-right: 0.4em; }
 .figure { display: block; text-align: center; font-style: italic; font-size: 0.9em; border: 1px solid #999; padding: 0.6em; margin: 0.9em 0; text-indent: 0; }
 .rawtex { font-family: monospace; background: #fee; }
 .cover { margin: 0; padding: 0; text-align: center; }
