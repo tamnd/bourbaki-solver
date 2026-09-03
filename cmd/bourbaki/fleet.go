@@ -30,6 +30,21 @@ flags:
   -only NAMES    comma separated route names, in place of every enabled route
   -state PATH    state file (default $BOURBAKI_FLEET_STATE, else ~/.config/bourbaki/fleet.json)
 
+The taking column of accounts is the only one not read off the host. It is
+answered out of recently asked, kept on this machine by the runs that did the
+asking (default $BOURBAKI_FLEET_ASKS, else ~/.config/bourbaki/asks.json), and
+it is there because every counted column can be right about a host that will
+not take a prompt. One box read 21 verified with 10 ready and idle while 720 of
+its asks in a week had ended "ChatGPT never accepted the prompt": the session
+loads, the profile counts as ready, and the composer never takes it, so each
+ask burns the whole deadline. Three extra translate lanes put against those ten
+ready profiles wrote nothing at all. Where the record says that, the last
+column says it instead of saying the host is free now, and the answer is to
+sign the profiles in again rather than to point more lanes at them.
+
+A dash in that column is a host nothing has asked lately, which is not the same
+as a host that failed everything, and is what it reads before any run has gone.
+
 Every chatgpt-tool listener binds 127.0.0.1 on its own host, so nothing here
 works without ssh. The tunnels are what the rest of the tool talks to.
 
@@ -224,6 +239,7 @@ func runFleetAccounts(args []string) error {
 	flags.bind(fs)
 	timeout := fs.Duration("timeout", 60*time.Second, "per host timeout")
 	sleep := fs.Bool("sleep", false, "print the seconds to wait for the first slot back, and nothing else")
+	within := fs.Duration("within", fleet.LedgerWindow, "how far back to read the record of asks already made")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -243,10 +259,27 @@ func runFleetAccounts(args []string) error {
 		fmt.Println(int(fleet.Wait(boards).Seconds()))
 		return nil
 	}
+	// What the hosts hold, and then what asking them has lately come to. The
+	// record is read here and not inside Board because it is written on this
+	// machine by the runs that did the asking, and costs no ssh round trip.
+	// Losing it is not worth failing the table for: a missing or unreadable
+	// file means the taking column says nothing, which is what it says before
+	// anything has run anyway.
+	if ledger, err := fleet.LoadLedger(fleet.LedgerPath()); err != nil {
+		fmt.Fprintf(os.Stderr, "the record of asks already made could not be read, so the taking column is empty: %v\n", err)
+	} else {
+		boards = ledger.Apply(boards, *within)
+	}
 	fmt.Print(fleet.AccountsTable(boards))
 	if wait := fleet.Wait(boards); wait > 0 {
 		fmt.Fprintf(os.Stderr, "every signed in profile is sitting out a cooldown, the first is back in %s\n",
 			wait.Round(time.Minute))
+	}
+	for _, board := range boards {
+		if board.NotTaking() {
+			fmt.Fprintf(os.Stderr, "%s has %d ready profiles and %d of its last %d asks never reached a composer, so more lanes at it will write nothing: it wants signing in again\n",
+				board.Host, board.Ready, board.NoComposer, board.Asks)
+		}
 	}
 	return nil
 }

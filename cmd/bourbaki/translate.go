@@ -406,9 +406,19 @@ func runTranslate(args []string) error {
 	// file was being translated was started again for the next file and the one
 	// after; held out here, it stays out.
 	brk := newBreaker(breakAfter, breakHold)
+	// And one record of what the asks came to, written out when the run ends.
+	// It is separate from the breaker on purpose: the breaker protects this run
+	// and forgets, and this is what fleet accounts reads to say that a host
+	// whose profiles all look ready has not taken a prompt in two hours.
+	led := fleet.NewLedger()
+	defer func() {
+		if err := led.Append(fleet.LedgerPath()); err != nil {
+			logf("the record of asks could not be written, so fleet accounts will not see this run: %v", err)
+		}
+	}()
 	var written, refused, asks int
 	for _, job := range jobs {
-		body, model, asked, problems := translateFile(ctx, root, q, hosts, brk, g, *from, *lang, tree, promptHash, job, *force, *redoSmall, *keep, *rawText, *deadline, logf)
+		body, model, asked, problems := translateFile(ctx, root, q, hosts, brk, led, g, *from, *lang, tree, promptHash, job, *force, *redoSmall, *keep, *rawText, *deadline, logf)
 		asks += asked
 		if len(problems) > 0 {
 			refused++
@@ -847,7 +857,7 @@ func freshOnly(hosts []ocr.Host) map[string]func(queue.Job) bool {
 // The third return is how many times this file was asked for, which the run
 // adds up. It counts leases and not answers, because the whole point of the
 // number is the asks that were not answers.
-func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, brk *breaker, g *glossary.Glossary, from, lang, tree, promptHash string, j job, force, redoSmall, keep, raw bool, deadline time.Duration, logf func(string, ...any)) (string, string, int, []translate.Problem) {
+func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr.Host, brk *breaker, led *fleet.Ledger, g *glossary.Glossary, from, lang, tree, promptHash string, j job, force, redoSmall, keep, raw bool, deadline time.Duration, logf func(string, ...any)) (string, string, int, []translate.Problem) {
 	have, queued, stuck, err := plan(q, root, lang, promptHash, j, force, redoSmall)
 	if err != nil {
 		return "", "", 0, []translate.Problem{{Rule: "queue", Msg: err.Error()}}
@@ -974,6 +984,12 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 							logf("%s: refused %d times running, so it is out of this run for %s",
 								host.Name, brk.After, brk.Hold)
 						}
+						// And written down for the runs after this one, which
+						// is what fleet accounts reads back. The breaker is
+						// this run only and by design; the record is how a
+						// board printed tomorrow morning can say that ten
+						// ready profiles on this host wrote nothing.
+						led.Note(host.Name, fleet.ClassifyText(bad[0].Msg))
 						return
 					}
 					// Past that point the question was read, and whether the
@@ -983,6 +999,7 @@ func translateFile(ctx context.Context, root string, q *queue.Queue, hosts []ocr
 					// far end, which would otherwise clear a streak that is real.
 					if !localFault(bad) {
 						brk.Answered(host.Name)
+						led.Note(host.Name, fleet.Answered)
 					}
 					if len(bad) > 0 {
 						state, err := q.Fail(item, bad[0].String())
