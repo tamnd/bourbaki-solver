@@ -140,7 +140,18 @@ type Runner struct {
 	// asking for pages 22 to 71 queued those pages and then read whatever the
 	// queue held, which on a volume already filled once meant reading page 1.
 	First, Last int
-	Logf        func(string, ...any)
+	// Only, when set, is the exact pages this run will lease, whatever else the
+	// queue holds between First and Last.
+	//
+	// A range is not enough for a windowed run. Its window is the next few pages
+	// the queue is still waiting on and those are not contiguous: on hist the
+	// 130 pages that were left behind ran from 1 to 299 with everything else
+	// between them already read. Only those pages have an image on disk, because
+	// only those were rendered, so a run bounded by 1 and 299 would lease a page
+	// whose image was swept two windows ago and send a batch at a file that is
+	// not there.
+	Only map[int]bool
+	Logf func(string, ...any)
 	Sleep       func(ctx context.Context, d time.Duration) error
 	Now         func() time.Time
 
@@ -185,12 +196,15 @@ func (r *Runner) takes(host, target string) bool {
 // the leasing loop already has a place to put one of those, and it fails the job
 // with the reason on it. Silently leaving it pending would hide it for ever.
 func (r *Runner) inRange(target string) bool {
-	if r.First == 0 && r.Last == 0 {
+	if r.First == 0 && r.Last == 0 && r.Only == nil {
 		return true
 	}
 	page, err := pageOf(target)
 	if err != nil {
 		return true
+	}
+	if r.Only != nil && !r.Only[page] {
+		return false
 	}
 	return (r.First == 0 || page >= r.First) && (r.Last == 0 || page <= r.Last)
 }
