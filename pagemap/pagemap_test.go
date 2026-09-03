@@ -694,6 +694,63 @@ func TestBuildRejectsAnEmptyDocument(t *testing.T) {
 	}
 }
 
+// One anchor carried across a volume contradicts nothing, so every other check
+// passes it and it gets written. top-v-x is 372 pages with the foot number read
+// on one of them, and it read as a mapped volume on the strength of that.
+//
+// The map here is consistent throughout on purpose: the point is that a map can
+// be perfectly self-consistent and still not be a fit.
+func TestValidateRefusesAMapNoReadingSupports(t *testing.T) {
+	entries := make([]Entry, 100)
+	for i := range entries {
+		entries[i] = Entry{PDFPage: i + 1, Chapter: "V", Page: i + 1, Confidence: Interpolated}
+	}
+	entries[0].Confidence = FromFoot
+	m := &Map{Book: "mini", Pagination: Continuous, PDFPages: 100, Entries: entries}
+	m.Chapters = chapterSpans(m.Entries, []string{"V"})
+
+	probs := m.Validate()
+	var read, run bool
+	for _, p := range probs {
+		if strings.Contains(p.Detail, "one reading extrapolated and not a fit") {
+			read = true
+		}
+		if strings.Contains(p.Detail, "a single stretch is held to") {
+			run = true
+		}
+	}
+	if !read || !run {
+		t.Errorf("1 anchor over 100 pages passed: read=%v run=%v, problems = %v", read, run, probs)
+	}
+
+	// Read enough of it and the same map is a fit. Every third page carries a
+	// number, which is 33 per cent and no run longer than two.
+	for i := range entries {
+		if i%3 == 0 {
+			entries[i].Confidence = FromFoot
+		} else {
+			entries[i].Confidence = Interpolated
+		}
+	}
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("a map read on every third page was refused: %v", probs)
+	}
+}
+
+// A share over a handful of pages is not a measurement, and the checks above
+// have fixtures of three and four pages that are not meant to be volumes.
+func TestAMapTooSmallToMeasureIsNotJudgedOnItsShare(t *testing.T) {
+	m := &Map{Book: "mini", Pagination: Continuous, PDFPages: 3, Entries: []Entry{
+		{PDFPage: 1, Chapter: "IV", Page: 1, Confidence: FromHead},
+		{PDFPage: 2, Chapter: "IV", Page: 2, Confidence: Interpolated},
+		{PDFPage: 3, Chapter: "IV", Page: 3, Confidence: Interpolated},
+	}}
+	m.Chapters = chapterSpans(m.Entries, []string{"IV"})
+	if probs := m.Validate(); len(probs) != 0 {
+		t.Errorf("a three page fixture was judged on its share: %v", probs)
+	}
+}
+
 func TestValidateCatchesAnUnrecordedJump(t *testing.T) {
 	m := &Map{Book: "mini", Pagination: PerChapter, PDFPages: 3, Entries: []Entry{
 		{PDFPage: 1, Chapter: "IV", Page: 1, Confidence: FromHead},
