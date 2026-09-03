@@ -25,6 +25,7 @@ import (
 // flag is for, and it is why the workflow builds into an empty directory.
 func (s *Site) Build(out string) ([]string, error) {
 	var wrote []string
+	s.Unreadable = nil // what a build found, not what every build so far found
 	write := func(rel, body string) error {
 		p := filepath.Join(out, filepath.FromSlash(rel))
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -73,61 +74,76 @@ func (s *Site) Build(out string) ([]string, error) {
 		return nil, err
 	}
 
-	for _, sec := range s.Sections {
-		body, err := s.section(sec)
+	// keep records a page whose body the build could not set and says to carry
+	// on to the next one. Everything below it renders a corpus body and can
+	// meet a file the corpus has broken, and stopping on the first of those is
+	// what made a ten minute check into one run per fault. A failure to write
+	// is a different thing and still returns: the disk being full is not a
+	// finding about the corpus.
+	//
+	// The error is not wrapped with the path. The renderer names the file and
+	// the line itself, since it is the only thing here that knows the line, and
+	// a wrap would print the path twice on the one message anybody reads.
+	keep := func(rel string, err error) bool {
 		if err != nil {
-			// Not wrapped with the path. The renderer names the file and the
-			// line itself, since it is the only thing here that knows the line,
-			// and a wrap would print the path twice on the one message anybody
-			// ever sees from this.
-			return nil, err
+			s.Unreadable = append(s.Unreadable, Unreadable{Rel: rel, Err: err})
+			return false
 		}
+		return true
+	}
+
+	for _, sec := range s.Sections {
 		rel := filepath.ToSlash(filepath.Join(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug, "index.html"))
+		body, err := s.section(sec)
+		if !keep(rel, err) {
+			continue
+		}
 		if err := write(rel, body); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, ch := range s.chapters() {
-		body, err := s.chapter(ch)
-		if err != nil {
-			return nil, err
-		}
 		rel := filepath.ToSlash(filepath.Join(ch.Lang, ch.Book, ch.Chapter, "index.html"))
+		body, err := s.chapter(ch)
+		if !keep(rel, err) {
+			continue
+		}
 		if err := write(rel, body); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, set := range s.exerciseSets() {
-		body, err := s.exerciseList(set)
-		if err != nil {
-			return nil, err
-		}
 		rel := filepath.ToSlash(filepath.Join(set.Lang, set.Book, set.Chapter, set.Dir, "ex", "index.html"))
+		body, err := s.exerciseList(set)
+		if !keep(rel, err) {
+			continue
+		}
 		if err := write(rel, body); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, ex := range s.Exercises {
-		body, err := s.exercisePage(ex, "")
-		if err != nil {
-			return nil, err
-		}
 		rel := filepath.ToSlash(filepath.Join(ex.Lang, ex.Meta.Book, ex.Meta.Chapter, ex.Dir,
 			"ex", strconv.Itoa(ex.Meta.Exercise), "index.html"))
+		body, err := s.exercisePage(ex, "")
+		if !keep(rel, err) {
+			continue
+		}
 		if err := write(rel, body); err != nil {
 			return nil, err
 		}
 	}
 
 	for _, st := range s.Statements {
+		rel := filepath.ToSlash(filepath.Join("tag", st.Tag, "index.html"))
 		body, err := s.tag(st)
-		if err != nil {
-			return nil, fmt.Errorf("tag %s: %w", st.Tag, err)
+		if !keep(rel, err) {
+			continue
 		}
-		if err := write(filepath.ToSlash(filepath.Join("tag", st.Tag, "index.html")), body); err != nil {
+		if err := write(rel, body); err != nil {
 			return nil, err
 		}
 	}
@@ -142,11 +158,12 @@ func (s *Site) Build(out string) ([]string, error) {
 		if ex.Meta.Tag == "" || s.byExTag[ex.Meta.Tag] != ex {
 			continue
 		}
+		rel := filepath.ToSlash(filepath.Join("tag", ex.Meta.Tag, "index.html"))
 		body, err := s.exercisePage(ex, s.ExerciseURL(ex))
-		if err != nil {
-			return nil, err
+		if !keep(rel, err) {
+			continue
 		}
-		if err := write(filepath.ToSlash(filepath.Join("tag", ex.Meta.Tag, "index.html")), body); err != nil {
+		if err := write(rel, body); err != nil {
 			return nil, err
 		}
 	}
@@ -159,11 +176,12 @@ func (s *Site) Build(out string) ([]string, error) {
 	}
 	at := s.sitewide()
 	for _, r := range rs {
+		rel := path.Join("reports", r.Name, "index.html")
 		body, err := s.reportPage(r, at)
-		if err != nil {
-			return nil, err
+		if !keep(rel, err) {
+			continue
 		}
-		if err := write(path.Join("reports", r.Name, "index.html"), body); err != nil {
+		if err := write(rel, body); err != nil {
 			return nil, err
 		}
 	}

@@ -70,7 +70,31 @@ type Site struct {
 	AllowBrokenMath bool
 	// Broken is what that produced, in the order it was found.
 	Broken []Refusal
+	// Unreadable is every page whose body the build could not render, in the
+	// order it reached them. It is a list rather than the first error because a
+	// build over twenty thousand files takes ten minutes, and returning on the
+	// first fault turns one check into one run per fault: two unclosed math
+	// spans in Algebre IV to VII cost two full passes over 20499 pages to learn
+	// two line numbers, and the two faults were the same fault twice, which a
+	// list would have said at a glance.
+	//
+	// The build carries on past one and writes every page it can, so a check
+	// that fails still leaves a site to look at. The caller is what turns a
+	// non-empty list into a non-zero exit.
+	Unreadable []Unreadable
 }
+
+// An Unreadable is one page the build could not set, and why.
+type Unreadable struct {
+	// Rel is where the page would have gone on the site. The error carries the
+	// corpus file and the line by itself, since the renderer is the only thing
+	// that knows the line, so this is the other half: which page of the site is
+	// missing because of it.
+	Rel string
+	Err error
+}
+
+func (u Unreadable) Error() string { return u.Err.Error() }
 
 // Section is one file of content/<lang>/.
 type Section struct {
