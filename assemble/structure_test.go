@@ -1562,3 +1562,73 @@ func TestANoIsReadWhenTheFascicleNumbersItByItsSection(t *testing.T) {
 		t.Errorf("### 3. 2-groupes gives %v", m)
 	}
 }
+
+// The third place the cut has to be made, and the one that needed a guard. A
+// member whose last paragraph runs over the foot of the page arrives as a block
+// of prose with the next member under it, so the block opens on neither member:
+// the cut before statementAt wants the block to open on the member the run is up
+// to, and the cut after it is given a body this block has no statement head to
+// produce. Example 2 of no. 1 of § 4 of chapter I of Functions of a Real Variable
+// is the case, where the display for $x^2$ ends the block and "3) The function
+// $|x|$ is convex" opens the line under it.
+func TestARunSplitsAMemberOffTheBlockThatCarriesTheOneBeforeIt(t *testing.T) {
+	in := blocks(
+		"### 1. Definition of a convex function",
+		"*Examples*",
+		"1) Every affine linear function is convex.",
+		"2) The function $x^2$ is convex on $\\mathbf{R}$.",
+		"for $0 \\leq \\lambda \\leq 1$.\n3) The function $|x|$ is convex on $\\mathbf{R}$.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "fvr", Chapter: "I", Section: 4}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"fvr-i-s4-n1-exa-1",
+		"fvr-i-s4-n1-exa-2",
+		"fvr-i-s4-n1-exa-3",
+	})
+	if !strings.HasPrefix(got[2].Body, "The function $|x|$") {
+		t.Errorf("the third member was not read: %q", got[2].Body)
+	}
+}
+
+// The guard on that cut. A run stays open across the statements printed between
+// its members, so without it every enumeration in every proof after a Remarque 1
+// is read as Remarque 2. Page 109 of the French Lie II and III is where it cost
+// something: the proof of a proposition enumerates the steps 1) 2) 3), the run
+// opened by Remarque 1 was still counting, and the volume came out with two
+// statements labelled lie-iii-s1-n8-rem-2 and would not assemble at all.
+func TestAnEnumerationInAProofIsNotTheNextMemberOfAnOpenRun(t *testing.T) {
+	in := blocks(
+		"### 8. Fibrés vectoriels",
+		"**Remarque.** — 1) On peut remplacer les lois à gauche par les lois à droite.",
+		"PROPOSITION 4. — *Soit $E$ un fibré vectoriel de base $X$.*",
+		"Pour $x \\in V$, $\\varphi_x$ s’obtient en composant les applications suivantes :\n2) l’application $f$ de $E_0$ dans $E_0$;",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "lie", Chapter: "III", Section: 1}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"lie-iii-s1-n8-rem-1", "lie-iii-s1-prop-4"})
+}
+
+// Ten of the thirteen members that had gone into the body of the one before them
+// were indented rather than run together, because the reading indents a member
+// the printing set as a hanging paragraph. Four spaces were enough to hide the
+// marker from patterns anchored at the head of the line. Exemple 1 of no. 1 of
+// § 9 of chapter I of Algebra is the case.
+func TestAnIndentedMemberIsStillAMemberOfTheRun(t *testing.T) {
+	in := blocks(
+		"### 1. Corps",
+		"Exemples. — 1) Nous définirons au n° 4 le corps des nombres rationnels.\n    2) L’anneau $\\mathbf{Z}/2\\mathbf{Z}$ est évidemment un corps.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "I", Section: 9}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"alg-i-s9-n1-exa-1", "alg-i-s9-n1-exa-2"})
+	if !strings.HasPrefix(got[1].Body, "L’anneau") {
+		t.Errorf("the indent stayed on the member: %q", got[1].Body)
+	}
+}

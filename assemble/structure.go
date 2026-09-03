@@ -299,6 +299,7 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 	var parent corpus.Ref           // the last statement a Corollary could be numbered under
 	var run corpus.Ref              // the run of remarks or examples now open, if any
 	next := 0                       // the number the next member of that run would carry
+	atMember := false               // the last statement read was the member before next
 	passed := map[corpus.Ref]bool{} // the numbered statements printed so far
 	occ := map[corpus.Ref]int{}
 	high := map[corpus.Ref]int{}          // the highest number a run of the kind has reached in this no.
@@ -313,14 +314,14 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 		b := queue[i]
 		if m := subsecRE.FindStringSubmatch(b.text); m != nil {
 			no, _ = strconv.Atoi(m[1])
-			next = 0
+			next, atMember = 0, false
 			if err := f(b, corpus.Ref{}, "", "", false); err != nil {
 				return err
 			}
 			continue
 		}
 		if strings.HasPrefix(b.text, "#") {
-			next = 0
+			next, atMember = 0, false
 			if err := f(b, corpus.Ref{}, "", "", false); err != nil {
 				return err
 			}
@@ -368,9 +369,9 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 			seen[key]++
 			earlier := seen[key] < runs[key]
 			if earlier {
-				next = 0 // an earlier run of the kind, so its members are not numbered
+				next, atMember = 0, false // an earlier run of the kind, so its members are not numbered
 			} else if !carries {
-				run, next = key, 1
+				run, next, atMember = key, 1, true
 			}
 			if earlier || !carries {
 				if err := f(b, corpus.Ref{}, "", "", false); err != nil {
@@ -390,18 +391,56 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 				t := b
 				t.text, t.label = rest, ""
 				queue = slices.Insert(queue, i+1, t)
+			} else if head, rest, ok := cutNextMember(b.text, next); ok && atMember {
+				// The same cut once more, for the block that carries the next
+				// member without opening on one. A member whose last paragraph
+				// runs over the foot of the page arrives as a block of prose
+				// with the next member under it, so the block opens on neither
+				// member and the two cuts above it both decline: cutRunMember
+				// wants the block to open on the member it is up to, and the
+				// cut after statementAt is given a body that this block has no
+				// statement head to produce.
+				//
+				// Thirteen places in the corpus are this shape. Example 2 of
+				// no. 1 of § 4 of chapter I of Functions of a Real Variable is
+				// the one to read: the display for $x^2$ ends the page block,
+				// and "3) The function $|x|$ is convex" opens the next line
+				// under it, so Example 3 was set as the last sentence of
+				// Example 2 and the § printed two examples where the volume
+				// prints three. Cutting the thirteen recovered 26 statements,
+				// because a member cut out of the one before it makes the
+				// member after it visible in its turn.
+				//
+				// atMember is what keeps this off every other block. A run
+				// stays open across the statements printed between its
+				// members, deliberately, so next is still counting a long way
+				// past the last member; without the guard the steps of every
+				// proof after a Remarque 1 are read as Remarque 2. Page 109 of
+				// the French Lie II and III is where that showed: the proof of
+				// a proposition enumerates 1) 2) 3), and the chapter came out
+				// with two statements labelled lie-iii-s1-n8-rem-2 and would
+				// not assemble. The guard says the last statement read was the
+				// member before this one, which is what "the member runs over
+				// the foot of the page" means.
+				b.text = head
+				t := b
+				t.text, t.label = rest, ""
+				queue = slices.Insert(queue, i+1, t)
 			}
 		}
 		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, high, off, taken, pr)
 		if err != nil {
 			return err
 		}
+		if ok && r.Number == 0 {
+			atMember = false
+		}
 		if ok && r.Number > 0 {
 			switch r.Kind.Scope() {
 			case corpus.ScopeSection:
-				parent, passed[r] = r, true
+				parent, passed[r], atMember = r, true, false
 			case corpus.ScopeSubsec:
-				run, next = r, r.Number+1
+				run, next, atMember = r, r.Number+1, true
 				// The same cut as above and it has to be made here as well,
 				// because the block above it cannot make it. A run whose head
 				// carries its first member on the line, "Remarques. — 1) ...",
@@ -1049,12 +1088,26 @@ func cutRunMember(text string, now int) (head, rest string, ok bool) {
 	}
 	lines := strings.Split(text, "\n")
 	for i := 1; i < len(lines); i++ {
-		if num, _, _, ok := runItem(lines[i]); ok && num == strconv.Itoa(now+1) {
+		if num, _, _, ok := runItem(indented(lines[i])); ok && num == strconv.Itoa(now+1) {
+			lines[i] = indented(lines[i])
 			return strings.Join(lines[:i], "\n"), strings.Join(lines[i:], "\n"), true
 		}
 	}
 	return "", "", false
 }
+
+// indented takes the leading spaces off a line before the marker on it is read.
+//
+// The readings indent a member that the printing set as a hanging paragraph,
+// and ten of the thirteen places where a member had gone into the body of the
+// one before it were indented rather than run together: "    2) L'anneau
+// $\mathbf{Z}/2\mathbf{Z}$ est evidemment un corps." under Exemple 1 of no. 1
+// of § 9 of chapter I of Algebra. The marker patterns are anchored at the head
+// of the line, so four spaces were enough to hide the member. They stay
+// anchored, because a number in the middle of a sentence is a reference; this
+// only says that the head of the line is where the text begins and not where
+// the whitespace does.
+func indented(line string) string { return strings.TrimLeft(line, " \t") }
 
 // cutNextMember cuts the body of one member of a run at the line where the next
 // member begins, and says false where the body is only its own member.
@@ -1072,7 +1125,12 @@ func cutRunMember(text string, now int) (head, rest string, ok bool) {
 func cutNextMember(body string, want int) (head, rest string, ok bool) {
 	lines := strings.Split(body, "\n")
 	for i := 1; i < len(lines); i++ {
-		if num, _, _, is := runItem(lines[i]); is && num == strconv.Itoa(want) {
+		if num, _, _, is := runItem(indented(lines[i])); is && num == strconv.Itoa(want) {
+			// The indent goes with the cut. What is handed back is a block that
+			// opens on a member, and everything that reads a block reads the
+			// marker at the head of the line, so a member left indented is cut
+			// out of the one before it and then not recognised as a member.
+			lines[i] = indented(lines[i])
 			return strings.TrimRight(strings.Join(lines[:i], "\n"), "\n"), strings.Join(lines[i:], "\n"), true
 		}
 	}
