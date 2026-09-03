@@ -397,6 +397,74 @@ func pageText(ctx context.Context, root string, b corpus.Book) ([]string, error)
 	return volumeText(ctx, root, &b)
 }
 
+// bestPageText is the best reading of every page of a volume: the page file
+// where the volume has been read, and the PDF's own text layer where it has
+// not.
+//
+// It exists because pageText answers a different question than the one a check
+// on the printed page wants answered. pageText goes to the PDF for any volume
+// whose manifest says it has a text layer, and for a scanned volume that layer
+// is whatever the scanner left behind twenty years ago, which is not what read
+// these pages. The page files under pages/ were read afterwards off the images
+// by this project, and they are better by a wide margin.
+//
+// How wide is measurable. toc verify reported 140 headings as not printed on
+// the page the contents names, and 108 of those were the start of a run of
+// exercises. Every one of the 21 volumes holding them has text_layer: ocr, and
+// not one of the 6 native or 4 unlayered volumes has a single one. Page 23 of
+// top-v-x-fr is the shape of all of them: the run mark the check looks for is
+// a line reading "§ 2", pages/top-v-x-fr/0023.md carries it, and the scanner's
+// layer has a blank line where it was. The § is the character that layer loses
+// most, and it is the one character the check is built on.
+//
+// The fall back is per page and not per volume, because a volume half read is
+// the normal state of most of the shelf and the half that has been read should
+// still be checked against the good reading.
+//
+// What it does not do is touch a native layer, and that line was measured too.
+// A native layer is not a reading of anything: it is the publisher's own text,
+// carried in the file since it was typeset, and it is exact in a way no OCR of
+// a rendered image can be. Preferring the page files everywhere cost the three
+// born-digital volumes 201 of 201 down to 176, 98 of 98 down to 93 and 165 of
+// 165 down to 160. So the rule is only that this project's OCR beats a
+// scanner's, which is the claim the evidence actually supports.
+func bestPageText(ctx context.Context, root string, b corpus.Book) ([]string, error) {
+	if b.TextLayer == "none" {
+		return readPageFiles(root, b)
+	}
+	layer, err := volumeText(ctx, root, &b)
+	if err != nil {
+		return nil, err
+	}
+	if b.TextLayer != "ocr" {
+		return layer, nil
+	}
+	read := 0
+	for page := 1; page <= b.Pages && page <= len(layer); page++ {
+		file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, b.ID, page))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		// An empty body is a page that was read and found to hold nothing, a
+		// plate or a blank verso. Taking it would replace whatever the layer has
+		// with nothing, and a blank page is the one case where the two readings
+		// cannot disagree about a heading anyway.
+		if strings.TrimSpace(file.Body) == "" {
+			continue
+		}
+		layer[page-1] = file.Body
+		read++
+	}
+	if read < b.Pages {
+		fmt.Printf("%s: %d of %d pages have been read, the rest are checked against the PDF's own text layer\n",
+			b.ID, read, b.Pages)
+	}
+	return layer, nil
+}
+
 // pageFolios is the folio every page file of a volume records, in page order,
 // with a zero where the page has not been read or does not say.
 //
