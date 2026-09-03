@@ -1415,7 +1415,47 @@ func Build(pages []string, opt Options) (*Map, error) {
 			m.Steps[i].AtPDFPage = order[s.AtPDFPage-1]
 		}
 	}
-	m.Chapters = spansFor(m.Entries, opt.Chapters)
+	// A volume that prints no chapter numeral anywhere has none for the fit to
+	// find, and its rows come out unnamed however many the manifest declares.
+	// Elements d'histoire des mathematiques and the French Varietes
+	// differentielles are the two: both are continuously paginated, both
+	// declare the single chapter "1", and neither prints it, so chapterSpans
+	// looks for rows saying "1", finds none, and the chapter column comes out
+	// empty on all 374 and all 190 rows. The corpus is keyed on that column --
+	// content/fr/hist/1/ is where the sections live -- so an empty one is a
+	// loss and not a rename, and a build with no -book would quietly take it
+	// away from the two committed maps that have been pinned by hand.
+	//
+	// Where the declaration names one chapter and no row could be fitted to
+	// it, the body is named the way a volume declaring no chapters at all is
+	// named: one run per fascicule, numbered from one in the order they are
+	// bound. For a volume of one run that gives the declaration back, and for
+	// the Varietes, which is two fascicules bound together and prints page 50
+	// twice, it keeps the span each that stops a printed page being ambiguous.
+	chapters := opt.Chapters
+	if opt.Pagination == Continuous && len(chapters) <= 1 && len(chapterSpans(m.Entries, chapters)) == 0 {
+		chapters = nil
+	}
+	m.Chapters = spansFor(m.Entries, chapters)
+	// The steps and the conflicts were recorded against the fit, which for
+	// these volumes named no chapter, and spansFor has just named the rows.
+	// They are given the name of the row they stand on so that Validate
+	// compares like with like. Without it the English History reports its ten
+	// missing leaves as ten printed pages nothing accounts for, because the
+	// steps that account for them are filed under no chapter, and both of its
+	// overruled readings as unconfirmed, because the neighbours confirming
+	// them are now named and the conflict is not. Neither is a change in the
+	// fit.
+	for i, s := range m.Steps {
+		if s.Chapter == "" && s.AtPDFPage >= 1 && s.AtPDFPage <= len(m.Entries) {
+			m.Steps[i].Chapter = m.Entries[s.AtPDFPage-1].Chapter
+		}
+	}
+	for i, c := range m.Conflicts {
+		if c.Chapter == "" && c.PDFPage >= 1 && c.PDFPage <= len(m.Entries) {
+			m.Conflicts[i].Chapter = m.Entries[c.PDFPage-1].Chapter
+		}
+	}
 	m.Gaps = findGaps(m.Entries)
 	return m, nil
 }

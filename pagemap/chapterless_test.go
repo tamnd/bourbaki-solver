@@ -146,3 +146,67 @@ func TestAVolumeThatDeclaresChaptersIsUnaffected(t *testing.T) {
 		t.Errorf("a declared chapter was renamed to %q", entries[1].Chapter)
 	}
 }
+
+// tamnd/bourbaki-solver#475. Elements d'histoire des mathematiques and the
+// French Varietes differentielles are continuously paginated and each declares
+// the single chapter "1" in books.yaml, but neither prints a chapter numeral
+// anywhere, so the fit finds no opener and names no row. chapterSpans then
+// looked for rows saying "1", found none, and handed back nothing, which left
+// the chapter column empty on every row of both maps. That is a loss and not a
+// rename: content/fr/hist/1/ is where the sections live and a map with no
+// chapter cannot answer which pages chapter 1 covers.
+func TestOneDeclaredChapterNoPrintingShowsIsWrittenOnEveryBodyRow(t *testing.T) {
+	pages := []string{
+		head("Contents"),
+		head("Contents"),
+		head("A NOTE ON NUMBER THEORY  3"),
+		head("A NOTE ON NUMBER THEORY  4"),
+		head("A NOTE ON NUMBER THEORY  5"),
+		head("A NOTE ON NUMBER THEORY  6"),
+	}
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"1"}, Pagination: Continuous})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Chapters) != 1 || m.Chapters[0].Chapter != "1" {
+		t.Fatalf("spans = %v, want one named 1", m.Chapters)
+	}
+	for _, e := range m.Entries {
+		if e.Page != 0 && e.Chapter != "1" {
+			t.Errorf("pdf %d is printed page %d and is named %q, want 1", e.PDFPage, e.Page, e.Chapter)
+		}
+	}
+	if probs := m.Validate(); len(probs) > 0 {
+		t.Errorf("naming the rows made the map invalid: %v", probs)
+	}
+}
+
+// And the volume bound from two fascicules keeps a span each, because each
+// prints its own page 6 and one span over both would answer a lookup with
+// whichever row it reached first. The declaration says one chapter and the
+// printing says two runs, and the runs are what the map has to be able to tell
+// apart.
+func TestOneDeclaredChapterOverTwoFasciculesKeepsASpanEach(t *testing.T) {
+	pages := []string{
+		head("RESULTATS  3"),
+		head("RESULTATS  4"),
+		head("RESULTATS  5"),
+		head("RESULTATS  3"),
+		head("RESULTATS  4"),
+		head("RESULTATS  5"),
+	}
+	m, err := Build(pages, Options{Book: "mini", Chapters: []string{"1"},
+		Pagination: Continuous, Restarts: []int{4}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Chapters) != 2 {
+		t.Fatalf("spans = %v, want one per fascicule", m.Chapters)
+	}
+	if m.Chapters[0].Chapter != "1" || m.Chapters[1].Chapter != "2" {
+		t.Errorf("spans are named %q and %q, want 1 and 2", m.Chapters[0].Chapter, m.Chapters[1].Chapter)
+	}
+	if got, ok := m.PDFPageOf("2", 4); !ok || got != 5 {
+		t.Errorf(`PDFPageOf("2", 4) = %d, %v; want 5, true`, got, ok)
+	}
+}
