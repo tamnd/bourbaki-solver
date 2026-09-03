@@ -256,7 +256,14 @@ func printVerifier(run *benchmark.Run) {
 		return
 	}
 	s := run.Score
-	fmt.Printf("verifier     measured %s on %d cases\n", run.Ran, len(run.Outcomes))
+	// A partial run should not reach here, because solve eval -write refuses to
+	// write one, but a file can be put there by hand and the scorecard is the
+	// thing that quotes it, so it says so rather than reading it as whole.
+	of := ""
+	if run.Partial() {
+		of = fmt.Sprintf(", a part of a set of %d and not the set", run.Of)
+	}
+	fmt.Printf("verifier     measured %s on %d cases%s\n", run.Ran, len(run.Outcomes), of)
 	fmt.Printf("  false accept %s\n", verifierRate(s.FalseAccepts, s.Rejects,
 		s.FalseAcceptRate(), benchmark.FalseAcceptTarget))
 	fmt.Printf("  false reject %s\n", verifierRate(s.FalseRejects, s.Accepts,

@@ -112,19 +112,45 @@ func (s Score) Met() (accept, reject, measured bool) {
 // It goes in reports/eval.json in the corpus, one file, overwritten. It is the
 // current estimate and not a history: a scorecard quoting the best run the
 // corpus ever had would be quoting the weather.
+// Of is how many cases the run set out to put, against len(Outcomes), which is
+// how many it got answers for. The two differ whenever a case was never asked,
+// and the gap is the only thing in the file that says the run did not finish.
+// It is written on every run, complete ones included, because a reader that has
+// to know whether the field is present to know what it means is a reader that
+// gets it wrong: on a complete run Of equals len(Outcomes) and the check passes
+// by arithmetic rather than by absence.
+//
+// A run stopped after five hours had put 68 of the set to the fleet and had 20
+// answered, and what it left behind read as a clean eval of 4 outcomes with a
+// false reject rate of zero, which is the M8 exit criterion passing on a fifth
+// of the questions. Nothing in that file said it was a fragment.
 type Run struct {
 	Ran      string             `json:"ran"`
 	Set      string             `json:"set"`
+	Of       int                `json:"of"`
 	Outcomes []Outcome          `json:"outcomes"`
 	Score    Score              `json:"score"`
 	Rates    map[string]float64 `json:"rates"`
 }
+
+// Partial says the run has fewer answers than it has cases, so its rates are
+// measured over a part of the set and are not the set's rates.
+//
+// A run written before Of existed has it at zero and is reported whole, which is
+// the right way round: those runs are the committed complete ones.
+func (r Run) Partial() bool { return r.Of > len(r.Outcomes) }
 
 // RunPath is where a run lives in the corpus.
 func RunPath(root string) string { return filepath.Join(root, "reports", "eval.json") }
 
 // Save writes the run, filling in the rates so that a reader that is not this
 // package does not have to know how they are worked out.
+//
+// It writes beside the file and renames, the way writeOCRReport does, so that a
+// run killed while it is saving leaves the last good result in place rather than
+// a half written one. The eval is the M8 exit criterion and it runs for hours
+// against a fleet answering well under half of what it is asked, which is
+// exactly the condition in which a run gets abandoned part way.
 func (r Run) Save(root string) error {
 	r.Rates = map[string]float64{
 		"false_accept": r.Score.FalseAcceptRate(),
@@ -134,10 +160,18 @@ func (r Run) Save(root string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(RunPath(root)), 0o755); err != nil {
+	path := RunPath(root)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(RunPath(root), append(body, '\n'), 0o644)
+	if err := os.WriteFile(path+".tmp", append(body, '\n'), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(path+".tmp", path); err != nil {
+		os.Remove(path + ".tmp")
+		return err
+	}
+	return nil
 }
 
 // LastRun reads the run the corpus holds. The second return is false when
