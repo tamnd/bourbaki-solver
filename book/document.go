@@ -3,7 +3,6 @@ package book
 import (
 	_ "embed"
 	"fmt"
-	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -399,28 +398,58 @@ func Coverage(root string, v *Volume) (have, want int, missing []string, err err
 	if !ok {
 		return 0, 0, nil, fmt.Errorf("no sections recorded for %s", v.Meta.ID)
 	}
+	// Keyed on what the section is and not on what its file is called. The
+	// filename is the title slugged, and a translation is titled in its own
+	// language, so 01_s1_laws_of_composition.md and 01_s1_luat_hop_thanh.md are
+	// the same § under two names. Worse, the two printings slug differently in
+	// the same language, so a lane built from the French pages reported 8 of 30
+	// against an English sections manifest that had all thirty. The chapter and
+	// the § number are what the book has and neither is a matter of spelling.
+	// The path stays, but only to name the file in the message.
 	got := map[string]bool{}
-	for _, s := range v.Pieces() {
-		got[path.Base(s.Path)] = true
+	if v.Reader != nil {
+		got[coverageKey("", *v.Reader)] = true
 	}
-	count := func(r corpus.SectionRecord) {
+	if v.Intro != nil {
+		got[coverageKey("", *v.Intro)] = true
+	}
+	for _, c := range v.Chapters {
+		if c.Front != nil {
+			got[coverageKey(c.Numeral, *c.Front)] = true
+		}
+		for _, s := range c.Sections {
+			got[coverageKey(c.Numeral, *s)] = true
+		}
+		if c.Historical != nil {
+			got[coverageKey(c.Numeral, *c.Historical)] = true
+		}
+	}
+	count := func(chapter string, r corpus.SectionRecord) {
 		want++
-		if got[path.Base(r.Path)] {
+		if got[chapter+"/"+r.Kind+"/"+strconv.Itoa(r.Section)] {
 			have++
 			return
 		}
 		missing = append(missing, r.Path)
 	}
 	if bs.ReaderNote != nil {
-		count(*bs.ReaderNote)
+		count("", *bs.ReaderNote)
 	}
 	if bs.Introduction != nil {
-		count(*bs.Introduction)
+		count("", *bs.Introduction)
 	}
 	for _, c := range bs.Chapters {
 		for _, s := range c.Sections {
-			count(s)
+			count(c.Chapter, s)
 		}
 	}
 	return have, want, missing, nil
+}
+
+// coverageKey names a section by what it is: the chapter it is in, what kind of
+// file it is, and its § number where it has one. Everything that is not a § has
+// number zero, and a chapter has at most one front page and one historical
+// note, so zero is not ambiguous.
+func coverageKey(chapter string, s Section) string {
+	return chapter + "/" + s.Kind + "/" + strconv.Itoa(s.Number)
 }

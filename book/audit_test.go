@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
 // find returns the check with this name, which is how a test says which of the
@@ -311,5 +313,64 @@ func TestLengthDoesNotMindAVolumeLongerThanThePrinting(t *testing.T) {
 	a.length(root, v, DefaultAuditOptions())
 	if c := find(t, a, "holds the text the printing has"); !c.OK {
 		t.Errorf("a volume twice the length of its printing failed: %s", c.Detail)
+	}
+}
+
+// The sections manifest holds the printing and a translation is counted against
+// it, so the two sides name the same § in two languages. Matching them by
+// filename made a Vietnamese Algebra IX read as 8 sections of 30 when it had
+// all thirty, because the file is the title slugged and the title is
+// translated. The chapter and the § number are the same in every language.
+func TestCoverageCountsATranslationWhoseFilesAreNamedInItsOwnLanguage(t *testing.T) {
+	root := t.TempDir()
+	m := &corpus.SectionsManifest{}
+	m.Upsert(corpus.BookSections{ID: "test-i", Chapters: []corpus.ChapterSections{{
+		Chapter: "I",
+		Sections: []corpus.SectionRecord{
+			{Kind: corpus.KindSection, Section: 1, Path: "content/en/alg/I/01_s1_groups.md"},
+			{Kind: corpus.KindHistorical, Path: "content/en/alg/I/historical_note.md"},
+		},
+	}}})
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	v := sample()
+	v.Lang = "vi"
+	v.Chapters[0].Sections[0].Path = "content/vi/alg/I/01_s1_cac_nhom.md"
+	v.Chapters[0].Historical.Path = "content/vi/alg/I/ghi_chu_lich_su.md"
+	have, want, missing, err := Coverage(root, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want != 2 || have != 2 {
+		t.Errorf("counted %d of %d, missing %v; both sections are there under translated names", have, want, missing)
+	}
+}
+
+// A § the language really has not got is still missing, and the message names
+// the file of the printing so there is something to go and look for.
+func TestCoverageStillReportsASectionThatIsNotThere(t *testing.T) {
+	root := t.TempDir()
+	m := &corpus.SectionsManifest{}
+	m.Upsert(corpus.BookSections{ID: "test-i", Chapters: []corpus.ChapterSections{{
+		Chapter: "I",
+		Sections: []corpus.SectionRecord{
+			{Kind: corpus.KindSection, Section: 1, Path: "content/en/alg/I/01_s1_groups.md"},
+			{Kind: corpus.KindSection, Section: 2, Path: "content/en/alg/I/02_s2_rings.md"},
+			{Kind: corpus.KindHistorical, Path: "content/en/alg/I/historical_note.md"},
+		},
+	}}})
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	have, want, missing, err := Coverage(root, sample())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if have != 2 || want != 3 {
+		t.Fatalf("counted %d of %d, want 2 of 3", have, want)
+	}
+	if len(missing) != 1 || missing[0] != "content/en/alg/I/02_s2_rings.md" {
+		t.Errorf("missing is %v, want the § 2 of the printing", missing)
 	}
 }
