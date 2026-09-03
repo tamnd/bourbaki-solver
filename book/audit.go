@@ -193,6 +193,7 @@ func Inspect(root string, v *Volume, d *Document, b *Build, e *EPUB, opt AuditOp
 	a.coverage(root, v, opt)
 	a.length(root, v, opt)
 	a.written(d, opt)
+	a.matter(v, d)
 	a.typeset(v, b, opt)
 	a.packed(e)
 	a.cover(b, opt)
@@ -623,6 +624,84 @@ func (a *Audit) written(d *Document, opt AuditOptions) {
 	}
 	a.ok("no footnote is printed as its own source", len(printed) == 0,
 		fmt.Sprintf("%d markers reached the page", len(printed)), cap12(marks)...)
+}
+
+// matter checks that the parts of the book which belong to no chapter are bound
+// in: the half title, the title page, the edition line and the contents at the
+// front, and the historical notes and the two indexes at the back.
+//
+// It is here because those are the two parts of the build with nothing else
+// watching them. Every other check in this file is anchored to a chapter, a §
+// or a statement, so a volume could lose its whole front matter and pass all of
+// them: the chapters the manifest names would still be there, the §§ would
+// still run without a gap, and the text length would move by the half of one
+// per cent that four leaves come to. The way a missing title page shows up
+// otherwise is that somebody opens the PDF, which is what this file exists to
+// stop being the way anything shows up.
+//
+// What is looked at is the TeX rather than the PDF, for the same reason the
+// footnote check looks at the TeX: the commands are unmistakable there, and a
+// document that never reached the typesetter is still worth this answer. It is
+// the writer's own vocabulary, so a rename in document.go that forgot this
+// would fail the check rather than pass it quietly, which is the right way
+// round.
+//
+// The back matter is conditional on the volume, not fixed. Not every printing
+// has a historical note and not every one carries both indexes, so the check
+// asks for what this volume holds and says how many of each it found. A volume
+// with none of the three passes with nothing to bind, which is a true statement
+// about the Elements: the Historical Note is a Book of its own in some
+// printings and an appendix to a chapter in others.
+func (a *Audit) matter(v *Volume, d *Document) {
+	if d == nil {
+		return
+	}
+	front := []string{`\bcover`, `\bhalftitle`, `\btitlepage`, `\frontmatter`, `\bcontents`}
+	if v.Meta.Edition != "" {
+		front = append(front, `\bedition{`)
+	}
+	var absent []string
+	for _, cmd := range front {
+		if !strings.Contains(d.TeX, cmd) {
+			absent = append(absent, cmd)
+		}
+	}
+	a.ok("the front matter is bound in", len(absent) == 0,
+		fmt.Sprintf("%d of %d parts set", len(front)-len(absent), len(front)),
+		absent...)
+
+	// A historical note is asked for by its anchor and not by its heading. The
+	// heading is the note's own title where it has one and \bhistoricalname only
+	// where it does not, so looking for the command would pass every volume
+	// whose notes are untitled and fail every volume whose notes are titled,
+	// which is the opposite of a check. The anchor is written either way, and it
+	// carries the chapter, so a volume that lost the note off one chapter of six
+	// is a failure that names which one.
+	var want []string
+	for _, c := range v.Chapters {
+		if c.Historical != nil {
+			want = append(want, "{hist-"+strings.ToLower(c.Numeral)+"}")
+		}
+	}
+	if v.Notation != nil {
+		want = append(want, `{notation}`)
+	}
+	if v.Terminology != nil {
+		want = append(want, `{terminology}`)
+	}
+	// \backmatter opens the division the indexes sit in, so it is asked for
+	// exactly when there is an index to put there and not otherwise.
+	if v.Notation != nil || v.Terminology != nil {
+		want = append(want, `\backmatter`)
+	}
+	var lost []string
+	for _, cmd := range want {
+		if !strings.Contains(d.TeX, cmd) {
+			lost = append(lost, cmd)
+		}
+	}
+	a.ok("the back matter is bound in", len(lost) == 0,
+		fmt.Sprintf("%d of %d parts set", len(want)-len(lost), len(want)), lost...)
 }
 
 // printedMarkerRE is a Markdown footnote call that reached the page as its own
