@@ -111,7 +111,7 @@ var bodyAppendixLine = regexp.MustCompile(
 // that knows them for a volume with no contents page, and the § and no. come
 // from the headings on the pages inside each span.
 func FromBody(pages []BodyPage, pm *pagemap.Map, opt Options) *Result {
-	res := &Result{Book: opt.Book, Grammar: Grammar{Mark: "body", Page: Bare}}
+	res := &Result{Book: opt.Book, Grammar: Grammar{Mark: Body, Page: Bare}}
 	byPDF := map[int]BodyPage{}
 	for _, p := range pages {
 		byPDF[p.PDFPage] = p

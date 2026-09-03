@@ -131,6 +131,48 @@ func ocrSetupFor(book, queueRoot string, flagged, contents, rendered bool) (setu
 	return out, nil
 }
 
+// contentsHosts drops the hosts that cannot be asked the contents question, and
+// refuses the run when that leaves none.
+//
+// A host with a reader named on it runs a program that is not chatgpt-tool, and
+// what is behind that program is a card in the box with a fixed prompt in front
+// of it. The batch sends --prompt to it exactly as it does to a browser and the
+// reader takes the images and answers with its own question, so the flag is
+// accepted and has no effect. That was measured on three pages of the French
+// Integration: they came back in forty-four seconds, as good a reading of a
+// contents page as the ordinary prompt gives, which is to say a page of prose
+// with the leader dots counted as text and the printed page numbers scattered
+// through it. The whole point of -contents is that those numbers come back in
+// the column the printing puts them in, and nothing about the answer said the
+// question had been changed.
+//
+// Dropping rather than refusing outright, because a pool is a mixture and the
+// hosts that can be asked should still be. Saying so out loud either way: a run
+// that quietly leaves a host out is the same fault one step further on.
+func contentsHosts(hosts []ocr.Host, contents bool, logf func(string, ...any)) ([]ocr.Host, error) {
+	if !contents {
+		return hosts, nil
+	}
+	kept := make([]ocr.Host, 0, len(hosts))
+	var fixed []string
+	for _, host := range hosts {
+		if strings.TrimSpace(host.Reader) != "" {
+			fixed = append(fixed, host.Name+" reads with "+host.Reader)
+			continue
+		}
+		kept = append(kept, host)
+	}
+	if len(fixed) > 0 {
+		logf("-contents: skipping %s, which carries its own prompt and would answer the ordinary question",
+			strings.Join(fixed, ", "))
+	}
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("-contents: no host left that can be asked a question of its own, "+
+			"every one of the %d in the pool reads with a prompt of its own", len(hosts))
+	}
+	return kept, nil
+}
+
 // contentsRange refuses a contents run that names no pages.
 //
 // The contents is a handful of pages and the prompt that reads it is wrong for
@@ -399,6 +441,9 @@ func ocrRun(args []string) error {
 		hosts, err = ocrHostsNow(ctx, *routeFile, *hostList, *wait, logf)
 	}
 	if err != nil {
+		return err
+	}
+	if hosts, err = contentsHosts(hosts, *contents, logf); err != nil {
 		return err
 	}
 	if *lanes > 0 {

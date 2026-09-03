@@ -40,6 +40,16 @@ const (
 	// Column is a bare "1. Title" set at the left margin, used by the 2023
 	// volume, where a no. line carries the same shape but is indented.
 	Column SectionMark = "column"
+	// Body is not a mark at all. It is what a reading carries when it came off
+	// the volume's own pages rather than off a contents page, which is the only
+	// thing there is for a volume whose scan carries no contents to read. Three
+	// volumes are in that position: ac-x-fr and lie-vii-viii-fr print none, and
+	// alg-iv-vii-fr prints one whose middle leaf is not in the file.
+	//
+	// It is a named constant so that a caller can tell the two apart without
+	// spelling the word twice. bourbaki toc build asks, because a volume already
+	// read this way is not a volume it failed on.
+	Body SectionMark = "body"
 )
 
 // PageForm is how the contents prints the page a line points at.
