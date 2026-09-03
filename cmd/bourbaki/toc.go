@@ -135,7 +135,7 @@ func tocBuild(args []string) error {
 		// against the printing by hand, and a rebuild used to put every one of
 		// those corrections back the way the scan had it without saying so.
 		if was, ok := man.Get(b.ID); ok {
-			chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters)
+			chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters, pm)
 			if !*retitle {
 				res.Chapters = chapters
 			}
@@ -147,11 +147,13 @@ func tocBuild(args []string) error {
 				fmt.Printf("  %s %s\n", what, one)
 			}
 			if len(kept) > 0 && !*retitle {
-				titles := "titles already in the manifest were kept"
+				// "readings" and not "titles": a printed page off the contents
+				// is kept on the same grounds and gets counted in the same line.
+				readings := "readings already in the manifest were kept"
 				if len(kept) == 1 {
-					titles = "title already in the manifest was kept"
+					readings = "reading already in the manifest was kept"
 				}
-				fmt.Printf("  %d %s, pass -retitle to take the new readings\n", len(kept), titles)
+				fmt.Printf("  %d %s, pass -retitle to take the new readings\n", len(kept), readings)
 			}
 		}
 		if fromBody && len(toc.Hard(res.Problems)) > 0 {
@@ -594,7 +596,7 @@ func tocBody(args []string) error {
 	res := toc.FromBody(pages, pm, toc.Options{
 		Book: b.ID, Chapters: b.Chapters, Title: b.Title})
 	if was, ok := man.Get(b.ID); ok && !*retitle {
-		chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters)
+		chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters, pm)
 		res.Chapters = chapters
 		for _, one := range kept {
 			fmt.Printf("  kept %s\n", one)
