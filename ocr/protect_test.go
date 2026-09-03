@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/queue"
@@ -445,5 +446,110 @@ func TestTheSalvageFlagCarriesTheMarkThatIsMatched(t *testing.T) {
 		3, ruleList([]Rule{RuleStatement}))
 	if !salvagedReading(corpus.PageFrontMatter{Flags: []string{flag}}) {
 		t.Errorf("the flag write emits does not match the mark salvagedReading looks for: %q", flag)
+	}
+}
+
+// ReadAgain is the door that was missing. Three doors existed and all three
+// were for something else: a changed image, a changed prompt, or a rejected
+// page a stronger reader should take. A page that passes every rule was
+// unreachable, and the rules are structural, so a page can be well formed and
+// wrong and no run would ever look at it again.
+func TestAnAcceptedPageIsQueuedWhenItIsAskedForAgain(t *testing.T) {
+	r, source := write(t, "olmOCR-2-7B-1025-FP8", "same-prompt", "same-image")
+	if r.state(source, "same-prompt") != alreadyRead {
+		t.Fatal("the fixture does not pass the rules, so this test proves nothing")
+	}
+	r.ReadAgain = true
+	if r.state(source, "same-prompt") != unread {
+		t.Error("a page asked for again was skipped as already read")
+	}
+}
+
+// What makes it safe rather than a way to lose work. The 142 pages were lost to
+// a weaker reader writing over a stronger one, and outranked stops that
+// whatever put the page in the queue. On alg-x-fr this is the whole behaviour:
+// 163 pages came off the weakest reader in the fleet and 59 off gpt-5, and
+// asking the volume for a re-read should reach the 163 and not the 59.
+func TestAskingAgainStillLeavesAStrongerReadersPagesAlone(t *testing.T) {
+	for _, model := range []string{"claude-opus", "gpt-5", "gpt-4o", "o3-mini"} {
+		t.Run(model, func(t *testing.T) {
+			r, source := write(t, model, "same-prompt", "same-image")
+			r.ReadAgain = true
+			if r.state(source, "same-prompt") != needsABetterReader {
+				t.Error("a re-read handed a stronger reader's page to a run that could only make it worse")
+			}
+		})
+	}
+}
+
+// And a run that does hold a reader as strong gets the page, because then the
+// re-read is not a downgrade.
+func TestAskingAgainReachesAStrongerReadersPageForARunThatCanMatchIt(t *testing.T) {
+	r, source := write(t, "gpt-5", "same-prompt", "same-image")
+	r.Model = "gpt-5"
+	r.ReadAgain = true
+	if r.state(source, "same-prompt") != unread {
+		t.Error("a run holding an equal reader was refused a page it asked for again")
+	}
+}
+
+// Off by default, said as a test rather than left to be inferred, because
+// every other test in this file would still pass if the flag were on.
+func TestAnAcceptedPageIsLeftAloneWithoutTheFlag(t *testing.T) {
+	r, source := write(t, "olmOCR-2-7B-1025-FP8", "same-prompt", "same-image")
+	if r.state(source, "same-prompt") != alreadyRead {
+		t.Error("an accepted page was queued by a run that did not ask for one")
+	}
+}
+
+// The queue half. The job id is the content address of the work, so a page read
+// at this image and this prompt is a job the queue has already done and Add
+// refuses one of those. Without the reset, ReadAgain would tell state the page
+// is work and then queue nothing at all.
+func TestAskingAgainPutsTheFinishedJobBackInPending(t *testing.T) {
+	r, source := write(t, "olmOCR-2-7B-1025-FP8", "same-prompt", "same-image")
+	r.Prompt = "same-prompt-text"
+	q, err := queue.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Queue = q
+	job := queue.New(queue.StageOCR, Target("ens-i-iv", 116), source.SHA256, sha256Hex(r.Prompt))
+	if _, err = q.Add(job); err != nil {
+		t.Fatal(err)
+	}
+	leased, err := q.Lease(queue.StageOCR, "reader", "", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.Finish(leased, true, ""); err != nil {
+		t.Fatal(err)
+	}
+	// The reading on disk has to match what the queue just finished, or state
+	// would call the page stale and queue it for a reason that is not this one.
+	if err := (corpus.PageFile{Meta: corpus.PageFrontMatter{
+		Book: "ens-i-iv", PDFPage: 116, Method: corpus.MethodOCR,
+		RunningHead: "DISTRIBUTIVITY FORMULAE", Model: "olmOCR-2-7B-1025-FP8",
+		PromptSHA256: sha256Hex(r.Prompt), InputSHA256: source.SHA256, Lines: 12,
+	}, Body: cleanPage}).Write(corpus.PagePath(r.Root, "ens-i-iv", 116)); err != nil {
+		t.Fatal(err)
+	}
+	added, err := r.Fill([]Source{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 0 {
+		t.Errorf("a finished job was queued again without the flag: %d added", added)
+	}
+	r.ReadAgain = true
+	added, err = r.Fill([]Source{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 1 {
+		t.Fatalf("the finished job was not put back: %d added", added)
+	}
+	if _, state, err := q.Find(queue.StageOCR, job.ID); err != nil || state != queue.Pending {
+		t.Errorf("the job is in %q rather than pending (%v), so the id did not survive the reset", state, err)
 	}
 }

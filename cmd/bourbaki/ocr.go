@@ -65,6 +65,14 @@ flags for fill and run:
                  it is for the volumes whose text layer drops that column
   -unread        only the pages with no reading committed, so that editing the
                  prompt does not send the pages already read back to the fleet
+  -again         (fill) queue pages that already pass the rules. The rules are
+                 structural and a page can be well formed and wrong, so this is
+                 how an operator says a set of readings should be made again
+                 whatever the rules think of them. It needs -f and -l, because
+                 the pages it puts back already passed. Pages a stronger reader
+                 wrote are still held back for that reader, so pointing it at a
+                 volume read half by gpt-5 and half by a weaker model queues the
+                 weaker half and leaves the rest
   -reread-protected
                  read over pages that claude or gpt-5 already read. Those stand
                  by default even when the prompt or the render moved under them,
