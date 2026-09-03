@@ -1,0 +1,4 @@
+The rules below are about this printing of Theory of Sets, the French one, and not about the Book. The other printing sets both of them differently.
+
+- The § headings of this printing do carry the § sign, and it is printed and so it is transcribed. A section is headed by the sign, its number, a full stop and its title, set large and centred, and it is written ## § 4. RÉUNION ET INTERSECTION D’UNE FAMILLE D’ENSEMBLES. A numbered no. under it is set in bold at the left margin and is written as a level three heading.
+- The page number of this printing is in the running head and not at the foot. It is a full label, the letter E, the numeral of the chapter and the page within the chapter, as in E I.15, and it sits at the outer edge of the line above the text block with the title of the chapter or of the current no. in small capitals beside it. Transcribe that whole line as the first line, label included.

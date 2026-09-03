@@ -201,7 +201,7 @@ func ocrCheck(args []string) error {
 		}
 		checked++
 
-		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID)})
+		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID, entry.Book)})
 		if *only != "" {
 			problems = filterRule(problems, ocr.Rule(*only))
 		}
