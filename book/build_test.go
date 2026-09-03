@@ -37,7 +37,7 @@ func TestReadLogSeesEveryClassOfTeXError(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Build{Dir: dir, Log: path, PDF: filepath.Join(dir, "book.pdf")}
-	if err := b.readLog(); err != nil {
+	if err := b.readLog(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -82,7 +82,7 @@ func TestReadLogOnACleanLogFindsNoErrors(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Build{Dir: dir, Log: path, PDF: filepath.Join(dir, "book.pdf")}
-	if err := b.readLog(); err != nil {
+	if err := b.readLog(nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(b.Errors) != 0 {
@@ -117,7 +117,7 @@ func TestReadLogSeesAGlyphWhoseFontNameWrapped(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Build{Dir: dir, Log: path, PDF: filepath.Join(dir, "book.pdf")}
-	if err := b.readLog(); err != nil {
+	if err := b.readLog(nil); err != nil {
 		t.Fatal(err)
 	}
 	if len(b.MissingGlyphs) != 2 {
@@ -156,7 +156,7 @@ func TestReadLogDoesNotReadABoxDumpAsAnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	b := &Build{Dir: dir, Log: path, PDF: filepath.Join(dir, "book.pdf")}
-	if err := b.readLog(); err != nil {
+	if err := b.readLog(nil); err != nil {
 		t.Fatal(err)
 	}
 	// The real error after the dump still counts, and the overfull is still one.

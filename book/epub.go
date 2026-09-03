@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"html"
 	"os"
+	"os/exec"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -47,6 +49,57 @@ type EPUB struct {
 	// Math is the number of spans set as MathML, which is the number that says
 	// whether the reading system has any work to do at all.
 	Math int
+	// CoverIsRaster says the cover in the book is page one of the PDF this run
+	// set, rather than the SVG this package draws. See Options.CoverPDF.
+	CoverIsRaster bool
+}
+
+// RasterCover is the first page of a built PDF as a PNG, for the EPUB to carry
+// as its cover.
+//
+// It is page one of the file the typesetter just wrote, which is the whole
+// point: the cover in the EPUB is then not a second drawing of the cover that
+// has to be kept in step with the first, it is the first. A change to the class
+// reaches both or neither.
+//
+// A missing pdftoppm is not an error. poppler is not on every machine, an EPUB
+// with the drawn cover is a perfectly good EPUB, and a build that refused
+// because a rasteriser was absent would make the whole EPUB path depend on a
+// tool the PDF path does not need. Nothing being returned means the caller
+// should draw it, and the audit says which of the two happened.
+//
+// 300 dpi against a 155 mm trim is 1831 pixels across, which is what the page
+// images under images/ are rendered at and is more than any reading system will
+// use. 150 is half that and still twice a retina phone's short side.
+func RasterCover(pdf string) ([]byte, error) {
+	if pdf == "" {
+		return nil, nil
+	}
+	if _, err := os.Stat(pdf); err != nil {
+		return nil, nil
+	}
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		return nil, nil
+	}
+	dir, err := os.MkdirTemp("", "bourbaki-cover")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+	prefix := filepath.Join(dir, "cover")
+	cmd := exec.Command("pdftoppm", "-png", "-r", "150", "-f", "1", "-l", "1", "-forcenum", pdf, prefix)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return nil, fmt.Errorf("pdftoppm: %w\n%s", err, strings.TrimSpace(string(out)))
+	}
+	// pdftoppm pads the page number to the width of the page count, so page one
+	// of an 873 page volume is -001 and page one of a nine page one is -1. The
+	// directory is asked rather than the name guessed, for the reason the cover
+	// check gives: knowing the width means knowing how long the book is.
+	written, _ := filepath.Glob(prefix + "-*.png")
+	if len(written) != 1 {
+		return nil, fmt.Errorf("pdftoppm wrote %d files for page one of %s, not one", len(written), pdf)
+	}
+	return os.ReadFile(written[0])
 }
 
 // WriteEPUB writes one volume as an EPUB 3 file.
@@ -92,16 +145,28 @@ func WriteEPUB(file string, v *Volume, opt Options) (*EPUB, error) {
 	if err := z.store("mimetype", "application/epub+zip"); err != nil {
 		return nil, err
 	}
+	png, err := RasterCover(opt.CoverPDF)
+	if err != nil {
+		return nil, err
+	}
+	e.CoverIsRaster = png != nil
 	add := []struct{ name, body string }{
 		{"META-INF/container.xml", container},
-		{"EPUB/package.opf", packageOPF(v, docs, opt)},
+		{"EPUB/package.opf", packageOPF(v, docs, opt, e.CoverIsRaster)},
 		{"EPUB/nav.xhtml", navDoc(v, docs)},
-		{"EPUB/cover.xhtml", coverDoc(v)},
-		{"EPUB/cover.svg", CoverSVG(v)},
+		{"EPUB/cover.xhtml", coverDoc(v, e.CoverIsRaster)},
 		{"EPUB/style.css", epubCSS},
+	}
+	if !e.CoverIsRaster {
+		add = append(add, struct{ name, body string }{"EPUB/cover.svg", CoverSVG(v)})
 	}
 	for _, a := range add {
 		if err := z.add(a.name, a.body); err != nil {
+			return nil, err
+		}
+	}
+	if e.CoverIsRaster {
+		if err := z.add("EPUB/cover.png", string(png)); err != nil {
 			return nil, err
 		}
 	}
@@ -1035,7 +1100,7 @@ const container = `<?xml version="1.0" encoding="UTF-8"?>
 // same bytes. A random identifier would make every rebuild a different book as
 // far as a library is concerned, and would make it impossible to tell a build
 // that changed from a build that did not.
-func packageOPF(v *Volume, docs []doc, opt Options) string {
+func packageOPF(v *Volume, docs []doc, opt Options, raster bool) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="utf-8"?>` + "\n")
 	b.WriteString(`<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="` + esc(v.Lang) + `">` + "\n")
@@ -1053,8 +1118,16 @@ func packageOPF(v *Volume, docs []doc, opt Options) string {
 	b.WriteString("<meta name=\"cover\" content=\"cover-image\"/>\n")
 	b.WriteString("</metadata>\n<manifest>\n")
 	b.WriteString(`<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>` + "\n")
-	b.WriteString(`<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" properties="svg"/>` + "\n")
-	b.WriteString(`<item id="cover-image" href="cover.svg" media-type="image/svg+xml" properties="cover-image"/>` + "\n")
+	// A cover page that holds an SVG has to declare it; one that holds a PNG must
+	// not, since the svg property means the document embeds SVG and a reading
+	// system is entitled to act on that.
+	if raster {
+		b.WriteString(`<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>` + "\n")
+		b.WriteString(`<item id="cover-image" href="cover.png" media-type="image/png" properties="cover-image"/>` + "\n")
+	} else {
+		b.WriteString(`<item id="cover" href="cover.xhtml" media-type="application/xhtml+xml" properties="svg"/>` + "\n")
+		b.WriteString(`<item id="cover-image" href="cover.svg" media-type="image/svg+xml" properties="cover-image"/>` + "\n")
+	}
 	b.WriteString(`<item id="css" href="style.css" media-type="text/css"/>` + "\n")
 	for i, d := range docs {
 		props := ""
@@ -1119,7 +1192,7 @@ func navDoc(v *Volume, docs []doc) string {
 	return b.String()
 }
 
-func coverDoc(v *Volume) string {
+func coverDoc(v *Volume, raster bool) string {
 	w, h := v.Meta.PageWidth, v.Meta.PageHeight
 	if w == 0 || h == 0 {
 		w, h = 363.12, 565.56
@@ -1127,7 +1200,15 @@ func coverDoc(v *Volume) string {
 	var b strings.Builder
 	b.WriteString(xhtmlHead(v.Lang, v.Title, "style.css"))
 	b.WriteString(`<div class="cover">` + "\n")
-	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="100%%" height="100%%" viewBox="0 0 %.2f %.2f" preserveAspectRatio="xMidYMid meet"><image width="%.2f" height="%.2f" xlink:href="cover.svg"/></svg>`+"\n", w, h, w, h)
+	// A raster is set as a plain img and left to the stylesheet. The SVG is
+	// wrapped in an svg element with a viewBox instead, because that is the one
+	// arrangement every reading system scales the same way, and because an SVG
+	// cover referenced from an img is the shape several of them refuse.
+	if raster {
+		fmt.Fprintf(&b, `<img src="cover.png" alt="%s"/>`+"\n", esc(v.Title))
+	} else {
+		fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="100%%" height="100%%" viewBox="0 0 %.2f %.2f" preserveAspectRatio="xMidYMid meet"><image width="%.2f" height="%.2f" xlink:href="cover.svg"/></svg>`+"\n", w, h, w, h)
+	}
 	b.WriteString("</div>\n")
 	b.WriteString(xhtmlFoot)
 	return b.String()
@@ -1206,5 +1287,6 @@ aside.notes { margin-top: 2em; font-size: 0.85em; }
 .figure { display: block; text-align: center; font-style: italic; font-size: 0.9em; border: 1px solid #999; padding: 0.6em; margin: 0.9em 0; text-indent: 0; }
 .rawtex { font-family: monospace; background: #fee; }
 .cover { margin: 0; padding: 0; text-align: center; }
+.cover img { max-width: 100%; max-height: 100%; height: auto; }
 math { font-size: 1em; }
 `

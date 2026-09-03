@@ -106,6 +106,37 @@ type AuditOptions struct {
 	// the publisher's pages that no reading of the book puts into content/, and
 	// not room for a chapter.
 	Short float64
+	// Floor is how much of the printing a language must hold before this is
+	// willing to call the result a volume, as a fraction of the sections the
+	// printing has.
+	//
+	// It is the one check in here that refuses rather than reports, and it is the
+	// only one that should. Everything else the audit finds is a thing wrong with
+	// a book; this is the case where there is no book. A Vietnamese Algebra at
+	// eighty per cent is a real object with real chapters in it and a reader can
+	// use it. The same volume at eleven per cent is chapter I § 1 and § 2 with a
+	// cover on it and a contents listing what is not inside, and shipping that
+	// under the title of the printing is a lie told in a yellow wrapper.
+	//
+	// A tenth is the default and it was measured rather than picked. The last
+	// full sweep, 107 builds over 40 volumes in reports/books.json, has 21 builds
+	// that set no file of content/ at all: ac-viii-ix-fr in English and
+	// Vietnamese, alg-i-iii and alg-iv-vii and int-vii-ix in French, and the rest
+	// of that list. Every one of them produced a four page PDF, a cover and a
+	// title page and a contents of nothing, and every one of them passed 18 or 19
+	// of the 21 checks, because almost every check in here is about text and
+	// there was no text to be wrong about. That is the failure this stops.
+	//
+	// The 21 run from 0 to 7 per cent and the lowest build that holds anything at
+	// all is the Vietnamese Commutative Algebra I-IV at 12, so anything between 8
+	// and 11 refuses exactly the empty books and nothing else. A tenth is the
+	// middle of that gap.
+	//
+	// The line is not "this is finished", which is what the coverage check
+	// reports; it is "there is enough here that binding it is honest", so the
+	// flag exists and the number is printed in the report either way rather than
+	// being quietly applied.
+	Floor float64
 	// Cover asks pdftoppm to render the first page and looks at it, which is the
 	// only way to know that the cover is the cover. It is a flag because
 	// poppler is not on every machine and a missing tool should skip a check
@@ -115,7 +146,39 @@ type AuditOptions struct {
 
 // DefaultAuditOptions are what the command uses when nothing is said.
 func DefaultAuditOptions() AuditOptions {
-	return AuditOptions{Overfull: 200, Short: 0.10, Cover: true}
+	return AuditOptions{Overfull: 200, Short: 0.10, Floor: 0.10, Cover: true}
+}
+
+// BelowFloor is the refusal a build gets when the language does not hold enough
+// of the printing to be bound, and nil when it does.
+//
+// It is separate from the audit and is asked before the writer runs, because the
+// audit is a report on a book that exists and the whole point here is not to
+// make one. What comes back names the sections that are missing, capped, since
+// a volume at four per cent is missing eight hundred of them and a screen of
+// paths is not more useful than a dozen and a count.
+func BelowFloor(root string, v *Volume, floor float64) error {
+	if floor <= 0 {
+		return nil
+	}
+	have, want, missing, err := Coverage(root, v)
+	if err != nil || want == 0 {
+		// A volume the sections manifest does not know cannot be measured against
+		// the printing, and refusing on a measurement nobody could take would stop
+		// a build for a reason that is about the manifest. The audit reports the
+		// missing manifest as its own failure.
+		return nil
+	}
+	if float64(have)/float64(want) >= floor {
+		return nil
+	}
+	named := missing
+	if len(named) > 12 {
+		named = append(named[:12:12], fmt.Sprintf("and %d more", len(missing)-12))
+	}
+	return fmt.Errorf("%s holds %d of the printing's %d sections, %.1f%%, and the floor is %.0f%%; missing:\n  %s",
+		v.ID(), have, want, 100*float64(have)/float64(want), 100*floor,
+		strings.Join(named, "\n  "))
 }
 
 // Inspect runs every check over a volume that has been loaded, written, built
@@ -125,7 +188,7 @@ func DefaultAuditOptions() AuditOptions {
 func Inspect(root string, v *Volume, d *Document, b *Build, e *EPUB, opt AuditOptions) *Audit {
 	a := &Audit{Volume: v.Meta.ID, Lang: v.Lang, Title: v.Title, Doc: d, Build: b, EPUB: e}
 	a.structure(v)
-	a.coverage(root, v)
+	a.coverage(root, v, opt)
 	a.length(root, v, opt)
 	a.written(d, opt)
 	a.typeset(v, b, opt)
@@ -231,7 +294,7 @@ func statementCount(body string) int {
 }
 
 // coverage is how much of the printing this language holds.
-func (a *Audit) coverage(root string, v *Volume) {
+func (a *Audit) coverage(root string, v *Volume, opt AuditOptions) {
 	have, want, absent, err := Coverage(root, v)
 	if err != nil {
 		a.ok("the sections manifest knows this volume", false, err.Error())
@@ -245,6 +308,14 @@ func (a *Audit) coverage(root string, v *Volume) {
 	// it a failure every night would teach everyone to ignore the audit.
 	pass := have == want || v.Lang != v.Meta.Lang
 	detail := fmt.Sprintf("%d of %d sections, %.1f%%", have, want, 100*float64(have)/float64(max(want, 1)))
+	// The floor goes in the detail whether or not it bit, so that a report of a
+	// build carries the line it had to clear as well as where it landed. A build
+	// that is under it never gets this far, since BelowFloor is asked before the
+	// writer runs, but the report of one that cleared it should still say by how
+	// much.
+	if opt.Floor > 0 {
+		detail += fmt.Sprintf(", the floor to build at all is %.0f%%", 100*opt.Floor)
+	}
 	notes := absent
 	if len(notes) > 12 {
 		notes = append(notes[:12:12], fmt.Sprintf("and %d more", len(absent)-12))
@@ -450,10 +521,26 @@ func (a *Audit) typeset(v *Volume, b *Build, opt AuditOptions) {
 	if b == nil {
 		return
 	}
-	// First, because everything below it is a report on a document and this is
-	// the question of whether there is one. A TeX error stops the page it is on
-	// and the run writes no PDF, so a build with an error in it has an audit
-	// measuring a manuscript nobody can open.
+	// These two first, because everything below them is a report on a document
+	// and these are the question of whether there is one.
+	//
+	// They are two checks rather than one because they fail apart. A run can stop
+	// with an error and still leave the PDF the last run wrote, and a run can
+	// exit zero and write a PDF of four pages because the emergency stop came
+	// after the title page. Both used to be invisible: the command nilled the
+	// build out when it had no pages, this function returns on a nil build, and a
+	// volume that had stopped inside TeX therefore produced an audit with no
+	// typesetting section in it at all, which reads exactly like a volume that
+	// was never asked to typeset.
+	a.ok("the typesetter ran to the end", b.Failed == "",
+		firstLine(b.Failed, "it exited without an error"))
+	a.ok("the typesetter wrote a PDF", b.Pages > 0,
+		fmt.Sprintf("%d pages in %s", b.Pages, filepath.Base(b.PDF)))
+	// A TeX error stops the page it is on, so a build with an error in it has an
+	// audit measuring a book with a hole in it. Each one names the file under
+	// content/ it came out of where the log said which line of the document it
+	// was on, since the line of the document is a line of a file nobody wrote and
+	// nobody can edit.
 	a.ok("the typesetter finished without an error", len(b.Errors) == 0,
 		fmt.Sprintf("%d errors", len(b.Errors)), b.Errors...)
 	a.ok("the typesetter defined every command the writer used", len(b.Undefined) == 0,
@@ -499,6 +586,19 @@ func (a *Audit) packed(e *EPUB) {
 	a.ok("KaTeX reads every formula in the book", len(e.Refused) == 0,
 		fmt.Sprintf("%d spans refused of %d", len(e.Refused), e.Math+len(e.Refused)),
 		top(e.Refused, 12)...)
+
+	// Which of the two covers the EPUB is carrying. It is reported and is not a
+	// failure, because a build asked for no PDF has nothing to rasterise and a
+	// machine without poppler cannot rasterise it, and an EPUB with the drawn
+	// cover is still a book. What the line is for is that a reader of the report
+	// can tell whether the EPUB's cover is the PDF's cover or a second drawing of
+	// it, which is the difference between two covers that cannot drift and two
+	// that can.
+	how := "drawn as SVG from the class's measurements, since there was no PDF to take it from"
+	if e.CoverIsRaster {
+		how = "page one of the PDF this build set"
+	}
+	a.ok("the EPUB carries a cover", true, how)
 
 	z, err := zip.OpenReader(e.Path)
 	if err != nil {
@@ -764,6 +864,19 @@ func ppmHeader(raw []byte) ([3]int, []byte, error) {
 		out[n] = v
 	}
 	return out, raw[i+1:], nil
+}
+
+// firstLine is the head of what the typesetter said, for a check detail that
+// has to fit on one line. tectonic's error carries forty lines of log tail after
+// it, which belong in the terminal and not in a table.
+func firstLine(s, whenEmpty string) string {
+	if s == "" {
+		return whenEmpty
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func abs(n int) int {

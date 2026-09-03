@@ -52,7 +52,35 @@ type Document struct {
 	// made and not a fault, and it is listed so that somebody comparing a page
 	// against the printing knows which formulas to look at first.
 	Aligned []Finding
+	// Sources says which corpus file each stretch of the generated TeX came
+	// from, in order. See Source.
+	Sources []Source
 }
+
+// A Source is the line of the generated document at which one corpus file's
+// text begins.
+//
+// The typesetter reports everything against a line of book.tex, and book.tex is
+// a file nobody wrote: it is half a megabyte of macro calls this package
+// produced, it is deleted and made again on every build, and "l.41207" in the
+// log tells a reader nothing they can act on. What they need is the file under
+// content/ that the text came from, because that is the file somebody can open
+// and fix.
+//
+// So the writer drops a comment in front of every body it sets, the line
+// numbers of those comments are read back off the finished document, and an
+// error at line 41207 is reported against the last file that began before it.
+// A comment is what carries the mark because TeX counts a comment line like any
+// other and then throws it away, so the mapping costs the document nothing.
+type Source struct {
+	Line int    // the line of the generated TeX the marker sits on
+	Path string // content/en/alg/I/01_s1_laws_of_composition.md
+}
+
+// sourceMark opens a marker comment. Two per cent signs so it cannot be
+// confused with the escaper's output: a per cent in the corpus is escaped to
+// \%, so no line of set text can begin with a bare one.
+const sourceMark = "%%<< "
 
 // A Finding is one thing the build could not do, and where.
 type Finding struct {
@@ -87,7 +115,7 @@ func Write(v *Volume) (*Document, error) {
 	if v.Meta.Edition != "" {
 		fmt.Fprintf(&b, "\\bedition{%s}\n", escapeTeX(v.Meta.Edition))
 	}
-	b.WriteString("\\begin{document}\n\\bcover\n\\btitlepage\n\\frontmatter\n\\bcontents\n")
+	b.WriteString("\\begin{document}\n\\bcover\n\\bhalftitle\n\\btitlepage\n\\frontmatter\n\\bcontents\n")
 
 	// The note to the reader and the Book's own introduction stand before
 	// chapter I and belong to no chapter, which is where the printing puts them
@@ -127,7 +155,39 @@ func Write(v *Volume) (*Document, error) {
 	}
 	b.WriteString("\\end{document}\n")
 	d.TeX = b.String()
+	d.index()
 	return d, nil
+}
+
+// index reads the source markers back off the finished document.
+//
+// Off the finished string rather than counted as the parts went in, because the
+// line the typesetter reports is a line of the file on disk and the only thing
+// that is certainly the file on disk is the string that gets written to it. A
+// counter maintained alongside a strings.Builder is a second implementation of
+// the same arithmetic and would be wrong the first time somebody added a
+// Fprintf without thinking about it.
+func (d *Document) index() {
+	d.Sources = nil
+	for i, line := range strings.Split(d.TeX, "\n") {
+		if path, ok := strings.CutPrefix(line, sourceMark); ok {
+			d.Sources = append(d.Sources, Source{Line: i + 1, Path: path})
+		}
+	}
+}
+
+// At is the corpus file whose text is set on a line of the generated document,
+// and empty for a line that belongs to the class or to the front matter rather
+// than to any file.
+func (d *Document) At(line int) string {
+	if d == nil || len(d.Sources) == 0 {
+		return ""
+	}
+	i := sort.Search(len(d.Sources), func(i int) bool { return d.Sources[i].Line > line })
+	if i == 0 {
+		return ""
+	}
+	return d.Sources[i-1].Path
 }
 
 // collect is every anchor the volume defines, which is what a cross reference
@@ -232,6 +292,7 @@ func (d *Document) exercises(b *strings.Builder, v *Volume, c *Chapter, anchors 
 				exLabel = fmt.Sprintf("%s-ex-%d", label, e.Number)
 			}
 			fmt.Fprintf(b, "\\bexercise{%d}{%s}{%s}\n", e.Number, star, exLabel)
+			b.WriteString(mark(e.Path))
 			r := d.renderer(v, e.Path, e.Head, anchors)
 			tex, err := r.TeX(StripTitle(e.Body))
 			if err != nil {
@@ -252,7 +313,19 @@ func (d *Document) body(v *Volume, s *Section, anchors map[string]bool) (string,
 		return "", err
 	}
 	d.Files++
-	return tex, nil
+	return mark(s.Path) + tex, nil
+}
+
+// mark is the comment that says the following lines came out of one corpus
+// file. It ends in a newline of its own, so that it cannot join itself to the
+// line under it: a TeX comment eats the newline that closes it, and a marker
+// set on the same line as the text it introduces would run the text into the
+// paragraph above.
+func mark(path string) string {
+	if path == "" {
+		return ""
+	}
+	return sourceMark + path + "\n"
 }
 
 // renderer wires one file's renderer to the document's counters.
