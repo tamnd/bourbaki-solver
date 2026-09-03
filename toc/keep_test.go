@@ -309,3 +309,41 @@ func TestAKeptPageThatTheMapCannotPlaceHoldsItsPDFPage(t *testing.T) {
 		t.Errorf("reported %v, want the one page it kept", kept)
 	}
 }
+
+// Chapter V of evt-i-v opens its historical note on pdf 338, a page whose
+// running head reads HISTORICAL NOTE and which carries a manual flag saying the
+// opening was filed by hand. A whole-shelf rebuild dropped the locator without
+// a word, which is how it was found.
+func TestALocatorTheRebuildLostIsKeptAndReported(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "V", Page: 1, PDFPage: 259,
+		Historical: &corpus.Locator{Page: 80, PDFPage: 338}}}
+	fresh := []corpus.Chapter{{Numeral: "V", Page: 1, PDFPage: 259}}
+
+	out, kept := KeepTitles(old, fresh, plainMap(-258, 400))
+	if out[0].Historical == nil {
+		t.Fatal("the historical note is gone, which is the whole defect")
+	}
+	if h := out[0].Historical; h.Page != 80 || h.PDFPage != 338 {
+		t.Errorf("the note is on printed %d, pdf %d, want 80 and 338", h.Page, h.PDFPage)
+	}
+	if len(kept) != 1 || kept[0].What != "historical note" || kept[0].Now != "nothing" {
+		t.Errorf("reported %+v, want the one note it kept", kept)
+	}
+}
+
+// A chapter that prints no historical note stays without one. Nil in the
+// manifest is not a reading that failed, it is the chapter as it is, and the
+// rebuild finding one there is the rebuild reading a page nobody had read.
+func TestALocatorTheManifestDoesNotHaveIsTakenFromTheRebuild(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "VIII", Page: 1, PDFPage: 259}}
+	fresh := []corpus.Chapter{{Numeral: "VIII", Page: 1, PDFPage: 259,
+		Historical: &corpus.Locator{Page: 90, PDFPage: 348}}}
+
+	out, kept := KeepTitles(old, fresh, plainMap(-258, 400))
+	if out[0].Historical == nil || out[0].Historical.Page != 90 {
+		t.Errorf("the note the rebuild found was not taken: %+v", out[0].Historical)
+	}
+	if len(kept) != 0 {
+		t.Errorf("reported %v, want nothing: there was no reading here to undo", kept)
+	}
+}
