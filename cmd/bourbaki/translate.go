@@ -97,6 +97,8 @@ about a fifth of the words.
   -keep          leave the questions on the boxes, for debugging
   -deadline DUR  the longest one ask of one chunk may take, default 5m, up to
                  20m, for a day the boxes are answering slowly
+  -within DUR    stop the whole run after this long, whatever it is in the
+                 middle of, and report what was written. Unset by default
   -queue PATH    the work list, default $BOURBAKI_WORK/queue
 
 There is one subcommand, bourbaki translate roundtrip, which takes a sample of
@@ -136,6 +138,21 @@ through: eight short chunks timed out on both boxes, pass after pass, while
 chapter III went over the same routes. A run on a slow day is worth more time
 per question. It is still a cap, and a lane that spends it has still spent it
 doing nothing, so raise it for the run that needs it rather than in the file.
+
+-deadline is per ask and not per file, and the difference is a whole day when it
+is read the wrong way round. A section is 25 to 50 chunks, so at the longest
+-deadline the flag accepts one file is up to sixteen hours, and a long call
+prints nothing until it returns: two lanes sat seventy two minutes inside their
+first file on a morning that wrote no section at all, while the supervisor above
+them cleared their leases twice for looking dead. An exercise is one chunk, so
+for exercises the two numbers are the same and the flag does what it looks like
+it does.
+
+-within is the bound on the run. It stops everything when the time is up and
+reports what was written, and it costs only the chunks in flight, because every
+answered chunk is recorded done in the queue with its answer beside it before
+the file is ever assembled. A run stopped this way is not an error; run it again
+and it reads back what it has and asks only for the rest.
 
 A host that keeps refusing to read the question is taken out of the run. The
 host list is a preference order and a host that refuses is still a host, so a
@@ -216,6 +233,7 @@ func runTranslate(args []string) error {
 	all := fs.Bool("all", false, "with -check-glossary, every term and not only the missed ones")
 	keep := fs.Bool("keep", false, "leave the questions on the boxes")
 	deadline := fs.Duration("deadline", chunkDeadline, "the longest one ask of one chunk may take")
+	within := fs.Duration("within", 0, "stop the whole run after this long and report what was written")
 	queueRoot := fs.String("queue", defaultQueueRoot(), "queue directory")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -348,6 +366,24 @@ func runTranslate(args []string) error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// -within bounds the run, which is the bound a caller actually wants and the
+	// one this command did not have. -deadline is per ask and says so, but it is
+	// the only cap here, so a runner written on the belief that it bounded the
+	// call was not being careless: a section is 25 to 50 chunks, and at the
+	// maximum -deadline accepts that is sixteen hours in one call that prints
+	// nothing until it returns. Two lanes sat seventy two minutes inside a single
+	// file on a morning that wrote no section at all, and the supervisor above
+	// them cleared their leases twice while they were still in it.
+	//
+	// It is safe to cut a run short because every answered chunk is already
+	// recorded done in the queue with its answer beside it. What is lost is the
+	// chunks in flight, and the next run reads back everything else and asks only
+	// for the rest.
+	if *within > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, *within)
+		defer cancel()
+	}
 
 	// Anything a worker was holding when it died comes back before this run
 	// starts, or the chunks it had sit in leased until their deadline passes and
@@ -399,6 +435,14 @@ func runTranslate(args []string) error {
 	// log.
 	fmt.Printf("translate: %d files written, %d refused, %d were already current, %d asks\n",
 		written, refused, skipped, asks)
+	// A run that spent the time it was given did what it was asked to do, so it
+	// is said and not returned as a failure. An interrupt still is one: somebody
+	// stopped this, and a script above it should be able to tell that from a
+	// slice of effort running out.
+	if *within > 0 && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		fmt.Printf("translate: stopped after %s, which is what -within asked for; run it again to carry on\n", *within)
+		return nil
+	}
 	return ctx.Err()
 }
 
@@ -1592,9 +1636,26 @@ func modelsUsed(models []string) string {
 // The attempt is in it, so that a second ask does not land on the first one's
 // files and read the first one's answer back when the second call dies before
 // writing.
+//
+// The body is in it because the chunk number is not a name for a piece of text.
+// A section is cut at blank lines under ChunkChars and ChunkSpans, so changing
+// either of those re-cuts every unfinished section and chunk 7 becomes a
+// different passage of the book while keeping the number 7. The queue and the
+// accepted answers are keyed on a hash of the body already and would both miss,
+// which is what they should do; this was the one name left that would have been
+// reused, so a re-split would have put the new chunk 7 into the directory the
+// old chunk 7 was asked in and read whatever was lying there. Keying it on the
+// text turns that into a fresh directory, which is the whole of what is wanted:
+// a re-split should miss and not mis-pair.
+//
+// Six hex digits of each. That is the same width the source hash has always
+// had, and the two together are 24 bits against the chunks of one section,
+// which is tens of items and not thousands.
 func chunkID(lang, source string, c translate.Chunk, attempt int) string {
-	sum := sha256.Sum256([]byte(source))
-	return fmt.Sprintf("tr-%s-%s-%03d-%d", lang, hex.EncodeToString(sum[:])[:6], c.Index, attempt)
+	src := sha256.Sum256([]byte(source))
+	body := sha256.Sum256([]byte(c.Body))
+	return fmt.Sprintf("tr-%s-%s-%s-%03d-%d", lang,
+		hex.EncodeToString(src[:])[:6], hex.EncodeToString(body[:])[:6], c.Index, attempt)
 }
 
 // runID names the run in the front matter of every file it wrote.
