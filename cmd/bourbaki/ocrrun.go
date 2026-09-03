@@ -219,12 +219,20 @@ func ocrFill(args []string) error {
 	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
 	contents := fs.Bool("contents", false, "read the pages as a table of contents")
 	unread := fs.Bool("unread", false, "only the pages with no reading committed")
+	// -unread narrows the set and this widens it, which is the direction that
+	// was missing. It takes a range and refuses to run without one, because the
+	// pages it puts back are pages that already passed and the cost of pointing
+	// it at a whole volume by accident is a volume of fleet time.
+	again := fs.Bool("again", false, "read pages that already pass the rules again, within -f and -l")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *book == "" {
 		fs.Usage()
 		os.Exit(2)
+	}
+	if *again && (*first == 0 || *last == 0) {
+		return fmt.Errorf("ocr fill -again needs -f and -l: it queues pages that already pass, so the range has to be said out loud")
 	}
 	if err := contentsRange(*contents, *first, *last); err != nil {
 		return err
@@ -233,7 +241,8 @@ func ocrFill(args []string) error {
 	if err != nil {
 		return err
 	}
-	runner := &ocr.Runner{Book: state.entry.ID, Root: state.root, Queue: state.queue, Prompt: state.ask}
+	runner := &ocr.Runner{Book: state.entry.ID, Root: state.root, Queue: state.queue, Prompt: state.ask,
+		ReadAgain: *again, Logf: func(format string, args ...any) { fmt.Printf(format+"\n", args...) }}
 	sources := state.sources(*first, *last, *unread)
 	added, err := runner.Fill(sources)
 	if err != nil {

@@ -98,6 +98,29 @@ type Runner struct {
 	// at a higher resolution to be read better, which are the two cases where
 	// walking over the old readings is the point.
 	RereadProtected bool
+	// ReadAgain says an accepted page is work anyway.
+	//
+	// The three doors that were here before are doors for something else: a
+	// changed image, a changed prompt, or a rejected page a stronger reader
+	// should take. A page that passes every rule was unreachable, and it stayed
+	// unreachable however wrong it was, because state took passing the rules as
+	// evidence of having been read correctly. The rules are structural. They see
+	// a broken heading, a loose control sequence, an unbalanced delimiter. They
+	// cannot see a page that is well formed and wrong.
+	//
+	// alg-x-fr is the case. 163 of its 222 pages came off the weakest reader in
+	// the fleet, every one of them passes, so every one was alreadyRead and Fill
+	// skipped all 222. Page 65 is the shape of it: running_head RÉSOLUTIONS
+	// where every neighbouring page of the chapter says ALGÈBRE HOMOLOGIQUE,
+	// because the reader filed the section title as the running head, and no
+	// page_label at all. Both wrong, neither visible to a rule.
+	//
+	// outranked stays in force, and that is what makes this safe rather than a
+	// way to lose work: the 142 pages lost before were lost to a weaker reader
+	// writing over a stronger one, and outranked stops that whatever put the
+	// page in the queue. A run holding nothing better than what read the page
+	// leaves it alone and says so.
+	ReadAgain bool
 	// Keep leaves the page images on the hosts.
 	Keep bool
 	// Salvage writes a page on its last attempt when the only things wrong with
@@ -232,7 +255,7 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var added, waited int
+	var added, waited, again int
 	for _, source := range sources {
 		if source.Blank {
 			continue
@@ -248,6 +271,23 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 			continue
 		}
 		job := queue.New(queue.StageOCR, Target(r.Book, source.Page), source.SHA256, promptSHA)
+		// A page read at this image and this prompt is a job the queue has
+		// already done, and Add refuses one of those, so ReadAgain has to say so
+		// to the queue as well as to state or it would queue nothing at all.
+		// Reset is the same door translate -force uses and it keeps the id, so
+		// the record of what the last answer was and which host gave it stays on
+		// the file rather than being replaced by an id nobody can line up.
+		if r.ReadAgain {
+			reset, err := r.Queue.Reset(queue.StageOCR, job.ID)
+			if err != nil {
+				return added, err
+			}
+			if reset {
+				again++
+				added++
+				continue
+			}
+		}
 		ok, err := r.Queue.Add(job)
 		if err != nil {
 			return added, err
@@ -256,8 +296,17 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 			added++
 		}
 	}
+	if again > 0 {
+		r.logf("%d pages already read were put back for a re-read", again)
+	}
 	if waited > 0 {
-		r.logf("%d pages do not pass the rules and came off a stronger reader than this run has, left for that reader", waited)
+		// Under ReadAgain most of these pass the rules, so the old wording would
+		// be false about them. The reason they are held is the same either way.
+		what := "do not pass the rules and came off"
+		if r.ReadAgain {
+			what = "came off"
+		}
+		r.logf("%d pages %s a stronger reader than this run has, left for that reader", waited, what)
 	}
 	return added, nil
 }
@@ -327,9 +376,13 @@ func (r *Runner) state(source Source, promptSHA string) pageState {
 		expect = r.Expect(source.Page)
 	}
 	text := textguard.Normalise(textguard.Strip(file.Body))
-	if len(Validate(text, expect, r.options())) == 0 {
+	if len(Validate(text, expect, r.options())) == 0 && !r.ReadAgain {
 		return alreadyRead
 	}
+	// Falling through rather than returning unread is deliberate. An accepted
+	// page asked for again is still subject to outranked, so a run holding a
+	// weaker reader than the one that wrote it is told the page is somebody
+	// else's work instead of reading over it.
 	if r.outranked(file.Meta.Model) || r.resalvaging(file.Meta) {
 		return needsABetterReader
 	}
