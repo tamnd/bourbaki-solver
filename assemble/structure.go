@@ -402,6 +402,30 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 				parent, passed[r] = r, true
 			case corpus.ScopeSubsec:
 				run, next = r, r.Number+1
+				// The same cut as above and it has to be made here as well,
+				// because the block above it cannot make it. A run whose head
+				// carries its first member on the line, "Remarques. — 1) ...",
+				// arrives with next still 0: the run is not open until this
+				// block has been read as its first member. So the cut above
+				// never looks at it, and where the printing ran the members
+				// together the second and third go into the body of the first
+				// and are invisible to everything downstream, with no tag, no
+				// reference target and no translation unit of their own.
+				//
+				// It is cut out of the body rather than out of the block,
+				// because the head has already been taken off by statementAt
+				// and the body is what the member is.
+				//
+				// no. 11 of § 5 of chapter IV of Integration is the case to
+				// read: the French printing sets Remarque 1 and then "2) La
+				// topologie induite ..." on the line under it with no blank
+				// line between, and only Remarque 1 came out.
+				if head, rest, cut := cutNextMember(body, next); cut {
+					body = head
+					t := b
+					t.text, t.label = rest, ""
+					queue = slices.Insert(queue, i+1, t)
+				}
 			}
 		}
 		// A proof the printing broke off and takes up again hands the reader
@@ -633,7 +657,18 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		r := run
 		r.Number = next
 		took(r)
-		return r, "", body(afterMarker(marker, tail)), true, nil
+		// The star that opens a passage in small type stands in front of the
+		// number and is taken off with it, so it goes back on the front of the
+		// body, exactly as it does for a head below. Without this the member
+		// loses a mark the book set and the star at the far end of the passage
+		// is left without its pair: eight members of runs across the corpus
+		// open on one, "\* 2) The real line $\mathbf{R}$ is locally compact",
+		// and five of those close the passage on the same line.
+		out := afterMarker(marker, tail)
+		if star := smallTypeMark.FindString(marker); star != "" {
+			out = star + " " + out
+		}
+		return r, "", body(out), true, nil
 	}
 	// The head matched one of the branches of pr.head and left the others empty,
 	// and every branch pairs its kind with its number, so running the pairs
@@ -1016,6 +1051,29 @@ func cutRunMember(text string, now int) (head, rest string, ok bool) {
 	for i := 1; i < len(lines); i++ {
 		if num, _, _, ok := runItem(lines[i]); ok && num == strconv.Itoa(now+1) {
 			return strings.Join(lines[:i], "\n"), strings.Join(lines[i:], "\n"), true
+		}
+	}
+	return "", "", false
+}
+
+// cutNextMember cuts the body of one member of a run at the line where the next
+// member begins, and says false where the body is only its own member.
+//
+// It is cutRunMember asked from the other end. That one is given a block and
+// asks whether the block opens on the member now expected; this is given a body
+// whose member has already been read off the front by statementAt, so the
+// number it is looking for is the only thing it can go on.
+//
+// The search is for one number and not for any number, and that is what keeps a
+// cross-reference out of it. "voir 2) ci-dessus" in the body of member 5 is not
+// a break, because 5 is followed by 6 and nothing else. The line has to open on
+// the marker as well, so a citation in the middle of a sentence is never the
+// start of anything.
+func cutNextMember(body string, want int) (head, rest string, ok bool) {
+	lines := strings.Split(body, "\n")
+	for i := 1; i < len(lines); i++ {
+		if num, _, _, is := runItem(lines[i]); is && num == strconv.Itoa(want) {
+			return strings.TrimRight(strings.Join(lines[:i], "\n"), "\n"), strings.Join(lines[i:], "\n"), true
 		}
 	}
 	return "", "", false

@@ -964,6 +964,73 @@ func TestARunSplitsTwoMembersThePageRanTogether(t *testing.T) {
 	}
 }
 
+// The other end of the same cut, and the one the printings actually make: the
+// head carries member 1 on its own line and member 2 opens the line under it.
+// The block above cannot make this cut, because the run is not open until this
+// block has been read as its first member and next is still 0 when it is asked.
+// no. 11 of § 5 of chapter IV of Integration is read this way.
+func TestARunSplitsWhereItsHeadCarriesTheFirstMember(t *testing.T) {
+	in := blocks(
+		"### 11. Espaces de fonctions mesurables",
+		"**Remarques.** — 1) L’espace vectoriel topologique $\\mathcal{S}(X, \\mu; F)$ n’est pas nécessairement localement convexe.\n2) La topologie induite par la topologie de la convergence en mesure est moins fine.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "int", Chapter: "IV", Section: 5}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"int-iv-s5-n11-rem-1",
+		"int-iv-s5-n11-rem-2",
+	})
+	if strings.Contains(got[0].Body, "La topologie induite") {
+		t.Errorf("the second member stayed in the body of the first: %q", got[0].Body)
+	}
+	if !strings.HasPrefix(got[1].Body, "La topologie induite") {
+		t.Errorf("the second member was not read: %q", got[1].Body)
+	}
+}
+
+// The cut looks for the one number the run is up to and it has to be at the
+// front of a line, which is what keeps a member that cites an earlier one whole.
+func TestARunDoesNotSplitOnACrossReferenceToAMember(t *testing.T) {
+	in := blocks(
+		"### 4. Mesures définies par des densités",
+		"**Remarques.** — 1) Le raisonnement de la prop. 3 s’applique, voir 2) ci-dessous.\n3) On notera que cette hypothèse est nécessaire.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "int", Chapter: "V", Section: 5}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"int-v-s5-n4-rem-1"})
+	for _, want := range []string{"voir 2) ci-dessous", "3) On notera"} {
+		if !strings.Contains(got[0].Body, want) {
+			t.Errorf("the body was cut at %q: %q", want, got[0].Body)
+		}
+	}
+}
+
+// The star that opens a passage in small type stands in front of the number and
+// comes off with it, so it has to go back on the body. Five of the eight members
+// of runs that open on it close the passage on the same line, and dropping it
+// leaves the star at the far end without its pair. The members write it escaped,
+// which is not how a head writes it. See smallTypeMark.
+func TestAMemberOfARunKeepsTheStarThatOpensSmallType(t *testing.T) {
+	in := blocks(
+		"### 9. Locally Compact Spaces",
+		"*Examples*",
+		"(1) Every compact space is locally compact.",
+		"\\* (2) The real line $\\mathbf{R}$ is locally compact, since it is the union of the intervals $[-n, +n]$. \\*",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "top", Chapter: "I", Section: 9}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"top-i-s9-n9-exa-1", "top-i-s9-n9-exa-2"})
+	if !strings.HasPrefix(got[1].Body, "\\* The real line") {
+		t.Errorf("the member lost the mark the printing set: %q", got[1].Body)
+	}
+}
+
 // Where a no. prints two runs of one kind the numbers belong to the last, which
 // is the run the volume cites by, and the earlier one is left as the prose it is
 // printed as. See walk.
