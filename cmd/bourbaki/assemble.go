@@ -25,6 +25,20 @@ import (
 // its inputs, and the only way to know that it stays one is to run it against
 // what is committed and diff.
 //
+// -overwrite is what a run needs before it may replace a file whose committed
+// text is not the text this run would write. Without it a run that would change
+// a committed file stops and names every one of them, and a run that changes
+// nothing behaves exactly as it always did.
+//
+// It is there because assembly is one half of a two-layer arrangement and only
+// one of the layers is generated. A correction made in content/ rather than in
+// the page it came from survives until the next assemble of that book and is
+// then silently undone, because assembly is a pure function of pages/ and does
+// not know that the text it is replacing was better than the text it has. That
+// had grown to 80 files across 21 books before anything reported it, and it was
+// found by diffing after every run by hand. A correction belongs in the page,
+// and this is what says so at the moment the correction would otherwise be lost.
+//
 // -partial assembles the chapters that are read through and skips the ones that
 // are not. A volume is normally assembled once its pages are all in, and running
 // it short is then a mistake worth stopping for, which is why this is a flag and
@@ -63,10 +77,11 @@ func runAssemble(args []string) error {
 	book := fs.String("book", "", "book id, as in manifests/books.yaml")
 	lang := fs.String("lang", "", "language of the pages being assembled, and by default the language of the book")
 	check := fs.Bool("check", false, "assemble but write nothing, and report what differs from what is committed")
+	overwrite := fs.Bool("overwrite", false, "replace committed files whose text this run does not reproduce")
 	partial := fs.Bool("partial", false, "assemble the chapters that are read through and skip the ones that are not")
 	quiet := fs.Bool("q", false, "print only the totals")
 	fs.Usage = func() {
-		fmt.Fprint(os.Stderr, "usage: bourbaki assemble -book <id> [-lang fr] [-check] [-partial]\n\n")
+		fmt.Fprint(os.Stderr, "usage: bourbaki assemble -book <id> [-lang fr] [-check] [-overwrite] [-partial]\n\n")
 		fs.PrintDefaults()
 	}
 	if _, err := parseFlags(fs, args); err != nil {
@@ -86,6 +101,17 @@ func runAssemble(args []string) error {
 	}
 	if *check {
 		return checkFiles(root, files, stale)
+	}
+	if !*overwrite {
+		clobbered, err := wouldClobber(files)
+		if err != nil {
+			return err
+		}
+		if len(clobbered) > 0 {
+			return fmt.Errorf("%s: %d committed files hold text this run does not reproduce, and it would replace them:\n\t%s\n"+
+				"put the correction in the page it came from, or pass -overwrite to let assembly have the last word",
+				*book, len(clobbered), strings.Join(named(root, clobbered), "\n\t"))
+		}
 	}
 	for _, path := range sortedKeys(files) {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -713,6 +739,37 @@ func staleFiles(root, lang, book string, chapters []corpus.Chapter, written map[
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// wouldClobber is the committed files this run would replace with something
+// else. A file that is not there yet is not one of them: writing a section for
+// the first time takes nothing away. Nor is a file this run reproduces byte for
+// byte, which is the ordinary case and the reason the gate costs nothing on a
+// corpus that is in step with its pages.
+func wouldClobber(files map[string][]byte) ([]string, error) {
+	var out []string
+	for _, path := range sortedKeys(files) {
+		have, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(have, files[path]) {
+			out = append(out, path)
+		}
+	}
+	return out, nil
+}
+
+// named puts a list of absolute paths back into the spelling the corpus uses.
+func named(root string, paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, rel(root, p))
+	}
+	return out
 }
 
 // checkFiles compares what this run would write against what is committed.

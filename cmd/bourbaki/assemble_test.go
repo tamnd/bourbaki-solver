@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -674,6 +675,61 @@ func TestRunAssembleCheckReportsADifference(t *testing.T) {
 	}
 	if len(after) == len(before) {
 		t.Error("-check wrote the file back")
+	}
+}
+
+// A correction made in content/ and not in the page it came from is undone by
+// the next assemble of that book. It went unreported until it had reached 80
+// files, so a run that would undo one now stops and names it, and only
+// -overwrite lets assembly have the last word.
+func TestRunAssembleWillNotClobberACorrectionWithout(t *testing.T) {
+	root := smallCorpus(t)
+	t.Setenv("BOURBAKI_CORPUS", root)
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(root, "content", "en", "alg", "VIII",
+		"01_s1_artinian_modules_and_noetherian_modules.md")
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repaired := append(before, []byte("\na correction made at the wrong layer\n")...)
+	if err := os.WriteFile(path, repaired, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = runAssemble([]string{"-book", "alg-viii", "-q"})
+	if err == nil {
+		t.Fatal("a run that would undo the correction should stop")
+	}
+	if !strings.Contains(err.Error(), "01_s1_artinian_modules_and_noetherian_modules.md") {
+		t.Errorf("the error does not name the file: %v", err)
+	}
+	if now, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(now, repaired) {
+		t.Error("the run that stopped wrote the file anyway")
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-overwrite", "-q"}); err != nil {
+		t.Fatalf("-overwrite should go ahead: %v", err)
+	}
+	if now, err := os.ReadFile(path); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(now, before) {
+		t.Error("-overwrite did not put the assembled text back")
+	}
+}
+
+// A book whose content is in step with its pages is not held up by the gate,
+// which is the whole corpus on an ordinary day.
+func TestRunAssembleWritesWhenItReproducesWhatIsThere(t *testing.T) {
+	root := smallCorpus(t)
+	t.Setenv("BOURBAKI_CORPUS", root)
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := runAssemble([]string{"-book", "alg-viii", "-q"}); err != nil {
+		t.Fatalf("a second run of an unedited book should go through: %v", err)
 	}
 }
 
