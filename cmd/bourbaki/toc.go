@@ -317,7 +317,8 @@ func correctContents(pages []string, errata []corpus.Erratum) ([]string, error) 
 			n += strings.Count(p, e.Says)
 		}
 		if n != 1 {
-			return nil, fmt.Errorf("the contents erratum %q is on %d pages of the volume, want exactly one", e.Says, n)
+			return nil, fmt.Errorf("the contents erratum %q is on %d pages of the volume, want exactly one%s",
+				e.Says, n, nearMiss(pages, e.Says))
 		}
 		for i, p := range pages {
 			pages[i] = strings.Replace(p, e.Says, e.Read, 1)
@@ -327,6 +328,59 @@ func correctContents(pages []string, errata []corpus.Erratum) ([]string, error) 
 		}
 	}
 	return pages, nil
+}
+
+// nearMiss says which line the erratum was probably meant for, when the exact
+// one is on no page of the volume.
+//
+// It exists because of int-i-iv-fr, which spent its whole life as an open issue
+// reported as "the contents re-read hit the colophon, not the contents". The
+// contents had not moved and nothing had hit a colophon. Its erratum reads
+// "§ 2. Support d'une mesure ... 62" with a typewriter apostrophe and the page
+// carries "Support d’une mesure" with a typographic one, U+0027 against U+2019
+// at offset 14 of an 88 character line, and the corpus writes the typographic
+// one everywhere. The message said the line was on 0 pages of the volume, which
+// is true and is no help at all: the line is on pdf 283, in full, one character
+// out. So when the count is wrong the pages are searched again with the quote
+// marks folded together and the runs of blanks squeezed, and the line that
+// comes back is printed under the failure with the offset of the first
+// character that differs.
+//
+// It only ever reports. Folding the quotes for the match itself would let an
+// erratum typed with the wrong apostrophe apply, and applying it writes e.Read
+// into the page, so a corpus that uses U+2019 everywhere would quietly acquire
+// a U+0027 on the corrected line. The erratum is the thing to fix, and this
+// says which character to fix.
+func nearMiss(pages []string, says string) string {
+	want := fold(says)
+	// pages is indexed from zero and the volume counts its pdf pages from one.
+	for i, page := range pages {
+		for _, line := range strings.Split(page, "\n") {
+			if fold(line) != want {
+				continue
+			}
+			at := ""
+			for i := range min(len(line), len(says)) {
+				if line[i] != says[i] {
+					at = fmt.Sprintf(", first differing at byte %d", i)
+					break
+				}
+			}
+			return fmt.Sprintf("\n  pdf %d carries %q%s", i+1, line, at)
+		}
+	}
+	return ""
+}
+
+// fold is the difference between an erratum somebody typed and the line a page
+// carries: the apostrophes and quotation marks, and how many blanks are between
+// the words. See nearMiss, which is the only caller and which only reports.
+func fold(s string) string {
+	s = strings.NewReplacer(
+		"\u2018", "'", "\u2019", "'", "\u02bc", "'",
+		"\u201c", `"`, "\u201d", `"`,
+	).Replace(s)
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func printTOC(r *toc.Result, verbose bool) {
