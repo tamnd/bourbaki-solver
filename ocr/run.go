@@ -150,10 +150,10 @@ type Runner struct {
 	// only those were rendered, so a run bounded by 1 and 299 would lease a page
 	// whose image was swept two windows ago and send a batch at a file that is
 	// not there.
-	Only map[int]bool
-	Logf func(string, ...any)
-	Sleep       func(ctx context.Context, d time.Duration) error
-	Now         func() time.Time
+	Only  map[int]bool
+	Logf  func(string, ...any)
+	Sleep func(ctx context.Context, d time.Duration) error
+	Now   func() time.Time
 
 	// mu guards refused, which the host goroutines both read and write.
 	mu sync.Mutex
