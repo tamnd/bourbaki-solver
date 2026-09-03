@@ -76,7 +76,7 @@ func tocBuild(args []string) error {
 	}
 
 	ctx := context.Background()
-	failed, skipped := 0, 0
+	failed, skipped, derived := 0, 0, 0
 	for _, b := range list {
 		pm, err := pagemap.Load(root, b.ID)
 		if err != nil {
@@ -91,22 +91,40 @@ func tocBuild(args []string) error {
 			skipped++
 			continue
 		}
-		pages, err := volumeText(ctx, root, &b)
-		if err != nil {
-			return err
+		// A volume already read off its own pages is not a volume this failed
+		// on. Three of the forty-four carry no contents this can read, and
+		// bourbaki toc body was written for exactly those; their manifests say
+		// so in their own grammar. Counting them as failures made a sweep of a
+		// fully read library end in an error every time, which teaches a reader
+		// to ignore the one line that matters.
+		//
+		// The three fail in two different ways and both have to be caught here.
+		// ac-x-fr and lie-vii-viii-fr have no contents page at all, so the parse
+		// returns an error. alg-iv-vii-fr prints a contents that reads cleanly
+		// and is short a leaf: the scan runs from chapter V § 13 at the foot of
+		// pdf 423 to chapter VII § 1 at the head of pdf 424, so the leaf holding
+		// the end of chapter V and the whole of chapter VI is not in the file,
+		// and the parse comes back with three of the four chapters and a problem
+		// saying so. Taking that reading would throw away a chapter the body
+		// route already has.
+		fromBody := false
+		if was, ok := man.Get(b.ID); ok {
+			fromBody = readOffItsOwnPages(was.Grammar)
 		}
-		read, err := contentsReadings(root, b.ID)
+		res, err := readContents(ctx, root, &b, pm, errata)
 		if err != nil {
-			return fmt.Errorf("%s: %w", b.ID, err)
-		}
-		pages = toc.Overlay(pages, read, pm)
-		if pages, err = correctContents(pages, errata.ContentsErrata(b.ID)); err != nil {
-			return fmt.Errorf("%s: %w", b.ID, err)
-		}
-		res, err := toc.Parse(pages, pm, toc.Options{
-			Book: b.ID, Chapters: b.Chapters, Title: b.Title,
-			FrontMatterPDF: frontMatterPDF(&b)})
-		if err != nil {
+			if fromBody {
+				fmt.Printf("%s  read off its own pages by toc body, left as it stands\n", b.ID)
+				derived++
+				continue
+			}
+			// Everything else is reported against the volume it happened to and
+			// the sweep carries on. It used to return, and a single stranded
+			// contents erratum in int-i-iv-fr therefore stopped the run before
+			// it reached the thirty-odd volumes after it in the manifest, which
+			// read perfectly well. A volume named on the command line is the
+			// only volume in the list, so it still ends in a non-zero exit
+			// through the count below.
 			fmt.Printf("%s  %v\n", b.ID, err)
 			failed++
 			continue
@@ -136,6 +154,11 @@ func tocBuild(args []string) error {
 				fmt.Printf("  %d %s, pass -retitle to take the new readings\n", len(kept), titles)
 			}
 		}
+		if fromBody && len(toc.Hard(res.Problems)) > 0 {
+			fmt.Printf("%s  read off its own pages by toc body, left as it stands\n", b.ID)
+			derived++
+			continue
+		}
 		printTOC(res, *verbose)
 		if len(toc.Hard(res.Problems)) > 0 {
 			// A contents with a problem in it is not written. What the parser
@@ -161,6 +184,13 @@ func tocBuild(args []string) error {
 	if skipped > 0 {
 		fmt.Printf("%d volumes have no page map yet and were not read\n", skipped)
 	}
+	if derived > 0 {
+		volumes := "volumes carry a contents read off their own pages"
+		if derived == 1 {
+			volumes = "volume carries a contents read off its own pages"
+		}
+		fmt.Printf("%d %s and were left alone\n", derived, volumes)
+	}
 	if !*dry {
 		if err := man.Save(root); err != nil {
 			return err
@@ -171,6 +201,44 @@ func tocBuild(args []string) error {
 		return fmt.Errorf("%d volumes have contents problems and were not written", failed)
 	}
 	return nil
+}
+
+// readOffItsOwnPages says whether a contents already in the manifest came from
+// the volume's body rather than from a contents page.
+//
+// The grammar a reading records is the pair the contents page was set in,
+// pilcrow or column and bare or label, and a body reading has no contents page
+// to have a grammar of, so it writes the word body in the first half. That is
+// the whole of the mark: it is written by one command, bourbaki toc body, and
+// there is nothing else in the corpus that can produce it.
+func readOffItsOwnPages(grammar string) bool {
+	return strings.HasPrefix(grammar, string(toc.Body)+"/")
+}
+
+// readContents is one volume's table of contents, from the pdf text through the
+// re-readings and the errata to the parse.
+//
+// It is a function of its own so that the sweep has one place to decide what a
+// volume it cannot read means. Each of the four steps used to return straight
+// out of the loop, so whichever volume failed first ended the run for every
+// volume after it in the manifest.
+func readContents(ctx context.Context, root string, b *corpus.Book, pm *pagemap.Map,
+	errata *corpus.ErrataManifest) (*toc.Result, error) {
+	pages, err := volumeText(ctx, root, b)
+	if err != nil {
+		return nil, err
+	}
+	read, err := contentsReadings(root, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	pages = toc.Overlay(pages, read, pm)
+	if pages, err = correctContents(pages, errata.ContentsErrata(b.ID)); err != nil {
+		return nil, err
+	}
+	return toc.Parse(pages, pm, toc.Options{
+		Book: b.ID, Chapters: b.Chapters, Title: b.Title,
+		FrontMatterPDF: frontMatterPDF(b)})
 }
 
 // contentsReadings is what the model read off the pages of the table of
