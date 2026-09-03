@@ -196,7 +196,20 @@ func Load(opt Options) (*Corpus, error) {
 	// Markdown as it stands and not for a manifest somebody could have edited.
 	// That the manifest agrees with the Markdown is refs build -check, which is
 	// its own step and not this one.
-	if hasLang(c.Langs, "en") {
+	//
+	// It is also, on its own, what an audit costs. Timed stage by stage over the
+	// corpus as it stands, building the graph is 63.5 of the 67 seconds a full
+	// load takes; every manifest and every Markdown body of every language
+	// together is 3.2. So a run that selected no reference rule does not build
+	// it, and bourbaki audit -only M01 comes back in about four seconds instead
+	// of a minute.
+	//
+	// That difference is the whole point rather than a tidiness. M01 finds an
+	// unclosed math span and has since the rule was written, and people went on
+	// finding those with publish -check, which walks the corpus for ten minutes
+	// and stops at the first one. A question you ask while a file is open in
+	// front of you has to answer while it is still open.
+	if hasLang(c.Langs, "en") && opt.wantsRefs() {
 		if c.Refs, err = refs.Build(c.Root, "en"); err != nil {
 			return nil, err
 		}
