@@ -706,7 +706,7 @@ func refreshFleet(ctx context.Context, routeFile, names string) error {
 		if strings.TrimSpace(value.Host) == "" {
 			continue
 		}
-		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+		targets = append(targets, fleetTarget(value))
 	}
 	if len(targets) == 0 {
 		return nil

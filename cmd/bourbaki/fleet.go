@@ -131,7 +131,7 @@ func runFleetProbe(args []string) error {
 		if value.Host == "" {
 			continue
 		}
-		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+		targets = append(targets, fleetTarget(value))
 	}
 	if len(targets) == 0 {
 		return fmt.Errorf("no route in %s names an ssh host", source)
@@ -176,9 +176,33 @@ func sshTargets(registry route.Registry) []fleet.Target {
 		if value.Host == "" {
 			continue
 		}
-		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+		targets = append(targets, fleetTarget(value))
 	}
 	return targets
+}
+
+// fleetTarget is the one place a route becomes something to ask over ssh.
+//
+// It exists because four call sites built the same three fields by hand and a
+// fifth fact then had to reach all four. That fact is the kind: a route that
+// names a reader is a box serving its own weights, and every question the fleet
+// asks about readiness has a different answer for it. See fleet.Kind. Missing
+// one call site would leave a host that is a reader everywhere except in the
+// report that says whether it can read.
+func fleetTarget(value route.Route) fleet.Target {
+	target := fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort}
+	if strings.TrimSpace(value.Reader) != "" {
+		target.Kind = fleet.Reader
+		target.ReaderURL = value.ReaderURL
+		// The served model is what the endpoint calls the weights and is what a
+		// row about a reader should print, since it is the thing that changes
+		// when somebody swaps the shortlist entry under it.
+		target.ReaderModel = value.ServedModel
+		if target.ReaderModel == "" {
+			target.ReaderModel = value.Model
+		}
+	}
+	return target
 }
 
 // runFleetAccounts prints the ban board, and with -sleep prints the seconds a
@@ -392,6 +416,15 @@ func runFleetStatus(args []string) error {
 		for _, value := range registry.Routes {
 			if facts, ok := state.Hosts[value.Name]; ok {
 				facts.Name = value.Name
+				// The kind comes off the route rather than out of the state
+				// file, because the route file is the thing that declares it and
+				// a state file written before there were kinds would read a
+				// reader as a browser and print the wrong sentence about it.
+				target := fleetTarget(value)
+				facts.Kind, facts.ReaderURL = target.Kind.Or(), target.ReaderURL
+				if facts.ReaderModel == "" {
+					facts.ReaderModel = target.ReaderModel
+				}
 				rows = append(rows, facts)
 			}
 		}

@@ -47,6 +47,22 @@ type Facts struct {
 	Rsync   bool `json:"rsync"`
 	Screen  bool `json:"screen"`
 
+	// Kind is what this host reads with, carried in from the target rather than
+	// guessed off the fields above. Guessing would get it wrong on the host it
+	// matters for: chatgpt-tool is installed on the reader as well and answers
+	// nothing there, so a rule of the form "it has the browser tool, so it is a
+	// browser box" reproduces the bug this field exists to fix.
+	Kind Kind `json:"kind,omitempty"`
+	// ReaderModel is what the reader's own model server calls the weights, and
+	// ReaderAnswers is whether it replied to this probe. They are the two facts
+	// somebody deciding where to send a page needs about a reader host, and they
+	// are what the account counts are for a browser host.
+	ReaderModel   string `json:"reader_model,omitempty"`
+	ReaderAnswers bool   `json:"reader_answers,omitempty"`
+	// ReaderURL is where it was asked, kept so a row that says the endpoint is
+	// down says which endpoint.
+	ReaderURL string `json:"reader_url,omitempty"`
+
 	CheckedAt time.Time `json:"checked_at"`
 	Err       string    `json:"error,omitempty"`
 }
@@ -69,6 +85,21 @@ echo "rsync=$(command -v rsync || echo '')"
 echo "screen=$(command -v screen || echo '')"
 `
 
+// readerProbeScript asks the reader's own model server whether it is up, and is
+// appended to the probe only for a host that has one.
+//
+// It asks over the loopback on the box rather than from here, because that is
+// where the endpoint is: the reader serves 127.0.0.1 and there is no tunnel to
+// it, since it answers page images and not questions and nothing here should be
+// able to send it a conversation by accident.
+//
+// /models is the listing every OpenAI-shaped server answers, so this reports
+// both that the port is open and that what is behind it is the right sort of
+// thing. A socket check would say yes to anything that happened to bind.
+const readerProbeScript = `
+echo "reader_answers=$(curl -fsS --max-time 5 -o /dev/null -w 'yes' 'READER_URL/models' 2>/dev/null || echo '')"
+`
+
 // Target is one host to ask.
 //
 // Name and Host are two different things and conflating them is a bug waiting
@@ -79,15 +110,29 @@ type Target struct {
 	Name string
 	Host string
 	Port int
+	// Kind is what this host reads with. The zero value is a browser box, which
+	// is what every host in the pool was before there were kinds.
+	Kind Kind
+	// ReaderURL and ReaderModel come off the route of a reader host and are
+	// empty for a browser one. They are the route file's Reader_URL and
+	// ServedModel: where the model server on the box answers, and what it calls
+	// the weights on the wire.
+	ReaderURL   string
+	ReaderModel string
 }
 
 // Probe asks one host what it is.
 func Probe(ctx context.Context, runner Runner, target Target) Facts {
-	facts := Facts{Name: target.Name, CheckedAt: time.Now().UTC()}
+	facts := Facts{Name: target.Name, CheckedAt: time.Now().UTC(),
+		Kind: target.Kind.Or(), ReaderURL: target.ReaderURL, ReaderModel: target.ReaderModel}
 	if facts.Name == "" {
 		facts.Name = target.Host
 	}
 	script := strings.ReplaceAll(probeScript, "PORT", strconv.Itoa(target.Port))
+	if target.ReaderURL != "" {
+		script += strings.ReplaceAll(readerProbeScript, "READER_URL",
+			strings.TrimSuffix(target.ReaderURL, "/"))
+	}
 	out, err := runner.Run(ctx, target.Host, script)
 	if err != nil {
 		facts.Err = err.Error()
@@ -123,6 +168,8 @@ func Probe(ctx context.Context, runner Runner, target Target) Facts {
 			facts.Rsync = value != ""
 		case "screen":
 			facts.Screen = value != ""
+		case "reader_answers":
+			facts.ReaderAnswers = value != ""
 		}
 	}
 	// A box with neither program on it has nothing to offer. A box with only
@@ -170,25 +217,44 @@ const OCRMemoryMB = 1500
 // A thousand is that number rounded up.
 const OCRDiskMB = 1000
 
-// CanOCR reports whether a host can run chatgpt-tool ocr-batch.
+// CanOCR reports whether a host can read a page, and asks the question its kind
+// answers.
 //
-// OCR is a headed Chrome under xvfb-run driving the ChatGPT page. A host
-// without xvfb-run cannot start it, a host without rsync cannot be given the
-// images, and a host with 553 MB free, which is what server1 had on the day
-// this was written, will start it and then be killed by the OOM reaper halfway
-// through a batch. Reporting that up front is the difference between a host
-// marked incapable and a batch that dies at page eleven.
+// It used to ask one question of every host, because every host was one thing.
+// See Kind: a reader host fails every clause of the browser test and reads more
+// pages than anything else in the pool, so the one machine in the fleet with a
+// GPU was the one this gate was most likely to exclude, on the grounds that it
+// had no Xvfb for a browser it never starts.
 //
-// Disk is in here for the same reason, and it was added after the fact. server2
+// Rsync is in both, and is the only thing that is. The page images go over the
+// same way whatever reads them at the far end.
+func (f Facts) CanOCR() (bool, string) {
+	if f.Err != "" {
+		return false, f.Err
+	}
+	if f.Kind.Or() == Reader {
+		return f.canRead()
+	}
+	return f.canBrowse()
+}
+
+// canBrowse is the test as it always was.
+//
+// OCR on these boxes is a headed Chrome under xvfb-run driving the ChatGPT
+// page. A host without xvfb-run cannot start it, a host without rsync cannot be
+// given the images, and a host with 553 MB free, which is what one of them had
+// on the day this was written, will start it and then be killed by the OOM
+// reaper halfway through a batch. Reporting that up front is the difference
+// between a host marked incapable and a batch that dies at page eleven.
+//
+// Disk is in here for the same reason, and it was added after the fact. One box
 // filled its disk, and because nothing here looked at disk it kept its lane and
 // took work: every chunk of the first Vietnamese translation went to it and
 // came back "mkdir: cannot create directory 'bourbaki-ocr/chat': No space left
 // on device". The probe had the number in hand the whole time and only printed
 // it.
-func (f Facts) CanOCR() (bool, string) {
+func (f Facts) canBrowse() (bool, string) {
 	switch {
-	case f.Err != "":
-		return false, f.Err
 	case f.Tool == "":
 		return false, "chatgpt-tool is not installed"
 	case !f.Xvfb:
@@ -197,6 +263,34 @@ func (f Facts) CanOCR() (bool, string) {
 		return false, "no rsync, so the page images cannot be sent"
 	case f.MemFreeMB < OCRMemoryMB:
 		return false, fmt.Sprintf("%d MB free, and one profile needs about %d", f.MemFreeMB, OCRMemoryMB)
+	case f.DiskFreeMB < OCRDiskMB:
+		return false, fmt.Sprintf("%d MB free on disk, and one lane needs about %d", f.DiskFreeMB, OCRDiskMB)
+	}
+	return true, ""
+}
+
+// canRead is the test for a host that serves its own weights.
+//
+// What it needs is the reader program, the images, room to put them, and a
+// model server that answers. What it does not need is a browser, a display, an
+// account, or the memory a browser profile reserves: the weights are on the
+// card and the process holding them is up before this ever runs.
+//
+// The endpoint is asked rather than assumed, and it is the clause that will
+// actually fire. A reader box is a machine in a room whose service can be down
+// while ssh, disk and everything else about it look perfect, and a page sent to
+// a reader with no server behind it fails at the far end with nothing here
+// having said why.
+func (f Facts) canRead() (bool, string) {
+	switch {
+	case f.ReaderTool == "":
+		return false, "the reader program is not installed"
+	case !f.Rsync:
+		return false, "no rsync, so the page images cannot be sent"
+	case f.ReaderURL == "":
+		return false, "no reader url, so there is no model server to read against"
+	case !f.ReaderAnswers:
+		return false, "its model server does not answer on " + f.ReaderURL
 	case f.DiskFreeMB < OCRDiskMB:
 		return false, fmt.Sprintf("%d MB free on disk, and one lane needs about %d", f.DiskFreeMB, OCRDiskMB)
 	}
@@ -232,6 +326,18 @@ const CoresPerLane = 2
 func (f Facts) Lanes() int {
 	if ok, _ := f.CanOCR(); !ok {
 		return 0
+	}
+	// A reader's lanes are not bounded by anything this probe can see. The work
+	// is done by a card the probe cannot measure and by a server that was
+	// already holding the weights before the lane started, so the two divisors
+	// below are both about a browser: 1500 MB is what a Chrome profile reserves
+	// and two cores is what rasterising a page through swiftshader costs. Neither
+	// is spent here, and dividing by them would give the fastest reader in the
+	// pool the fewest lanes. Disk still divides, because the page images land on
+	// it the same way. What the card will actually take is measured by fleet
+	// bench and recorded as the route's concurrency, which is where it belongs.
+	if f.Kind.Or() == Reader {
+		return max(1, f.DiskFreeMB/OCRDiskMB)
 	}
 	byMemory := f.MemFreeMB / OCRMemoryMB
 	// Each lane drives its own profile and each profile grows, so disk divides
@@ -277,7 +383,13 @@ func Table(rows []Facts) string {
 			continue
 		}
 		ocr, why := row.CanOCR()
+		// The last column is what this host reads with, so on a reader it is the
+		// reader program and the weights it is serving rather than a browser tool
+		// path that is either empty or, worse, present and useless.
 		tool := row.Tool
+		if row.Kind.Or() == Reader {
+			tool = strings.TrimSpace(row.ReaderTool + "  " + row.ReaderModel)
+		}
 		if !ocr && why != "" {
 			tool = tool + "  (" + why + ")"
 		}
