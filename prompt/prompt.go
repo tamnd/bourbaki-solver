@@ -25,10 +25,17 @@ func OCR() string { return strings.TrimSpace(ocrBourbaki) + "\n" }
 //go:embed ocr_ens.md
 var ocrENS string
 
+//go:embed ocr_ens_en.md
+var ocrENSEn string
+
+//go:embed ocr_ens_fr.md
+var ocrENSFr string
+
 //go:embed ocr_foot.md
 var ocrFoot string
 
-// volumeNote is what a Book adds to the scanned prompt, by book id.
+// bookNote is what a Book adds to the scanned prompt, by book id, and it goes
+// to every printing of that Book.
 //
 // The prompt above was written against Algebra and says so, and a Book that
 // sets a notation of its own writes it here rather than there. A note is added
@@ -38,35 +45,71 @@ var ocrFoot string
 // back in the queue for a rule that is about none of them.
 //
 // A Book with nothing to add gets the shared prompt byte for byte, so its pages
-// do not go stale for a note about a volume it has no part in.
+// do not go stale for a note about a Book it has no part in.
+//
+// The key is the Book and not the volume because the note is about the Book.
+// Read ocr_ens.md and almost every line is a fact about Theory of Sets: the
+// Hilbert operator is tau with the bound letter as an index, the criteria are
+// labelled CF1 to CF8, disjunction is a large V, a removed letter leaves a
+// small filled square. None of that changes between one printing and another,
+// and keying it by volume is what read all 349 pages of the French printing
+// without any of it. Measured on the two printings of the same Book: the one
+// that was told the script T "is never \mathcal" wrote \mathcal zero times and
+// the one that was not wrote it 738 times, and the pilcrow the note calls
+// common turned up 249 times against 47.
+var bookNote = map[string]string{
+	"ens": ocrENS,
+}
+
+// volumeNote is what one printing adds, by volume id. It is for the lines that
+// really are about how a publisher set the page.
+//
+// The two printings of Theory of Sets are here because two of the fourteen
+// lines the note used to carry are of that kind, and both are wrong for the
+// other printing rather than merely absent from it. The English printing heads
+// a section with a bare number and the French heads it with a § and the number,
+// so "do not add a sign the page does not print" would tell the French reader
+// to drop a sign that is printed. The English printing is foot-number and the
+// French is head-label, so the sentence saying to leave the folio at the foot
+// would send the French reader looking for it in the wrong place, and the
+// French label is the thing the page map wants most.
+//
 // A volume that prints its page number at the foot and has no text layer behind
 // it gets the foot note, because those two together are what leave a volume with
 // no page number anywhere. Six volumes are foot-number and four of them carry a
 // text layer, so pdftotext reads the foot off that and the reading never has to.
 // The two here are the ones where the reading is the only chance at it, and they
-// are the two the page map cannot fit.
-//
-// ens-i-iv is foot-number as well and is deliberately not here. It has a text
-// layer, and its own note already says where the folio sits, so adding this one
-// would move its hash and put 416 read pages back in the queue for a rule that
-// changes nothing about them.
+// are the two the page map cannot fit. ens-i-iv is foot-number as well and does
+// not get ocrFoot: its own note below already says where the folio sits.
 var volumeNote = map[string]string{
-	"ens-i-iv": ocrENS,
-	"ac-i-vii": ocrFoot,
-	"top-v-x":  ocrFoot,
+	"ens-i-iv":    ocrENSEn,
+	"ens-i-iv-fr": ocrENSFr,
+	"ac-i-vii":    ocrFoot,
+	"top-v-x":     ocrFoot,
 }
 
 // OCRFor is the prompt for reading a page of one scanned volume.
-func OCRFor(book string) string {
-	note, ok := volumeNote[book]
-	if !ok {
-		return OCR()
+//
+// volume is the id in the manifest and book is the Book that volume prints, so
+// that the two printings of one Book are read with the same notation and each
+// with its own account of the page. A caller that has only the volume passes it
+// twice or passes an empty book, and gets the volume note alone.
+//
+// The Book note goes above the volume note because it is the general rule and
+// the volume note is the exception to it, and a reader meets the exception last.
+func OCRFor(volume, book string) string {
+	text := OCR()
+	if note, ok := bookNote[book]; ok {
+		text += "\n" + strings.TrimSpace(note) + "\n"
 	}
-	return OCR() + "\n" + strings.TrimSpace(note) + "\n"
+	if note, ok := volumeNote[volume]; ok {
+		text += "\n" + strings.TrimSpace(note) + "\n"
+	}
+	return text
 }
 
 // OCRForSHA256 is the hash of the prompt one volume is read with.
-func OCRForSHA256(book string) string { return SHA256(OCRFor(book)) }
+func OCRForSHA256(volume, book string) string { return SHA256(OCRFor(volume, book)) }
 
 // OCRAnything is every prompt a page of one volume could have been read with,
 // run together.
@@ -76,8 +119,8 @@ func OCRForSHA256(book string) string { return SHA256(OCRFor(book)) }
 // on disk and the front matter carries the hash of the prompt, not its text.
 // Rule 3 only ever matches a whole line, so the extra prompts cost nothing and
 // asking with the wrong one would miss a page that echoed a different one.
-func OCRAnything(book string) string {
-	return OCRFor(book) + "\n" + OCRNative() + "\n" + Contents()
+func OCRAnything(volume, book string) string {
+	return OCRFor(volume, book) + "\n" + OCRNative() + "\n" + Contents()
 }
 
 //go:embed ocr_native.md
