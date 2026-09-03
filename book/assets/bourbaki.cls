@@ -480,6 +480,26 @@
   \nopagecolor\restoregeometry
 }
 
+% \bhalftitle is the leaf between the cover and the title page: the title of the
+% volume alone, high on a recto, with a blank verso after it. Every one of these
+% printings has one and it is not decoration. It is the page that tells a reader
+% holding the block without its wrapper what the block is, and it is the first
+% recto, so leaving it out moves every folio of the front matter by two and puts
+% the title page on a verso, which no book does.
+%
+% Set at \large and not at the title page's \Huge, which is also what the
+% printings do: the half title names the book and the title page presents it.
+\newcommand{\bhalftitle}{%
+  \thispagestyle{empty}%
+  \begin{center}
+    \vspace*{0.18\paperheight}
+    {\large\bvolumetitle}\par
+    \ifx\bvolumespan\empty\else\vspace{1em}{\bvolumespan}\par\fi
+  \end{center}
+  \clearpage
+  \thispagestyle{empty}\null\clearpage
+}
+
 \newcommand{\btitlepage}{%
   \thispagestyle{empty}%
   \begin{center}
