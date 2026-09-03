@@ -915,8 +915,32 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // a bracket after it all open the line with it, and not one of the other 66
 // puts a dagger in front of a number. Those 66 are footnote marks, which sit
 // inside a sentence or against the word they hang off.
+//
+// T, Q, J and Π are the pilcrow again, read as a letter. They look like nothing
+// at all until the pages are counted: every page that opens an exercise with one
+// of them carries no pilcrow anywhere, so on that page the mark was read as a
+// letter throughout and the letter is all there is to go on. They are selective
+// the way a pilcrow is and an ordinary number is not, which is what rules out a
+// numbering of some other kind: page 109 of Espaces vectoriels topologiques in
+// French runs "T 27) 28) T 29) 30) T 31)", marking three of five.
+//
+// The other printing settles it. Of the 37 exercises marked this way that the
+// other language also has as an exercise of its own, 28 are starred there, which
+// is to say the other reading of the same exercise found a pilcrow in front of
+// it. The remaining 9 do not contradict it: every one of them sits on a page
+// that carries no exercise mark of any kind, neither pilcrow nor letter, so
+// there is nothing on it to disagree with.
+//
+// The letter is required to have a space after it, which is what separates a
+// mark from a label. The corpus writes "C1.", "S2.", "A1." and "E1)" 307 times
+// with no space and never means a mark by them. And A is left out although it
+// has the space: all four of "A 1)" and "A 2)" are in the proof of § 3 of
+// chapter V of Commutative Algebra in French, where they number the cases of an
+// argument, the second of them opening "Cas général". Those four are the whole
+// of the capital-and-space form outside the four letters taken here, so the set
+// is not a guess at what a model might do, it is the corpus counted.
 var exNumRE = regexp.MustCompile(
-	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†|§)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
+	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†|§)[ \t]*|[TQJΠ][ \t]+)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
 		`(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // marks are the star and the pilcrow a book can set in front of an exercise
@@ -933,7 +957,7 @@ func marksOf(prefix string) (star, pilcrow string) {
 			return markOf(prefix, "*"), p
 		}
 	}
-	for _, c := range []string{"†", "§"} {
+	for _, c := range []string{"†", "§", "T", "Q", "J", "Π"} {
 		if p := markOf(prefix, c); p != "" {
 			return markOf(prefix, "*"), p
 		}
