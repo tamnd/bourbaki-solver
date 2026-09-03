@@ -20,10 +20,20 @@ import (
 // and is better than it was, and it should be a thing somebody asks for rather
 // than a thing that happens.
 //
-// Pages are not kept. A page is a number the reader either got or did not, it
-// is checked against the body by toc verify, and a page that changed is a page
-// map or an erratum doing its job. It is the titles that get corrected by hand
-// and the titles that got silently undone.
+// Pages are not kept, with one exception. A page is a number the reader either
+// got or did not, it is checked against the body by toc verify, and a page that
+// changed is a page map or an erratum doing its job. It is the titles that get
+// corrected by hand and the titles that got silently undone.
+//
+// The exception is zero, which is not a page that changed but a page the reader
+// failed to get. hist § 19 is the case: it is printed on page 203, the page map
+// runs pdf 204 to printed 202 and pdf 205 to printed 204, and printed 203 is in
+// the step between them, so the rebuild resolves it to nothing and writes 0
+// over the 205 that was there. Nobody gains a thing by that. Zero carries no
+// information the previous number did not, it is not a correction and it is not
+// a reading, and toc verify then has one fewer heading it can check. So a page
+// the rebuild could not resolve keeps whatever the manifest had, and a page it
+// did resolve replaces it however much it differs.
 
 // Retitle is one title in a rebuilt contents that differs from the title the
 // manifest already carries.
@@ -67,6 +77,8 @@ func KeepTitles(old, fresh []corpus.Chapter) ([]corpus.Chapter, []Retitle) {
 		}
 		where := "chapter " + chapter.Numeral
 		chapter.Nominal = chapter.Nominal || was.Nominal
+		chapter.Page = keepPage(was.Page, chapter.Page)
+		chapter.PDFPage = keepPage(was.PDFPage, chapter.PDFPage)
 		chapter.Title, kept = keep(where, was.Title, chapter.Title, kept)
 		chapter.Sections, kept = keepSections(where, was.Sections, chapter.Sections, kept)
 		chapter.Subsections, kept = keepSubsections(where, was.Subsections, chapter.Subsections, kept)
@@ -99,6 +111,8 @@ func keepSections(where string, old, fresh []corpus.Section, kept []Retitle) ([]
 			name = fmt.Sprintf("%s appendix %d", where, section.Number)
 		}
 		section.Title, kept = keep(name, was.Title, section.Title, kept)
+		section.Page = keepPage(was.Page, section.Page)
+		section.PDFPage = keepPage(was.PDFPage, section.PDFPage)
 		section.Subsections, kept = keepSubsections(name, was.Subsections, section.Subsections, kept)
 		out[i] = section
 	}
@@ -121,6 +135,8 @@ func keepSubsections(where string, old, fresh []corpus.Subsection, kept []Retitl
 			continue
 		}
 		sub.Title, kept = keep(fmt.Sprintf("%s no. %d", where, sub.Number), was.Title, sub.Title, kept)
+		sub.Page = keepPage(was.Page, sub.Page)
+		sub.PDFPage = keepPage(was.PDFPage, sub.PDFPage)
 		out[i] = sub
 	}
 	return out, kept
@@ -135,4 +151,16 @@ func keep(where, was, now string, kept []Retitle) (string, []Retitle) {
 		return now, kept
 	}
 	return was, append(kept, Retitle{Where: where, Was: was, Now: now})
+}
+
+// keepPage holds on to a page the rebuild could not resolve. Zero is the
+// reader coming back with nothing rather than with a different answer, and
+// writing it over a number that was there loses a heading toc verify could
+// otherwise check. Any number the rebuild did get is taken, however far it is
+// from the one before it: that is the page map or an erratum doing its job.
+func keepPage(was, now int) int {
+	if now == 0 {
+		return was
+	}
+	return now
 }
