@@ -64,7 +64,7 @@ func runFleetBench(args []string) error {
 		if value.Host == "" {
 			continue
 		}
-		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+		targets = append(targets, fleetTarget(value))
 	}
 	if len(targets) == 0 {
 		return fmt.Errorf("no route in %s names an ssh host", source)

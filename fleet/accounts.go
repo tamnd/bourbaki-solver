@@ -59,6 +59,24 @@ type Accounts struct {
 	// there with its cooldown run out.
 	Soonest time.Duration
 	Err     string
+
+	// Kind is what this host reads with, and it decides which of these fields
+	// mean anything. On a reader every count above is zero and always will be,
+	// because a reader has no account pool: it serves its own weights and reads
+	// against them. A board that did not know this printed "no signed in
+	// profile, so this host can read nothing" about the host that reads the most
+	// pages in the fleet.
+	Kind Kind
+	// Model is what a reader is serving and Answers is whether its endpoint
+	// replied. Those two are a reader's readiness, exactly as the counts are a
+	// browser host's.
+	Model   string
+	Answers bool
+	// TimedOut says the host did not answer inside the deadline, which is a
+	// different state from a host that answered and has nothing ready. The table
+	// used to print the transport error into a row of counts, so a box that was
+	// merely slow read the same as a box with every profile banned.
+	TimedOut bool
 }
 
 // accountsScript finds chatgpt-tool the way the probe finds it, because the
@@ -131,21 +149,76 @@ func parseLeft(line string) (time.Duration, bool) {
 	return time.Duration(hours)*time.Hour + time.Duration(minutes)*time.Minute, true
 }
 
-// Board asks one host for its accounts.
+// readerBoardScript asks a reader host the question the account table asks a
+// browser host: is there anything here that can take a page right now.
+//
+// For a browser that is a pool of signed in profiles and a cooldown. For a
+// reader it is one thing, whether the model server on the box is up, so the
+// script is one line. See readerProbeScript, which asks the same question in
+// the same way from the wider probe.
+const readerBoardScript = `
+echo "reader_answers=$(curl -fsS --max-time 5 -o /dev/null -w 'yes' 'READER_URL/models' 2>/dev/null || echo '')"
+`
+
+// Board asks one host what it has ready, and asks the question its kind
+// answers.
 func Board(ctx context.Context, runner Runner, target Target) Accounts {
-	out, err := runner.Run(ctx, target.Host, accountsScript)
 	name := target.Name
 	if name == "" {
 		name = target.Host
 	}
+	if target.Kind.Or() == Reader {
+		return readerBoard(ctx, runner, target, name)
+	}
+	out, err := runner.Run(ctx, target.Host, accountsScript)
 	if err != nil {
-		return Accounts{Host: name, Err: err.Error()}
+		return Accounts{Host: name, Kind: Browser, Err: err.Error(), TimedOut: timedOut(err)}
 	}
 	board := ParseAccounts(name, out)
+	board.Kind = Browser
 	if board.Verified == 0 {
 		board.Err = "no signed in profile, so this host can read nothing"
 	}
 	return board
+}
+
+// readerBoard is the same question put to a host with no accounts.
+func readerBoard(ctx context.Context, runner Runner, target Target, name string) Accounts {
+	board := Accounts{Host: name, Kind: Reader, Model: target.ReaderModel}
+	if target.ReaderURL == "" {
+		board.Err = "no reader url, so there is no model server to ask about"
+		return board
+	}
+	script := strings.ReplaceAll(readerBoardScript, "READER_URL", strings.TrimSuffix(target.ReaderURL, "/"))
+	out, err := runner.Run(ctx, target.Host, script)
+	if err != nil {
+		board.Err = err.Error()
+		board.TimedOut = timedOut(err)
+		return board
+	}
+	board.Answers = strings.Contains(out, "reader_answers=yes")
+	if !board.Answers {
+		board.Err = "its model server does not answer on " + target.ReaderURL
+	}
+	return board
+}
+
+// timedOut says the host never answered, as against answering something this
+// could not read.
+//
+// It matches on the message rather than on a sentinel because the runner is an
+// interface and the ssh one wraps whatever the command did into text. Both
+// wordings are here: the deadline this run set, and the one the far end's own
+// TCP stack reports when a box is up but not listening.
+func timedOut(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "deadline exceeded") ||
+		strings.Contains(s, "context canceled") ||
+		strings.Contains(s, "timed out") ||
+		strings.Contains(s, "timeout")
 }
 
 // BoardAll asks every host at once, in the order given.
@@ -166,6 +239,17 @@ func BoardAll(ctx context.Context, runner Runner, targets []Target) []Accounts {
 func Wait(boards []Accounts) time.Duration {
 	soonest := time.Duration(-1)
 	for _, board := range boards {
+		// A reader that is answering means the fleet has somewhere to send a
+		// page now, and a reader has no cooldown to count down to, so it is
+		// either zero or it is not part of this sum at all. Without this the
+		// sweep would go to sleep for the length of a browser cooldown with the
+		// fastest reader in the pool sitting idle.
+		if board.Kind == Reader {
+			if board.Answers {
+				return 0
+			}
+			continue
+		}
 		if board.Err != "" && board.Verified == 0 {
 			continue
 		}
@@ -183,11 +267,33 @@ func Wait(boards []Accounts) time.Duration {
 }
 
 // AccountsTable renders the boards the way fleet accounts prints them.
+//
+// Three shapes of row, because there are three things a row can be saying. A
+// browser host has counts. A reader host has a model and whether it answers,
+// and printing zeroes for it in the account columns would be true and
+// misleading. A host that never answered has neither, and is not the same state
+// as a host that answered and has nothing ready.
 func AccountsTable(boards []Accounts) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "%-8s  %8s  %5s  %6s  %6s  %5s  %s\n",
 		"host", "verified", "ready", "banned", "locked", "stale", "first one back")
 	for _, board := range boards {
+		if board.TimedOut {
+			fmt.Fprintf(&out, "%-8s  did not answer inside the deadline, so nothing is known about it\n", board.Host)
+			continue
+		}
+		if board.Kind == Reader {
+			what := "serving " + board.Model
+			if board.Model == "" {
+				what = "a reader"
+			}
+			state := "not answering"
+			if board.Answers {
+				state = "answering, and has no accounts to run out of"
+			}
+			fmt.Fprintf(&out, "%-8s  %s, %s\n", board.Host, what, state)
+			continue
+		}
 		if board.Err != "" && board.Verified == 0 {
 			fmt.Fprintf(&out, "%-8s  %s\n", board.Host, board.Err)
 			continue
