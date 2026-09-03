@@ -79,9 +79,6 @@ func pagemapBuild(args []string) error {
 		if len(pages) != b.Pages {
 			fmt.Printf("%s: got %d pages, the manifest says %d\n", b.ID, len(pages), b.Pages)
 		}
-		if err := correctHeads(pages, errata.HeadErrata(b.ID)); err != nil {
-			return fmt.Errorf("%s: %w", b.ID, err)
-		}
 		swaps, err := transpositions(b)
 		if err != nil {
 			return err
@@ -93,6 +90,9 @@ func pagemapBuild(args []string) error {
 		labels, err := pageLabels(root, b)
 		if err != nil {
 			return err
+		}
+		if err := correctHeads(pages, labels, errata.HeadErrata(b.ID)); err != nil {
+			return fmt.Errorf("%s: %w", b.ID, err)
 		}
 		// What the manifest already says the volume does, unless the flag
 		// overrules it. Detection is a guess made from the reading, and the
@@ -186,7 +186,26 @@ func pagemapBuild(args []string) error {
 // printed 2 is normally a fit that has slipped. Naming the page the opener
 // carries turns the slide into the missing leaf it is, which the loader then
 // reads back off the rows as a step.
-func correctHeads(pages []string, errata []corpus.PageErratum) error {
+// The label the reader wrote into the front matter is corrected here too, and
+// it has to be, because it is the anchor the fit actually uses. readAnchors
+// takes the label over the head wherever there is one, so a mangled label is
+// not overruled by a sound head on the same page: it is preferred to it, and
+// then thrown away by the filter that keeps only the volume's own Book prefix,
+// which leaves the page with no anchor at all. Algebre commutative chapitre 10
+// is that case seven times over. The reader lost the A off AC on pdf 41, 63,
+// 73, 125, 131, 139 and 171, writing "C X.42" and its like, and the running
+// head on each of those pages is the chapter title and carries no number to
+// fall back to. Each of the seven fitted correctly all the same, because 119
+// neighbours agree on the offset, so what the loss cost was not the number but
+// the evidence for it: seven pages the volume prints a number on that the map
+// had to call interpolated.
+//
+// The same erratum serves both, since which of the two a correction lands on is
+// a fact about where the reader put the number rather than about the printing.
+// An erratum is applied where its says is found and it is an error where it is
+// found in neither place, on the same reasoning as below: a correction nobody
+// applied is a person having believed it was in force.
+func correctHeads(pages, labels []string, errata []corpus.PageErratum) error {
 	for _, e := range errata {
 		if e.PDFPage > len(pages) {
 			return fmt.Errorf("the head erratum for pdf page %d is past the end of a %d page volume",
@@ -201,11 +220,22 @@ func correctHeads(pages []string, errata []corpus.PageErratum) error {
 			pages[e.PDFPage-1] = e.Read + "\n" + pg
 			continue
 		}
-		if n := strings.Count(pg, e.Says); n != 1 {
+		onLabel := e.PDFPage <= len(labels) &&
+			strings.TrimSpace(labels[e.PDFPage-1]) == strings.TrimSpace(e.Says)
+		if onLabel {
+			labels[e.PDFPage-1] = e.Read
+		}
+		// A says that is on the page more than once is still an error even when
+		// the label carried it too, because the head it means is then not
+		// decided and the wrong one would be rewritten.
+		switch n := strings.Count(pg, e.Says); {
+		case n == 1:
+			pages[e.PDFPage-1] = strings.Replace(pg, e.Says, e.Read, 1)
+		case n == 0 && onLabel:
+		default:
 			return fmt.Errorf("the head erratum %q is on pdf page %d %d times, want exactly one",
 				e.Says, e.PDFPage, n)
 		}
-		pages[e.PDFPage-1] = strings.Replace(pg, e.Says, e.Read, 1)
 	}
 	return nil
 }

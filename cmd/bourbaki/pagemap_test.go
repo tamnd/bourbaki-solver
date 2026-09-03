@@ -120,7 +120,7 @@ func TestCorrectHeadsMendsTheHeadBeforeItIsRead(t *testing.T) {
 		"A V I . 37     ENDOMORPHISMES DES ESPACES VECTORIELS\n\nbody\n",
 		"A VII.38       ENDOMORPHISMES DES ESPACES VECTORIELS\n\nA V I . 37 is cited here\n",
 	}
-	err := correctHeads(pages, []corpus.PageErratum{{
+	err := correctHeads(pages, nil, []corpus.PageErratum{{
 		PDFPage: 1,
 		Erratum: corpus.Erratum{
 			Says: "A V I . 37", Read: "A VII.37",
@@ -149,7 +149,7 @@ func TestCorrectHeadsRefusesAnErratumItCannotPlace(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			pages := []string{"a head\n", "twice over\n\ntwice over\n"}
-			err := correctHeads(pages, []corpus.PageErratum{{
+			err := correctHeads(pages, nil, []corpus.PageErratum{{
 				PDFPage: c.page,
 				Erratum: corpus.Erratum{Says: c.says, Read: "x", Why: "y"},
 			}})
@@ -201,7 +201,7 @@ func TestCorrectHeadsSuppliesAHeadThePrintingLeavesOff(t *testing.T) {
 		"CHAPITRE X\n\nProfondeur, regularite, dualite\n",
 		"N 1 PROFONDEUR      AC X.3\n\nbody\n",
 	}
-	err := correctHeads(pages, []corpus.PageErratum{{
+	err := correctHeads(pages, nil, []corpus.PageErratum{{
 		PDFPage: 1,
 		Erratum: corpus.Erratum{
 			Says: "", Read: "AC X.1",
@@ -219,12 +219,62 @@ func TestCorrectHeadsSuppliesAHeadThePrintingLeavesOff(t *testing.T) {
 	}
 }
 
+// The label in the front matter is what the fit anchors on where there is one,
+// so a correction has to reach it. A mangled label is not overruled by the head
+// beside it, it is preferred to it and then dropped by the prefix filter, and
+// the page ends up with no anchor at all.
+//
+// Algebre commutative chapitre 10 is the volume: the reader lost the A off AC
+// seven times and wrote "C X.42" and its like, and the running head on each of
+// those pages is the chapter title with no number in it to fall back to.
+func TestCorrectHeadsMendsTheLabelTheFrontMatterRecords(t *testing.T) {
+	pages := []string{
+		"PROFONDEUR, REGULARITE, DUALITE\n\nbody\n",
+		"PROFONDEUR, REGULARITE, DUALITE\n\nbody\n",
+	}
+	labels := []string{"C X.42", "AC X.43"}
+	err := correctHeads(pages, labels, []corpus.PageErratum{{
+		PDFPage: 1,
+		Erratum: corpus.Erratum{
+			Says: "C X.42", Read: "AC X.42",
+			Why: "the reader dropped the A off the Book prefix",
+		},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if labels[0] != "AC X.42" {
+		t.Errorf("the label is %q, want the prefix put back", labels[0])
+	}
+	if labels[1] != "AC X.43" {
+		t.Error("the correction ran past the page it was written for")
+	}
+	// The page itself never carried the string, and that is not a missing
+	// correction: it was applied, to the place the reader put the number.
+	if strings.Contains(pages[0], "AC X.42") {
+		t.Errorf("the body was rewritten as well:\n%s", pages[0])
+	}
+}
+
+// And an erratum that lands on neither is still refused, because the reason for
+// refusing one is that it was written down in the belief it was in force.
+func TestCorrectHeadsRefusesALabelErratumThatMatchesNothing(t *testing.T) {
+	labels := []string{"AC X.42"}
+	err := correctHeads([]string{"a head\n"}, labels, []corpus.PageErratum{{
+		PDFPage: 1,
+		Erratum: corpus.Erratum{Says: "C X.42", Read: "AC X.42", Why: "y"},
+	}})
+	if err == nil {
+		t.Fatal("no error")
+	}
+}
+
 // A supplied head that supplies nothing is an entry that does nothing, and the
 // whole point of refusing an erratum that cannot apply is that writing one down
 // and not applying it is worse than not writing it.
 func TestCorrectHeadsRefusesAnErratumThatSuppliesNothing(t *testing.T) {
 	pages := []string{"a page\n"}
-	err := correctHeads(pages, []corpus.PageErratum{{
+	err := correctHeads(pages, nil, []corpus.PageErratum{{
 		PDFPage: 1,
 		Erratum: corpus.Erratum{Says: "", Read: "   ", Why: "y"},
 	}})
