@@ -310,6 +310,12 @@ func TestItemOpenOnRealMarkers(t *testing.T) {
 		"¶ **9)** Consider the operation of s on its enveloping algebra.",
 		"**¶5)** Assume that g is semi-simple.",
 		`$7)^*$Let $d_1, . . . , d_l$ be the characteristic degrees.`,
+		// The section sign standing where the pilcrow is printed. All four are
+		// cut out of the pages as they stand.
+		"**§ 4.** Let $X$ be a set and $c$ a cardinal.",
+		"§ 11. A topological space is said to be solvable.",
+		"§ 9) Soient E un espace vectoriel de dimension $n$.",
+		"**§ 27.** (a) Let A be a commutative ring.",
 	} {
 		if !itemOpen(s) {
 			t.Errorf("itemOpen(%q) = false", s)
@@ -320,10 +326,50 @@ func TestItemOpenOnRealMarkers(t *testing.T) {
 		"(i) The module M is simple.",
 		"Let A be a ring and 15) is not how a sentence opens.",
 		"$$ 5) $$",
+		// A cross reference to a subsection, set on a line of its own. The digit
+		// after the full stop is what keeps it out, and chapters I and III of
+		// Lie hold six of them.
+		"§ 4.3",
+		"§ 1.10",
 	} {
 		if itemOpen(s) {
 			t.Errorf("itemOpen(%q) = true", s)
 		}
+	}
+}
+
+// The section sign is a misread pilcrow and has to mark what the pilcrow marks,
+// or the exercise it opens comes out unstarred. § 7 of chapter I of Algebra is
+// the case that found it: nothing could read "**§ 4.**", so the § stopped at the
+// third of the forty exercises the volume prints and the other 37 were appended
+// to the body of the third.
+func TestSectionSignIsAPilcrow(t *testing.T) {
+	m := exNumRE.FindStringSubmatch("**§ 4.** Let $X$ be a set and $c$ a cardinal.")
+	if m == nil {
+		t.Fatal(`"**§ 4.**" was not read as a marker`)
+	}
+	if m[2] != "4" {
+		t.Errorf("the marker carries the number %q", m[2])
+	}
+	star, pilcrow := marksOf(m[1])
+	if pilcrow == "" {
+		t.Errorf("marksOf(%q) read no pilcrow off the marker", m[1])
+	}
+	if star != "" {
+		t.Errorf("marksOf(%q) read a star %q that is not printed", m[1], star)
+	}
+}
+
+// The heading of a § spells a section sign and a number as well, so the sign is
+// taken only where the number is the one the § is up to. This is the guard that
+// lets the sign be read at all.
+func TestSectionSignNeedsTheNumberTheSectionIsUpTo(t *testing.T) {
+	const line = "§ 11. A topological space is said to be solvable."
+	if i, _ := itemStart(line, 11); i != 0 {
+		t.Errorf("exercise 11 was not found at the head of the block, i = %d", i)
+	}
+	if i, _ := itemStart(line, 4); i >= 0 {
+		t.Errorf("the line was read as exercise 4 at %d", i)
 	}
 }
 
