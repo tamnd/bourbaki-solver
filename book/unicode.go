@@ -444,6 +444,16 @@ var operators = map[rune]string{
 	'↼': `\leftharpoonup`, '⇌': `\rightleftharpoons`,
 	'⟨': `\langle`, '⟩': `\rangle`, '‖': `\|`, '′': `{}'`, '″': `{}''`,
 	'⋯': `\cdots`, '■': `\blacksquare`, '•': `\bullet`,
+
+	// The double angle brackets are not notation. They are the two characters an
+	// extraction writes around a stretch of page it could not read, and the
+	// corpus has exactly one such stretch: the footnote of Théorie des ensembles
+	// II, § 1, no. 7, which sets an assemblage of the primitive signs with the
+	// links drawn as bars above it and which no reading can give back as text.
+	// They are here so that ⟪illegible⟫ prints as ⟪illegible⟫, which is what the
+	// page honestly amounts to, rather than reaching the typesetter as a
+	// character no font has and being dropped from the footnote in silence.
+	'⟪': `\langle\!\langle`, '⟫': `\rangle\!\rangle`,
 }
 
 // letters is the sub and superscript figures, which an OCR writes when the

@@ -50,6 +50,11 @@ func Split(body string) (spans []Span, unclosed *Span) {
 	)
 	state := none
 	line := 1
+	// braces is one entry per brace group open inside the span being read, true
+	// for a group that is an argument of \text and its relatives. It is emptied
+	// with the span, since a brace that opens outside the mathematics is prose.
+	var braces []bool
+	pendingText := false
 	var open Span
 	var start int
 	rs := []rune(body)
@@ -60,22 +65,63 @@ func Split(body string) (spans []Span, unclosed *Span) {
 			continue
 		case '\\':
 			// The escape takes the next character with it, whatever it is, and
-			// a newline still has to be counted.
-			if i+1 < len(rs) {
-				if rs[i+1] == '\n' {
-					line++
-				}
-				i++
+			// a newline still has to be counted. A control word is read whole,
+			// because the one thing that has to be recognised here is the name
+			// in front of a brace.
+			if i+1 >= len(rs) {
+				continue
 			}
+			if name, end := controlWord(rs, i+1); name != "" {
+				pendingText, i = textArg[name], end-1
+				continue
+			}
+			if rs[i+1] == '\n' {
+				line++
+			}
+			i++
+			pendingText = false
+			continue
+		case '{':
+			if state != none {
+				braces = append(braces, pendingText)
+			}
+			pendingText = false
+			continue
+		case '}':
+			if state != none && len(braces) > 0 {
+				braces = braces[:len(braces)-1]
+			}
+			pendingText = false
 			continue
 		case '$':
+		case ' ', '\t':
+			continue // \text {x} is still \text's argument
 		default:
+			pendingText = false
+			continue
+		}
+		// A dollar inside the argument of a \text is the nested mathematics of
+		// \text{$\Gamma$ correspondance} and not the end of the span. The French
+		// index of notation of Théorie des ensembles writes one entry that way,
+		// and reading its dollars flat cut the entry into three spans with
+		// \Gamma and \Gamma' left as prose between them; the build then wrapped
+		// those in dollars of their own, as it is meant to for mathematics loose
+		// in prose, and wrote \text{$$\Gamma$$, $$\Gamma$'$ correspondances},
+		// which tectonic refused with "! Missing $ inserted." and no PDF for the
+		// cover check to open.
+		//
+		// It is \text and not any open brace, deliberately. A dollar inside any
+		// brace at all would mean that $\mathbf{Q$, which is a brace somebody
+		// left open and which M04 exists to report, swallowed the rest of the
+		// file into one unclosed span instead, and a rule that cannot see a
+		// defect is worse than the defect.
+		if state == inline && inText(braces) {
 			continue
 		}
 		double := i+1 < len(rs) && rs[i+1] == '$'
 		switch state {
 		case none:
-			open, start = Span{Display: double, Line: line}, i+1
+			open, start, braces = Span{Display: double, Line: line}, i+1, braces[:0]
 			if double {
 				state, start = display, i+2
 				i++
@@ -86,22 +132,60 @@ func Split(body string) (spans []Span, unclosed *Span) {
 		case inline:
 			open.Text, open.End = string(rs[start:i]), i
 			spans = append(spans, open)
-			state = none
+			state, braces = none, braces[:0]
 		case display:
 			if !double {
 				continue // a lone dollar inside a display is text
 			}
 			open.Text, open.End = string(rs[start:i]), i
 			spans = append(spans, open)
-			state = none
+			state, braces = none, braces[:0]
 			i++
 		}
+		pendingText = false
 	}
 	if state != none {
 		open.Text, open.End = string(rs[start:]), len(rs)
 		return spans, &open
 	}
 	return spans, nil
+}
+
+// textArg are the commands whose argument is set as text and may therefore hold
+// mathematics of its own. \text is amsmath's and is what the corpus writes; the
+// rest are the ones a body could reasonably use for the same thing, and \mbox
+// and \hbox are here because a formula copied out of an older source has them.
+var textArg = map[string]bool{
+	"text": true, "textrm": true, "textit": true, "textbf": true, "textsf": true,
+	"texttt": true, "textnormal": true, "textup": true, "textsc": true,
+	"mbox": true, "hbox": true, "intertext": true,
+}
+
+// controlWord reads the name of the control word starting at i, which is the
+// character after the backslash, and returns it with the index just past it. A
+// control symbol, \$ or \\ or \{, is not a word and comes back empty, so the
+// caller falls through to the escape rule that takes one character.
+func controlWord(rs []rune, i int) (string, int) {
+	j := i
+	for j < len(rs) && (rs[j] >= 'a' && rs[j] <= 'z' || rs[j] >= 'A' && rs[j] <= 'Z') {
+		j++
+	}
+	if j == i {
+		return "", i
+	}
+	return string(rs[i:j]), j
+}
+
+// inText says whether any brace group still open is a \text argument. It is any
+// and not the innermost, because \text{a $\{x : \text{...}\}$ b} nests and the
+// dollars inside the inner one are still nested dollars.
+func inText(braces []bool) bool {
+	for _, t := range braces {
+		if t {
+			return true
+		}
+	}
+	return false
 }
 
 // The repair is M03 read backwards. The rule says which characters are stranded
