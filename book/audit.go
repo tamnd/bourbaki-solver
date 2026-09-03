@@ -419,7 +419,31 @@ func (a *Audit) written(d *Document, opt AuditOptions) {
 	// printing knows how many decisions to look at.
 	a.ok("displays the build laid out itself", true,
 		fmt.Sprintf("%d multi-line displays set as an alignment", len(d.Aligned)))
+	// The footnote that printed itself. Neither builder read the Markdown form
+	// of a note, so a call came through as prose and the escaper turned its
+	// caret into \textasciicircum: 38 of the 129 built volumes set a marker
+	// literally, 905 times over, and nothing in the audit said so. A whole book
+	// had to be read to find it, which is exactly the kind of thing this file
+	// exists to stop.
+	//
+	// One check answers for both formats because both take the same body through
+	// the same reading. What is looked at is the TeX, because the escaping makes
+	// the defect unmistakable there: four characters of prose in the EPUB could
+	// be four characters the printing has.
+	printed := printedMarkerRE.FindAllStringIndex(d.TeX, -1)
+	marks := make([]string, 0, len(printed))
+	for _, at := range printed {
+		marks = append(marks, nearby(d.TeX, at[0]))
+	}
+	a.ok("no footnote is printed as its own source", len(printed) == 0,
+		fmt.Sprintf("%d markers reached the page", len(printed)), cap12(marks)...)
 }
+
+// printedMarkerRE is a Markdown footnote call that reached the page as its own
+// source. The caret is the escaper's, which is what makes it certain: a [^1] in
+// the prose is escaped on the way out and nothing else in the corpus writes a
+// bracketed \textasciicircum.
+var printedMarkerRE = regexp.MustCompile(`\[\\textasciicircum\{\}[A-Za-z0-9_-]{1,12}\]`)
 
 // typeset is what the typesetter found.
 func (a *Audit) typeset(v *Volume, b *Build, opt AuditOptions) {
