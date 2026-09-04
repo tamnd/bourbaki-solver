@@ -269,3 +269,85 @@ func TestSealFixesARowUnderAFileThatIsAlreadySealed(t *testing.T) {
 		t.Errorf("the manifest row is %s, want %s", row, corpus.ContentSHA256(body))
 	}
 }
+
+// The incident this command's paths were made to bind for. Two sections are
+// unsealed, one is named, and the other must come back untouched. Before the
+// paths bound, a run naming a single Vietnamese file resealed 209 of them and 4
+// more in en-mt, because parseFlags returned the paths and the caller dropped
+// them.
+func TestSealSealsOnlyTheFileItWasGiven(t *testing.T) {
+	asked := "content/vi/alg/VIII/01_s1_vanh_don.md"
+	other := "content/vi/alg/VIII/02_s2_vanh_nua_don.md"
+	mine, theirs := "Tâm của một vành đơn là một trường.\n", "Một sửa tay của người khác.\n"
+	root := sealCorpus(t, map[string]string{
+		asked: sealFile(mine, corpus.ContentSHA256("cũ")),
+		other: sealFile(theirs, corpus.ContentSHA256("cũ")),
+	})
+	if err := fixSeal([]string{"-lang", "vi", filepath.Join(root, filepath.FromSlash(asked))}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readSection(t, root, asked).Meta.ContentSHA256, corpus.ContentSHA256(mine); got != want {
+		t.Errorf("the file that was asked for has hash %s, want %s", got, want)
+	}
+	if got, want := readSection(t, root, other).Meta.ContentSHA256, corpus.ContentSHA256("cũ"); got != want {
+		t.Errorf("a file nobody asked about was resealed: hash is %s, want %s", got, want)
+	}
+}
+
+// A relative path is what anyone actually types, and the walk hands out
+// absolute ones, so the two are made to meet before they are compared.
+func TestSealTakesARelativePath(t *testing.T) {
+	name := "content/vi/alg/VIII/01_s1_vanh_don.md"
+	body := "Một vành đơn không có iđêan hai phía nào khác.\n"
+	root := sealCorpus(t, map[string]string{name: sealFile(body, corpus.ContentSHA256("cũ"))})
+	t.Chdir(root)
+	if err := fixSeal([]string{name}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := readSection(t, root, name).Meta.ContentSHA256, corpus.ContentSHA256(body); got != want {
+		t.Errorf("hash is %s, want %s", got, want)
+	}
+}
+
+// Exercises carry no hash of their own and eachSection does not descend into
+// them, so naming one asks for nothing at all. Saying so beats reporting that
+// zero sections were read and letting it pass for success.
+func TestSealSaysSoWhenTheNamedFileIsNotASectionItCanSeal(t *testing.T) {
+	name := "content/en/alg/VIII/exercises/s1/07.md"
+	root := sealCorpus(t, map[string]string{name: sealFile("A body.\n", corpus.ContentSHA256("old"))})
+	err := fixSeal([]string{filepath.Join(root, filepath.FromSlash(name))})
+	if err == nil {
+		t.Fatal("naming an exercise was accepted, want an error")
+	}
+	if !strings.Contains(err.Error(), "07.md") {
+		t.Errorf("the error does not name the file: %v", err)
+	}
+}
+
+// A path in one language under -lang another is a contradiction, and the file
+// is filtered out of the walk before it is ever offered. That must read as the
+// mistake it is rather than as a run that sealed nothing.
+func TestSealSaysSoWhenThePathIsOutsideTheLanguageAsked(t *testing.T) {
+	name := "content/vi/alg/VIII/01_s1_vanh_don.md"
+	root := sealCorpus(t, map[string]string{name: sealFile("Thân bài.\n", corpus.ContentSHA256("cũ"))})
+	err := fixSeal([]string{"-lang", "en", filepath.Join(root, filepath.FromSlash(name))})
+	if err == nil {
+		t.Fatal("a vi path under -lang en was accepted, want an error")
+	}
+	if got, want := readSection(t, root, name).Meta.ContentSHA256, corpus.ContentSHA256("cũ"); got != want {
+		t.Errorf("the file was sealed anyway: hash is %s, want %s", got, want)
+	}
+}
+
+// A path that is not there at all is a typo, and the run must not go on to
+// reseal the corpus because the set of files to narrow to came out empty.
+func TestSealRefusesAPathThatIsNotThere(t *testing.T) {
+	name := "content/en/alg/VIII/01_s1_simple_rings.md"
+	root := sealCorpus(t, map[string]string{name: sealFile("A body.\n", corpus.ContentSHA256("old"))})
+	if err := fixSeal([]string{filepath.Join(root, "content/en/alg/VIII/99_s99_nothing.md")}); err == nil {
+		t.Fatal("a path that is not there was accepted, want an error")
+	}
+	if got, want := readSection(t, root, name).Meta.ContentSHA256, corpus.ContentSHA256("old"); got != want {
+		t.Errorf("the corpus was sealed after a bad path: hash is %s, want %s", got, want)
+	}
+}
