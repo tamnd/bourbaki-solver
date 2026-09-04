@@ -1310,6 +1310,12 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// index entry that came back both escaped and re-laid out would
 		// otherwise be repaired by neither.
 		answer.Text = translate.Unescape(body, answer.Text)
+		// And Remerge before Respace for the same reason as Unescape, and after
+		// it for its own: an entry broken into three spans is three spans
+		// Respace would compare one by one against the wrong English, and an
+		// entry whose pieces were also re-laid out has to be one span again
+		// before the spacing can be put back into it.
+		answer.Text = translate.Remerge(body, answer.Text)
 		answer.Text = translate.Respace(body, answer.Text)
 		// And the second repair, for the same reason: a citation the model wrote
 		// in the words of the language it was translating into is a citation
