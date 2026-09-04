@@ -162,6 +162,26 @@ var weldedRE = regexp.MustCompile(`\p{L}*\$[^$\n]+\$\p{L}*`)
 // are control words.
 var ctrlWordRE = regexp.MustCompile(`\\[a-zA-Z]+`)
 
+// notationEntryRE is an entry of an index of notation: the notation itself, a
+// colon, and then where in the book it is defined.
+//
+// The notation is a symbol however much of it is spelled with letters. An index
+// writes "Map(M, N), Pol_A(M, N), Pol(M, N) : IV, p. 57", and Map there is the
+// functor set upright, the same thing as Hom, End and Aut, which weldedRE says
+// occur 2165 times over 155 names. weldedRE cannot help here because it wants
+// the dollars that a welded name is written with and an index writes none, so
+// the glossary read the word map and asked for "ánh xạ" in a list of symbols.
+//
+// Only what stands before the colon goes. Where the entry is defined is not
+// prose either, but leaving it costs nothing and taking it needs a second guess
+// about where the locator ends.
+//
+// Over content/en this matches 3398 lines in the fourteen index_of_ files and
+// four lines anywhere else, all four in one section and all four the heading
+// "Applications : I. Canonical decompositions ...", where the I is the number of
+// a part and not a volume. Headings are left alone for them.
+var notationEntryRE = regexp.MustCompile(`^.{1,400}?\s:\s*((?:\$?\\text\{)?\s*[IVXLC]+(?:[.,]|\s*,?\s*p\.))`)
+
 // proseText is prose, and with welded set it also drops those names.
 //
 // Only hasProse asks for that. The terminology rule reads the other form and
@@ -183,6 +203,9 @@ func proseText(body string, welded bool) string {
 		}
 		if inDisplay || bibEntryRE.MatchString(line) || refTailRE.MatchString(line) {
 			continue
+		}
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			line = notationEntryRE.ReplaceAllString(line, " $1")
 		}
 		line = attrRE.ReplaceAllString(line, " ")
 		if welded {
