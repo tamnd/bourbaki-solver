@@ -180,3 +180,56 @@ func TestADisplayWeldedToTheProseIsStillADisplay(t *testing.T) {
 		t.Errorf("%d problems, want the one term left standing: %v", len(problems), problems)
 	}
 }
+
+// citing is the rows plus the term whose only occurrence in the file that
+// prompted this was inside the name of a cited paper.
+func citing() *glossary.Glossary {
+	return &glossary.Glossary{Version: 3, Terms: []glossary.Term{
+		{EN: "space", VI: "không gian"},
+		{EN: "ring", VI: "vành"},
+	}}
+}
+
+// The title of a cited work stands as printed, so the English words in it are
+// not English left in the answer.
+//
+// Exercise 15 of § 2 of Topological Vector Spaces I is one line of prose and one
+// footnote, and the footnote is a citation. The word space is in the file once,
+// inside "The space of p-adic norms", which is the name of a paper and is not
+// translated by anybody. The rule asked for "không gian" in it, the chunk was
+// refused all three times it was asked for, and the file was one of fifteen the
+// run could not land.
+func TestATermInsideTheTitleOfACitedPaperIsNotATermLeftInEnglish(t *testing.T) {
+	const en = "1 For the exercises 12 and 13, see O. Goldman and N. Iwahori, " +
+		"The space of p-adic norms, Acta math., 109 (1963), pp. 137-177.\n"
+	const vi = "1 Đối với các bài tập 12 và 13, xem O. Goldman và N. Iwahori, " +
+		"The space of p-adic norms, Acta math., 109 (1963), pp. 137-177.\n"
+	if problems := AuditTerms("vi", citing(), en, vi); len(problems) != 0 {
+		t.Fatalf("a citation kept as printed was refused: %v", problems)
+	}
+}
+
+// The bracket-numbered references of the historical notes have the same fault
+// for the same reason, and there are 180 of those lines against 88 the older
+// rule already covered.
+func TestATermInsideABracketNumberedReferenceIsNotATermLeftInEnglish(t *testing.T) {
+	const en = "[4] E. Heine, On the space of trigonometric series, Crelle's Journal, 71 (1870), pp. 353-365.\n"
+	if problems := AuditTerms("vi", citing(), en, en); len(problems) != 0 {
+		t.Fatalf("a reference kept as printed was refused: %v", problems)
+	}
+}
+
+// The guard on the above. A reference is read by its tail, and no running
+// sentence has one, so an ordinary line that leaves a term in English is
+// refused exactly as it was before.
+func TestOrdinaryProseIsStillReadForTermsLeftInEnglish(t *testing.T) {
+	const en = "Every vector space over a ring is considered.\n"
+	const vi = "Mọi vector space trên một vành đều được xét.\n"
+	problems := AuditTerms("vi", citing(), en, vi)
+	if len(problems) != 1 {
+		t.Fatalf("%d problems, want the one term left standing: %v", len(problems), problems)
+	}
+	if !strings.Contains(problems[0].Msg, "space") {
+		t.Errorf("the complaint reads %q and does not say %q", problems[0].Msg, "space")
+	}
+}

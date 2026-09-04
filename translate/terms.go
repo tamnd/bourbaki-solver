@@ -163,7 +163,7 @@ func proseText(body string, welded bool) string {
 			inDisplay = !inDisplay
 			continue
 		}
-		if inDisplay || bibEntryRE.MatchString(line) {
+		if inDisplay || bibEntryRE.MatchString(line) || refTailRE.MatchString(line) {
 			continue
 		}
 		line = attrRE.ReplaceAllString(line, " ")
