@@ -36,7 +36,16 @@ func TestAnAnswerClearsTheRefusalsBeforeIt(t *testing.T) {
 	b.Refused("a")
 	b.Answered("a")
 	// Two more is four refusals in all and still not three in a row.
-	if b.Refused("a") || b.Refused("a") {
+	//
+	// Both refusals are taken before either is looked at. Written as an || the
+	// second call is only made when the first came back false, so the test says
+	// what it means only for as long as the code is right: the moment a bug
+	// makes the second refusal the tripping one, the || stops after the first,
+	// the third call below becomes the second refusal, and the test fails in the
+	// line that was meant to pass. staticcheck reads the two sides as the same
+	// expression and refuses the build over it, which is the same complaint.
+	third, fourth := b.Refused("a"), b.Refused("a")
+	if third || fourth {
 		t.Fatal("refusals from either side of an answer were counted as consecutive")
 	}
 	if !b.Refused("a") {
