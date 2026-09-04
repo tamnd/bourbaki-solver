@@ -894,3 +894,79 @@ func TestAGoodTranslationIsNotReadAsARefusal(t *testing.T) {
 		t.Fatalf("the reference translation was read as a provider message: %v", ps)
 	}
 }
+
+// The two exercises these tests are about are the ones the Vietnamese run could
+// not land: 54 inline spans in 2685 characters and 30 in 1480, and every answer
+// came back a span or two short. The rule said so, in a count, eleven times.
+
+func TestADroppedMathSpanIsNamedAndNotOnlyCounted(t *testing.T) {
+	en := `Let $E$ be a space, $F$ a subspace and $u$ the map.`
+	tr := `Cho $E$ là một không gian, $F$ một không gian con và ánh xạ.`
+	ps := auditMath(en, tr)
+	if len(ps) != 1 {
+		t.Fatalf("wanted the one count, got %v", ps)
+	}
+	if !strings.Contains(ps[0].Msg, "has 2 math spans and the English has 3") {
+		t.Fatalf("did not count the spans: %v", ps[0])
+	}
+	if !strings.Contains(ps[0].Msg, `"u"`) {
+		t.Fatalf("did not name the span that went: %v", ps[0])
+	}
+}
+
+func TestAMathSpanTheAnswerInventedIsNamed(t *testing.T) {
+	en := `Let $E$ be a space and $F$ a subspace.`
+	tr := `Cho $E$ là một không gian, $F$ một không gian con và $G$ một cái khác.`
+	ps := auditMath(en, tr)
+	if len(ps) != 1 {
+		t.Fatalf("wanted the one count, got %v", ps)
+	}
+	if !strings.Contains(ps[0].Msg, "not in the English") || !strings.Contains(ps[0].Msg, `"G"`) {
+		t.Fatalf("did not name the span that arrived: %v", ps[0])
+	}
+}
+
+func TestOnlySixOfTheDroppedSpansAreNamed(t *testing.T) {
+	var b strings.Builder
+	for i := range 20 {
+		fmt.Fprintf(&b, "term $x_{%d}$ and ", i)
+	}
+	ps := auditMath(b.String(), "nothing here at all")
+	if len(ps) != 1 {
+		t.Fatalf("wanted the one count, got %v", ps)
+	}
+	if !strings.Contains(ps[0].Msg, "and 14 more") {
+		t.Fatalf("a list of twenty was not cut down: %v", ps[0])
+	}
+	if strings.Contains(ps[0].Msg, `"x_{6}"`) {
+		t.Fatalf("named more than the first six: %v", ps[0])
+	}
+}
+
+func TestASpanThatMovedIsNotReportedByPositionAsWell(t *testing.T) {
+	// The old reading of a dropped span: the lists go out of step at the drop,
+	// and the first position after it reports as changed although the model
+	// wrote that formula exactly as it was given. A chunk was told both, and
+	// the positional half of it pointed at the wrong span.
+	en := `$a$ then $b$ then $c$ then $d$`
+	tr := `$a$ then $c$ then $d$`
+	ps := auditMath(en, tr)
+	if len(ps) != 1 {
+		t.Fatalf("the drop was reported twice: %v", ps)
+	}
+	if !strings.Contains(ps[0].Msg, `"b"`) {
+		t.Fatalf("did not name the span that went: %v", ps[0])
+	}
+}
+
+func TestAChangedSpanIsStillReportedByPositionWhenNothingWasDropped(t *testing.T) {
+	en := `$a$ then $b$ then $c$`
+	tr := `$a$ then $b'$ then $c$`
+	ps := auditMath(en, tr)
+	if len(ps) != 1 {
+		t.Fatalf("wanted the one difference, got %v", ps)
+	}
+	if !strings.Contains(ps[0].Msg, "math span 2 is") {
+		t.Fatalf("the span-by-span reading stopped working: %v", ps[0])
+	}
+}
