@@ -383,6 +383,30 @@ func headings(body string) []heading {
 // page a reader of a Vietnamese volume opens.
 var bibEntryRE = regexp.MustCompile(`^\d+\s*(\(\*?bis\*?\)\s*)?\.\s`)
 
+// refTailRE is the end of a printed reference: the volume, the year in
+// parentheses and the pages. It reads a citation by its tail because the
+// opener is what bibEntryRE cannot be trusted on, and the tail is the part no
+// running sentence has.
+//
+// Exercise 15 of § 2 of Topological Vector Spaces I carries a footnote, and the
+// footnote is a citation: "1 For the exercises 12 and 13, see O. Goldman and N.
+// Iwahori, The space of p-adic norms, Acta math., 109 (1963), pp. 137-177." The
+// marker is a bare 1 with no period after it, so bibEntryRE does not see a
+// bibliography entry, the line stays in the prose, and the only occurrence of
+// the word space in that file is inside the title of the cited paper. The
+// terminology rule then asked for "không gian" in a paper's name, the chunk was
+// refused on all three attempts and the file was one of fifteen the run could
+// not land.
+//
+// Over content/en this shape is on 268 lines of 259,261. bibEntryRE already
+// covers 88 of them and the other 180 are the bracket-numbered references of
+// the historical notes, "[4] E. Heine, Über trigonometrische Reihen, Crelle's
+// Journal, 71 (1870), pp. 353-365.", which have the same fault for the same
+// reason: the German and French titles of the works cited stand as printed, and
+// every English word in one of them was being read as English left in the
+// answer.
+var refTailRE = regexp.MustCompile(`\(\d{4}\),?\s*pp?\.\s*\d`)
+
 // bibAuthorRE and bibTitleRE are what tells an entry from a numbered paragraph.
 //
 // A heading is no use here. Of the 149 real entries in the corpus only 20 stand
