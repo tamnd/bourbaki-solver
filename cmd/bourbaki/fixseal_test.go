@@ -351,3 +351,43 @@ func TestSealRefusesAPathThatIsNotThere(t *testing.T) {
 		t.Errorf("the corpus was sealed after a bad path: hash is %s, want %s", got, want)
 	}
 }
+
+// A sweep handed a path says so. It will not use it, and the shape of the
+// mistake is somebody who believes they have narrowed the run to one file: that
+// is what fix seal looked like from the outside while it resealed 209.
+func TestASweepThatTakesNoPathsRefusesOneRatherThanIgnoringIt(t *testing.T) {
+	body := "Every field is a simple ring.\n"
+	name := "content/en/alg/VIII/01_s1_simple_rings.md"
+	root := sealCorpus(t, map[string]string{name: sealFile(body, corpus.ContentSHA256(body))})
+	path := filepath.Join(root, filepath.FromSlash(name))
+
+	for _, c := range []struct {
+		name string
+		run  func([]string) error
+	}{
+		{"fix padding", fixPadding},
+		{"fix dollars", fixDollars},
+		{"fix parens", fixParens},
+		{"fix footnote", fixFootnote},
+	} {
+		err := c.run([]string{path})
+		if err == nil {
+			t.Errorf("%s took a path it does not use and said nothing", c.name)
+			continue
+		}
+		if !strings.Contains(err.Error(), "takes no paths") {
+			t.Errorf("%s failed for another reason: %v", c.name, err)
+		}
+	}
+}
+
+// And the flags still work, so the refusal is about the path and not about
+// having been given anything at all.
+func TestASweepStillTakesItsFlags(t *testing.T) {
+	body := "Every field is a simple ring.\n"
+	name := "content/en/alg/VIII/01_s1_simple_rings.md"
+	sealCorpus(t, map[string]string{name: sealFile(body, corpus.ContentSHA256(body))})
+	if err := fixPadding([]string{"-check"}); err != nil && strings.Contains(err.Error(), "takes no paths") {
+		t.Errorf("a flag was read as a path: %v", err)
+	}
+}

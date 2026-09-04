@@ -850,7 +850,7 @@ func fixStray(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixStrayUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -967,7 +967,7 @@ func fixParens(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixParensUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -1140,7 +1140,7 @@ func fixFolio(args []string) error {
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
 	fill := fs.Bool("fill", false, "take the number from the page map when the body has none")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -1289,7 +1289,7 @@ func fixHeading(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixHeadingUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -1545,7 +1545,7 @@ func fixOpening(args []string) error {
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
 	layer := fs.Bool("text-layer", false, "ask the text layer about an opening that is not on the page")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2203,7 +2203,7 @@ func fixMath(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixMathUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2293,7 +2293,7 @@ func fixPrime(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixPrimeUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2348,7 +2348,7 @@ func fixNotin(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixNotinUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2405,7 +2405,7 @@ func fixDollars(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixDollarsUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2484,7 +2484,7 @@ func fixSection(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSectionUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2570,7 +2570,7 @@ func fixPadding(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixPaddingUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2741,7 +2741,7 @@ func fixStar(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixStarUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2797,7 +2797,7 @@ func fixLabel(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixLabelUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2858,7 +2858,7 @@ func fixElision(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixElisionUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2916,7 +2916,7 @@ func fixDash(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixDashUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2967,7 +2967,7 @@ func fixSmallCaps(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSmallCapsUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -3028,7 +3028,7 @@ func fixFence(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFenceUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -3339,7 +3339,7 @@ func fixFootnote(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFootnoteUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()

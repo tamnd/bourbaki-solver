@@ -8,6 +8,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strings"
 
 	bourbaki "github.com/tamnd/bourbaki-solver"
 	"github.com/tamnd/bourbaki-solver/corpus"
@@ -143,6 +144,29 @@ func parseFlags(fs *flag.FlagSet, args []string) ([]string, error) {
 		positional = append(positional, fs.Arg(0))
 		rest = fs.Args()[1:]
 	}
+}
+
+// noArgs is parseFlags for a command that takes no paths and says so rather
+// than going on as though none had been given.
+//
+// Every fix subcommand parsed its positional arguments and dropped them, and
+// what that reads like is a command that took the path and did as it was told.
+// It is not: -lang and -book were the only things narrowing the walk, so
+// "fix seal -lang vi one/file.md" resealed 209 files in that lane and 4 in
+// another, over every hand edit in the tree. fix seal now takes paths, because
+// naming the file a hand correction was in is the whole use of it. The rest are
+// sweeps over the corpus by design and are left that way, but none of them may
+// be silent about being handed something they will not use.
+func noArgs(fs *flag.FlagSet, args []string) error {
+	rest, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("%s takes no paths and was given %s: it writes every file it finds, "+
+			"and narrowing it is what the flags are for", fs.Name(), strings.Join(rest, ", "))
+	}
+	return nil
 }
 
 func runVersion() error {
