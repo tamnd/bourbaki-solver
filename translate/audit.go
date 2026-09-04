@@ -224,11 +224,24 @@ func auditMath(en, tr string) []Problem {
 			Msg: "a math span is opened and never closed"})
 	}
 	want, _ := mathtex.Split(en)
+	named := false
 	if len(got) != len(want) {
-		out = append(out, Problem{Rule: RuleMath,
-			Msg: fmt.Sprintf("has %d math spans and the English has %d", len(got), len(want))})
+		msg := fmt.Sprintf("has %d math spans and the English has %d", len(got), len(want))
+		lost, added := alignSpans(want, got)
+		if len(lost) > 0 {
+			msg += ", and these are not in it: " + spanList(lost)
+		}
+		if len(added) > 0 {
+			msg += ", and these are in it and not in the English: " + spanList(added)
+		}
+		named = len(lost) > 0 || len(added) > 0
+		out = append(out, Problem{Rule: RuleMath, Msg: msg})
 	}
-	for i := 0; i < len(got) && i < len(want); i++ {
+	// The span-by-span comparison is only worth making while the two lists are
+	// still in step. Once one is short the alignment above has already said
+	// which spans went and which arrived, and every position after the first
+	// drop reports as changed when nothing at that position changed at all.
+	for i := 0; !named && i < len(got) && i < len(want); i++ {
 		if glossary.SameMath(want[i].Text, got[i].Text) && got[i].Display == want[i].Display {
 			continue
 		}
@@ -241,6 +254,92 @@ func auditMath(en, tr string) []Problem {
 		break
 	}
 	return append(out, auditMathProse(en, tr)...)
+}
+
+// spanAlignLimit is the most span pairs the alignment will compare. The whole
+// point of it is a chunk of a few dozen spans, and a quadratic run over a
+// pathological one is not worth the risk of holding a lane up.
+const spanAlignLimit = 40000
+
+// alignSpans says which of the English spans the answer does not have and which
+// of the answer's spans the English does not, by the longest common
+// subsequence of the two lists.
+//
+// A count is not something an answer can be corrected from, and that is what
+// the rule gave the model until now. Two exercises of the last Vietnamese run
+// stood on it for eleven attempts across two hosts and three sittings: one is
+// 54 inline spans in 2685 characters, a span every fifty characters and most of
+// them one letter, and the answers came back holding 52 of them, then 53, then
+// 52 nine times over. "has 52 math spans and the English has 54" tells the
+// model that it lost two of fifty-four and nothing at all about which two, so
+// the re-ask askChunk makes is another draw from the same urn. Naming them
+// makes it a correction.
+//
+// A subsequence and not a set, for the reason auditMath compares in order: a
+// model that reflows a paragraph moves a formula without losing it, and a set
+// comparison of a reflow says nothing happened. A span the model altered rather
+// than dropped falls out of this as one lost and one added, which is the same
+// finding the positional comparison would have made and says more, since it
+// carries no claim about where the span sits.
+func alignSpans(want, got []mathtex.Span) (lost, added []string) {
+	if len(want)*len(got) > spanAlignLimit {
+		return nil, nil
+	}
+	same := func(i, j int) bool {
+		return want[i].Display == got[j].Display && glossary.SameMath(want[i].Text, got[j].Text)
+	}
+	n, m := len(want), len(got)
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			switch {
+			case same(i, j):
+				dp[i][j] = dp[i+1][j+1] + 1
+			case dp[i+1][j] >= dp[i][j+1]:
+				dp[i][j] = dp[i+1][j]
+			default:
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+	i, j := 0, 0
+	for i < n && j < m {
+		switch {
+		case same(i, j):
+			i, j = i+1, j+1
+		case dp[i+1][j] >= dp[i][j+1]:
+			lost = append(lost, want[i].Text)
+			i++
+		default:
+			added = append(added, got[j].Text)
+			j++
+		}
+	}
+	for ; i < n; i++ {
+		lost = append(lost, want[i].Text)
+	}
+	for ; j < m; j++ {
+		added = append(added, got[j].Text)
+	}
+	return lost, added
+}
+
+// spanList quotes the spans, at most six of them. A list of forty is a count
+// written the long way and is no more use to the model than the count was.
+func spanList(spans []string) string {
+	const most = 6
+	parts := make([]string, 0, most)
+	for _, s := range spans[:min(len(spans), most)] {
+		parts = append(parts, window([]rune(strings.Join(strings.Fields(s), " ")), 0))
+	}
+	out := strings.Join(parts, ", ")
+	if len(spans) > most {
+		out += fmt.Sprintf(", and %d more", len(spans)-most)
+	}
+	return out
 }
 
 // Invariant 1 read the other way round. A word set inside the mathematics is
