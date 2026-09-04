@@ -39,6 +39,34 @@ func line(key, values string, suffix ...string) *regexp.Regexp {
 		`(` + values + `)` + tail + mark + `[.]?` + mark + `$`)
 }
 
+// reasoned matches a decision line that is allowed to say why, in the shape
+// OBLIGATION and PART lines have always been read in.
+//
+// The five lines built with this are the ones the truth judge prompt asks to
+// carry a reason: TRUTH FALSE names the step that is wrong, and COMPLETE,
+// SELF_CONTAINED and VERIFIABLE each name what a NO comes from. HUMAN_READABLE
+// is asked for nothing but is read the same way, because a judge writing four
+// fields in a block does not switch shape for the third of them.
+//
+// This was found the expensive way. The prompt was changed to require every NO
+// to name what it came from, and the judge did exactly that, writing
+// "COMPLETE: NO, obligation 3 is not discharged." The line function anchors the
+// end of the line straight after the value, so none of those parsed, HasQuality
+// went false on a complete and careful review, and the case was thrown away and
+// asked again. Six of the twenty cases of the built-in set died that way, all of
+// them cases the judge had actually decided. A prompt that asks for a word the
+// parser does not read fails three hundred solves and not the test, which is the
+// contract solve.go names and this is the far side of it.
+//
+// The end of the line is still the end of the decision. What follows the value
+// is prose the judge wrote about its own answer, and nothing here reads it: the
+// correction loop is handed the review entire, so the reason travels anyway and
+// a field for it here would be a second copy nobody asked for.
+func reasoned(key, values string) *regexp.Regexp {
+	return regexp.MustCompile(`(?mi)^` + mark + key + mark + `:` + mark +
+		`(` + values + `)\b` + mark + `[,.]?[ \t]*.*$`)
+}
+
 // mark is the decoration a model puts around a decision, and it holds no
 // newline. It has to appear on both sides of the colon, because a model that
 // bolds the key alone writes **VERDICT**: PASS as readily as **VERDICT: PASS**.
@@ -52,11 +80,11 @@ const mark = "[ \t*_`>#-]*"
 var (
 	verdictLine       = line("VERDICT", `PASS|FAIL`)
 	scoreLine         = line("SCORE", `[0-7]`, `\s*/\s*7`)
-	truthLine         = line("TRUTH", `TRUE|FALSE`)
-	completeLine      = line("COMPLETE", `YES|NO`)
-	selfContainedLine = line("SELF_CONTAINED", `YES|NO`)
-	humanReadableLine = line("HUMAN_READABLE", `YES|NO`)
-	verifiableLine    = line("VERIFIABLE", `YES|NO`)
+	truthLine         = reasoned("TRUTH", `TRUE|FALSE`)
+	completeLine      = reasoned("COMPLETE", `YES|NO`)
+	selfContainedLine = reasoned("SELF_CONTAINED", `YES|NO`)
+	humanReadableLine = reasoned("HUMAN_READABLE", `YES|NO`)
+	verifiableLine    = reasoned("VERIFIABLE", `YES|NO`)
 	selectedLine      = line("SELECTED", `[1-5]`)
 	natureLine        = line("NATURE", `PROOF|EXPLORATION`)
 	reachLine         = line("REACH", `IN_CORPUS|OUT_OF_CORPUS`)

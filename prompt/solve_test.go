@@ -354,3 +354,44 @@ func TestTheTruthJudgeStillFailsWhatItCouldNotSettle(t *testing.T) {
 		}
 	}
 }
+
+// TestTheTruthJudgeCanWriteTheReasonItIsAskedFor is the far side of the
+// contract the file comment names, in the direction that actually broke.
+//
+// The prompt tells the judge that a field it answers NO "names what it comes
+// from, in a few words after the line". Nothing asserted that the parser could
+// read a line in that shape, and it could not: the decision lines were anchored
+// at the end of the value, so every reasoned NO read as no answer at all,
+// HasQuality went false on a review that had answered everything, and the case
+// was thrown away. Six of the twenty cases of the built-in eval set were lost
+// that way before anybody looked at an archived review.
+//
+// This asserts the two halves against each other rather than against a literal:
+// what the prompt asks for is read out of the prompt, so a prompt that stops
+// asking for reasons fails here rather than quietly making the test vacuous.
+func TestTheTruthJudgeCanWriteTheReasonItIsAskedFor(t *testing.T) {
+	truth := built()["truth"]
+	if !strings.Contains(truth, "names what it comes from") {
+		t.Fatal("the truth prompt no longer asks a NO to name what it comes from, " +
+			"so this test is asserting nothing; delete it or follow the prompt")
+	}
+	d := textguard.Read(`VERDICT: FAIL
+TRUTH: FALSE, the step from one implication to an equivalence.
+COMPLETE: NO, obligation 3 is not discharged.
+SELF_CONTAINED: YES
+HUMAN_READABLE: YES
+VERIFIABLE: NO, the converse is absent so the last step cannot be checked.
+SCORE: 3/7`)
+	if !d.HasQuality {
+		t.Error("the judge answered all four fields the way the prompt asks and the parser read none of them")
+	}
+	if !d.HasTruth || d.Truth {
+		t.Error("TRUTH: FALSE with its step named did not read as false")
+	}
+	if d.Complete || d.Verifiable {
+		t.Error("a NO that named what it came from read as a yes")
+	}
+	if d.Verdict != "FAIL" || d.Score != 3 {
+		t.Errorf("verdict %q score %d beside reasoned fields", d.Verdict, d.Score)
+	}
+}
