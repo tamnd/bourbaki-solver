@@ -261,3 +261,37 @@ func TestTakingOutControlWordsLeavesTheProseBehind(t *testing.T) {
 		t.Fatalf("%d problems, want the one term left standing: %v", len(problems), problems)
 	}
 }
+
+// The notation of an index entry is a symbol however much of it is spelled with
+// letters. Map is the functor set upright, the same thing as Hom and End, and
+// the glossary was asking for "ánh xạ" in a list of symbols.
+func TestTheNotationOfAnIndexEntryIsNotProse(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "map", VI: "ánh xạ"}}}
+	const en = "Map(M, N), Pol_A(M, N), Pol(M, N) : IV, p. 57.\n"
+	if problems := AuditTerms("vi", g, en, en); len(problems) != 0 {
+		t.Fatalf("an index of notation entry was read as prose: %v", problems)
+	}
+}
+
+// The locator is written a second way, inside \text, and that entry is an entry
+// too.
+func TestAnIndexEntryWhoseLocatorIsSetInTextIsAlsoNotProse(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "map", VI: "ánh xạ"}}}
+	const en = `Map(M, N) : \text{I, § 1, no. 5}.` + "\n"
+	if problems := AuditTerms("vi", g, en, en); len(problems) != 0 {
+		t.Fatalf("an index entry with a \\text locator was read as prose: %v", problems)
+	}
+}
+
+// The guard, and the reason headings are left alone. Section 3 of § 2 of
+// Algebra VII is titled "Applications : I. Canonical decompositions ...", where
+// the I numbers a part and does not name a volume. It is the only shape in the
+// corpus that reads as an index entry and is not one.
+func TestAHeadingThatReadsLikeAnIndexEntryIsStillProse(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "application", VI: "ứng dụng"}}}
+	const en = "### 3. Application : I. Canonical decompositions of rational numbers.\n"
+	const vi = "### 3. Application : I. Các phân tích chính tắc của các số hữu tỉ.\n"
+	if problems := AuditTerms("vi", g, en, vi); len(problems) != 1 {
+		t.Fatalf("%d problems, want the term left standing in a heading: %v", len(problems), problems)
+	}
+}
