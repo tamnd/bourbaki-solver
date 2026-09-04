@@ -330,3 +330,59 @@ func TestAVerdictWithNoObligationsInIt(t *testing.T) {
 		t.Errorf("it did not read as the pass it says it is: %s", why)
 	}
 }
+
+// The five lines below are the ones the truth judge prompt asks to carry a
+// reason. Every one of them is taken from a review the eval threw away.
+
+func TestAQualityFieldThatNamesWhatItComesFromIsStillRead(t *testing.T) {
+	d := Read(`VERDICT: FAIL
+TRUTH: FALSE, the final inference from one implication to an equivalence.
+COMPLETE: NO, obligation 3 is not discharged and the reverse implication is missing.
+SELF_CONTAINED: YES
+HUMAN_READABLE: YES
+VERIFIABLE: NO, the converse proof is absent so the step cannot be checked.
+SCORE: 3/7`)
+	if !d.HasQuality {
+		t.Fatal("a review that answered all four fields with a reason on two of them read as not having answered them")
+	}
+	if !d.HasTruth || d.Truth {
+		t.Fatal("TRUTH: FALSE with the step named after it did not read as false")
+	}
+	if d.Complete || d.Verifiable {
+		t.Fatal("a NO carrying its reason read as a yes")
+	}
+	if !d.SelfContained || !d.HumanReadable {
+		t.Fatal("a bare YES beside two reasoned NOs stopped reading")
+	}
+}
+
+func TestAReasonedFieldDoesNotTurnANoIntoAYes(t *testing.T) {
+	d := Read("COMPLETE: NO, every obligation is discharged and it reads well.")
+	if d.Complete {
+		t.Fatal("the prose after the comma was read instead of the answer before it")
+	}
+}
+
+func TestADecisionMentionedInPassingIsStillNotADecision(t *testing.T) {
+	d := Read("The solution is not COMPLETE: YES material, whatever it claims.")
+	if d.HasQuality {
+		t.Fatal("a field named in the middle of a sentence was read as an answer")
+	}
+}
+
+func TestAValueThatIsTheStartOfALongerWordIsNotADecision(t *testing.T) {
+	d := Read("TRUTH: TRUENESS is not what is being asked about here.")
+	if d.HasTruth {
+		t.Fatal("TRUENESS was read as TRUE")
+	}
+}
+
+func TestTheDecoratedFormStillReadsWithAReason(t *testing.T) {
+	d := Read("**COMPLETE**: **NO**, the induction has no base case.")
+	if _, has := boolean(completeLine, "**COMPLETE**: **NO**, the induction has no base case.", "YES"); !has {
+		t.Fatal("a bolded field with a reason after it did not read")
+	}
+	if d.Complete {
+		t.Fatal("a bolded NO read as a yes")
+	}
+}
