@@ -233,3 +233,31 @@ func TestOrdinaryProseIsStillReadForTermsLeftInEnglish(t *testing.T) {
 		t.Errorf("the complaint reads %q and does not say %q", problems[0].Msg, "space")
 	}
 }
+
+// A TeX control word is not the English word its letters spell.
+//
+// An index of notation writes its entries as bare LaTeX with no dollar signs
+// anywhere, so mathtex.Strip has nothing to take out and the line arrives whole.
+// The glossary then read sum in \sum and asked for "tổng" in a list of symbols.
+func TestATeXControlWordIsNotATermLeftInEnglish(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{
+		{EN: "sum", VI: "tổng"},
+		{EN: "map", VI: "ánh xạ"},
+	}}
+	const en = `\sum_{i=p}^q \sum_{j=r}^s x_{ij}, \prod_{i<j} x_{ij} : \text{I, § 1, no. 5}.` + "\n"
+	if problems := AuditTerms("vi", g, en, en); len(problems) != 0 {
+		t.Fatalf("an index of notation entry was read as prose: %v", problems)
+	}
+}
+
+// The guard. Taking the control words out must not take the prose with them:
+// a line that really does leave a term in English is refused as before.
+func TestTakingOutControlWordsLeavesTheProseBehind(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "sum", VI: "tổng"}}}
+	const en = "The sum of the family is written \\sum x_i here.\n"
+	const vi = "The sum của họ được viết \\sum x_i ở đây.\n"
+	problems := AuditTerms("vi", g, en, vi)
+	if len(problems) != 1 {
+		t.Fatalf("%d problems, want the one term left standing: %v", len(problems), problems)
+	}
+}

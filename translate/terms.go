@@ -144,6 +144,24 @@ func prose(body string) string { return proseText(body, false) }
 // and they caught this on the first run.
 var weldedRE = regexp.MustCompile(`\p{L}*\$[^$\n]+\$\p{L}*`)
 
+// ctrlWordRE is a TeX control word, which is never an English word however much
+// of one it looks like.
+//
+// mathtex.Strip takes out what stands between dollar signs, and an index of
+// notation has none: its entries are bare LaTeX, "\sum_{i=p}^q \sum_{j=r}^s
+// x_{ij} : \text{I, § 1, no. 5}". Nothing there is inside a formula as far as
+// Strip can tell, so the whole line came through as prose and the glossary read
+// the word sum in \sum and asked for "tổng". Four of the five indexes of
+// notation the last run could not land died on that, and the largest of them
+// was refused on every attempt over two models.
+//
+// The comment in Strip about the words left, right and square being read as
+// prose is this same fault seen from the other side. It was fixed there for a
+// display written $$...$$ on one line, which is where it was found; a control
+// word outside dollars altogether was still read, and \left, \right and \square
+// are control words.
+var ctrlWordRE = regexp.MustCompile(`\\[a-zA-Z]+`)
+
 // proseText is prose, and with welded set it also drops those names.
 //
 // Only hasProse asks for that. The terminology rule reads the other form and
@@ -170,7 +188,7 @@ func proseText(body string, welded bool) string {
 		if welded {
 			line = weldedRE.ReplaceAllString(line, " ")
 		}
-		b.WriteString(mathtex.Strip(line))
+		b.WriteString(ctrlWordRE.ReplaceAllString(mathtex.Strip(line), " "))
 		b.WriteString("\n")
 	}
 	return b.String()
