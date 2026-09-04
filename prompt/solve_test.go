@@ -309,3 +309,48 @@ func usesSample(prompt string) string {
 }
 
 func tagsIn(line string) []string { return sampleTag.FindAllString(line, -1) }
+
+// The truth judge failed 5 of the 10 right answers of the twenty-case set, and
+// three of those reviews had cleared every obligation, every failure mode and
+// every falsification check before writing the solution off. The summary block
+// was not being read off the review. These hold the prompt to the two things
+// that were changed about it, because both are one sentence away from being
+// deleted by a later edit that reads them as padding.
+
+func TestTheTruthJudgeIsToldToAnswerFromTheWorkItJustDid(t *testing.T) {
+	p := built()["truth"]
+	for _, want := range []string{
+		"read off the work above them",
+		"names what it comes from",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the truth judge is no longer told to answer from its own review: %q is gone", want)
+		}
+	}
+}
+
+func TestTheDefaultToFailIsScopedToAStepThatWasNotChecked(t *testing.T) {
+	p := built()["truth"]
+	if !strings.Contains(p, "Your default is to fail an unchecked step") {
+		t.Error("the default to fail is unscoped again, which is what failed three right answers that had passed every check in the review")
+	}
+	if !strings.Contains(p, "not licence to fail a step you") {
+		t.Error("nothing now stops a review that cleared every check from failing the solution anyway")
+	}
+}
+
+func TestTheTruthJudgeStillFailsWhatItCouldNotSettle(t *testing.T) {
+	// The false accept rate is the number that decides whether a verdict is
+	// worth anything, it is at 0 of 10, and none of the above may loosen it.
+	p := built()["truth"]
+	for _, want := range []string{
+		"If you are unsure, it is FAIL",
+		"VERDICT is PASS only when TRUTH is TRUE",
+		"score is 6 or 7",
+		"Reading a step and thinking it is probably fine is failing the step",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the gate was loosened: %q is gone", want)
+		}
+	}
+}

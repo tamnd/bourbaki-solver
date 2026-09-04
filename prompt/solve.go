@@ -126,6 +126,37 @@ func SolveSelect(exercise, obligations string, candidates []string) string {
 }
 
 // SolveTruth is the judge that reads the solution beside the reference.
+//
+// It is the half of the pair that decides the false reject rate, and the run of
+// 2026-09-04 over the twenty-case set put that at 5 of the 10 right answers,
+// against the 30 per cent spec 07 section 6 tolerates. The other half is fine:
+// the reference-blind audit judge agreed with the person on 9 of the 10, and
+// neither judge accepted a single one of the 10 wrong answers.
+//
+// The reviews say plainly what went wrong, and it is not calibration. Reading
+// the four the truth judge turned down, three of them worked the whole
+// checklist through and cleared it. Exercise 1 of section 1 of chapter II wrote
+// DISCHARGED against all three obligations, DOES NOT FALL against all four
+// failure modes, PASSED against all three falsification checks and found both
+// citations honest, and then wrote COMPLETE: NO, SELF_CONTAINED: NO,
+// VERIFIABLE: NO, SCORE 5/7 and a verdict of FAIL, naming nothing at all.
+// Exercise 2 of section 5 of chapter I discharged 5 obligations of 5, passed 4
+// checks of 4, and scored it 4 out of 7. The summary block was not being read
+// off the review; it was being answered fresh, from an impression, and the
+// review above it was doing no work.
+//
+// "Your default is to fail" is what produced that. It is the right instruction
+// for a step the judge has not checked and the wrong one for a step it has
+// checked and found sound, and the prompt did not distinguish the two. It now
+// scopes that sentence to unchecked steps and requires every NO to name what it
+// comes from: which obligation is not discharged, which step is left to a
+// reader, which result is used unstated, which step cannot be checked.
+//
+// Requiring a reason for a rejection cannot raise the false accept rate, which
+// is the number that decides whether a verdict in this corpus is worth
+// anything and is the one currently met. Nothing about PASS is loosened: the
+// verdict still wants TRUTH true, all four fields YES, a score of 6 or 7 and
+// every part passed, and an unsettled step is still a fail.
 func SolveTruth(context, reference, solution string, parts []string) string {
 	return fill(solveTruth,
 		"{{REFERENCE}}", strings.TrimSpace(reference),
