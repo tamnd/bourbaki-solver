@@ -1304,6 +1304,12 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// cost of the whole question, and the second answer is wrapped the same
 		// way as the first.
 		answer.Text = textguard.Normalise(textguard.Strip(answer.Text))
+		// Unescape goes before Respace because Respace asks whether two spans
+		// are the same but for spacing, and a span carrying a Markdown escape
+		// is not: the backslash is a character and the comparison sees it. An
+		// index entry that came back both escaped and re-laid out would
+		// otherwise be repaired by neither.
+		answer.Text = translate.Unescape(body, answer.Text)
 		answer.Text = translate.Respace(body, answer.Text)
 		// And the second repair, for the same reason: a citation the model wrote
 		// in the words of the language it was translating into is a citation
