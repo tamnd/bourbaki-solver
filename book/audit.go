@@ -269,6 +269,102 @@ func (a *Audit) structure(v *Volume) {
 	}
 	a.ok("every statement the front matter claims is on the page", len(short) == 0,
 		fmt.Sprintf("%d files short", len(short)), short...)
+
+	// The exercises are asked as well as the §§, and they are where this check
+	// earns its keep: every one of the fifteen misread lists in the corpus was
+	// in an exercise, and Pieces does not return those, so a first cut of this
+	// check that walked Pieces alone passed the whole library while ac IV § 2
+	// exercise 10 still read (a) (b) (y) (δ).
+	var mixed []string
+	for _, s := range v.Pieces() {
+		mixed = append(mixed, misreadLabels(s.Path, s.Body)...)
+		for _, e := range s.Exercises {
+			mixed = append(mixed, misreadLabels(e.Path, e.Body)...)
+		}
+	}
+	a.ok("no list of conditions has a Greek label read as Latin", len(mixed) == 0,
+		fmt.Sprintf("%d lists", len(mixed)), mixed...)
+}
+
+// greekForLatin is what the scan turns each Greek label into when it loses it.
+// These are the four that actually happened, and they are the four that look
+// like something else in the face these printings use: α and a, β and b, γ and
+// y, δ and the digit 8. The reading is not consistent about it, which is what
+// made this hard to see by eye rather than easy: ac III §3 exercise 23 came out
+// as "conditions (a), (β) and (y)" with a correct (γ) four words later in the
+// same sentence.
+var greekForLatin = map[string]string{"a": "α", "b": "β", "y": "γ", "8": "δ"}
+
+// greekOrder is the place of each label in the alphabet the lists run in. It is
+// a map and not an index into a string because these letters are two bytes
+// each, so strings.Index would put β one past α by two rather than by one and
+// no list would ever look consecutive.
+var greekOrder = map[string]int{"α": 1, "β": 2, "γ": 3, "δ": 4, "ε": 5, "ζ": 6, "η": 7}
+
+// labelRE is one item of a labelled list, at the head of its own line, with the
+// emphasis Markdown may have around it. Bourbaki labels the parts of an
+// exercise with Latin letters and the members of a list of equivalent
+// conditions with Greek ones, which is what makes a mixed list a finding.
+var labelRE = regexp.MustCompile(`^\s*\**\(([aby8]|[αβγδεζη])\)\**[\s*]`)
+
+// misreadLabels finds a list of conditions that the reading gave a Latin label
+// to. Looking for a Latin letter next to a Greek one is not enough on its own,
+// because the ordinary shape of an exercise is parts (a) and (b) with a Greek
+// list inside one of them, and that is not a finding: over the whole corpus it
+// is the common case and the misreadings are the rare one.
+//
+// What separates them is that a list of conditions is consecutive. Map each
+// Latin label to the Greek it was read from and ask whether the run then walks
+// the Greek alphabet without repeating or skipping. A run of (a) (β) becomes
+// α β and is a finding. A run of (a) (α) (β), which is part (a) followed by its
+// own two conditions, becomes α α β, which repeats, so it is not. Every one of
+// the nineteen mixed runs in the corpus was sorted correctly by that rule, the
+// fifteen real ones and the four that were the ordinary shape.
+//
+// The French lane has no mixed runs at all and neither does the machine
+// English, which is the evidence that these are misreadings of the English scan
+// and not a convention the corpus uses anywhere.
+func misreadLabels(path, body string) []string {
+	var found []string
+	var run []string
+	flush := func() {
+		defer func() { run = nil }()
+		if len(run) < 2 {
+			return
+		}
+		var latin, greek bool
+		mapped := make([]string, len(run))
+		for i, lab := range run {
+			if g, ok := greekForLatin[lab]; ok {
+				latin, mapped[i] = true, g
+				continue
+			}
+			greek, mapped[i] = true, lab
+		}
+		if !latin || !greek {
+			return
+		}
+		for i := 1; i < len(mapped); i++ {
+			prev, ok := greekOrder[mapped[i-1]]
+			if this := greekOrder[mapped[i]]; !ok || this != prev+1 {
+				return
+			}
+		}
+		found = append(found, fmt.Sprintf("%s: the list (%s) reads as (%s)",
+			path, strings.Join(run, ") ("), strings.Join(mapped, ") (")))
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if m := labelRE.FindStringSubmatch(line); m != nil {
+			run = append(run, m[1])
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		flush()
+	}
+	flush()
+	return found
 }
 
 // subsectionRE is a numbered subsection heading in a body, "### 3. ASSOCIATIVE
