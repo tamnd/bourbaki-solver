@@ -497,3 +497,104 @@ func TestTheBackMatterCheckFindsAnIndexThatDidNotReachTheDocument(t *testing.T) 
 		t.Errorf("the check does not name the index that went: %v", c.Notes)
 	}
 }
+
+// TestAConditionListWhoseGreekWasReadAsLatinIsFound is the finding that started
+// this check. The English of ac III, § 3, exercise 23 came off the scan with
+// its first two labels lost, and the French it was set from reads α) β) γ).
+func TestAConditionListWhoseGreekWasReadAsLatinIsFound(t *testing.T) {
+	body := "The following are equivalent:\n\n(a) every ideal is principal;\n(β) every ideal is free;\n(y) the ring is a field.\n"
+	got := misreadLabels("x.md", body)
+	if len(got) != 1 {
+		t.Fatalf("misreadLabels found %d lists, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "(α) (β) (γ)") {
+		t.Errorf("the finding does not say what the list should read: %s", got[0])
+	}
+}
+
+// TestPartsOfAnExerciseAroundAGreekListAreNotAFinding is the ordinary shape and
+// is far commoner than the misreadings. An exercise numbers its parts (a), (b),
+// (c) in Latin and its conditions α, β, γ in Greek, so the two alphabets sit
+// next to each other everywhere and a check that only looked for that would
+// fail most of the library. Mapping (a) to α leaves α α β, which repeats, and a
+// list of conditions does not repeat.
+func TestPartsOfAnExerciseAroundAGreekListAreNotAFinding(t *testing.T) {
+	body := "(a) Show that the following are equivalent:\n(α) the ring is local;\n(β) the ring is a field.\n\n(b) Deduce that the ring is Noetherian.\n"
+	if got := misreadLabels("x.md", body); len(got) != 0 {
+		t.Errorf("the ordinary shape of an exercise was reported as a finding: %v", got)
+	}
+}
+
+// TestATrailingLatinPartAfterAGreekListIsNotAFinding is alg I, § 2, exercise
+// 17, where two properties α and β are stated and then part (a) opens. Mapped,
+// that is α β α, which goes backwards, so it is not a list of conditions.
+func TestATrailingLatinPartAfterAGreekListIsNotAFinding(t *testing.T) {
+	body := "(α) for all s in S there exist t and b;\n(β) for all a, b in E there exists t;\n(a) In E times S let the relation denote this.\n"
+	if got := misreadLabels("x.md", body); len(got) != 0 {
+		t.Errorf("a Latin part after a Greek list was reported as a finding: %v", got)
+	}
+}
+
+// TestTheDigitEightIsReadAsDelta is ac II, § 4, exercise 18, whose fourth
+// condition came off the scan as "(8) The ring C(Y; R) is absolutely flat".
+func TestTheDigitEightIsReadAsDelta(t *testing.T) {
+	body := "(α) every prime ideal is maximal;\n(β) every countable intersection is open;\n(y) every function is locally constant;\n(8) the ring is absolutely flat.\n"
+	got := misreadLabels("x.md", body)
+	if len(got) != 1 {
+		t.Fatalf("misreadLabels found %d lists, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "(α) (β) (γ) (δ)") {
+		t.Errorf("the digit 8 was not read back as delta: %s", got[0])
+	}
+}
+
+// TestAListThatIsAllGreekOrAllLatinIsNotAFinding: the check needs one of each
+// to have anything to say, since a list that is wholly in either alphabet is
+// either right or wrong in a way this cannot see.
+func TestAListThatIsAllGreekOrAllLatinIsNotAFinding(t *testing.T) {
+	for _, body := range []string{
+		"(α) the first;\n(β) the second;\n(γ) the third.\n",
+		"(a) the first;\n(b) the second.\n",
+	} {
+		if got := misreadLabels("x.md", body); len(got) != 0 {
+			t.Errorf("a list in one alphabet was reported as a finding: %v", got)
+		}
+	}
+}
+
+// TestAGapInTheRunIsNotAListOfConditions: two labels that do not follow each
+// other are not the list this check is about, and reporting them would make it
+// fire on prose that happens to open two lines with brackets.
+func TestAGapInTheRunIsNotAListOfConditions(t *testing.T) {
+	body := "(a) the first;\n(γ) the third.\n"
+	if got := misreadLabels("x.md", body); len(got) != 0 {
+		t.Errorf("a run that skips a letter was reported as a finding: %v", got)
+	}
+}
+
+// TestTheGreekLabelCheckReadsTheExercisesAndNotOnlyTheSections is the mistake
+// the first cut of this check made. Volume.Pieces returns the §§, the chapter
+// fronts, the historical notes and the two indexes, and it does not return the
+// exercises, which hang off each § instead. Every one of the fifteen misread
+// lists in the corpus was in an exercise, so a check that walked Pieces alone
+// passed the entire library while ac IV, § 2, exercise 10 still read
+// (a) (b) (y) (δ). It was found by putting that file back as it was and
+// watching the audit stay green.
+func TestTheGreekLabelCheckReadsTheExercisesAndNotOnlyTheSections(t *testing.T) {
+	v := sample()
+	s := v.Chapters[0].Sections[0]
+	s.Exercises = append(s.Exercises, &Exercise{
+		Number: 1,
+		Path:   "ex/1.md",
+		Body:   "Show that the following are equivalent:\n\n(a) the ring is local;\n(β) the ring is a field.\n",
+	})
+	a := &Audit{}
+	a.structure(v)
+	c := find(t, a, "Greek label")
+	if c.OK {
+		t.Fatalf("the check passed a volume whose exercise reads (a) (β): %s", c.Detail)
+	}
+	if len(c.Notes) != 1 || !strings.Contains(c.Notes[0], "ex/1.md") {
+		t.Errorf("the finding does not name the exercise it is in: %v", c.Notes)
+	}
+}
