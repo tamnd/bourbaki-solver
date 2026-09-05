@@ -970,3 +970,50 @@ func TestAChangedSpanIsStillReportedByPositionWhenNothingWasDropped(t *testing.T
 		t.Fatalf("the span-by-span reading stopped working: %v", ps[0])
 	}
 }
+
+// The Topology X exercise that stood on this. The chunk uses $a$ three times
+// over legitimately and the answer added a fourth, so naming the text alone
+// names a letter the answer is right to have and asks the model which of them
+// it meant. Two models of different families answered that question wrong.
+func TestAnInventedSpanIsNamedAfterTheLastSpanBothSidesAgreeOn(t *testing.T) {
+	en := `every $h \in A$ with $|h| \leq |f|$]. The image in $A/a$ of $P$.`
+	tr := `mọi $h \in A$ với $|h| \leq |f|$ cũng thuộc $a$]. Ảnh trong $A/a$ của $P$.`
+	ps := auditMath(en, tr)
+	if len(ps) != 1 {
+		t.Fatalf("wanted the one count, got %v", ps)
+	}
+	if !strings.Contains(ps[0].Msg, `"a" after "|h| \\leq |f|"`) {
+		t.Fatalf("the extra span was not placed, so it names a letter and not a span: %v", ps[0])
+	}
+}
+
+// An anchor that repeats the span's own text places nothing, and "the extra "a"
+// after "a"" is a sentence rather than a direction.
+func TestASpanIsNotAnchoredToItself(t *testing.T) {
+	en := `Let $a$ be an ideal of $A$.`
+	tr := `Cho $a$ là một iđêan $a$ của $A$.`
+	ps := auditMath(en, tr)
+	if len(ps) != 1 {
+		t.Fatalf("wanted the one count, got %v", ps)
+	}
+	if strings.Contains(ps[0].Msg, `"a" after "a"`) {
+		t.Fatalf("a span was anchored to its own text: %v", ps[0])
+	}
+}
+
+// Nothing has been agreed on yet at the very front, so there is no anchor to
+// give and the name stands on its own as it always did.
+func TestASpanBeforeAnyAgreementIsNamedWithNoAnchor(t *testing.T) {
+	en := `The space $E$ is compact.`
+	tr := `$X$ Không gian $E$ là compact.`
+	ps := auditMath(en, tr)
+	if len(ps) != 1 {
+		t.Fatalf("wanted the one count, got %v", ps)
+	}
+	if !strings.Contains(ps[0].Msg, `"X"`) {
+		t.Fatalf("did not name the invented span: %v", ps[0])
+	}
+	if strings.Contains(ps[0].Msg, `"X" after`) {
+		t.Fatalf("anchored a span that comes before anything the two sides share: %v", ps[0])
+	}
+}

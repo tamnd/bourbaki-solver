@@ -281,7 +281,16 @@ const spanAlignLimit = 40000
 // than dropped falls out of this as one lost and one added, which is the same
 // finding the positional comparison would have made and says more, since it
 // carries no claim about where the span sits.
-func alignSpans(want, got []mathtex.Span) (lost, added []string) {
+//
+// Each one carries the last span the two sides agreed on before it, because the
+// text of a span is not always enough to find it by. A Topology X exercise came
+// back with 61 spans against the English's 60 and the extra one was "a", and
+// that chunk holds $a$ twice over legitimately, so "these are in it and not in
+// the English: "a"" names a letter the answer is right to have and leaves the
+// model to guess which of its three is the one too many. Two models of different
+// families guessed the same way and both guessed wrong. Anchored, it reads as
+// the extra "a" after "|h| \leq |f|", which is one span and not three.
+func alignSpans(want, got []mathtex.Span) (lost, added []spanMove) {
 	if len(want)*len(got) > spanAlignLimit {
 		return nil, nil
 	}
@@ -305,35 +314,57 @@ func alignSpans(want, got []mathtex.Span) (lost, added []string) {
 			}
 		}
 	}
+	// after is the last span the two sides agreed on, which is the anchor both
+	// lists are reported against. It stays empty until the first agreement, and
+	// a span reported with no anchor is one before anything the two sides share.
+	after := ""
 	i, j := 0, 0
 	for i < n && j < m {
 		switch {
 		case same(i, j):
+			after = want[i].Text
 			i, j = i+1, j+1
 		case dp[i+1][j] >= dp[i][j+1]:
-			lost = append(lost, want[i].Text)
+			lost = append(lost, spanMove{Text: want[i].Text, After: after})
 			i++
 		default:
-			added = append(added, got[j].Text)
+			added = append(added, spanMove{Text: got[j].Text, After: after})
 			j++
 		}
 	}
 	for ; i < n; i++ {
-		lost = append(lost, want[i].Text)
+		lost = append(lost, spanMove{Text: want[i].Text, After: after})
 	}
 	for ; j < m; j++ {
-		added = append(added, got[j].Text)
+		added = append(added, spanMove{Text: got[j].Text, After: after})
 	}
 	return lost, added
 }
 
-// spanList quotes the spans, at most six of them. A list of forty is a count
-// written the long way and is no more use to the model than the count was.
-func spanList(spans []string) string {
+// spanMove is one span that is on one side and not the other, and the last span
+// the two sides agreed on before it. After is empty for a span that comes before
+// anything they share, and then there is nothing to anchor it to but the start.
+type spanMove struct {
+	Text  string
+	After string
+}
+
+// spanList quotes the spans, at most six of them, each after the last span the
+// two sides agreed on. A list of forty is a count written the long way and is no
+// more use to the model than the count was.
+//
+// The anchor is dropped where it would not narrow anything: a span that comes
+// before the first agreement has none, and a span whose own text is the anchor's
+// is one of a repeated pair, where "after itself" is a sentence and not a place.
+func spanList(spans []spanMove) string {
 	const most = 6
 	parts := make([]string, 0, most)
 	for _, s := range spans[:min(len(spans), most)] {
-		parts = append(parts, window([]rune(strings.Join(strings.Fields(s), " ")), 0))
+		one := window([]rune(strings.Join(strings.Fields(s.Text), " ")), 0)
+		if s.After != "" && s.After != s.Text {
+			one += " after " + window([]rune(strings.Join(strings.Fields(s.After), " ")), 0)
+		}
+		parts = append(parts, one)
 	}
 	out := strings.Join(parts, ", ")
 	if len(spans) > most {
