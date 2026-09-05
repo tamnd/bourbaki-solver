@@ -77,3 +77,54 @@ func TestThePartsAreCountedAcrossTheWholePrinting(t *testing.T) {
 			card.Sections[0].Section, card.Sections[1].Section)
 	}
 }
+
+// read returns a solution somebody has read, with the findings they wrote down.
+func read(label, status string, found ...string) solve.Solution {
+	s := sol(label, status)
+	s.Meta.HandRead = "2026-08-19"
+	s.Meta.Found = found
+	return s
+}
+
+// A verified solution a reader objected to is the one thing on this card that
+// names a file the corpus is getting wrong, and it used to be counted only
+// beside hand read, where it read as a note on the reading and not on the
+// status. Believed went on counting it either way.
+func TestAVerifiedSolutionAReaderObjectedToIsCountedAgainstBelieved(t *testing.T) {
+	exercises := []string{"alg-viii-s1-ex-1", "alg-viii-s1-ex-2", "alg-viii-s1-ex-3"}
+	held := map[string]solve.Solution{
+		"alg-viii-s1-ex-1": read("alg-viii-s1-ex-1", corpus.StatusVerified,
+			"the proof assumes the result of the preceding exercise"),
+		"alg-viii-s1-ex-2": read("alg-viii-s1-ex-2", corpus.StatusVerified),
+		"alg-viii-s1-ex-3": sol("alg-viii-s1-ex-3", corpus.StatusVerified),
+	}
+	card := score(exercises, held, "en")
+	if card.Believed != 3 {
+		t.Errorf("believed %d, want 3: a finding is a reader's note and does not move a status", card.Believed)
+	}
+	if card.Contested != 1 {
+		t.Errorf("contested %d, want 1", card.Contested)
+	}
+	if card.HandRead != 2 || card.Disputed != 1 {
+		t.Errorf("hand read %d disputed %d, want 2 and 1", card.HandRead, card.Disputed)
+	}
+}
+
+// A reader who found something against an answer that was never claimed to be
+// right has not contested anything. The count is of the gap between what the
+// judges said and what somebody read, so an unverified solution with a finding
+// is the two agreeing.
+func TestAFindingAgainstAnUnverifiedSolutionIsNotContested(t *testing.T) {
+	exercises := []string{"alg-viii-s1-ex-1", "alg-viii-s1-ex-2"}
+	held := map[string]solve.Solution{
+		"alg-viii-s1-ex-1": read("alg-viii-s1-ex-1", corpus.StatusUnverified, "the second inclusion is asserted"),
+		"alg-viii-s1-ex-2": read("alg-viii-s1-ex-2", corpus.StatusPartial, "part (b) is hand waved"),
+	}
+	card := score(exercises, held, "en")
+	if card.Disputed != 2 {
+		t.Errorf("disputed %d, want 2", card.Disputed)
+	}
+	if card.Contested != 0 {
+		t.Errorf("contested %d, want 0", card.Contested)
+	}
+}
