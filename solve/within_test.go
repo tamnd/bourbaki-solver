@@ -316,3 +316,52 @@ func TestNoRoomAndAVeryTightRoomComeToTheSameThing(t *testing.T) {
 			len(got), len(want))
 	}
 }
+
+// manyOutside is a context citing n more things the corpus does not hold, on
+// top of the one the fixture already carries.
+func manyOutside(n int) *Context {
+	c := wide()
+	for i := range n {
+		c.Pieces = append(c.Pieces, Piece{Kind: Outside, Depth: 1,
+			Raw: fmt.Sprintf("Set Theory, III, §%d, No. 6, p. 155, Proposition 13", i)})
+	}
+	return c
+}
+
+// The out-of-corpus block is in the floor: order never offers Outside up, so a
+// context trimmed until everything that could go has gone still carries it
+// whole. Two exercises of Commutative Algebra § 1 carry 545 of these at 13723
+// characters against a question limit of 32000, which is a trimmer that has
+// given up every reference it had still handing over 13.7k it may not touch.
+func TestTheReferencesThatLeaveTheCorpusDoNotBecomeTheFloor(t *testing.T) {
+	c := manyOutside(545)
+	out := c.RenderWithin(0, "")
+
+	if len(out) > 6000 {
+		t.Errorf("the floor is %d characters", len(out))
+	}
+	if n := strings.Count(out, "\n- Set Theory"); n > mostOutside {
+		t.Errorf("named %d of them, the cap being %d", n, mostOutside)
+	}
+	// 545 added to the one the fixture already had, less the 40 named.
+	if !strings.Contains(out, "and 506 more") {
+		t.Error("the ones not named are not counted")
+	}
+	// The rule is the point of the block and it survives the cap.
+	if !strings.Contains(out, "statements are not available to you") {
+		t.Error("the instruction went with the list")
+	}
+}
+
+// Under the cap nothing changes: a handful is named one by one, which is what
+// the block was written to do.
+func TestAShortListOfWhatLeavesTheCorpusIsPrintedWhole(t *testing.T) {
+	c := manyOutside(3)
+	out := c.Render()
+	if n := strings.Count(out, "\n- Set Theory"); n != 4 {
+		t.Errorf("named %d of the 4 the fixture comes to", n)
+	}
+	if strings.Contains(out, "more, which are not named here") {
+		t.Error("a list that fits was given a tail")
+	}
+}

@@ -98,11 +98,43 @@ func (c *Context) renderOutside(b *strings.Builder) {
 	b.WriteString("References that leave the corpus\n\n")
 	b.WriteString(outsideInstruction)
 	b.WriteString("\n\n")
-	for _, p := range out {
+	for _, p := range out[:min(len(out), mostOutside)] {
 		fmt.Fprintf(b, "- %s\n", p.Raw)
+	}
+	if over := len(out) - mostOutside; over > 0 {
+		fmt.Fprintf(b, "\nand %d more, which are not named here because the list "+
+			"would be longer than the exercise. The rule above is the rule for all "+
+			"of them: where you use a result of a volume you have not been shown, "+
+			"say so in the form it gives.\n", over)
 	}
 	b.WriteString("\n")
 }
+
+// mostOutside is the cap on that list, and it is the cap that matters most.
+//
+// This block is in the floor. order never offers TheExercise, TheSection or
+// Outside up, so a context trimmed until everything that could go has gone still
+// carries this whole, and on the exercises where it is long it is most of what
+// is left. Commutative Algebra VI and VII § 1 exercise 1 each carry 545 of these
+// at 13723 characters, against a question limit of 32000: a trimmer that has
+// given up every reference and every sibling it had is still handing over 13.7k
+// of citation names it was never allowed to touch.
+//
+// It is the same shape as the cited-and-not-shown block above and it is worse,
+// because that one could at least be trimmed once it was counted and this one
+// cannot be. A count is what a list of five hundred names comes to either way.
+//
+// Measured on the floor itself, which is what solve context -ask 1 renders: VI
+// § 1 exercise 1 came to 22339 characters and comes to 10651, VII § 1 exercise 1
+// to 27270 and 15582. The same 11688 either way, because it is the same list.
+//
+// The instruction is what this block is for and the instruction is not a list:
+// it says that a result from a volume not shown must be named as such, and that
+// holds for the five hundred as much as for the forty. Nothing here was ever
+// giving the model the statements, only the names, so what the tail costs is
+// the model's chance to recognise one particular citation as being outside
+// rather than merely absent, and the sentence covers that case in general.
+const mostOutside = 40
 
 // renderNamed tells the model what is in the corpus and is not in front of it.
 //
