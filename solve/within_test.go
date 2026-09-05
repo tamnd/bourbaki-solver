@@ -1,6 +1,7 @@
 package solve
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -45,8 +46,15 @@ func TestAContextThatFitsIsSentWhole(t *testing.T) {
 	if got, want := c.RenderWithin(len(c.Render()), ""), c.Render(); got != want {
 		t.Error("a context inside the limit was trimmed")
 	}
-	if got, want := c.RenderWithin(0, ""), c.Render(); got != want {
-		t.Error("a limit of zero trimmed the context")
+	// This asserted the reverse, that a limit of zero was no limit and sent the
+	// context whole. Nothing asked for it that way: all four callers work the
+	// room out as the limit less what the rest of the question already takes,
+	// and the engine returns Render itself for an unlimited run before a room is
+	// ever computed. What the branch actually served was the truth judge, whose
+	// question carries a reference and a solution and so can leave a room of
+	// nothing, being handed the whole context at the tightest moment there is.
+	if got := c.RenderWithin(0, ""); len(got) >= len(c.Render()) {
+		t.Error("a room of nothing was sent the context whole")
 	}
 }
 
@@ -217,5 +225,143 @@ func TestTheStatementTheSolutionArguesFromIsTheOneKept(t *testing.T) {
 	}
 	if strings.Contains(got, "A principal ideal domain is Noetherian") {
 		t.Error("the statement nothing points at was kept instead")
+	}
+}
+
+// manyNamed is a context whose closure reached most of the corpus, which is the
+// ordinary case for a book that cites across volumes and is what the cap is for.
+func manyNamed(n int) *Context {
+	c := wide()
+	for i := range n {
+		c.Named = append(c.Named, Piece{Kind: Reference,
+			Label: fmt.Sprintf("top-iii-s%d", i), Why: SectionOnly})
+	}
+	return c
+}
+
+// The block that says what is in the corpus and is not in front of you is
+// neither trimmed by RenderWithin nor counted by Chars, so before it was capped
+// it was written out under a trimmed context at whatever length it came to and
+// the question went out at that length. Exercise 1 of Commutative Algebra I § 1
+// left the assembler at 447.9k characters against a 28k room, 422.3k of it this
+// block, and the engine sent it because from where it stands an exercise that
+// will not fit is a fact about the exercise.
+func TestAContextThatCitedMostOfTheCorpusStillFitsTheRoomItWasGiven(t *testing.T) {
+	c := manyNamed(5154)
+	out := c.RenderWithin(28000, "")
+
+	if len(out) > 28000 {
+		t.Errorf("the question is %d characters against a room of 28000", len(out))
+	}
+	if strings.Count(out, "\n- top-iii-s") > mostNamed {
+		t.Errorf("named %d of them, want at most %d",
+			strings.Count(out, "\n- top-iii-s"), mostNamed)
+	}
+	if !strings.Contains(out, fmt.Sprintf("and %d more", 5154-mostNamed)) {
+		t.Errorf("the tail was dropped without saying how much of it there was:\n%s", tail(out))
+	}
+}
+
+// The cap is for the pathological case and the ordinary one has to come through
+// it whole. A handful of references somebody could raise the cap for is worth
+// naming one by one, which is what this block was written to do.
+func TestAShortListOfWhatIsMissingIsPrintedWhole(t *testing.T) {
+	c := manyNamed(3)
+	out := c.RenderWithin(28000, "")
+
+	if n := strings.Count(out, "\n- top-iii-s"); n != 3 {
+		t.Errorf("named %d of the 3", n)
+	}
+	if strings.Contains(out, "more, not named here") {
+		t.Errorf("a list of 3 was told it had a tail:\n%s", tail(out))
+	}
+}
+
+// A room of nothing is not the same as no limit, and the two shared a branch.
+//
+// within computes the room as the limit less what the rest of the question
+// already takes, so a call whose instructions, reference and candidate solution
+// fill the limit on their own asks for a room of zero or below. That is the
+// tightest a question is ever assembled and the one place trimming matters
+// most. The unlimited case never reaches here: within returns Render itself
+// when the engine's limit is negative, and every other caller computes the room
+// by subtraction the same way.
+//
+// The branch read limit <= 0 and returned the whole context, so the assembler
+// answered "there is no room at all" by sending everything it had.
+func TestAContextGivenNoRoomAtAllGivesUpEverythingItCan(t *testing.T) {
+	c := wide()
+	whole := c.Render()
+
+	for _, room := range []int{0, -1, -5000} {
+		out := c.RenderWithin(room, "")
+		if len(out) >= len(whole) {
+			t.Errorf("a room of %d was rendered at %d characters, the whole of it being %d",
+				room, len(out), len(whole))
+		}
+		// The floor and not nothing: the exercise is never given up, because a
+		// question without it is not a question.
+		if !strings.Contains(out, "the exercise to solve") {
+			t.Errorf("a room of %d dropped the exercise itself", room)
+		}
+	}
+}
+
+// The floor a room of nothing reaches is the floor every tighter room reaches,
+// because the same things are undroppable either way.
+func TestNoRoomAndAVeryTightRoomComeToTheSameThing(t *testing.T) {
+	c := wide()
+	if got, want := c.RenderWithin(0, ""), c.RenderWithin(1, ""); got != want {
+		t.Errorf("a room of 0 rendered %d characters and a room of 1 rendered %d",
+			len(got), len(want))
+	}
+}
+
+// manyOutside is a context citing n more things the corpus does not hold, on
+// top of the one the fixture already carries.
+func manyOutside(n int) *Context {
+	c := wide()
+	for i := range n {
+		c.Pieces = append(c.Pieces, Piece{Kind: Outside, Depth: 1,
+			Raw: fmt.Sprintf("Set Theory, III, §%d, No. 6, p. 155, Proposition 13", i)})
+	}
+	return c
+}
+
+// The out-of-corpus block is in the floor: order never offers Outside up, so a
+// context trimmed until everything that could go has gone still carries it
+// whole. Two exercises of Commutative Algebra § 1 carry 545 of these at 13723
+// characters against a question limit of 32000, which is a trimmer that has
+// given up every reference it had still handing over 13.7k it may not touch.
+func TestTheReferencesThatLeaveTheCorpusDoNotBecomeTheFloor(t *testing.T) {
+	c := manyOutside(545)
+	out := c.RenderWithin(0, "")
+
+	if len(out) > 6000 {
+		t.Errorf("the floor is %d characters", len(out))
+	}
+	if n := strings.Count(out, "\n- Set Theory"); n > mostOutside {
+		t.Errorf("named %d of them, the cap being %d", n, mostOutside)
+	}
+	// 545 added to the one the fixture already had, less the 40 named.
+	if !strings.Contains(out, "and 506 more") {
+		t.Error("the ones not named are not counted")
+	}
+	// The rule is the point of the block and it survives the cap.
+	if !strings.Contains(out, "statements are not available to you") {
+		t.Error("the instruction went with the list")
+	}
+}
+
+// Under the cap nothing changes: a handful is named one by one, which is what
+// the block was written to do.
+func TestAShortListOfWhatLeavesTheCorpusIsPrintedWhole(t *testing.T) {
+	c := manyOutside(3)
+	out := c.Render()
+	if n := strings.Count(out, "\n- Set Theory"); n != 4 {
+		t.Errorf("named %d of the 4 the fixture comes to", n)
+	}
+	if strings.Contains(out, "more, which are not named here") {
+		t.Error("a list that fits was given a tail")
 	}
 }

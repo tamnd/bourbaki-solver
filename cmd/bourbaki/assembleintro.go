@@ -28,7 +28,20 @@ func readerFile(b corpus.Book, lang string, pages map[int]corpus.PageFile) (corp
 	return frontFile(b, *b.ReaderNote, corpus.KindReader, lang, pages)
 }
 
-// frontFile is the half the two have in common. Nothing is looked up for
+// notationFile and terminologyFile are the volume's two indexes as they go to
+// disk. From the assembler's point of view they are introductions again: a run
+// of pages named in the manifest, under a heading repeated as the running head
+// of every page after the first, belonging to no chapter. The only difference
+// is which end of the book they stand at, and nothing here depends on that.
+func notationFile(b corpus.Book, lang string, pages map[int]corpus.PageFile) (corpus.SectionFile, assemble.Piece, error) {
+	return frontFile(b, *b.NotationIndex, corpus.KindNotation, lang, pages)
+}
+
+func terminologyFile(b corpus.Book, lang string, pages map[int]corpus.PageFile) (corpus.SectionFile, assemble.Piece, error) {
+	return frontFile(b, *b.TerminologyIndex, corpus.KindTerminology, lang, pages)
+}
+
+// frontFile is the half they have in common. Nothing is looked up for
 // either: neither carries a numbered statement, so there is no label, no tag
 // and no erratum to find, and the permanent tags and the errata are both found
 // by label.

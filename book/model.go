@@ -51,12 +51,22 @@ type Volume struct {
 	// Reader is the publisher's note to the reader, which stands ahead of the
 	// introduction because that is where the printing puts it.
 	Reader *Section
+	// Notation and Terminology are the volume's two indexes, which stand after
+	// the last chapter and belong to no chapter. They are nil for a volume the
+	// printing gives none, and for a language it was not printed in, since an
+	// index is a list of the words one printing uses.
+	Notation, Terminology *Section
 }
 
 // Chapter is one chapter of the volume, in the order the volume prints it.
 type Chapter struct {
 	Numeral string // I, II, VIII
 	Title   string
+	// Listed is the chapter's title as the printed contents sets it, off
+	// manifests/toc/. See Section.Contents, which is the same thing one level
+	// down and which was already read; this is the two levels above it, and it
+	// is empty for a language the volume was not printed in.
+	Listed string
 	// Front is the chapter's opening page, which carries the chapter number and
 	// the title and sometimes a paragraph under them. It is a file like any
 	// other and is nil when the corpus has not got it.
@@ -77,9 +87,12 @@ type Section struct {
 	// Kind is one of corpus.KindFront, KindIntroduction, KindSection,
 	// KindAppendix or KindHistorical, the same vocabulary the sections manifest
 	// uses.
-	Kind    string
-	Number  int    // the § number, 0 for anything that is not a §
-	Title   string // the § title as the corpus has it
+	Kind   string
+	Number int    // the § number, 0 for anything that is not a §
+	Title  string // the § title as the corpus has it
+	// Listed is the § title as the printed contents sets it, off
+	// manifests/toc/, and empty for a language the volume was not printed in.
+	Listed  string
 	Label   string // alg-i-s1, the permanent name of the §, empty for the rest
 	Body    string
 	Path    string // repo-relative, for a message that names a file
@@ -159,7 +172,8 @@ func (s *Section) Heading() string {
 			return name
 		}
 		return fmt.Sprintf("%s %d", name, s.Number)
-	case corpus.KindHistorical, corpus.KindFront, corpus.KindIntroduction, corpus.KindReader:
+	case corpus.KindHistorical, corpus.KindFront, corpus.KindIntroduction, corpus.KindReader,
+		corpus.KindNotation, corpus.KindTerminology:
 		return s.Title
 	}
 	return fmt.Sprintf("§ %d", s.Number)
@@ -201,6 +215,12 @@ func (v *Volume) Pieces() []*Section {
 		if c.Historical != nil {
 			out = append(out, c.Historical)
 		}
+	}
+	if v.Notation != nil {
+		out = append(out, v.Notation)
+	}
+	if v.Terminology != nil {
+		out = append(out, v.Terminology)
 	}
 	return out
 }

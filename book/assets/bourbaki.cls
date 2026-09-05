@@ -480,6 +480,26 @@
   \nopagecolor\restoregeometry
 }
 
+% \bhalftitle is the leaf between the cover and the title page: the title of the
+% volume alone, high on a recto, with a blank verso after it. Every one of these
+% printings has one and it is not decoration. It is the page that tells a reader
+% holding the block without its wrapper what the block is, and it is the first
+% recto, so leaving it out moves every folio of the front matter by two and puts
+% the title page on a verso, which no book does.
+%
+% Set at \large and not at the title page's \Huge, which is also what the
+% printings do: the half title names the book and the title page presents it.
+\newcommand{\bhalftitle}{%
+  \thispagestyle{empty}%
+  \begin{center}
+    \vspace*{0.18\paperheight}
+    {\large\bvolumetitle}\par
+    \ifx\bvolumespan\empty\else\vspace{1em}{\bvolumespan}\par\fi
+  \end{center}
+  \clearpage
+  \thispagestyle{empty}\null\clearpage
+}
+
 \newcommand{\btitlepage}{%
   \thispagestyle{empty}%
   \begin{center}
@@ -556,15 +576,23 @@
 % The § head is set in capitals and upright, not in bold. That was read off the
 % page: "§ 5. GROUPS OPERATING ON A SET" is roman caps a size up from the body,
 % and the only bold on a Bourbaki page is the numbered subsection head under it.
-\newcommand{\bsection}[3]{%
+%
+% The third argument is the title the contents lists it under and the fourth is
+% the head. It takes both for the same reason \bno does: the head on the page
+% and the line in the contents are two readings of the volume rather than one,
+% and they come here from two sources, the head off content/ and the line off
+% manifests/toc/, which is the volume's own contents page. They agree on all 855
+% §§ of the library today and the audit says so on every build, but the day one
+% of them moves the contents is still the contents.
+\newcommand{\bsection}[4]{%
   \normalsize
-  \phantomsection\label{#3}%
-  \addcontentsline{toc}{section}{#1. #2}%
+  \phantomsection\label{#4}%
+  \addcontentsline{toc}{section}{#1. #3}%
   \renewcommand{\bsectionlabel}{#1}%
   \vspace{2.2em}
   {\centering\large #1.\quad \MakeUppercase{#2}\par}
   \vspace{1.4em}
-  \markright{\brhead{#2}{#1}}%
+  \markright{\brhead{#3}{#1}}%
   \@afterindentfalse\@afterheading
 }
 
@@ -581,6 +609,27 @@
   \vspace{2.5em}
   \markboth{#2}{\brhead{#2}{}}%
 }
+
+% bindex sets an index of notation or an index of terminology.
+%
+% One entry to a line, with the turnover of a long entry indented under it,
+% which is what page 701 of the English Algebra I to III does: "Adjunction of a
+% unit element (algebra derived by): III, § 1, no. 2." runs past the measure and
+% the second line starts a little in from the first, so that the alphabetical
+% order of the openings stays readable down the left edge. No paragraph
+% indentation, since an entry is not a paragraph, and no space between entries,
+% since the printing sets them solid.
+%
+% A size down from the body, as the printing sets it. The index of terminology
+% of that volume is 33 pages at this size and would be more at the body size,
+% and an index is looked things up in rather than read.
+\newenvironment{bindex}{%
+  \par\small
+  \setlength{\parindent}{0pt}%
+  \setlength{\parskip}{0pt}%
+  \raggedright
+  \everypar{\hangindent=1.5em\hangafter=1}%
+}{\par}
 
 % \banchor is a label that a heading may or may not carry. Most headings in the
 % corpus have one and some have none, and \label{} twice in a document is two

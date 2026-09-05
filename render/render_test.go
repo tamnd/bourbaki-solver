@@ -601,3 +601,54 @@ func TestARenderOfALowResolutionScanStaysAtTheScan(t *testing.T) {
 		}
 	}
 }
+
+// A render that named its pages writes blank page files for those pages and no
+// others.
+//
+// The manifest writeBlanks walks is the merged one, so after a few windows it
+// holds the whole volume. ocr run -window calls this once per window, and a
+// blank page outside the window is not this render's business: its image is not
+// even on disk any more, it was swept when its own window finished.
+func TestARenderOfNamedPagesWritesBlanksForThosePagesOnly(t *testing.T) {
+	run := &poppler{pages: 6, pad: 1, ink: map[int]float64{
+		1: 0, 2: 0.06, 3: 0, 4: 0.06, 5: 0, 6: 0.06,
+	}}
+	opts := options(t, run)
+	opts.WriteBlanks = true
+
+	// The first window is pages 1 and 2, and only page 1 of them is blank.
+	opts.Only = []int{1, 2}
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(corpus.PagePath(opts.Corpus, opts.Book, 1)); err != nil {
+		t.Errorf("the blank page of the window got no file: %v", err)
+	}
+	for _, page := range []int{3, 5} {
+		if _, err := os.Stat(corpus.PagePath(opts.Corpus, opts.Book, page)); !os.IsNotExist(err) {
+			t.Errorf("page %d is outside the window and was written anyway: %v", page, err)
+		}
+	}
+
+	// The next window takes page 3, and the merged manifest still holding page
+	// 1 does not put page 5 on disk.
+	opts.Only = []int{3, 4}
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(corpus.PagePath(opts.Corpus, opts.Book, 3)); err != nil {
+		t.Errorf("the blank page of the second window got no file: %v", err)
+	}
+	if _, err := os.Stat(corpus.PagePath(opts.Corpus, opts.Book, 5)); !os.IsNotExist(err) {
+		t.Errorf("page 5 was never in a window and was written anyway: %v", err)
+	}
+
+	// A render that names nothing is the whole volume, as it was.
+	opts.Only = nil
+	if _, err := Render(context.Background(), opts); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(corpus.PagePath(opts.Corpus, opts.Book, 5)); err != nil {
+		t.Errorf("a render of the whole volume left a blank page without a file: %v", err)
+	}
+}

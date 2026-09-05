@@ -188,6 +188,7 @@ func (r Renderer) TeX(body string) (string, error) {
 		return "", err
 	}
 	masked, tags := numbers(masked, spans)
+	masked = footnotes(masked)
 	var b strings.Builder
 	// The statement of a proposition is set in italic and the discussion after
 	// it is not, and the corpus does not mark the join: a #### heading is
@@ -1161,7 +1162,22 @@ var (
 	// reading "!Figure 2". And at all, because an image handed to the reference
 	// check is a reference to a file, and the check is about anchors, so every one
 	// of the 62 was counted as a cross reference pointing at nothing.
-	imageRE = regexp.MustCompile(`!\[([^\]]*)\]\(([^)\s]*)\)`)
+	//
+	// The target may hold spaces, which is not what Markdown says and is what
+	// this corpus has. Ten of the links are that shape. Nine are a caption
+	// standing where the target goes, "![Eleven Coxeter graphs](Fig. 2)", and
+	// they are in the English and the French too, so they came out of the
+	// reading rather than out of a translation. The tenth translated the file
+	// name: the English points at coxeter_graphs_rank_4_coefficient_6.png and
+	// the Vietnamese at "coxeter_graphs_hạng_4_hệ số_6.png".
+	//
+	// Requiring no space meant none of the ten matched, and an unmatched image
+	// is not left alone: the exclamation mark and the brackets go through as
+	// prose and the underscores in the target reach TeX as subscripts. That is
+	// what stopped the Vietnamese Lie IV-VI, both editions of it, with "! Double
+	// subscript" on a file name. Since only the alt text is used, allowing a
+	// space in the part that is thrown away costs nothing and takes all ten.
+	imageRE = regexp.MustCompile(`!\[([^\]]*)\]\(([^)]*)\)`)
 )
 
 // inline renders the inside of a paragraph or a heading.
@@ -1291,17 +1307,46 @@ func StripTitle(body string) string {
 // and a line under it linking the directory they are in.
 var exercisesAnchorRE = regexp.MustCompile(`(?m)^#{1,6}[^\n]*\{#[a-z0-9-]+-exercises[^}]*\}\s*$`)
 
-// StripExercisePointer takes that pointer off the end of a body.
+// StripExercisePointer takes that pointer off the end of a body, keeping any
+// footnote the assembly parked under it.
 //
-// It is a link between two files of a repository and it has no meaning in a
-// book: the book sets the exercises themselves, in the place the pointer sits,
-// out of the files the pointer points at. Leaving it would print a heading
+// The pointer is a link between two files of a repository and it has no meaning
+// in a book: the book sets the exercises themselves, in the place the pointer
+// sits, out of the files the pointer points at. Leaving it would print a heading
 // saying Exercises followed by a sentence telling the reader to see the
 // exercises, immediately above the exercises.
+//
+// The footnotes are a different matter. A Markdown note is written at the foot
+// of the body it belongs to and the assembly puts it at the foot of the file,
+// which is under the pointer whenever the § has exercises. Cutting at the
+// pointer took those with it: 94 notes in 68 files, 22 per cent of the corpus's
+// footnotes, called from a mark in the prose above and then not printed. § 1 of
+// Algebra IV is one, where the note on the analogy with the divisibility of the
+// integers hangs off the title of no. 7 and was written under the pointer nearly
+// a hundred lines further down.
 func StripExercisePointer(body string) string {
 	loc := exercisesAnchorRE.FindStringIndex(body)
 	if loc == nil {
 		return body
 	}
-	return strings.TrimRight(body[:loc[0]], "\n") + "\n"
+	kept := strings.TrimRight(body[:loc[0]], "\n") + "\n"
+	var notes []string
+	lines := strings.Split(body[loc[1]:], "\n")
+	for i := 0; i < len(lines); i++ {
+		if !noteDefRE.MatchString(lines[i]) {
+			continue
+		}
+		notes = append(notes, lines[i])
+		// The continuation lines of a note come with it, by the same rule
+		// footnotes reads them: a note runs on until a blank line or until the
+		// next definition.
+		for i+1 < len(lines) && strings.TrimSpace(lines[i+1]) != "" && !noteDefRE.MatchString(lines[i+1]) {
+			i++
+			notes = append(notes, lines[i])
+		}
+	}
+	if len(notes) == 0 {
+		return kept
+	}
+	return kept + "\n" + strings.Join(notes, "\n") + "\n"
 }

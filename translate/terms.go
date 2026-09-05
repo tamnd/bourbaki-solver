@@ -144,6 +144,44 @@ func prose(body string) string { return proseText(body, false) }
 // and they caught this on the first run.
 var weldedRE = regexp.MustCompile(`\p{L}*\$[^$\n]+\$\p{L}*`)
 
+// ctrlWordRE is a TeX control word, which is never an English word however much
+// of one it looks like.
+//
+// mathtex.Strip takes out what stands between dollar signs, and an index of
+// notation has none: its entries are bare LaTeX, "\sum_{i=p}^q \sum_{j=r}^s
+// x_{ij} : \text{I, § 1, no. 5}". Nothing there is inside a formula as far as
+// Strip can tell, so the whole line came through as prose and the glossary read
+// the word sum in \sum and asked for "tổng". Four of the five indexes of
+// notation the last run could not land died on that, and the largest of them
+// was refused on every attempt over two models.
+//
+// The comment in Strip about the words left, right and square being read as
+// prose is this same fault seen from the other side. It was fixed there for a
+// display written $$...$$ on one line, which is where it was found; a control
+// word outside dollars altogether was still read, and \left, \right and \square
+// are control words.
+var ctrlWordRE = regexp.MustCompile(`\\[a-zA-Z]+`)
+
+// notationEntryRE is an entry of an index of notation: the notation itself, a
+// colon, and then where in the book it is defined.
+//
+// The notation is a symbol however much of it is spelled with letters. An index
+// writes "Map(M, N), Pol_A(M, N), Pol(M, N) : IV, p. 57", and Map there is the
+// functor set upright, the same thing as Hom, End and Aut, which weldedRE says
+// occur 2165 times over 155 names. weldedRE cannot help here because it wants
+// the dollars that a welded name is written with and an index writes none, so
+// the glossary read the word map and asked for "ánh xạ" in a list of symbols.
+//
+// Only what stands before the colon goes. Where the entry is defined is not
+// prose either, but leaving it costs nothing and taking it needs a second guess
+// about where the locator ends.
+//
+// Over content/en this matches 3398 lines in the fourteen index_of_ files and
+// four lines anywhere else, all four in one section and all four the heading
+// "Applications : I. Canonical decompositions ...", where the I is the number of
+// a part and not a volume. Headings are left alone for them.
+var notationEntryRE = regexp.MustCompile(`^.{1,400}?\s:\s*((?:\$?\\text\{)?\s*[IVXLC]+(?:[.,]|\s*,?\s*p\.))`)
+
 // proseText is prose, and with welded set it also drops those names.
 //
 // Only hasProse asks for that. The terminology rule reads the other form and
@@ -163,14 +201,17 @@ func proseText(body string, welded bool) string {
 			inDisplay = !inDisplay
 			continue
 		}
-		if inDisplay || bibEntryRE.MatchString(line) {
+		if inDisplay || bibEntryRE.MatchString(line) || refTailRE.MatchString(line) {
 			continue
+		}
+		if !strings.HasPrefix(strings.TrimSpace(line), "#") {
+			line = notationEntryRE.ReplaceAllString(line, " $1")
 		}
 		line = attrRE.ReplaceAllString(line, " ")
 		if welded {
 			line = weldedRE.ReplaceAllString(line, " ")
 		}
-		b.WriteString(mathtex.Strip(line))
+		b.WriteString(ctrlWordRE.ReplaceAllString(mathtex.Strip(line), " "))
 		b.WriteString("\n")
 	}
 	return b.String()

@@ -29,7 +29,8 @@ flags for fill and run:
   -book ID       book id from manifests/books.yaml
   -f N -l N      first and last pdf page, default the whole volume
   -batch N       pages per batch, default 25
-  -limit N       stop after this many pages, for a pilot
+  -limit N       stop after this many pages, for a pilot. Under -window it
+                 bounds the run rather than each window
   -hosts LIST    comma separated route names, default every route that does OCR.
                  -hosts local reads the pages on this machine with the Claude
                  Code CLI instead of the fleet, which needs no browser account
@@ -54,6 +55,21 @@ flags for fill and run:
                  corpus never claims it is clean. Page 128 of Algebra I to III
                  died on the statement rule and took chapter I § 8 out of the
                  assembly with it, which is the case this is for
+  -window N      (run) read the whole volume N pages at a time. Each window is
+                 the next N pages the queue is still waiting on: they are
+                 rendered, read, and their images swept, and then the queue is
+                 asked again. It is the way to read a volume, because it needs
+                 no state outside the queue. The driver used to render a window,
+                 call run over that range and write the next page number into a
+                 cursor file, and a window that died part way through advanced
+                 the cursor anyway, so every page it had not leased stayed
+                 pending for ever behind it: 320 pages across the fleet, 130 of
+                 them in a volume that read as finished. A window here that dies
+                 leaves its pages outstanding and the next window takes them.
+                 The only reason to window at all is that this laptop cannot
+                 hold a volume of images at 300 dpi
+  -sweep         delete each window's page images once it has been read, on by
+                 default and the reason a window is a window
   -lanes N       override how many pages a host reads at once
   -wait DUR      wait this long for a box with a spare core rather than fail
   -flagged       only the pages a native extraction could not read, which is the
@@ -65,6 +81,14 @@ flags for fill and run:
                  it is for the volumes whose text layer drops that column
   -unread        only the pages with no reading committed, so that editing the
                  prompt does not send the pages already read back to the fleet
+  -again         (fill) queue pages that already pass the rules. The rules are
+                 structural and a page can be well formed and wrong, so this is
+                 how an operator says a set of readings should be made again
+                 whatever the rules think of them. It needs -f and -l, because
+                 the pages it puts back already passed. Pages a stronger reader
+                 wrote are still held back for that reader, so pointing it at a
+                 volume read half by gpt-5 and half by a weaker model queues the
+                 weaker half and leaves the rest
   -reread-protected
                  read over pages that claude or gpt-5 already read. Those stand
                  by default even when the prompt or the render moved under them,
@@ -201,7 +225,7 @@ func ocrCheck(args []string) error {
 		}
 		checked++
 
-		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID)})
+		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID, entry.Book)})
 		if *only != "" {
 			problems = filterRule(problems, ocr.Rule(*only))
 		}

@@ -176,6 +176,67 @@ func TestRule2ReadsParagraphByParagraph(t *testing.T) {
 	}
 }
 
+// The second half of rule 2. Counting delimiters can only see mathematics that
+// was set as mathematics; a page whose reader dropped the dollars altogether is
+// balanced at zero and the rule had nothing to say about it. Ten pages of the
+// French Varietes differentielles are of that kind.
+func TestRule2FindsTeXOutsideEveryMathSpan(t *testing.T) {
+	head := "A IV.7  POLYNOMIALS  § 1\n\n"
+	filler := strings.Repeat(" filler text to clear the length rule.", 8)
+	cases := []struct {
+		name string
+		body string
+		bad  bool
+	}{
+		{"a control sequence set in the prose", `Soit \varphi une application continue.`, true},
+		{"the same one inside an inline span", `Soit $\varphi$ une application continue.`, false},
+		{"inside a display span", `The map is $$\varphi(x) = y.$$ It is continuous.`, false},
+		// Markdown escapes are a backslash and one character that is not a
+		// letter, and the corpus sets them on purpose.
+		{"a markdown escape", `The file is named a\_b and the star is \*.`, false},
+		{"an escaped dollar in the prose", `The prize was \$100 in all.`, false},
+		// #448 settled on two conventions. Inline \footnote{...} is one of
+		// them, 82 places that both builders set correctly, so it stands.
+		{"a footnote command", `Le theoreme\footnote{Voir le chapitre III.} est classique.`, false},
+		// \footnotetext is the one that was dropped, because it takes its
+		// marker from the counter and the readings had put the printed marker
+		// inside the argument. There are none left in pages/, and a reading
+		// that writes one is now a page to read again.
+		{"a footnotetext command", `\footnotetext{1 Voir le chapitre III.}`, true},
+		{"a footnotemark command", `Le theoreme\footnotemark{} est classique.`, true},
+		// A backslash at the end of a line is a line break, not a command, and
+		// eating the newline after it would misreport every line below.
+		{"a trailing backslash", "The line ends here \\\nand carries on." + filler, false},
+	}
+	for _, test := range cases {
+		problems := Validate(head+test.body+filler, alg4(7), Options{})
+		if got := has(problems, RuleMath); got != test.bad {
+			t.Errorf("%s: math rule fired %t, want %t: %s", test.name, got, test.bad, Reasons(problems))
+		}
+	}
+}
+
+// The line matters for the same reason it matters to parity: the repair pass
+// has to be told where to look.
+func TestBareTeXIsReportedOnItsOwnLine(t *testing.T) {
+	body := "A IV.7  POLYNOMIALS  § 1\n\nThe first paragraph is ordinary prose.\n\nSoit \\varphi une application." +
+		strings.Repeat(" filler text to clear the length rule.", 8)
+	problems := Validate(body, alg4(7), Options{})
+	var line int
+	var detail string
+	for _, problem := range problems {
+		if problem.Rule == RuleMath {
+			line, detail = problem.Line, problem.Detail
+		}
+	}
+	if line != 5 {
+		t.Errorf("the bare control sequence was reported on line %d, want 5: %s", line, Reasons(problems))
+	}
+	if !strings.Contains(detail, `\varphi`) {
+		t.Errorf("the report does not name the command: %s", detail)
+	}
+}
+
 func TestRule3Leaks(t *testing.T) {
 	text := "Here is the transcription of the image:\n\n" + goodPage
 	problems := Validate(text, alg4(7), Options{})
@@ -606,9 +667,14 @@ func TestRuleThreeCatchesThePromptHandedBack(t *testing.T) {
 		}
 	}
 
-	// And without the prompt in hand it is what it was before: long, prose, no
-	// unbalanced mathematics, a first line that reads like a running head.
-	if problems := Validate(body.String(), expect, Options{}); len(problems) > 0 {
+	// And without the prompt in hand nothing here reads as a leak: it is long,
+	// it is prose, its delimiters balance and its first line reads like a
+	// running head. Rule 2 does still have something to say about it, because
+	// the house rules name \mathbf and \operatorname in prose and rule 2 now
+	// asks whether TeX is inside a span. That is the rule working: a page whose
+	// body sets control sequences in the prose is a page to look at, whatever
+	// put them there.
+	if problems := Validate(body.String(), expect, Options{}); has(problems, RuleLeak) {
 		t.Fatalf("without the prompt there is nothing to compare against, got %v", problems)
 	}
 }

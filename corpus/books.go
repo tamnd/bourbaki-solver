@@ -88,6 +88,18 @@ type Book struct {
 	// Introduction is the Book's own introduction, where it has one, and is
 	// empty where it has not.
 	Introduction *Introduction `yaml:"introduction,omitempty"`
+	// NotationIndex and TerminologyIndex are the volume's two indexes, the
+	// pages the printing sets after the last chapter under INDEX OF NOTATION
+	// and INDEX OF TERMINOLOGY, or INDEX DES NOTATIONS and INDEX
+	// TERMINOLOGIQUE in a French printing.
+	//
+	// They are the same shape as an introduction and are assembled the same
+	// way, and they are given here rather than found for the same reason: the
+	// heading is also the running head of every page after the first, so
+	// looking for one finds every page of the run. What is different is only
+	// which end of the book they stand at.
+	NotationIndex    *Introduction `yaml:"notation_index,omitempty"`
+	TerminologyIndex *Introduction `yaml:"terminology_index,omitempty"`
 }
 
 // Transposition is two PDF pages a file carries the wrong way round.

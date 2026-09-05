@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
 // find returns the check with this name, which is how a test says which of the
@@ -311,5 +313,288 @@ func TestLengthDoesNotMindAVolumeLongerThanThePrinting(t *testing.T) {
 	a.length(root, v, DefaultAuditOptions())
 	if c := find(t, a, "holds the text the printing has"); !c.OK {
 		t.Errorf("a volume twice the length of its printing failed: %s", c.Detail)
+	}
+}
+
+// The sections manifest holds the printing and a translation is counted against
+// it, so the two sides name the same § in two languages. Matching them by
+// filename made a Vietnamese Algebra IX read as 8 sections of 30 when it had
+// all thirty, because the file is the title slugged and the title is
+// translated. The chapter and the § number are the same in every language.
+func TestCoverageCountsATranslationWhoseFilesAreNamedInItsOwnLanguage(t *testing.T) {
+	root := t.TempDir()
+	m := &corpus.SectionsManifest{}
+	m.Upsert(corpus.BookSections{ID: "test-i", Chapters: []corpus.ChapterSections{{
+		Chapter: "I",
+		Sections: []corpus.SectionRecord{
+			{Kind: corpus.KindSection, Section: 1, Path: "content/en/alg/I/01_s1_groups.md"},
+			{Kind: corpus.KindHistorical, Path: "content/en/alg/I/historical_note.md"},
+		},
+	}}})
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	v := sample()
+	v.Lang = "vi"
+	v.Chapters[0].Sections[0].Path = "content/vi/alg/I/01_s1_cac_nhom.md"
+	v.Chapters[0].Historical.Path = "content/vi/alg/I/ghi_chu_lich_su.md"
+	have, want, missing, err := Coverage(root, v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want != 2 || have != 2 {
+		t.Errorf("counted %d of %d, missing %v; both sections are there under translated names", have, want, missing)
+	}
+}
+
+// A § the language really has not got is still missing, and the message names
+// the file of the printing so there is something to go and look for.
+func TestCoverageStillReportsASectionThatIsNotThere(t *testing.T) {
+	root := t.TempDir()
+	m := &corpus.SectionsManifest{}
+	m.Upsert(corpus.BookSections{ID: "test-i", Chapters: []corpus.ChapterSections{{
+		Chapter: "I",
+		Sections: []corpus.SectionRecord{
+			{Kind: corpus.KindSection, Section: 1, Path: "content/en/alg/I/01_s1_groups.md"},
+			{Kind: corpus.KindSection, Section: 2, Path: "content/en/alg/I/02_s2_rings.md"},
+			{Kind: corpus.KindHistorical, Path: "content/en/alg/I/historical_note.md"},
+		},
+	}}})
+	if err := m.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	have, want, missing, err := Coverage(root, sample())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if have != 2 || want != 3 {
+		t.Fatalf("counted %d of %d, want 2 of 3", have, want)
+	}
+	if len(missing) != 1 || missing[0] != "content/en/alg/I/02_s2_rings.md" {
+		t.Errorf("missing is %v, want the § 2 of the printing", missing)
+	}
+}
+
+// The front matter and the back matter are the two parts of the build with no
+// other check watching them, which is the whole reason matter exists. A volume
+// can lose its title page and pass every other check in the file: the chapters
+// the manifest names are still there, the §§ still run without a gap, and four
+// leaves are half of one per cent of the text length.
+func TestTheFrontAndBackMatterAreBoundIntoAVolumeThisPackageWrote(t *testing.T) {
+	v := sample()
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	for _, c := range a.Checks {
+		if !c.OK {
+			t.Errorf("%s failed on a document this package just wrote: %s %v", c.Name, c.Detail, c.Notes)
+		}
+	}
+}
+
+// The check has to name the part that went, because "the front matter is not
+// bound in" sends whoever reads it back through document.go to work out which
+// of the five it means.
+func TestTheFrontMatterCheckNamesThePartThatIsNotThere(t *testing.T) {
+	v := sample()
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.TeX = strings.Replace(d.TeX, "\\btitlepage\n", "", 1)
+	a := &Audit{}
+	a.matter(v, d)
+	c := find(t, a, "front matter is bound in")
+	if c.OK {
+		t.Error("a document with no title page passed the front matter check")
+	}
+	if !strings.Contains(strings.Join(c.Notes, " "), `\btitlepage`) {
+		t.Errorf("the check does not name the part that went: %v", c.Notes)
+	}
+}
+
+// The edition line is asked for only where the manifest carries one, so a
+// printing that does not say which edition it is passes rather than failing for
+// a line it has no text for.
+func TestTheEditionLineIsOnlyAskedForWhereThePrintingHasOne(t *testing.T) {
+	v := sample()
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	if c := find(t, a, "front matter is bound in"); !c.OK {
+		t.Errorf("a volume with no edition in its manifest failed: %s %v", c.Detail, c.Notes)
+	}
+	v.Meta.Edition = "Second edition"
+	d, err = Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(d.TeX, `\bedition{Second edition}`) {
+		t.Fatal("the writer did not set the edition line the manifest carries")
+	}
+	d.TeX = strings.Replace(d.TeX, `\bedition{Second edition}`, "", 1)
+	a = &Audit{}
+	a.matter(v, d)
+	if c := find(t, a, "front matter is bound in"); c.OK {
+		t.Error("a volume whose manifest names an edition passed without the edition line")
+	}
+}
+
+// The back matter is conditional on what the volume holds and not on a fixed
+// list. Some printings set the Historical Note as a Book of its own and some as
+// an appendix to a chapter, and not every one carries both indexes, so a volume
+// with none of the three has nothing to bind and passes.
+func TestAVolumeWithNoIndexesAndNoHistoricalNoteHasNoBackMatterToBind(t *testing.T) {
+	v := sample()
+	v.Chapters[0].Historical = nil
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	c := find(t, a, "back matter is bound in")
+	if !c.OK {
+		t.Errorf("a volume with nothing to bind at the back failed: %s %v", c.Detail, c.Notes)
+	}
+	if !strings.Contains(c.Detail, "0 of 0") {
+		t.Errorf("detail = %q, want it to say there was nothing to bind", c.Detail)
+	}
+}
+
+// An index that is dropped on the way out is the fault this half of the check
+// is for. The two indexes are the last thing in the document, so a writer that
+// stops early loses them and leaves everything above them intact.
+func TestTheBackMatterCheckFindsAnIndexThatDidNotReachTheDocument(t *testing.T) {
+	v := sample()
+	v.Notation = &Section{
+		Kind: corpus.KindNotation, Title: "Index of Notation",
+		Body: "$x$, I, § 1, no. 1\n", Path: "content/en/alg/I/notation.md", Head: 1, Lang: "en",
+	}
+	d, err := Write(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &Audit{}
+	a.matter(v, d)
+	if c := find(t, a, "back matter is bound in"); !c.OK {
+		t.Fatalf("a volume whose index was written failed: %s %v", c.Detail, c.Notes)
+	}
+	d.TeX = strings.Replace(d.TeX, "{notation}", "{dropped}", 1)
+	a = &Audit{}
+	a.matter(v, d)
+	c := find(t, a, "back matter is bound in")
+	if c.OK {
+		t.Error("a document with no index of notation in it passed the back matter check")
+	}
+	if !strings.Contains(strings.Join(c.Notes, " "), "notation") {
+		t.Errorf("the check does not name the index that went: %v", c.Notes)
+	}
+}
+
+// TestAConditionListWhoseGreekWasReadAsLatinIsFound is the finding that started
+// this check. The English of ac III, § 3, exercise 23 came off the scan with
+// its first two labels lost, and the French it was set from reads α) β) γ).
+func TestAConditionListWhoseGreekWasReadAsLatinIsFound(t *testing.T) {
+	body := "The following are equivalent:\n\n(a) every ideal is principal;\n(β) every ideal is free;\n(y) the ring is a field.\n"
+	got := misreadLabels("x.md", body)
+	if len(got) != 1 {
+		t.Fatalf("misreadLabels found %d lists, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "(α) (β) (γ)") {
+		t.Errorf("the finding does not say what the list should read: %s", got[0])
+	}
+}
+
+// TestPartsOfAnExerciseAroundAGreekListAreNotAFinding is the ordinary shape and
+// is far commoner than the misreadings. An exercise numbers its parts (a), (b),
+// (c) in Latin and its conditions α, β, γ in Greek, so the two alphabets sit
+// next to each other everywhere and a check that only looked for that would
+// fail most of the library. Mapping (a) to α leaves α α β, which repeats, and a
+// list of conditions does not repeat.
+func TestPartsOfAnExerciseAroundAGreekListAreNotAFinding(t *testing.T) {
+	body := "(a) Show that the following are equivalent:\n(α) the ring is local;\n(β) the ring is a field.\n\n(b) Deduce that the ring is Noetherian.\n"
+	if got := misreadLabels("x.md", body); len(got) != 0 {
+		t.Errorf("the ordinary shape of an exercise was reported as a finding: %v", got)
+	}
+}
+
+// TestATrailingLatinPartAfterAGreekListIsNotAFinding is alg I, § 2, exercise
+// 17, where two properties α and β are stated and then part (a) opens. Mapped,
+// that is α β α, which goes backwards, so it is not a list of conditions.
+func TestATrailingLatinPartAfterAGreekListIsNotAFinding(t *testing.T) {
+	body := "(α) for all s in S there exist t and b;\n(β) for all a, b in E there exists t;\n(a) In E times S let the relation denote this.\n"
+	if got := misreadLabels("x.md", body); len(got) != 0 {
+		t.Errorf("a Latin part after a Greek list was reported as a finding: %v", got)
+	}
+}
+
+// TestTheDigitEightIsReadAsDelta is ac II, § 4, exercise 18, whose fourth
+// condition came off the scan as "(8) The ring C(Y; R) is absolutely flat".
+func TestTheDigitEightIsReadAsDelta(t *testing.T) {
+	body := "(α) every prime ideal is maximal;\n(β) every countable intersection is open;\n(y) every function is locally constant;\n(8) the ring is absolutely flat.\n"
+	got := misreadLabels("x.md", body)
+	if len(got) != 1 {
+		t.Fatalf("misreadLabels found %d lists, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "(α) (β) (γ) (δ)") {
+		t.Errorf("the digit 8 was not read back as delta: %s", got[0])
+	}
+}
+
+// TestAListThatIsAllGreekOrAllLatinIsNotAFinding: the check needs one of each
+// to have anything to say, since a list that is wholly in either alphabet is
+// either right or wrong in a way this cannot see.
+func TestAListThatIsAllGreekOrAllLatinIsNotAFinding(t *testing.T) {
+	for _, body := range []string{
+		"(α) the first;\n(β) the second;\n(γ) the third.\n",
+		"(a) the first;\n(b) the second.\n",
+	} {
+		if got := misreadLabels("x.md", body); len(got) != 0 {
+			t.Errorf("a list in one alphabet was reported as a finding: %v", got)
+		}
+	}
+}
+
+// TestAGapInTheRunIsNotAListOfConditions: two labels that do not follow each
+// other are not the list this check is about, and reporting them would make it
+// fire on prose that happens to open two lines with brackets.
+func TestAGapInTheRunIsNotAListOfConditions(t *testing.T) {
+	body := "(a) the first;\n(γ) the third.\n"
+	if got := misreadLabels("x.md", body); len(got) != 0 {
+		t.Errorf("a run that skips a letter was reported as a finding: %v", got)
+	}
+}
+
+// TestTheGreekLabelCheckReadsTheExercisesAndNotOnlyTheSections is the mistake
+// the first cut of this check made. Volume.Pieces returns the §§, the chapter
+// fronts, the historical notes and the two indexes, and it does not return the
+// exercises, which hang off each § instead. Every one of the fifteen misread
+// lists in the corpus was in an exercise, so a check that walked Pieces alone
+// passed the entire library while ac IV, § 2, exercise 10 still read
+// (a) (b) (y) (δ). It was found by putting that file back as it was and
+// watching the audit stay green.
+func TestTheGreekLabelCheckReadsTheExercisesAndNotOnlyTheSections(t *testing.T) {
+	v := sample()
+	s := v.Chapters[0].Sections[0]
+	s.Exercises = append(s.Exercises, &Exercise{
+		Number: 1,
+		Path:   "ex/1.md",
+		Body:   "Show that the following are equivalent:\n\n(a) the ring is local;\n(β) the ring is a field.\n",
+	})
+	a := &Audit{}
+	a.structure(v)
+	c := find(t, a, "Greek label")
+	if c.OK {
+		t.Fatalf("the check passed a volume whose exercise reads (a) (β): %s", c.Detail)
+	}
+	if len(c.Notes) != 1 || !strings.Contains(c.Notes[0], "ex/1.md") {
+		t.Errorf("the finding does not name the exercise it is in: %v", c.Notes)
 	}
 }

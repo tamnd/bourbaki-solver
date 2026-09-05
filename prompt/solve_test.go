@@ -309,3 +309,89 @@ func usesSample(prompt string) string {
 }
 
 func tagsIn(line string) []string { return sampleTag.FindAllString(line, -1) }
+
+// The truth judge failed 5 of the 10 right answers of the twenty-case set, and
+// three of those reviews had cleared every obligation, every failure mode and
+// every falsification check before writing the solution off. The summary block
+// was not being read off the review. These hold the prompt to the two things
+// that were changed about it, because both are one sentence away from being
+// deleted by a later edit that reads them as padding.
+
+func TestTheTruthJudgeIsToldToAnswerFromTheWorkItJustDid(t *testing.T) {
+	p := built()["truth"]
+	for _, want := range []string{
+		"read off the work above them",
+		"names what it comes from",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the truth judge is no longer told to answer from its own review: %q is gone", want)
+		}
+	}
+}
+
+func TestTheDefaultToFailIsScopedToAStepThatWasNotChecked(t *testing.T) {
+	p := built()["truth"]
+	if !strings.Contains(p, "Your default is to fail an unchecked step") {
+		t.Error("the default to fail is unscoped again, which is what failed three right answers that had passed every check in the review")
+	}
+	if !strings.Contains(p, "not licence to fail a step you") {
+		t.Error("nothing now stops a review that cleared every check from failing the solution anyway")
+	}
+}
+
+func TestTheTruthJudgeStillFailsWhatItCouldNotSettle(t *testing.T) {
+	// The false accept rate is the number that decides whether a verdict is
+	// worth anything, it is at 0 of 10, and none of the above may loosen it.
+	p := built()["truth"]
+	for _, want := range []string{
+		"If you are unsure, it is FAIL",
+		"VERDICT is PASS only when TRUTH is TRUE",
+		"score is 6 or 7",
+		"Reading a step and thinking it is probably fine is failing the step",
+	} {
+		if !strings.Contains(p, want) {
+			t.Errorf("the gate was loosened: %q is gone", want)
+		}
+	}
+}
+
+// TestTheTruthJudgeCanWriteTheReasonItIsAskedFor is the far side of the
+// contract the file comment names, in the direction that actually broke.
+//
+// The prompt tells the judge that a field it answers NO "names what it comes
+// from, in a few words after the line". Nothing asserted that the parser could
+// read a line in that shape, and it could not: the decision lines were anchored
+// at the end of the value, so every reasoned NO read as no answer at all,
+// HasQuality went false on a review that had answered everything, and the case
+// was thrown away. Six of the twenty cases of the built-in eval set were lost
+// that way before anybody looked at an archived review.
+//
+// This asserts the two halves against each other rather than against a literal:
+// what the prompt asks for is read out of the prompt, so a prompt that stops
+// asking for reasons fails here rather than quietly making the test vacuous.
+func TestTheTruthJudgeCanWriteTheReasonItIsAskedFor(t *testing.T) {
+	truth := built()["truth"]
+	if !strings.Contains(truth, "names what it comes from") {
+		t.Fatal("the truth prompt no longer asks a NO to name what it comes from, " +
+			"so this test is asserting nothing; delete it or follow the prompt")
+	}
+	d := textguard.Read(`VERDICT: FAIL
+TRUTH: FALSE, the step from one implication to an equivalence.
+COMPLETE: NO, obligation 3 is not discharged.
+SELF_CONTAINED: YES
+HUMAN_READABLE: YES
+VERIFIABLE: NO, the converse is absent so the last step cannot be checked.
+SCORE: 3/7`)
+	if !d.HasQuality {
+		t.Error("the judge answered all four fields the way the prompt asks and the parser read none of them")
+	}
+	if !d.HasTruth || d.Truth {
+		t.Error("TRUTH: FALSE with its step named did not read as false")
+	}
+	if d.Complete || d.Verifiable {
+		t.Error("a NO that named what it came from read as a yes")
+	}
+	if d.Verdict != "FAIL" || d.Score != 3 {
+		t.Errorf("verdict %q score %d beside reasoned fields", d.Verdict, d.Score)
+	}
+}

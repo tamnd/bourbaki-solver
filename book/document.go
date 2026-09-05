@@ -3,7 +3,6 @@ package book
 import (
 	_ "embed"
 	"fmt"
-	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -53,7 +52,35 @@ type Document struct {
 	// made and not a fault, and it is listed so that somebody comparing a page
 	// against the printing knows which formulas to look at first.
 	Aligned []Finding
+	// Sources says which corpus file each stretch of the generated TeX came
+	// from, in order. See Source.
+	Sources []Source
 }
+
+// A Source is the line of the generated document at which one corpus file's
+// text begins.
+//
+// The typesetter reports everything against a line of book.tex, and book.tex is
+// a file nobody wrote: it is half a megabyte of macro calls this package
+// produced, it is deleted and made again on every build, and "l.41207" in the
+// log tells a reader nothing they can act on. What they need is the file under
+// content/ that the text came from, because that is the file somebody can open
+// and fix.
+//
+// So the writer drops a comment in front of every body it sets, the line
+// numbers of those comments are read back off the finished document, and an
+// error at line 41207 is reported against the last file that began before it.
+// A comment is what carries the mark because TeX counts a comment line like any
+// other and then throws it away, so the mapping costs the document nothing.
+type Source struct {
+	Line int    // the line of the generated TeX the marker sits on
+	Path string // content/en/alg/I/01_s1_laws_of_composition.md
+}
+
+// sourceMark opens a marker comment. Two per cent signs so it cannot be
+// confused with the escaper's output: a per cent in the corpus is escaped to
+// \%, so no line of set text can begin with a bare one.
+const sourceMark = "%%<< "
 
 // A Finding is one thing the build could not do, and where.
 type Finding struct {
@@ -88,7 +115,7 @@ func Write(v *Volume) (*Document, error) {
 	if v.Meta.Edition != "" {
 		fmt.Fprintf(&b, "\\bedition{%s}\n", escapeTeX(v.Meta.Edition))
 	}
-	b.WriteString("\\begin{document}\n\\bcover\n\\btitlepage\n\\frontmatter\n\\bcontents\n")
+	b.WriteString("\\begin{document}\n\\bcover\n\\bhalftitle\n\\btitlepage\n\\frontmatter\n\\bcontents\n")
 
 	// The note to the reader and the Book's own introduction stand before
 	// chapter I and belong to no chapter, which is where the printing puts them
@@ -126,9 +153,129 @@ func Write(v *Volume) (*Document, error) {
 			return nil, err
 		}
 	}
+	// The two indexes stand after the last chapter, which is where the printing
+	// puts them. They are set the way the front matter is, as unnumbered
+	// divisions with a contents line and a running head of their own, and their
+	// text goes inside an environment that sets one entry to a line.
+	if v.Notation != nil || v.Terminology != nil {
+		b.WriteString("\\backmatter\n")
+	}
+	for _, f := range []struct {
+		sec      *Section
+		fallback string
+		anchor   string
+	}{
+		{v.Notation, "Index of Notation", "notation"},
+		{v.Terminology, "Index of Terminology", "terminology"},
+	} {
+		if f.sec == nil {
+			continue
+		}
+		title := f.sec.Title
+		if title == "" {
+			title = f.fallback
+		}
+		fmt.Fprintf(&b, "\n\\bunnumbered{%s}{%s}{%s}\n", escapeTeX(title),
+			escapeTeX(listed(title, v.Lang)), f.anchor)
+		tex, err := d.entries(v, f.sec, anchors)
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString("\\begin{bindex}\n" + tex + "\\end{bindex}\n")
+	}
 	b.WriteString("\\end{document}\n")
 	d.TeX = b.String()
+	d.index()
 	return d, nil
+}
+
+// entries renders an index, which is a file whose lines are its structure.
+//
+// Every other file in the corpus is prose, where a run of lines with no blank
+// line between them is one paragraph and setting it as one is right. An index is
+// the opposite: page 701 of the English Algebra I to III sets 46 entries down
+// the page, one to a line, and a renderer that treated them as prose would run
+// the whole of the index of terminology into a single paragraph of 1400 words,
+// which is not a defect anybody would have to look twice at.
+//
+// So each line of an index becomes its own paragraph before the ordinary
+// renderer sees it, and the class sets the paragraph shape. A display is left
+// alone, because a display is already several lines that belong together and
+// splitting it would put a blank line between $$ and the formula under it, and
+// the index of notation is where the displays are: 21 of the 24 entries on page
+// 693 are formulae the reading set as displays because that is what they look
+// like on the page.
+func (d *Document) entries(v *Volume, s *Section, anchors map[string]bool) (string, error) {
+	r := d.renderer(v, s.Path, s.Head, anchors)
+	tex, err := r.TeX(oneEntryToALine(StripTitle(s.Body)))
+	if err != nil {
+		return "", err
+	}
+	d.Files++
+	return mark(s.Path) + tex, nil
+}
+
+// oneEntryToALine makes every line of an index a paragraph of its own, except
+// the lines of a display, which stay the one block they were written as.
+//
+// It walks lines rather than blocks because the two readings of the English
+// Algebra I to III disagree about blank lines: the index of notation puts one
+// between every pair of entries down to page 676 and then none at all, and the
+// index of terminology has none anywhere. A blocks-first pass that kept any
+// block holding $$ intact therefore left the whole packed tail of the notation
+// index, 130 entries with four displays in it, as a single paragraph, which is
+// the run-together shape this function exists to prevent.
+func oneEntryToALine(body string) string {
+	var out []string
+	display := false
+	for _, line := range strings.Split(body, "\n") {
+		switch {
+		case strings.TrimSpace(line) == "$$":
+			if display {
+				out[len(out)-1] += "\n" + line
+			} else {
+				out = append(out, line)
+			}
+			display = !display
+		case display && len(out) > 0:
+			out[len(out)-1] += "\n" + line
+		case strings.TrimSpace(line) == "":
+		default:
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n\n")
+}
+
+// index reads the source markers back off the finished document.
+//
+// Off the finished string rather than counted as the parts went in, because the
+// line the typesetter reports is a line of the file on disk and the only thing
+// that is certainly the file on disk is the string that gets written to it. A
+// counter maintained alongside a strings.Builder is a second implementation of
+// the same arithmetic and would be wrong the first time somebody added a
+// Fprintf without thinking about it.
+func (d *Document) index() {
+	d.Sources = nil
+	for i, line := range strings.Split(d.TeX, "\n") {
+		if path, ok := strings.CutPrefix(line, sourceMark); ok {
+			d.Sources = append(d.Sources, Source{Line: i + 1, Path: path})
+		}
+	}
+}
+
+// At is the corpus file whose text is set on a line of the generated document,
+// and empty for a line that belongs to the class or to the front matter rather
+// than to any file.
+func (d *Document) At(line int) string {
+	if d == nil || len(d.Sources) == 0 {
+		return ""
+	}
+	i := sort.Search(len(d.Sources), func(i int) bool { return d.Sources[i].Line > line })
+	if i == 0 {
+		return ""
+	}
+	return d.Sources[i-1].Path
 }
 
 // collect is every anchor the volume defines, which is what a cross reference
@@ -172,7 +319,15 @@ func (d *Document) chapter(b *strings.Builder, v *Volume, c *Chapter, anchors ma
 		if label == "" {
 			label = fmt.Sprintf("ch-%s-s%d", strings.ToLower(c.Numeral), s.Number)
 		}
-		fmt.Fprintf(b, "\n\\bsection{%s}{%s}{%s}\n", escapeTeX(s.Heading()), escapeTeX(s.Title), label)
+		// The contents line comes off manifests/toc/ where the volume was printed
+		// in this language, and falls back to the head where it was not, which is
+		// the same rule the numbered subsections have had since they were set.
+		list := s.Listed
+		if list == "" {
+			list = s.Title
+		}
+		fmt.Fprintf(b, "\n\\bsection{%s}{%s}{%s}{%s}\n", escapeTeX(s.Heading()),
+			escapeTeX(s.Title), escapeTeX(list), label)
 		tex, err := d.body(v, s, anchors)
 		if err != nil {
 			return err
@@ -233,6 +388,7 @@ func (d *Document) exercises(b *strings.Builder, v *Volume, c *Chapter, anchors 
 				exLabel = fmt.Sprintf("%s-ex-%d", label, e.Number)
 			}
 			fmt.Fprintf(b, "\\bexercise{%d}{%s}{%s}\n", e.Number, star, exLabel)
+			b.WriteString(mark(e.Path))
 			r := d.renderer(v, e.Path, e.Head, anchors)
 			tex, err := r.TeX(StripTitle(e.Body))
 			if err != nil {
@@ -253,7 +409,19 @@ func (d *Document) body(v *Volume, s *Section, anchors map[string]bool) (string,
 		return "", err
 	}
 	d.Files++
-	return tex, nil
+	return mark(s.Path) + tex, nil
+}
+
+// mark is the comment that says the following lines came out of one corpus
+// file. It ends in a newline of its own, so that it cannot join itself to the
+// line under it: a TeX comment eats the newline that closes it, and a marker
+// set on the same line as the text it introduces would run the text into the
+// paragraph above.
+func mark(path string) string {
+	if path == "" {
+		return ""
+	}
+	return sourceMark + path + "\n"
 }
 
 // renderer wires one file's renderer to the document's counters.
@@ -399,28 +567,58 @@ func Coverage(root string, v *Volume) (have, want int, missing []string, err err
 	if !ok {
 		return 0, 0, nil, fmt.Errorf("no sections recorded for %s", v.Meta.ID)
 	}
+	// Keyed on what the section is and not on what its file is called. The
+	// filename is the title slugged, and a translation is titled in its own
+	// language, so 01_s1_laws_of_composition.md and 01_s1_luat_hop_thanh.md are
+	// the same § under two names. Worse, the two printings slug differently in
+	// the same language, so a lane built from the French pages reported 8 of 30
+	// against an English sections manifest that had all thirty. The chapter and
+	// the § number are what the book has and neither is a matter of spelling.
+	// The path stays, but only to name the file in the message.
 	got := map[string]bool{}
-	for _, s := range v.Pieces() {
-		got[path.Base(s.Path)] = true
+	if v.Reader != nil {
+		got[coverageKey("", *v.Reader)] = true
 	}
-	count := func(r corpus.SectionRecord) {
+	if v.Intro != nil {
+		got[coverageKey("", *v.Intro)] = true
+	}
+	for _, c := range v.Chapters {
+		if c.Front != nil {
+			got[coverageKey(c.Numeral, *c.Front)] = true
+		}
+		for _, s := range c.Sections {
+			got[coverageKey(c.Numeral, *s)] = true
+		}
+		if c.Historical != nil {
+			got[coverageKey(c.Numeral, *c.Historical)] = true
+		}
+	}
+	count := func(chapter string, r corpus.SectionRecord) {
 		want++
-		if got[path.Base(r.Path)] {
+		if got[chapter+"/"+r.Kind+"/"+strconv.Itoa(r.Section)] {
 			have++
 			return
 		}
 		missing = append(missing, r.Path)
 	}
 	if bs.ReaderNote != nil {
-		count(*bs.ReaderNote)
+		count("", *bs.ReaderNote)
 	}
 	if bs.Introduction != nil {
-		count(*bs.Introduction)
+		count("", *bs.Introduction)
 	}
 	for _, c := range bs.Chapters {
 		for _, s := range c.Sections {
-			count(s)
+			count(c.Chapter, s)
 		}
 	}
 	return have, want, missing, nil
+}
+
+// coverageKey names a section by what it is: the chapter it is in, what kind of
+// file it is, and its § number where it has one. Everything that is not a § has
+// number zero, and a chapter has at most one front page and one historical
+// note, so zero is not ambiguous.
+func coverageKey(chapter string, s Section) string {
+	return chapter + "/" + s.Kind + "/" + strconv.Itoa(s.Number)
 }

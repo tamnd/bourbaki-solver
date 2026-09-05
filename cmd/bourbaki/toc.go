@@ -76,7 +76,7 @@ func tocBuild(args []string) error {
 	}
 
 	ctx := context.Background()
-	failed, skipped := 0, 0
+	failed, skipped, derived := 0, 0, 0
 	for _, b := range list {
 		pm, err := pagemap.Load(root, b.ID)
 		if err != nil {
@@ -91,22 +91,40 @@ func tocBuild(args []string) error {
 			skipped++
 			continue
 		}
-		pages, err := volumeText(ctx, root, &b)
-		if err != nil {
-			return err
+		// A volume already read off its own pages is not a volume this failed
+		// on. Three of the forty-four carry no contents this can read, and
+		// bourbaki toc body was written for exactly those; their manifests say
+		// so in their own grammar. Counting them as failures made a sweep of a
+		// fully read library end in an error every time, which teaches a reader
+		// to ignore the one line that matters.
+		//
+		// The three fail in two different ways and both have to be caught here.
+		// ac-x-fr and lie-vii-viii-fr have no contents page at all, so the parse
+		// returns an error. alg-iv-vii-fr prints a contents that reads cleanly
+		// and is short a leaf: the scan runs from chapter V § 13 at the foot of
+		// pdf 423 to chapter VII § 1 at the head of pdf 424, so the leaf holding
+		// the end of chapter V and the whole of chapter VI is not in the file,
+		// and the parse comes back with three of the four chapters and a problem
+		// saying so. Taking that reading would throw away a chapter the body
+		// route already has.
+		fromBody := false
+		if was, ok := man.Get(b.ID); ok {
+			fromBody = readOffItsOwnPages(was.Grammar)
 		}
-		read, err := contentsReadings(root, b.ID)
+		res, err := readContents(ctx, root, &b, pm, errata)
 		if err != nil {
-			return fmt.Errorf("%s: %w", b.ID, err)
-		}
-		pages = toc.Overlay(pages, read, pm)
-		if pages, err = correctContents(pages, errata.ContentsErrata(b.ID)); err != nil {
-			return fmt.Errorf("%s: %w", b.ID, err)
-		}
-		res, err := toc.Parse(pages, pm, toc.Options{
-			Book: b.ID, Chapters: b.Chapters, Title: b.Title,
-			FrontMatterPDF: frontMatterPDF(&b)})
-		if err != nil {
+			if fromBody {
+				fmt.Printf("%s  read off its own pages by toc body, left as it stands\n", b.ID)
+				derived++
+				continue
+			}
+			// Everything else is reported against the volume it happened to and
+			// the sweep carries on. It used to return, and a single stranded
+			// contents erratum in int-i-iv-fr therefore stopped the run before
+			// it reached the thirty-odd volumes after it in the manifest, which
+			// read perfectly well. A volume named on the command line is the
+			// only volume in the list, so it still ends in a non-zero exit
+			// through the count below.
 			fmt.Printf("%s  %v\n", b.ID, err)
 			failed++
 			continue
@@ -117,7 +135,7 @@ func tocBuild(args []string) error {
 		// against the printing by hand, and a rebuild used to put every one of
 		// those corrections back the way the scan had it without saying so.
 		if was, ok := man.Get(b.ID); ok {
-			chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters)
+			chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters, pm)
 			if !*retitle {
 				res.Chapters = chapters
 			}
@@ -129,12 +147,19 @@ func tocBuild(args []string) error {
 				fmt.Printf("  %s %s\n", what, one)
 			}
 			if len(kept) > 0 && !*retitle {
-				titles := "titles already in the manifest were kept"
+				// "readings" and not "titles": a printed page off the contents
+				// is kept on the same grounds and gets counted in the same line.
+				readings := "readings already in the manifest were kept"
 				if len(kept) == 1 {
-					titles = "title already in the manifest was kept"
+					readings = "reading already in the manifest was kept"
 				}
-				fmt.Printf("  %d %s, pass -retitle to take the new readings\n", len(kept), titles)
+				fmt.Printf("  %d %s, pass -retitle to take the new readings\n", len(kept), readings)
 			}
+		}
+		if fromBody && len(toc.Hard(res.Problems)) > 0 {
+			fmt.Printf("%s  read off its own pages by toc body, left as it stands\n", b.ID)
+			derived++
+			continue
 		}
 		printTOC(res, *verbose)
 		if len(toc.Hard(res.Problems)) > 0 {
@@ -161,6 +186,13 @@ func tocBuild(args []string) error {
 	if skipped > 0 {
 		fmt.Printf("%d volumes have no page map yet and were not read\n", skipped)
 	}
+	if derived > 0 {
+		volumes := "volumes carry a contents read off their own pages"
+		if derived == 1 {
+			volumes = "volume carries a contents read off its own pages"
+		}
+		fmt.Printf("%d %s and were left alone\n", derived, volumes)
+	}
 	if !*dry {
 		if err := man.Save(root); err != nil {
 			return err
@@ -171,6 +203,44 @@ func tocBuild(args []string) error {
 		return fmt.Errorf("%d volumes have contents problems and were not written", failed)
 	}
 	return nil
+}
+
+// readOffItsOwnPages says whether a contents already in the manifest came from
+// the volume's body rather than from a contents page.
+//
+// The grammar a reading records is the pair the contents page was set in,
+// pilcrow or column and bare or label, and a body reading has no contents page
+// to have a grammar of, so it writes the word body in the first half. That is
+// the whole of the mark: it is written by one command, bourbaki toc body, and
+// there is nothing else in the corpus that can produce it.
+func readOffItsOwnPages(grammar string) bool {
+	return strings.HasPrefix(grammar, string(toc.Body)+"/")
+}
+
+// readContents is one volume's table of contents, from the pdf text through the
+// re-readings and the errata to the parse.
+//
+// It is a function of its own so that the sweep has one place to decide what a
+// volume it cannot read means. Each of the four steps used to return straight
+// out of the loop, so whichever volume failed first ended the run for every
+// volume after it in the manifest.
+func readContents(ctx context.Context, root string, b *corpus.Book, pm *pagemap.Map,
+	errata *corpus.ErrataManifest) (*toc.Result, error) {
+	pages, err := volumeText(ctx, root, b)
+	if err != nil {
+		return nil, err
+	}
+	read, err := contentsReadings(root, b.ID)
+	if err != nil {
+		return nil, err
+	}
+	pages = toc.Overlay(pages, read, pm)
+	if pages, err = correctContents(pages, errata.ContentsErrata(b.ID)); err != nil {
+		return nil, err
+	}
+	return toc.Parse(pages, pm, toc.Options{
+		Book: b.ID, Chapters: b.Chapters, Title: b.Title,
+		FrontMatterPDF: frontMatterPDF(b)})
 }
 
 // contentsReadings is what the model read off the pages of the table of
@@ -247,7 +317,8 @@ func correctContents(pages []string, errata []corpus.Erratum) ([]string, error) 
 			n += strings.Count(p, e.Says)
 		}
 		if n != 1 {
-			return nil, fmt.Errorf("the contents erratum %q is on %d pages of the volume, want exactly one", e.Says, n)
+			return nil, fmt.Errorf("the contents erratum %q is on %d pages of the volume, want exactly one%s",
+				e.Says, n, nearMiss(pages, e.Says))
 		}
 		for i, p := range pages {
 			pages[i] = strings.Replace(p, e.Says, e.Read, 1)
@@ -257,6 +328,59 @@ func correctContents(pages []string, errata []corpus.Erratum) ([]string, error) 
 		}
 	}
 	return pages, nil
+}
+
+// nearMiss says which line the erratum was probably meant for, when the exact
+// one is on no page of the volume.
+//
+// It exists because of int-i-iv-fr, which spent its whole life as an open issue
+// reported as "the contents re-read hit the colophon, not the contents". The
+// contents had not moved and nothing had hit a colophon. Its erratum reads
+// "§ 2. Support d'une mesure ... 62" with a typewriter apostrophe and the page
+// carries "Support d’une mesure" with a typographic one, U+0027 against U+2019
+// at offset 14 of an 88 character line, and the corpus writes the typographic
+// one everywhere. The message said the line was on 0 pages of the volume, which
+// is true and is no help at all: the line is on pdf 283, in full, one character
+// out. So when the count is wrong the pages are searched again with the quote
+// marks folded together and the runs of blanks squeezed, and the line that
+// comes back is printed under the failure with the offset of the first
+// character that differs.
+//
+// It only ever reports. Folding the quotes for the match itself would let an
+// erratum typed with the wrong apostrophe apply, and applying it writes e.Read
+// into the page, so a corpus that uses U+2019 everywhere would quietly acquire
+// a U+0027 on the corrected line. The erratum is the thing to fix, and this
+// says which character to fix.
+func nearMiss(pages []string, says string) string {
+	want := fold(says)
+	// pages is indexed from zero and the volume counts its pdf pages from one.
+	for i, page := range pages {
+		for _, line := range strings.Split(page, "\n") {
+			if fold(line) != want {
+				continue
+			}
+			at := ""
+			for i := range min(len(line), len(says)) {
+				if line[i] != says[i] {
+					at = fmt.Sprintf(", first differing at byte %d", i)
+					break
+				}
+			}
+			return fmt.Sprintf("\n  pdf %d carries %q%s", i+1, line, at)
+		}
+	}
+	return ""
+}
+
+// fold is the difference between an erratum somebody typed and the line a page
+// carries: the apostrophes and quotation marks, and how many blanks are between
+// the words. See nearMiss, which is the only caller and which only reports.
+func fold(s string) string {
+	s = strings.NewReplacer(
+		"\u2018", "'", "\u2019", "'", "\u02bc", "'",
+		"\u201c", `"`, "\u201d", `"`,
+	).Replace(s)
+	return strings.Join(strings.Fields(s), " ")
 }
 
 func printTOC(r *toc.Result, verbose bool) {
@@ -430,7 +554,7 @@ func tocVerify(args []string) error {
 		if !ok {
 			return fmt.Errorf("%s is in %s but not in %s", bt.ID, corpus.TOCPath(root, bt.ID), corpus.BooksPath(root))
 		}
-		// pageText and not volumeText, which is the whole of what this check
+		// bestPageText and not volumeText, which is the whole of what this check
 		// used to be able to see. volumeText is the layer the PDF carries and
 		// three volumes carry none: alg-x-fr, top-v-x and ac-i-vii. For those it
 		// hands back empty pages, every heading misses, and the report reads as
@@ -438,10 +562,16 @@ func tocVerify(args []string) error {
 		// scored 0 of 68 the first time its contents was read, on a map whose
 		// own numbers come off the pages and validate clean.
 		//
-		// Nothing moves for the forty volumes that do have a layer, because
-		// pageText goes to it for them and this is the same text it was reading
-		// before.
-		pages, err := pageText(ctx, root, *b)
+		// And bestPageText rather than pageText, which went to the PDF's layer
+		// for every volume that had one however bad it was. On a scanned volume
+		// that layer is the scanner's own OCR and this project has read the same
+		// pages far better since; the § that this check is built on is the
+		// character the old layer drops most. It took the shelf from 6373 of
+		// 6513 headings to 6499, and the 31 headings this check reported as
+		// printed on a page the contents does not name to none: every one of the
+		// 31 was the scanner's layer losing a mark, not the corpus putting a
+		// heading in the wrong place. See bestPageText.
+		pages, err := bestPageText(ctx, root, *b)
 		if err != nil {
 			return err
 		}
@@ -520,7 +650,7 @@ func tocBody(args []string) error {
 	res := toc.FromBody(pages, pm, toc.Options{
 		Book: b.ID, Chapters: b.Chapters, Title: b.Title})
 	if was, ok := man.Get(b.ID); ok && !*retitle {
-		chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters)
+		chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters, pm)
 		res.Chapters = chapters
 		for _, one := range kept {
 			fmt.Printf("  kept %s\n", one)

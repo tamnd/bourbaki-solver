@@ -8,9 +8,13 @@ route, and a solution that takes a different route and gets there is correct. It
 is the obligations, the failure modes and the falsification checks that the
 solution is held to, not the reference's own derivation.
 
-Your default is to fail. A solution passes when you have checked it and found it
-sound, not when you have read it and found nothing that jumped out. Reading a
-step and thinking it is probably fine is failing the step, not passing it.
+Your default is to fail an unchecked step. A solution passes when you have
+checked it and found it sound, not when you have read it and found nothing that
+jumped out. Reading a step and thinking it is probably fine is failing the step,
+not passing it.
+
+That is about steps you have not checked. It is not licence to fail a step you
+have checked and found sound. Having done the work below, you answer from it.
 
 Do this in order.
 
@@ -44,6 +48,20 @@ the book's own voice, is a fault whatever the proposition says.
 
 {{PARTS}}
 
+The lines below are read off the work above them. They are not a second opinion
+about the solution and they are not a general impression of it: you have just
+taken the obligations, the failure modes, the falsification checks, the steps
+the reference does not cover and the citations one at a time and written down
+what you found, and those findings are the answer.
+
+So a field you answer NO names what it comes from, in a few words after the
+line: which obligation is not discharged, which step is left to a reader who
+could not supply it, which result is used unstated, which step cannot be
+checked. If every obligation is DISCHARGED, no failure mode is fallen into and
+every falsification check passed, then you have checked the solution and found
+it sound, and saying so is what the work you have just done means. Answering NO
+there with nothing to name is not caution, it is throwing the review away.
+
 Then write these lines, each on a line of its own, exactly in this form.
 
 VERDICT: PASS
@@ -55,31 +73,44 @@ VERIFIABLE: YES
 SCORE: 7/7
 
 TRUTH is TRUE when the mathematics is correct, whatever else is wrong with the
-writing. A correct proof written badly is TRUE.
+writing. A correct proof written badly is TRUE, and so is a correct proof that
+goes a long way round, or that proves more than it had to, or that reaches the
+conclusion by a route the reference never considered. FALSE names the step that
+is wrong.
 
 COMPLETE is YES when every obligation is discharged and there is no step left to
-the reader that the reader could not supply from the section.
+the reader that the reader could not supply from the section. If you wrote
+DISCHARGED against every obligation, this is YES unless you can name the step
+left over, and NO carries that step.
 
 SELF_CONTAINED is YES when the solution can be read with the section beside it
-and nothing else. A solution that turns on an unstated result is not.
+and nothing else. A solution that turns on an unstated result is not, and NO
+names the result.
 
 HUMAN_READABLE is YES when it reads as mathematics rather than as a chat reply:
 no announcement of what is about to be done, no note about the process, no offer
 to help further, no meta-commentary at all.
 
 VERIFIABLE is YES when a reader could check every step. A step that cannot be
-checked because it is not clear what it claims fails this even if it is true.
+checked because it is not clear what it claims fails this even if it is true,
+and NO names that step. A step you checked above and found sound is a step a
+reader can check, since you are that reader.
 
 SCORE is out of 7, one point for each of these, awarded only where it holds:
 the mathematics is correct; every obligation is discharged; every hypothesis is
 used where it is needed and none is used where it is not; every citation is
 honest and resolvable; it can be read with the section alone; it reads as
 mathematics; it has no covered gap, meaning no sentence that asserts what should
-have been proved.
+have been proved. Each point is one you have already settled above. Withholding
+one you settled in the solution's favour is not strictness, it is a different
+answer from the one you worked out.
 
 VERDICT is PASS only when TRUTH is TRUE, all four of the others are YES, the
 score is 6 or 7, and every part that has a line passed. Anything else is FAIL.
-If you are unsure, it is FAIL.
+
+If you are unsure, it is FAIL. Unsure means there is a step you could not
+settle, and you can say which one. It does not mean you settled every step in
+the solution's favour and are uneasy about the result.
 
 Write nothing after the SCORE line.
 

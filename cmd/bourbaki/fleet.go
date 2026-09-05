@@ -30,6 +30,21 @@ flags:
   -only NAMES    comma separated route names, in place of every enabled route
   -state PATH    state file (default $BOURBAKI_FLEET_STATE, else ~/.config/bourbaki/fleet.json)
 
+The taking column of accounts is the only one not read off the host. It is
+answered out of recently asked, kept on this machine by the runs that did the
+asking (default $BOURBAKI_FLEET_ASKS, else ~/.config/bourbaki/asks.json), and
+it is there because every counted column can be right about a host that will
+not take a prompt. One box read 21 verified with 10 ready and idle while 720 of
+its asks in a week had ended "ChatGPT never accepted the prompt": the session
+loads, the profile counts as ready, and the composer never takes it, so each
+ask burns the whole deadline. Three extra translate lanes put against those ten
+ready profiles wrote nothing at all. Where the record says that, the last
+column says it instead of saying the host is free now, and the answer is to
+sign the profiles in again rather than to point more lanes at them.
+
+A dash in that column is a host nothing has asked lately, which is not the same
+as a host that failed everything, and is what it reads before any run has gone.
+
 Every chatgpt-tool listener binds 127.0.0.1 on its own host, so nothing here
 works without ssh. The tunnels are what the rest of the tool talks to.
 
@@ -67,6 +82,29 @@ func (f *fleetFlags) registry() (route.Registry, string, error) {
 		}
 	}
 	return registry, source, nil
+}
+
+// noSSHHost says that nothing is left to work with, and blames the right thing
+// for it.
+//
+// The message used to name the route file whether or not the route file was the
+// reason. -only narrows the registry before this is reached, so asking probe for
+// a gateway or subscription route by name emptied the selection and was told
+// "no route in routes.json names an ssh host" about a file holding four of them.
+// That was read as the file being wrong and sent somebody to look at it; the
+// answer was that the route asked for is not reachable over ssh and never was.
+// A run against that same route then failed on the first ask, an hour later,
+// with the model's own 400.
+//
+// The file is still to blame when nothing was selected, and then it is still
+// named.
+func (f *fleetFlags) noSSHHost(source, adjective string) error {
+	if names := strings.TrimSpace(f.only); names != "" {
+		return fmt.Errorf("no %sroute named in -only %s reaches a box over ssh, "+
+			"so there is nothing to do here: gateway and subscription routes are asked directly",
+			adjective, names)
+	}
+	return fmt.Errorf("no %sroute in %s names an ssh host", adjective, source)
 }
 
 func (f *fleetFlags) statePath() string {
@@ -131,10 +169,10 @@ func runFleetProbe(args []string) error {
 		if value.Host == "" {
 			continue
 		}
-		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+		targets = append(targets, fleetTarget(value))
 	}
 	if len(targets) == 0 {
-		return fmt.Errorf("no route in %s names an ssh host", source)
+		return flags.noSSHHost(source, "")
 	}
 
 	ctx, cancel := signalContext()
@@ -176,9 +214,33 @@ func sshTargets(registry route.Registry) []fleet.Target {
 		if value.Host == "" {
 			continue
 		}
-		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+		targets = append(targets, fleetTarget(value))
 	}
 	return targets
+}
+
+// fleetTarget is the one place a route becomes something to ask over ssh.
+//
+// It exists because four call sites built the same three fields by hand and a
+// fifth fact then had to reach all four. That fact is the kind: a route that
+// names a reader is a box serving its own weights, and every question the fleet
+// asks about readiness has a different answer for it. See fleet.Kind. Missing
+// one call site would leave a host that is a reader everywhere except in the
+// report that says whether it can read.
+func fleetTarget(value route.Route) fleet.Target {
+	target := fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort}
+	if strings.TrimSpace(value.Reader) != "" {
+		target.Kind = fleet.Reader
+		target.ReaderURL = value.ReaderURL
+		// The served model is what the endpoint calls the weights and is what a
+		// row about a reader should print, since it is the thing that changes
+		// when somebody swaps the shortlist entry under it.
+		target.ReaderModel = value.ServedModel
+		if target.ReaderModel == "" {
+			target.ReaderModel = value.Model
+		}
+	}
+	return target
 }
 
 // runFleetAccounts prints the ban board, and with -sleep prints the seconds a
@@ -200,6 +262,7 @@ func runFleetAccounts(args []string) error {
 	flags.bind(fs)
 	timeout := fs.Duration("timeout", 60*time.Second, "per host timeout")
 	sleep := fs.Bool("sleep", false, "print the seconds to wait for the first slot back, and nothing else")
+	within := fs.Duration("within", fleet.LedgerWindow, "how far back to read the record of asks already made")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -209,7 +272,7 @@ func runFleetAccounts(args []string) error {
 	}
 	targets := sshTargets(registry)
 	if len(targets) == 0 {
-		return fmt.Errorf("no enabled route in %s names an ssh host", source)
+		return flags.noSSHHost(source, "enabled ")
 	}
 
 	ctx, cancel := signalContext()
@@ -219,10 +282,27 @@ func runFleetAccounts(args []string) error {
 		fmt.Println(int(fleet.Wait(boards).Seconds()))
 		return nil
 	}
+	// What the hosts hold, and then what asking them has lately come to. The
+	// record is read here and not inside Board because it is written on this
+	// machine by the runs that did the asking, and costs no ssh round trip.
+	// Losing it is not worth failing the table for: a missing or unreadable
+	// file means the taking column says nothing, which is what it says before
+	// anything has run anyway.
+	if ledger, err := fleet.LoadLedger(fleet.LedgerPath()); err != nil {
+		fmt.Fprintf(os.Stderr, "the record of asks already made could not be read, so the taking column is empty: %v\n", err)
+	} else {
+		boards = ledger.Apply(boards, *within)
+	}
 	fmt.Print(fleet.AccountsTable(boards))
 	if wait := fleet.Wait(boards); wait > 0 {
 		fmt.Fprintf(os.Stderr, "every signed in profile is sitting out a cooldown, the first is back in %s\n",
 			wait.Round(time.Minute))
+	}
+	for _, board := range boards {
+		if board.NotTaking() {
+			fmt.Fprintf(os.Stderr, "%s has %d ready profiles and %d of its last %d asks never reached a composer, so more lanes at it will write nothing: it wants signing in again\n",
+				board.Host, board.Ready, board.NoComposer, board.Asks)
+		}
 	}
 	return nil
 }
@@ -266,7 +346,7 @@ func runFleetUp(args []string) error {
 	}
 	links := links(registry, false)
 	if len(links) == 0 {
-		return fmt.Errorf("no enabled route in %s names an ssh host", source)
+		return flags.noSSHHost(source, "enabled ")
 	}
 
 	ctx, cancel := signalContext()
@@ -392,6 +472,15 @@ func runFleetStatus(args []string) error {
 		for _, value := range registry.Routes {
 			if facts, ok := state.Hosts[value.Name]; ok {
 				facts.Name = value.Name
+				// The kind comes off the route rather than out of the state
+				// file, because the route file is the thing that declares it and
+				// a state file written before there were kinds would read a
+				// reader as a browser and print the wrong sentence about it.
+				target := fleetTarget(value)
+				facts.Kind, facts.ReaderURL = target.Kind.Or(), target.ReaderURL
+				if facts.ReaderModel == "" {
+					facts.ReaderModel = target.ReaderModel
+				}
 				rows = append(rows, facts)
 			}
 		}

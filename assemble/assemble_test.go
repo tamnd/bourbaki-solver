@@ -82,7 +82,7 @@ func folioChapter() (corpus.Chapter, map[int]corpus.PageFile) {
 
 func TestAVolumeWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
 	ch, pages := folioChapter()
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestASectionOpeningOnAnUnnumberedPageStillHasItsPages(t *testing.T) {
 	first := pages[18]
 	first.Meta.Folio = 0
 	pages[18] = first
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestABracketTheJoinPutsBackComesOutOfTheMathematics(t *testing.T) {
 		"Noetherian.", `faithful and conclude by induction on $n.)$`, 1)
 	pages[19] = second
 
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +147,7 @@ func TestABracketTheJoinPutsBackComesOutOfTheMathematics(t *testing.T) {
 
 func TestChapter(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestChapter(t *testing.T) {
 // carry was taken off them.
 func TestAnExerciseWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestAnExerciseWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
 		t.Errorf("exercise 1 is printed on %q, want the label of the page", p)
 	}
 	ch, pages = folioChapter()
-	if got, err = Chapter("alg", "en", ch, pages); err != nil {
+	if got, err = Chapter("alg", "en", ch, pages, 0); err != nil {
 		t.Fatal(err)
 	}
 	if p := got[1].Exercises[0].Meta.BookPage; p != "17" {
@@ -212,7 +212,7 @@ func TestAnExerciseWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
 	opening := pages[20]
 	opening.Meta.Folio = 0
 	pages[20] = opening
-	if got, err = Chapter("alg", "en", ch, pages); err != nil {
+	if got, err = Chapter("alg", "en", ch, pages, 0); err != nil {
 		t.Fatal(err)
 	}
 	if p := got[1].Exercises[0].Meta.BookPage; p != "17" {
@@ -225,7 +225,7 @@ func TestAnExerciseWithNoPageLabelIsPlacedByItsFolio(t *testing.T) {
 // text of them.
 func TestChapterSplitsTheExercises(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,7 +251,7 @@ func TestChapterSplitsTheExercises(t *testing.T) {
 // on, so it leaves the section with it, and both files number from one.
 func TestChapterPutsAFootnoteInTheFileThatMarksIt(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -278,7 +278,7 @@ func TestChapterRefusesAFootnoteNothingMarks(t *testing.T) {
 	p := pages[19]
 	p.Body = strings.Replace(p.Body, "Artinian[^1]", "Artinian", 1)
 	pages[19] = p
-	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages, 0); err == nil {
 		t.Fatal("a footnote nothing marks should be an error")
 	}
 }
@@ -286,7 +286,7 @@ func TestChapterRefusesAFootnoteNothingMarks(t *testing.T) {
 // The publisher's line is not part of the book and is not ours to republish.
 func TestChapterDropsTheImprint(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestChapterDropsTheImprint(t *testing.T) {
 // definition and in the mark alike.
 func TestChapterJoinsAndRenumbers(t *testing.T) {
 	ch, pages := smallChapter()
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestChapterDoesNotGlueAnExerciseOntoThePageBefore(t *testing.T) {
 	pages[20] = p
 	ch.Sections[0].Exercises = nil
 
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -343,12 +343,12 @@ func TestChapterDoesNotGlueAnExerciseOntoThePageBefore(t *testing.T) {
 func TestChapterRefusesAHeadingTheContentsDisagreesWith(t *testing.T) {
 	ch, pages := smallChapter()
 	ch.Sections[0].Title = "Artinian Modules"
-	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages, 0); err == nil {
 		t.Fatal("a title the page disagrees with should be an error")
 	}
 	ch, pages = smallChapter()
 	ch.Sections[0].PDFPage = 19
-	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages, 0); err == nil {
 		t.Fatal("a § on the wrong page should be an error")
 	}
 }
@@ -363,7 +363,7 @@ func TestChapterTakesASectionHeadingFromTheFootOfThePageBefore(t *testing.T) {
 	ch, pages := smallChapter()
 	ch.Sections[0].PDFPage = 19
 	ch.Sections[0].Subsections[0].PDFPage = 19
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -375,7 +375,7 @@ func TestChapterTakesASectionHeadingFromTheFootOfThePageBefore(t *testing.T) {
 	// about the § itself, and a § the page it names does not carry is an error.
 	ch, pages = smallChapter()
 	ch.Sections[0].PDFPage = 19
-	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages, 0); err == nil {
 		t.Fatal("a § on the wrong page should be an error")
 	}
 }
@@ -421,7 +421,7 @@ func setsChapter() (corpus.Chapter, map[int]corpus.PageFile) {
 
 func TestChapterReadsASectionHeadedByItsNumberAlone(t *testing.T) {
 	ch, pages := setsChapter()
-	got, err := Chapter("ens", "en", ch, pages)
+	got, err := Chapter("ens", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -448,7 +448,7 @@ func TestChapterReadsASectionHeadedByItsNumberAlone(t *testing.T) {
 func TestChapterRefusesABareSectionHeadingTheContentsDisagreesWith(t *testing.T) {
 	ch, pages := setsChapter()
 	ch.Sections[0].Title = "Proofs"
-	if _, err := Chapter("ens", "en", ch, pages); err == nil {
+	if _, err := Chapter("ens", "en", ch, pages, 0); err == nil {
 		t.Fatal("a bare heading the contents disagrees with should be an error")
 	}
 }
@@ -466,7 +466,7 @@ func TestChapterReadsAnAppendixWithNoTitle(t *testing.T) {
 		"### 1. SIGNS AND WORDS",
 		"Let the signs be given in some order.",
 	}, "\n\n"))
-	got, err := Chapter("ens", "en", ch, pages)
+	got, err := Chapter("ens", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -486,7 +486,7 @@ func TestChapterReadsAnAppendixWithNoTitle(t *testing.T) {
 func TestChapterRefusesAMissingPage(t *testing.T) {
 	ch, pages := smallChapter()
 	delete(pages, 19)
-	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages, 0); err == nil {
 		t.Fatal("a missing page should be an error")
 	}
 }
@@ -657,7 +657,7 @@ func TestChapterDoesNotMendOntoAnExercise(t *testing.T) {
 	pages[20] = p
 	ch.Sections[0].Exercises = nil
 
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -960,7 +960,7 @@ func gatheredChapter() (corpus.Chapter, map[int]corpus.PageFile) {
 // of the § it names, and a § the block does not mark gets nothing.
 func TestChapterReadsAGatheredBlockTheContentsGivesToTheChapter(t *testing.T) {
 	ch, pages := gatheredChapter()
-	got, err := Chapter("ta", "en", ch, pages)
+	got, err := Chapter("ta", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -991,7 +991,7 @@ func TestChapterReadsAGatheredBlockTheContentsGivesToTheChapter(t *testing.T) {
 // the label.
 func TestAGatheredBlockGivesEachSectionThePageItsMarkIsOn(t *testing.T) {
 	ch, pages := gatheredChapter()
-	got, err := Chapter("ta", "en", ch, pages)
+	got, err := Chapter("ta", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1079,7 +1079,7 @@ func TestAChapterThePrintingDoesNotHaveOpensOnItsFirstSection(t *testing.T) {
 	first.Body = strings.TrimPrefix(first.Body, "## CHAPTER VIII SEMISIMPLE MODULES AND RINGS\n\n")
 	pages[18] = first
 
-	got, err := Chapter("alg", "en", ch, pages)
+	got, err := Chapter("alg", "en", ch, pages, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1101,7 +1101,7 @@ func TestAChapterThePrintingDoesHaveStillWantsItsMarker(t *testing.T) {
 	first := pages[18]
 	first.Body = strings.TrimPrefix(first.Body, "## CHAPTER VIII SEMISIMPLE MODULES AND RINGS\n\n")
 	pages[18] = first
-	if _, err := Chapter("alg", "en", ch, pages); err == nil {
+	if _, err := Chapter("alg", "en", ch, pages, 0); err == nil {
 		t.Fatal("a chapter with no marker on its page assembled")
 	}
 }

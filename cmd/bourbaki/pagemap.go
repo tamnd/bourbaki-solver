@@ -79,9 +79,6 @@ func pagemapBuild(args []string) error {
 		if len(pages) != b.Pages {
 			fmt.Printf("%s: got %d pages, the manifest says %d\n", b.ID, len(pages), b.Pages)
 		}
-		if err := correctHeads(pages, errata.HeadErrata(b.ID)); err != nil {
-			return fmt.Errorf("%s: %w", b.ID, err)
-		}
 		swaps, err := transpositions(b)
 		if err != nil {
 			return err
@@ -93,6 +90,9 @@ func pagemapBuild(args []string) error {
 		labels, err := pageLabels(root, b)
 		if err != nil {
 			return err
+		}
+		if err := correctHeads(pages, labels, errata.HeadErrata(b.ID)); err != nil {
+			return fmt.Errorf("%s: %w", b.ID, err)
 		}
 		// What the manifest already says the volume does, unless the flag
 		// overrules it. Detection is a guess made from the reading, and the
@@ -186,7 +186,26 @@ func pagemapBuild(args []string) error {
 // printed 2 is normally a fit that has slipped. Naming the page the opener
 // carries turns the slide into the missing leaf it is, which the loader then
 // reads back off the rows as a step.
-func correctHeads(pages []string, errata []corpus.PageErratum) error {
+// The label the reader wrote into the front matter is corrected here too, and
+// it has to be, because it is the anchor the fit actually uses. readAnchors
+// takes the label over the head wherever there is one, so a mangled label is
+// not overruled by a sound head on the same page: it is preferred to it, and
+// then thrown away by the filter that keeps only the volume's own Book prefix,
+// which leaves the page with no anchor at all. Algebre commutative chapitre 10
+// is that case seven times over. The reader lost the A off AC on pdf 41, 63,
+// 73, 125, 131, 139 and 171, writing "C X.42" and its like, and the running
+// head on each of those pages is the chapter title and carries no number to
+// fall back to. Each of the seven fitted correctly all the same, because 119
+// neighbours agree on the offset, so what the loss cost was not the number but
+// the evidence for it: seven pages the volume prints a number on that the map
+// had to call interpolated.
+//
+// The same erratum serves both, since which of the two a correction lands on is
+// a fact about where the reader put the number rather than about the printing.
+// An erratum is applied where its says is found and it is an error where it is
+// found in neither place, on the same reasoning as below: a correction nobody
+// applied is a person having believed it was in force.
+func correctHeads(pages, labels []string, errata []corpus.PageErratum) error {
 	for _, e := range errata {
 		if e.PDFPage > len(pages) {
 			return fmt.Errorf("the head erratum for pdf page %d is past the end of a %d page volume",
@@ -201,11 +220,22 @@ func correctHeads(pages []string, errata []corpus.PageErratum) error {
 			pages[e.PDFPage-1] = e.Read + "\n" + pg
 			continue
 		}
-		if n := strings.Count(pg, e.Says); n != 1 {
+		onLabel := e.PDFPage <= len(labels) &&
+			strings.TrimSpace(labels[e.PDFPage-1]) == strings.TrimSpace(e.Says)
+		if onLabel {
+			labels[e.PDFPage-1] = e.Read
+		}
+		// A says that is on the page more than once is still an error even when
+		// the label carried it too, because the head it means is then not
+		// decided and the wrong one would be rewritten.
+		switch n := strings.Count(pg, e.Says); {
+		case n == 1:
+			pages[e.PDFPage-1] = strings.Replace(pg, e.Says, e.Read, 1)
+		case n == 0 && onLabel:
+		default:
 			return fmt.Errorf("the head erratum %q is on pdf page %d %d times, want exactly one",
 				e.Says, e.PDFPage, n)
 		}
-		pages[e.PDFPage-1] = strings.Replace(pg, e.Says, e.Read, 1)
 	}
 	return nil
 }
@@ -365,6 +395,74 @@ func pageText(ctx context.Context, root string, b corpus.Book) ([]string, error)
 		return readPageFiles(root, b)
 	}
 	return volumeText(ctx, root, &b)
+}
+
+// bestPageText is the best reading of every page of a volume: the page file
+// where the volume has been read, and the PDF's own text layer where it has
+// not.
+//
+// It exists because pageText answers a different question than the one a check
+// on the printed page wants answered. pageText goes to the PDF for any volume
+// whose manifest says it has a text layer, and for a scanned volume that layer
+// is whatever the scanner left behind twenty years ago, which is not what read
+// these pages. The page files under pages/ were read afterwards off the images
+// by this project, and they are better by a wide margin.
+//
+// How wide is measurable. toc verify reported 140 headings as not printed on
+// the page the contents names, and 108 of those were the start of a run of
+// exercises. Every one of the 21 volumes holding them has text_layer: ocr, and
+// not one of the 6 native or 4 unlayered volumes has a single one. Page 23 of
+// top-v-x-fr is the shape of all of them: the run mark the check looks for is
+// a line reading "§ 2", pages/top-v-x-fr/0023.md carries it, and the scanner's
+// layer has a blank line where it was. The § is the character that layer loses
+// most, and it is the one character the check is built on.
+//
+// The fall back is per page and not per volume, because a volume half read is
+// the normal state of most of the shelf and the half that has been read should
+// still be checked against the good reading.
+//
+// What it does not do is touch a native layer, and that line was measured too.
+// A native layer is not a reading of anything: it is the publisher's own text,
+// carried in the file since it was typeset, and it is exact in a way no OCR of
+// a rendered image can be. Preferring the page files everywhere cost the three
+// born-digital volumes 201 of 201 down to 176, 98 of 98 down to 93 and 165 of
+// 165 down to 160. So the rule is only that this project's OCR beats a
+// scanner's, which is the claim the evidence actually supports.
+func bestPageText(ctx context.Context, root string, b corpus.Book) ([]string, error) {
+	if b.TextLayer == "none" {
+		return readPageFiles(root, b)
+	}
+	layer, err := volumeText(ctx, root, &b)
+	if err != nil {
+		return nil, err
+	}
+	if b.TextLayer != "ocr" {
+		return layer, nil
+	}
+	read := 0
+	for page := 1; page <= b.Pages && page <= len(layer); page++ {
+		file, err := corpus.ReadFile[corpus.PageFrontMatter](corpus.PagePath(root, b.ID, page))
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return nil, err
+		}
+		// An empty body is a page that was read and found to hold nothing, a
+		// plate or a blank verso. Taking it would replace whatever the layer has
+		// with nothing, and a blank page is the one case where the two readings
+		// cannot disagree about a heading anyway.
+		if strings.TrimSpace(file.Body) == "" {
+			continue
+		}
+		layer[page-1] = file.Body
+		read++
+	}
+	if read < b.Pages {
+		fmt.Printf("%s: %d of %d pages have been read, the rest are checked against the PDF's own text layer\n",
+			b.ID, read, b.Pages)
+	}
+	return layer, nil
 }
 
 // pageFolios is the folio every page file of a volume records, in page order,

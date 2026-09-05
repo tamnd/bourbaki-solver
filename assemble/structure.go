@@ -299,6 +299,7 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 	var parent corpus.Ref           // the last statement a Corollary could be numbered under
 	var run corpus.Ref              // the run of remarks or examples now open, if any
 	next := 0                       // the number the next member of that run would carry
+	atMember := false               // the last statement read was the member before next
 	passed := map[corpus.Ref]bool{} // the numbered statements printed so far
 	occ := map[corpus.Ref]int{}
 	high := map[corpus.Ref]int{}          // the highest number a run of the kind has reached in this no.
@@ -313,14 +314,14 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 		b := queue[i]
 		if m := subsecRE.FindStringSubmatch(b.text); m != nil {
 			no, _ = strconv.Atoi(m[1])
-			next = 0
+			next, atMember = 0, false
 			if err := f(b, corpus.Ref{}, "", "", false); err != nil {
 				return err
 			}
 			continue
 		}
 		if strings.HasPrefix(b.text, "#") {
-			next = 0
+			next, atMember = 0, false
 			if err := f(b, corpus.Ref{}, "", "", false); err != nil {
 				return err
 			}
@@ -368,9 +369,9 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 			seen[key]++
 			earlier := seen[key] < runs[key]
 			if earlier {
-				next = 0 // an earlier run of the kind, so its members are not numbered
+				next, atMember = 0, false // an earlier run of the kind, so its members are not numbered
 			} else if !carries {
-				run, next = key, 1
+				run, next, atMember = key, 1, true
 			}
 			if earlier || !carries {
 				if err := f(b, corpus.Ref{}, "", "", false); err != nil {
@@ -390,18 +391,80 @@ func walk(blocks []block, id corpus.Ref, pr printing, taken map[corpus.Ref]map[i
 				t := b
 				t.text, t.label = rest, ""
 				queue = slices.Insert(queue, i+1, t)
+			} else if head, rest, ok := cutNextMember(b.text, next); ok && atMember {
+				// The same cut once more, for the block that carries the next
+				// member without opening on one. A member whose last paragraph
+				// runs over the foot of the page arrives as a block of prose
+				// with the next member under it, so the block opens on neither
+				// member and the two cuts above it both decline: cutRunMember
+				// wants the block to open on the member it is up to, and the
+				// cut after statementAt is given a body that this block has no
+				// statement head to produce.
+				//
+				// Thirteen places in the corpus are this shape. Example 2 of
+				// no. 1 of § 4 of chapter I of Functions of a Real Variable is
+				// the one to read: the display for $x^2$ ends the page block,
+				// and "3) The function $|x|$ is convex" opens the next line
+				// under it, so Example 3 was set as the last sentence of
+				// Example 2 and the § printed two examples where the volume
+				// prints three. Cutting the thirteen recovered 26 statements,
+				// because a member cut out of the one before it makes the
+				// member after it visible in its turn.
+				//
+				// atMember is what keeps this off every other block. A run
+				// stays open across the statements printed between its
+				// members, deliberately, so next is still counting a long way
+				// past the last member; without the guard the steps of every
+				// proof after a Remarque 1 are read as Remarque 2. Page 109 of
+				// the French Lie II and III is where that showed: the proof of
+				// a proposition enumerates 1) 2) 3), and the chapter came out
+				// with two statements labelled lie-iii-s1-n8-rem-2 and would
+				// not assemble. The guard says the last statement read was the
+				// member before this one, which is what "the member runs over
+				// the foot of the page" means.
+				b.text = head
+				t := b
+				t.text, t.label = rest, ""
+				queue = slices.Insert(queue, i+1, t)
 			}
 		}
 		r, name, body, ok, err := statementAt(b.text, id, no, parent, run, next, occ, high, off, taken, pr)
 		if err != nil {
 			return err
 		}
+		if ok && r.Number == 0 {
+			atMember = false
+		}
 		if ok && r.Number > 0 {
 			switch r.Kind.Scope() {
 			case corpus.ScopeSection:
-				parent, passed[r] = r, true
+				parent, passed[r], atMember = r, true, false
 			case corpus.ScopeSubsec:
-				run, next = r, r.Number+1
+				run, next, atMember = r, r.Number+1, true
+				// The same cut as above and it has to be made here as well,
+				// because the block above it cannot make it. A run whose head
+				// carries its first member on the line, "Remarques. — 1) ...",
+				// arrives with next still 0: the run is not open until this
+				// block has been read as its first member. So the cut above
+				// never looks at it, and where the printing ran the members
+				// together the second and third go into the body of the first
+				// and are invisible to everything downstream, with no tag, no
+				// reference target and no translation unit of their own.
+				//
+				// It is cut out of the body rather than out of the block,
+				// because the head has already been taken off by statementAt
+				// and the body is what the member is.
+				//
+				// no. 11 of § 5 of chapter IV of Integration is the case to
+				// read: the French printing sets Remarque 1 and then "2) La
+				// topologie induite ..." on the line under it with no blank
+				// line between, and only Remarque 1 came out.
+				if head, rest, cut := cutNextMember(body, next); cut {
+					body = head
+					t := b
+					t.text, t.label = rest, ""
+					queue = slices.Insert(queue, i+1, t)
+				}
 			}
 		}
 		// A proof the printing broke off and takes up again hands the reader
@@ -633,7 +696,18 @@ func statementAt(text string, id corpus.Ref, no int, parent, run corpus.Ref, nex
 		r := run
 		r.Number = next
 		took(r)
-		return r, "", body(afterMarker(marker, tail)), true, nil
+		// The star that opens a passage in small type stands in front of the
+		// number and is taken off with it, so it goes back on the front of the
+		// body, exactly as it does for a head below. Without this the member
+		// loses a mark the book set and the star at the far end of the passage
+		// is left without its pair: eight members of runs across the corpus
+		// open on one, "\* 2) The real line $\mathbf{R}$ is locally compact",
+		// and five of those close the passage on the same line.
+		out := afterMarker(marker, tail)
+		if star := smallTypeMark.FindString(marker); star != "" {
+			out = star + " " + out
+		}
+		return r, "", body(out), true, nil
 	}
 	// The head matched one of the branches of pr.head and left the others empty,
 	// and every branch pairs its kind with its number, so running the pairs
@@ -878,6 +952,32 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // after it. The rule that a marker counts only when it carries the number the §
 // is up to holds them down as well.
 //
+// That is the control word a text layer writes. The sign itself is the same
+// misreading and the commoner one, and until now the pattern could not read it:
+// 1603 lines of the two printings and the pages open on a literal § and a
+// number. § 6 of chapter I of Algebra stopped at its eighth exercise where the
+// volume prints 41, and § 7 at its third where the volume prints 40, on the
+// "**§ 4.**" that opens its fourth. Nothing was lost when a § stalled, only
+// misfiled: the rest of the section was appended to the last exercise the
+// assembler had managed to open, which is why s7/03.md is 34043 bytes against
+// 236 and 439 for the two exercises in front of it.
+//
+// A section heading is the other thing a § and a number spell, and three things
+// keep this off them. A marker counts only when it carries the number the § is
+// up to, as above. The heading of a § is not inside the exercise block that
+// exercises() reads. And the cross reference set on a line of its own, "§ 4.3",
+// cannot match at all, because the pattern wants a space, a bold or a dollar
+// after the full stop and a cross reference puts a digit there. What is left is
+// 21 historical notes that list their own contents, "§ 1. Topological vector
+// spaces" against a dot leader. Those are read by itemOpen, which only ever
+// refuses to glue two blocks together, and a table of contents is not the second
+// half of a sentence broken over a page, so refusing is the right answer anyway.
+//
+// It moves 29 sections and takes 279 exercises back out of the bodies they had
+// been glued into, and costs no section an exercise. 14 of the 29 land exactly
+// on the count the other printing of the same book assembles on its own, § 6 and
+// § 7 of Algebra I among them.
+//
 // The dagger is the same swap again and a bigger one. A model reading a page
 // image gives the pilcrow as a dagger 64 times, across nine volumes in both
 // languages, and page 95 of Algebra 4 to 7 is the case that found it: the
@@ -889,9 +989,42 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // a bracket after it all open the line with it, and not one of the other 66
 // puts a dagger in front of a number. Those 66 are footnote marks, which sit
 // inside a sentence or against the word they hang off.
+//
+// T, Q, J and Π are the pilcrow again, read as a letter. They look like nothing
+// at all until the pages are counted: every page that opens an exercise with one
+// of them carries no pilcrow anywhere, so on that page the mark was read as a
+// letter throughout and the letter is all there is to go on. They are selective
+// the way a pilcrow is and an ordinary number is not, which is what rules out a
+// numbering of some other kind: page 109 of Espaces vectoriels topologiques in
+// French runs "T 27) 28) T 29) 30) T 31)", marking three of five.
+//
+// The other printing settles it. Of the 37 exercises marked this way that the
+// other language also has as an exercise of its own, 28 are starred there, which
+// is to say the other reading of the same exercise found a pilcrow in front of
+// it. The remaining 9 do not contradict it: every one of them sits on a page
+// that carries no exercise mark of any kind, neither pilcrow nor letter, so
+// there is nothing on it to disagree with.
+//
+// The letter is required to have a space after it, which is what separates a
+// mark from a label. The corpus writes "C1.", "S2.", "A1." and "E1)" 307 times
+// with no space and never means a mark by them. And A is left out although it
+// has the space: all four of "A 1)" and "A 2)" are in the proof of § 3 of
+// chapter V of Commutative Algebra in French, where they number the cases of an
+// argument, the second of them opening "Cas général". Those four are the whole
+// of the capital-and-space form outside the four letters taken here, so the set
+// is not a guess at what a model might do, it is the corpus counted.
+//
+// The bold can close between the number and the bracket as well as after it.
+// Extraction writes the mark and the number inside one span of bold and the
+// bracket outside it, "**T 1**)" and "**¶ 15**)", and the form was worth the
+// two bytes it costs: the whole corpus holds seven of them and three are the
+// first exercise of their §, which is the one exercise a § cannot do without.
+// § 3 of chapter IV of Topological Vector Spaces opens on "**T 1**)" and came
+// out with two exercises against the eighteen on its pages, both of them
+// halves of a citation, because the run never found its first.
 var exNumRE = regexp.MustCompile(
-	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†)[ \t]*)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
-		`(?:\*\*)?(\d+)[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
+	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†|§)[ \t]*|[TQJΠ][ \t]+)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
+		`(?:\*\*)?(\d+)(?:\*\*)?[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
 
 // marks are the star and the pilcrow a book can set in front of an exercise
 // number. The bold that extraction writes around the number of some of them is
@@ -907,8 +1040,10 @@ func marksOf(prefix string) (star, pilcrow string) {
 			return markOf(prefix, "*"), p
 		}
 	}
-	if p := markOf(prefix, "†"); p != "" {
-		return markOf(prefix, "*"), p
+	for _, c := range []string{"†", "§", "T", "Q", "J", "Π"} {
+		if p := markOf(prefix, c); p != "" {
+			return markOf(prefix, "*"), p
+		}
 	}
 	return markOf(prefix, "*"), markOf(prefix, "¶")
 }
@@ -953,8 +1088,50 @@ func cutRunMember(text string, now int) (head, rest string, ok bool) {
 	}
 	lines := strings.Split(text, "\n")
 	for i := 1; i < len(lines); i++ {
-		if num, _, _, ok := runItem(lines[i]); ok && num == strconv.Itoa(now+1) {
+		if num, _, _, ok := runItem(indented(lines[i])); ok && num == strconv.Itoa(now+1) {
+			lines[i] = indented(lines[i])
 			return strings.Join(lines[:i], "\n"), strings.Join(lines[i:], "\n"), true
+		}
+	}
+	return "", "", false
+}
+
+// indented takes the leading spaces off a line before the marker on it is read.
+//
+// The readings indent a member that the printing set as a hanging paragraph,
+// and ten of the thirteen places where a member had gone into the body of the
+// one before it were indented rather than run together: "    2) L'anneau
+// $\mathbf{Z}/2\mathbf{Z}$ est evidemment un corps." under Exemple 1 of no. 1
+// of § 9 of chapter I of Algebra. The marker patterns are anchored at the head
+// of the line, so four spaces were enough to hide the member. They stay
+// anchored, because a number in the middle of a sentence is a reference; this
+// only says that the head of the line is where the text begins and not where
+// the whitespace does.
+func indented(line string) string { return strings.TrimLeft(line, " \t") }
+
+// cutNextMember cuts the body of one member of a run at the line where the next
+// member begins, and says false where the body is only its own member.
+//
+// It is cutRunMember asked from the other end. That one is given a block and
+// asks whether the block opens on the member now expected; this is given a body
+// whose member has already been read off the front by statementAt, so the
+// number it is looking for is the only thing it can go on.
+//
+// The search is for one number and not for any number, and that is what keeps a
+// cross-reference out of it. "voir 2) ci-dessus" in the body of member 5 is not
+// a break, because 5 is followed by 6 and nothing else. The line has to open on
+// the marker as well, so a citation in the middle of a sentence is never the
+// start of anything.
+func cutNextMember(body string, want int) (head, rest string, ok bool) {
+	lines := strings.Split(body, "\n")
+	for i := 1; i < len(lines); i++ {
+		if num, _, _, is := runItem(indented(lines[i])); is && num == strconv.Itoa(want) {
+			// The indent goes with the cut. What is handed back is a block that
+			// opens on a member, and everything that reads a block reads the
+			// marker at the head of the line, so a member left indented is cut
+			// out of the one before it and then not recognised as a member.
+			lines[i] = indented(lines[i])
+			return strings.TrimRight(strings.Join(lines[:i], "\n"), "\n"), strings.Join(lines[i:], "\n"), true
 		}
 	}
 	return "", "", false
@@ -1223,7 +1400,29 @@ var pilcrowBefore = regexp.MustCompile(`\$?\s*(?:\\P|¶)\s*\$?\s*$`)
 // number the § is very likely to be up to: "(Chapter II, § 6, no. 3)" in the
 // second exercise of § 1 of chapter III of Theory of Sets was read as the start
 // of the third, which cost that § the twenty exercises printed after it.
-var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])(?:no|nos|p|pp|cf|fig|chap|vol|resp|art)\.$`)
+//
+// The list was a page reference and little else, and the rest of the citation
+// form the books use was missing from it, so every other kind of cross
+// reference read as a marker. "exerc." is the worst of them: § 5 of chapter IX
+// of Topologie generale in French opens its twenty fifth on "montrer que si X
+// est un espace inépuisable (IX, p. 112, exerc. 7)", the seven of that citation
+// read as the seventh exercise of the §, and the § came out with seven
+// exercises against the thirty the English has. Exercises 5, 6 and 7 of it were
+// all halves of a sentence cut at a citation, two of them a body of one full
+// stop.
+//
+// Every abbreviation here was counted in the corpus before it went in, in the
+// one shape that can do the damage, the citation that closes on the number:
+// prop. 13090, exerc. 5595, th. 4445, cor. 2180, déf. 1440, Exer. 680, Ex. 234,
+// mod. 82, rem. 6, App. 6, Sect. 4. Every distinct match of the smaller ones was
+// read; "mod. 4)" is a congruence and the others are citations. None of them can
+// cost a real marker, because a marker at the head of a block is matched by
+// exNumRE at offset zero and never reaches here, and a marker set inside a
+// paragraph directly behind the word "prop." or "exerc." is a thing the books
+// do not print.
+var shortened = regexp.MustCompile(`(?i)(?:^|[\s(\[])` +
+	`(?:no|nos|p|pp|cf|fig|chap|vol|resp|art` +
+	`|prop|exerc|exer|ex|th|cor|déf|def|mod|rem|app|sect)\.$`)
 
 // closingMarks are the marks that can stand between the end of a sentence and
 // the number after it: the space and the newline, the dollar of a span the mark

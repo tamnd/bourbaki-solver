@@ -1,6 +1,7 @@
 package benchmark
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -140,6 +141,51 @@ func TestARunComesBackTheWayItWentIn(t *testing.T) {
 	// package does not have to know how they are worked out.
 	if out.Rates["false_accept"] != 1 {
 		t.Errorf("the saved rate was %v, want 1", out.Rates["false_accept"])
+	}
+}
+
+// A run that was stopped has fewer answers than it has cases, and the gap is
+// the only thing in the file that says so. A five hour run that was stopped
+// wrote 4 outcomes over a committed 20 and read as a clean eval.
+func TestARunSaysHowMuchOfTheSetItAnswered(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		run     Run
+		partial bool
+	}{
+		{"answered every case", Run{Of: 20, Outcomes: make([]Outcome, 20)}, false},
+		{"stopped a fifth of the way in", Run{Of: 20, Outcomes: make([]Outcome, 4)}, true},
+		{"answered nothing", Run{Of: 20}, true},
+		// Written before the field existed, which is every committed run, and
+		// those are the complete ones.
+		{"from before the field", Run{Outcomes: make([]Outcome, 20)}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := c.run.Partial(); got != c.partial {
+				t.Errorf("Partial() = %v, want %v", got, c.partial)
+			}
+		})
+	}
+}
+
+// Saving goes through a temporary file so a run killed while it writes leaves
+// the last good result rather than half of a new one.
+func TestSavingLeavesNoTemporaryFileBehind(t *testing.T) {
+	root := t.TempDir()
+	in := Run{Ran: "2026-09-04T02:00:00Z", Set: "the built-in set", Of: 2,
+		Outcomes: make([]Outcome, 2)}
+	if err := in.Save(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(RunPath(root) + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("the temporary file is still there, err %v", err)
+	}
+	out, measured, err := LastRun(root)
+	if err != nil || !measured {
+		t.Fatalf("the run did not come back, err %v", err)
+	}
+	if out.Of != 2 || out.Partial() {
+		t.Errorf("got of=%d partial=%v, want of=2 and whole", out.Of, out.Partial())
 	}
 }
 

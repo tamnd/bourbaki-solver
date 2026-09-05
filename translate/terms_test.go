@@ -180,3 +180,118 @@ func TestADisplayWeldedToTheProseIsStillADisplay(t *testing.T) {
 		t.Errorf("%d problems, want the one term left standing: %v", len(problems), problems)
 	}
 }
+
+// citing is the rows plus the term whose only occurrence in the file that
+// prompted this was inside the name of a cited paper.
+func citing() *glossary.Glossary {
+	return &glossary.Glossary{Version: 3, Terms: []glossary.Term{
+		{EN: "space", VI: "không gian"},
+		{EN: "ring", VI: "vành"},
+	}}
+}
+
+// The title of a cited work stands as printed, so the English words in it are
+// not English left in the answer.
+//
+// Exercise 15 of § 2 of Topological Vector Spaces I is one line of prose and one
+// footnote, and the footnote is a citation. The word space is in the file once,
+// inside "The space of p-adic norms", which is the name of a paper and is not
+// translated by anybody. The rule asked for "không gian" in it, the chunk was
+// refused all three times it was asked for, and the file was one of fifteen the
+// run could not land.
+func TestATermInsideTheTitleOfACitedPaperIsNotATermLeftInEnglish(t *testing.T) {
+	const en = "1 For the exercises 12 and 13, see O. Goldman and N. Iwahori, " +
+		"The space of p-adic norms, Acta math., 109 (1963), pp. 137-177.\n"
+	const vi = "1 Đối với các bài tập 12 và 13, xem O. Goldman và N. Iwahori, " +
+		"The space of p-adic norms, Acta math., 109 (1963), pp. 137-177.\n"
+	if problems := AuditTerms("vi", citing(), en, vi); len(problems) != 0 {
+		t.Fatalf("a citation kept as printed was refused: %v", problems)
+	}
+}
+
+// The bracket-numbered references of the historical notes have the same fault
+// for the same reason, and there are 180 of those lines against 88 the older
+// rule already covered.
+func TestATermInsideABracketNumberedReferenceIsNotATermLeftInEnglish(t *testing.T) {
+	const en = "[4] E. Heine, On the space of trigonometric series, Crelle's Journal, 71 (1870), pp. 353-365.\n"
+	if problems := AuditTerms("vi", citing(), en, en); len(problems) != 0 {
+		t.Fatalf("a reference kept as printed was refused: %v", problems)
+	}
+}
+
+// The guard on the above. A reference is read by its tail, and no running
+// sentence has one, so an ordinary line that leaves a term in English is
+// refused exactly as it was before.
+func TestOrdinaryProseIsStillReadForTermsLeftInEnglish(t *testing.T) {
+	const en = "Every vector space over a ring is considered.\n"
+	const vi = "Mọi vector space trên một vành đều được xét.\n"
+	problems := AuditTerms("vi", citing(), en, vi)
+	if len(problems) != 1 {
+		t.Fatalf("%d problems, want the one term left standing: %v", len(problems), problems)
+	}
+	if !strings.Contains(problems[0].Msg, "space") {
+		t.Errorf("the complaint reads %q and does not say %q", problems[0].Msg, "space")
+	}
+}
+
+// A TeX control word is not the English word its letters spell.
+//
+// An index of notation writes its entries as bare LaTeX with no dollar signs
+// anywhere, so mathtex.Strip has nothing to take out and the line arrives whole.
+// The glossary then read sum in \sum and asked for "tổng" in a list of symbols.
+func TestATeXControlWordIsNotATermLeftInEnglish(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{
+		{EN: "sum", VI: "tổng"},
+		{EN: "map", VI: "ánh xạ"},
+	}}
+	const en = `\sum_{i=p}^q \sum_{j=r}^s x_{ij}, \prod_{i<j} x_{ij} : \text{I, § 1, no. 5}.` + "\n"
+	if problems := AuditTerms("vi", g, en, en); len(problems) != 0 {
+		t.Fatalf("an index of notation entry was read as prose: %v", problems)
+	}
+}
+
+// The guard. Taking the control words out must not take the prose with them:
+// a line that really does leave a term in English is refused as before.
+func TestTakingOutControlWordsLeavesTheProseBehind(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "sum", VI: "tổng"}}}
+	const en = "The sum of the family is written \\sum x_i here.\n"
+	const vi = "The sum của họ được viết \\sum x_i ở đây.\n"
+	problems := AuditTerms("vi", g, en, vi)
+	if len(problems) != 1 {
+		t.Fatalf("%d problems, want the one term left standing: %v", len(problems), problems)
+	}
+}
+
+// The notation of an index entry is a symbol however much of it is spelled with
+// letters. Map is the functor set upright, the same thing as Hom and End, and
+// the glossary was asking for "ánh xạ" in a list of symbols.
+func TestTheNotationOfAnIndexEntryIsNotProse(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "map", VI: "ánh xạ"}}}
+	const en = "Map(M, N), Pol_A(M, N), Pol(M, N) : IV, p. 57.\n"
+	if problems := AuditTerms("vi", g, en, en); len(problems) != 0 {
+		t.Fatalf("an index of notation entry was read as prose: %v", problems)
+	}
+}
+
+// The locator is written a second way, inside \text, and that entry is an entry
+// too.
+func TestAnIndexEntryWhoseLocatorIsSetInTextIsAlsoNotProse(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "map", VI: "ánh xạ"}}}
+	const en = `Map(M, N) : \text{I, § 1, no. 5}.` + "\n"
+	if problems := AuditTerms("vi", g, en, en); len(problems) != 0 {
+		t.Fatalf("an index entry with a \\text locator was read as prose: %v", problems)
+	}
+}
+
+// The guard, and the reason headings are left alone. Section 3 of § 2 of
+// Algebra VII is titled "Applications : I. Canonical decompositions ...", where
+// the I numbers a part and does not name a volume. It is the only shape in the
+// corpus that reads as an index entry and is not one.
+func TestAHeadingThatReadsLikeAnIndexEntryIsStillProse(t *testing.T) {
+	g := &glossary.Glossary{Version: 3, Terms: []glossary.Term{{EN: "application", VI: "ứng dụng"}}}
+	const en = "### 3. Application : I. Canonical decompositions of rational numbers.\n"
+	const vi = "### 3. Application : I. Các phân tích chính tắc của các số hữu tỉ.\n"
+	if problems := AuditTerms("vi", g, en, vi); len(problems) != 1 {
+		t.Fatalf("%d problems, want the term left standing in a heading: %v", len(problems), problems)
+	}
+}

@@ -14,6 +14,13 @@ import (
 )
 
 func runBook(args []string) error {
+	// book check is the same build over the whole shelf with a report at the end.
+	// It is a subcommand rather than a flag because it takes the volume list off
+	// the manifest rather than off the command line, which is the opposite of
+	// what -book means everywhere else.
+	if len(args) > 0 && args[0] == "check" {
+		return bookCheckCmd(args[1:])
+	}
 	fs := flag.NewFlagSet("book", flag.ExitOnError)
 	fs.Usage = func() {
 		fmt.Fprint(os.Stderr, `usage: bourbaki book -book <id> [-lang en,vi] [-chapter I] [-out work/books]
@@ -70,6 +77,11 @@ because a built book is a statement about one build and not about the corpus.
                     number can be ratcheted down as they are repaired. A ceiling
                     may be lowered and may never be raised.
   -max-wide         see -max-stray
+  -floor            how much of the printing a language must hold before this
+                    is willing to bind it, as a fraction of the printing's
+                    sections. A build under it refuses and names what is
+                    missing, rather than putting a cover and a contents on two
+                    translated §§ and calling it the volume. 0 turns it off
   -no-cover-check   do not render the first page to look at the cover
 
 Exits 1 if any check failed, so this can be a gate.
@@ -88,6 +100,7 @@ Exits 1 if any check failed, so this can be a gate.
 	maxOverfull := fs.Int("max-overfull", 200, "the most lines that may run past the measure")
 	maxStray := fs.Int("max-stray", 0, "the most TeX control sequences loose in the prose")
 	maxWide := fs.Int("max-wide", 0, "the most arrays widened to hold their own rows")
+	floor := fs.Float64("floor", 0.10, "how much of the printing a language must hold to be bound at all")
 	noCover := fs.Bool("no-cover-check", false, "do not render the first page to look at the cover")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -121,6 +134,7 @@ Exits 1 if any check failed, so this can be a gate.
 	aopt := book.AuditOptions{
 		Short: *short, Overfull: *maxOverfull,
 		Stray: *maxStray, Wide: *maxWide,
+		Floor: *floor,
 		Cover: !*noCover && !*noPDF,
 	}
 
@@ -147,6 +161,13 @@ Exits 1 if any check failed, so this can be a gate.
 func buildOne(root, out, id, lang, chapter string, opt book.Options, aopt book.AuditOptions, noPDF, noEPUB bool) (*book.Audit, error) {
 	v, err := book.Load(root, id, lang)
 	if err != nil {
+		return nil, err
+	}
+	// Before anything is written, because the point of a floor is that no book
+	// comes out. A language that holds a twentieth of the printing would
+	// otherwise get a cover, a title page and a contents listing what is not
+	// inside it, and an audit saying so at the bottom of a page of green.
+	if err := book.BelowFloor(root, v, aopt.Floor); err != nil {
 		return nil, err
 	}
 	if chapter != "" {
@@ -181,17 +202,33 @@ func buildOne(root, out, id, lang, chapter string, opt book.Options, aopt book.A
 			// A typesetter that stopped is a failure worth reporting rather than
 			// worth hiding, and the audit still has everything the writer found,
 			// so the error goes to the terminal and the audit runs on what there
-			// is. A build that produced no PDF fails the checks that need one.
+			// is.
+			//
+			// The build is kept rather than thrown away, which is the change that
+			// makes a stopped run visible. It used to be nilled out whenever it had
+			// no pages, and book.Audit.typeset returns on a nil build, so the audit
+			// of a volume that had died inside TeX came out with no typesetting
+			// section at all: the same shape as the audit of a volume nobody asked
+			// to typeset. Two checks in there now fail on exactly this, and they
+			// need the build to be there to fail on.
 			fmt.Fprintf(os.Stderr, "%s: %v\n", v.ID(), err)
-			if b != nil && b.Pages == 0 {
-				b = nil
+			if b == nil {
+				b = &book.Build{Dir: dir, Failed: err.Error()}
 			}
 		}
 	}
 
 	var e *book.EPUB
 	if !noEPUB {
-		e, err = book.WriteEPUB(filepath.Join(dir, "book.epub"), v, opt)
+		// The EPUB takes its cover off page one of the PDF this run just set, so
+		// that the two books cannot end up with two covers. Where there is no PDF,
+		// because -no-pdf was given or because the typesetter stopped, the EPUB
+		// draws its own and says so in the audit.
+		eopt := opt
+		if b != nil && b.Pages > 0 {
+			eopt.CoverPDF = b.PDF
+		}
+		e, err = book.WriteEPUB(filepath.Join(dir, "book.epub"), v, eopt)
 		if err != nil {
 			return nil, err
 		}

@@ -106,6 +106,37 @@ type AuditOptions struct {
 	// the publisher's pages that no reading of the book puts into content/, and
 	// not room for a chapter.
 	Short float64
+	// Floor is how much of the printing a language must hold before this is
+	// willing to call the result a volume, as a fraction of the sections the
+	// printing has.
+	//
+	// It is the one check in here that refuses rather than reports, and it is the
+	// only one that should. Everything else the audit finds is a thing wrong with
+	// a book; this is the case where there is no book. A Vietnamese Algebra at
+	// eighty per cent is a real object with real chapters in it and a reader can
+	// use it. The same volume at eleven per cent is chapter I § 1 and § 2 with a
+	// cover on it and a contents listing what is not inside, and shipping that
+	// under the title of the printing is a lie told in a yellow wrapper.
+	//
+	// A tenth is the default and it was measured rather than picked. The last
+	// full sweep, 107 builds over 40 volumes in reports/books.json, has 21 builds
+	// that set no file of content/ at all: ac-viii-ix-fr in English and
+	// Vietnamese, alg-i-iii and alg-iv-vii and int-vii-ix in French, and the rest
+	// of that list. Every one of them produced a four page PDF, a cover and a
+	// title page and a contents of nothing, and every one of them passed 18 or 19
+	// of the 21 checks, because almost every check in here is about text and
+	// there was no text to be wrong about. That is the failure this stops.
+	//
+	// The 21 run from 0 to 7 per cent and the lowest build that holds anything at
+	// all is the Vietnamese Commutative Algebra I-IV at 12, so anything between 8
+	// and 11 refuses exactly the empty books and nothing else. A tenth is the
+	// middle of that gap.
+	//
+	// The line is not "this is finished", which is what the coverage check
+	// reports; it is "there is enough here that binding it is honest", so the
+	// flag exists and the number is printed in the report either way rather than
+	// being quietly applied.
+	Floor float64
 	// Cover asks pdftoppm to render the first page and looks at it, which is the
 	// only way to know that the cover is the cover. It is a flag because
 	// poppler is not on every machine and a missing tool should skip a check
@@ -115,7 +146,39 @@ type AuditOptions struct {
 
 // DefaultAuditOptions are what the command uses when nothing is said.
 func DefaultAuditOptions() AuditOptions {
-	return AuditOptions{Overfull: 200, Short: 0.10, Cover: true}
+	return AuditOptions{Overfull: 200, Short: 0.10, Floor: 0.10, Cover: true}
+}
+
+// BelowFloor is the refusal a build gets when the language does not hold enough
+// of the printing to be bound, and nil when it does.
+//
+// It is separate from the audit and is asked before the writer runs, because the
+// audit is a report on a book that exists and the whole point here is not to
+// make one. What comes back names the sections that are missing, capped, since
+// a volume at four per cent is missing eight hundred of them and a screen of
+// paths is not more useful than a dozen and a count.
+func BelowFloor(root string, v *Volume, floor float64) error {
+	if floor <= 0 {
+		return nil
+	}
+	have, want, missing, err := Coverage(root, v)
+	if err != nil || want == 0 {
+		// A volume the sections manifest does not know cannot be measured against
+		// the printing, and refusing on a measurement nobody could take would stop
+		// a build for a reason that is about the manifest. The audit reports the
+		// missing manifest as its own failure.
+		return nil
+	}
+	if float64(have)/float64(want) >= floor {
+		return nil
+	}
+	named := missing
+	if len(named) > 12 {
+		named = append(named[:12:12], fmt.Sprintf("and %d more", len(missing)-12))
+	}
+	return fmt.Errorf("%s holds %d of the printing's %d sections, %.1f%%, and the floor is %.0f%%; missing:\n  %s",
+		v.ID(), have, want, 100*float64(have)/float64(want), 100*floor,
+		strings.Join(named, "\n  "))
 }
 
 // Inspect runs every check over a volume that has been loaded, written, built
@@ -125,9 +188,12 @@ func DefaultAuditOptions() AuditOptions {
 func Inspect(root string, v *Volume, d *Document, b *Build, e *EPUB, opt AuditOptions) *Audit {
 	a := &Audit{Volume: v.Meta.ID, Lang: v.Lang, Title: v.Title, Doc: d, Build: b, EPUB: e}
 	a.structure(v)
-	a.coverage(root, v)
+	a.listed(v)
+	a.indexed(v)
+	a.coverage(root, v, opt)
 	a.length(root, v, opt)
 	a.written(d, opt)
+	a.matter(v, d)
 	a.typeset(v, b, opt)
 	a.packed(e)
 	a.cover(b, opt)
@@ -203,6 +269,102 @@ func (a *Audit) structure(v *Volume) {
 	}
 	a.ok("every statement the front matter claims is on the page", len(short) == 0,
 		fmt.Sprintf("%d files short", len(short)), short...)
+
+	// The exercises are asked as well as the §§, and they are where this check
+	// earns its keep: every one of the fifteen misread lists in the corpus was
+	// in an exercise, and Pieces does not return those, so a first cut of this
+	// check that walked Pieces alone passed the whole library while ac IV § 2
+	// exercise 10 still read (a) (b) (y) (δ).
+	var mixed []string
+	for _, s := range v.Pieces() {
+		mixed = append(mixed, misreadLabels(s.Path, s.Body)...)
+		for _, e := range s.Exercises {
+			mixed = append(mixed, misreadLabels(e.Path, e.Body)...)
+		}
+	}
+	a.ok("no list of conditions has a Greek label read as Latin", len(mixed) == 0,
+		fmt.Sprintf("%d lists", len(mixed)), mixed...)
+}
+
+// greekForLatin is what the scan turns each Greek label into when it loses it.
+// These are the four that actually happened, and they are the four that look
+// like something else in the face these printings use: α and a, β and b, γ and
+// y, δ and the digit 8. The reading is not consistent about it, which is what
+// made this hard to see by eye rather than easy: ac III §3 exercise 23 came out
+// as "conditions (a), (β) and (y)" with a correct (γ) four words later in the
+// same sentence.
+var greekForLatin = map[string]string{"a": "α", "b": "β", "y": "γ", "8": "δ"}
+
+// greekOrder is the place of each label in the alphabet the lists run in. It is
+// a map and not an index into a string because these letters are two bytes
+// each, so strings.Index would put β one past α by two rather than by one and
+// no list would ever look consecutive.
+var greekOrder = map[string]int{"α": 1, "β": 2, "γ": 3, "δ": 4, "ε": 5, "ζ": 6, "η": 7}
+
+// labelRE is one item of a labelled list, at the head of its own line, with the
+// emphasis Markdown may have around it. Bourbaki labels the parts of an
+// exercise with Latin letters and the members of a list of equivalent
+// conditions with Greek ones, which is what makes a mixed list a finding.
+var labelRE = regexp.MustCompile(`^\s*\**\(([aby8]|[αβγδεζη])\)\**[\s*]`)
+
+// misreadLabels finds a list of conditions that the reading gave a Latin label
+// to. Looking for a Latin letter next to a Greek one is not enough on its own,
+// because the ordinary shape of an exercise is parts (a) and (b) with a Greek
+// list inside one of them, and that is not a finding: over the whole corpus it
+// is the common case and the misreadings are the rare one.
+//
+// What separates them is that a list of conditions is consecutive. Map each
+// Latin label to the Greek it was read from and ask whether the run then walks
+// the Greek alphabet without repeating or skipping. A run of (a) (β) becomes
+// α β and is a finding. A run of (a) (α) (β), which is part (a) followed by its
+// own two conditions, becomes α α β, which repeats, so it is not. Every one of
+// the nineteen mixed runs in the corpus was sorted correctly by that rule, the
+// fifteen real ones and the four that were the ordinary shape.
+//
+// The French lane has no mixed runs at all and neither does the machine
+// English, which is the evidence that these are misreadings of the English scan
+// and not a convention the corpus uses anywhere.
+func misreadLabels(path, body string) []string {
+	var found []string
+	var run []string
+	flush := func() {
+		defer func() { run = nil }()
+		if len(run) < 2 {
+			return
+		}
+		var latin, greek bool
+		mapped := make([]string, len(run))
+		for i, lab := range run {
+			if g, ok := greekForLatin[lab]; ok {
+				latin, mapped[i] = true, g
+				continue
+			}
+			greek, mapped[i] = true, lab
+		}
+		if !latin || !greek {
+			return
+		}
+		for i := 1; i < len(mapped); i++ {
+			prev, ok := greekOrder[mapped[i-1]]
+			if this := greekOrder[mapped[i]]; !ok || this != prev+1 {
+				return
+			}
+		}
+		found = append(found, fmt.Sprintf("%s: the list (%s) reads as (%s)",
+			path, strings.Join(run, ") ("), strings.Join(mapped, ") (")))
+	}
+	for _, line := range strings.Split(body, "\n") {
+		if m := labelRE.FindStringSubmatch(line); m != nil {
+			run = append(run, m[1])
+			continue
+		}
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		flush()
+	}
+	flush()
+	return found
 }
 
 // subsectionRE is a numbered subsection heading in a body, "### 3. ASSOCIATIVE
@@ -210,6 +372,119 @@ func (a *Audit) structure(v *Volume) {
 // than being counted during the render, because the audit has to be able to run
 // over a volume the writer refused.
 var subsectionRE = regexp.MustCompile(`(?m)^###\s+(\d+)\.\s`)
+
+// listed asks whether the contents the book builds is the contents the volume
+// prints. The titles it sets come out of content/, and manifests/toc/ is an
+// independent reading of the volume's own contents pages, corrected by hand
+// against the printing where the scan got it wrong. Two sources for one fact,
+// so they can be held against each other.
+//
+// It is only asked of a build in the language the volume was printed in, since
+// the manifest is that printing's contents and there is no Vietnamese printing
+// of Algebra to hold a Vietnamese build against. Those come back with nothing
+// to compare and pass, which is the honest answer rather than a pass for a
+// check that did not run: the detail says how many were compared.
+//
+// The check found something the first time it was run, and not drift. Chapter
+// VIII of Algebra prints twenty one §§ and then four appendices numbered from
+// one again, and the printed contents was keyed on the number alone, so
+// appendix 1 overwrote § 1 and the four §§ opening the chapter carried the
+// appendices' subsection titles into their contents lines. Seventeen §§ across
+// the library. With that fixed, all 134 chapters and all 855 §§ of the library
+// agree, which is the result worth having a gate on: the corpus has not drifted
+// from the printing anywhere, and this says so every time a book is built.
+func (a *Audit) listed(v *Volume) {
+	var differ []string
+	n := 0
+	for _, c := range v.Chapters {
+		if c.Listed != "" {
+			n++
+			if !sameTitle(c.Title, c.Listed, v.Lang) {
+				differ = append(differ, fmt.Sprintf("chapter %s is %q in content and %q in the printed contents",
+					c.Numeral, c.Title, c.Listed))
+			}
+		}
+		for _, s := range c.Sections {
+			if s.Listed == "" {
+				continue
+			}
+			n++
+			if !sameTitle(s.Title, s.Listed, v.Lang) {
+				differ = append(differ, fmt.Sprintf("chapter %s %s is %q in content and %q in the printed contents",
+					c.Numeral, s.Heading(), s.Title, s.Listed))
+			}
+		}
+	}
+	a.ok("the titles agree with the volume's own printed contents", len(differ) == 0,
+		fmt.Sprintf("%d compared, %d differ", n, len(differ)), differ...)
+}
+
+// indexRefRE is the chapter numeral opening a reference in a printed index.
+// Bourbaki's indexes point at a place in the argument rather than at a page,
+// "Abelian group: I, § 4, no. 2." in the English setting and "Anneau gradué :
+// III, 3, 1." in the French, and the English Commutative Algebra runs the three
+// together as "VII.1.1". All three shapes put the numeral straight after the
+// colon that ends the entry's headword, so one pattern reads all of them.
+var indexRefRE = regexp.MustCompile(`:\s*\**([IVXL]+)\s*[.,]`)
+
+// indexed asks whether every reference in the two indexes names a chapter this
+// volume actually has. It is the one check in the audit that reads the back
+// matter, and it is worth having because the indexes are transcribed off the
+// scan rather than generated: a reference is a numeral in a run of numerals,
+// which is exactly the shape OCR loses, and nothing else in the build would
+// ever notice. A reader who follows a wrong reference has no way back.
+//
+// Run over the library the first time, it read 11663 references and rejected
+// six, all in four printings and all single-numeral misreads that the entry's
+// neighbours settle at once, since an index keeps alphabetical order. Topology
+// I to IV had "General term of a series : VI, 5, 6." between a III entry and a
+// IV entry, and TG III § 5 is infinite sums and products. Topology V to X had
+// "Space, pseudo-compact : XI, 1, Exercise 21." in a book with ten chapters,
+// between two IX and X entries. Commutative Algebra I to VII had two VIII
+// references in a book with seven chapters, one of them followed immediately by
+// three more entries on the same divisors at VII.1.1.
+//
+// Repairing those turned up the larger defect underneath, which this check
+// could not see and a count of what it can see does find: the same Commutative
+// Algebra index had 140 references whose numeral had come back from the scan as
+// digits, II as 11 and III as 111 and I as 1 and VI as V1, so they were not
+// references to any chapter and not roman numerals either. The library went
+// from 11663 readable references to 11803 once they were roman again.
+func (a *Audit) indexed(v *Volume) {
+	var wrong []string
+	refs := 0
+	have := map[string]bool{}
+	for _, numeral := range v.Meta.Chapters {
+		have[numeral] = true
+	}
+	for _, s := range []*Section{v.Notation, v.Terminology} {
+		if s == nil {
+			continue
+		}
+		for i, line := range strings.Split(s.Body, "\n") {
+			for _, m := range indexRefRE.FindAllStringSubmatch(line, -1) {
+				refs++
+				if !have[m[1]] {
+					wrong = append(wrong, fmt.Sprintf("%s:%d: %s names chapter %s, and the volume has %s",
+						s.Path, i+1, firstLine(strings.TrimSpace(line), "an entry"),
+						m[1], strings.Join(v.Meta.Chapters, ", ")))
+				}
+			}
+		}
+	}
+	a.ok("every reference in the indexes names a chapter of this volume", len(wrong) == 0,
+		fmt.Sprintf("%d references, %d wrong", refs, len(wrong)), wrong...)
+}
+
+// sameTitle compares a title in content/ with the same title in the printed
+// contents. The printing sets a chapter title in capitals on the chapter's
+// opening page and in the contents, and sets a § title in capitals on the page
+// and in sentence case in the contents, and content/ carries whichever of the
+// two the file was assembled from. Case is therefore not a disagreement here
+// and a word is.
+func sameTitle(a, b, lang string) bool {
+	return listed(a, lang) == listed(b, lang)
+}
 
 func subsectionNumbers(body string) []int {
 	var out []int
@@ -231,7 +506,7 @@ func statementCount(body string) int {
 }
 
 // coverage is how much of the printing this language holds.
-func (a *Audit) coverage(root string, v *Volume) {
+func (a *Audit) coverage(root string, v *Volume, opt AuditOptions) {
 	have, want, absent, err := Coverage(root, v)
 	if err != nil {
 		a.ok("the sections manifest knows this volume", false, err.Error())
@@ -245,6 +520,14 @@ func (a *Audit) coverage(root string, v *Volume) {
 	// it a failure every night would teach everyone to ignore the audit.
 	pass := have == want || v.Lang != v.Meta.Lang
 	detail := fmt.Sprintf("%d of %d sections, %.1f%%", have, want, 100*float64(have)/float64(max(want, 1)))
+	// The floor goes in the detail whether or not it bit, so that a report of a
+	// build carries the line it had to clear as well as where it landed. A build
+	// that is under it never gets this far, since BelowFloor is asked before the
+	// writer runs, but the report of one that cleared it should still say by how
+	// much.
+	if opt.Floor > 0 {
+		detail += fmt.Sprintf(", the floor to build at all is %.0f%%", 100*opt.Floor)
+	}
 	notes := absent
 	if len(notes) > 12 {
 		notes = append(notes[:12:12], fmt.Sprintf("and %d more", len(absent)-12))
@@ -419,17 +702,135 @@ func (a *Audit) written(d *Document, opt AuditOptions) {
 	// printing knows how many decisions to look at.
 	a.ok("displays the build laid out itself", true,
 		fmt.Sprintf("%d multi-line displays set as an alignment", len(d.Aligned)))
+	// The footnote that printed itself. Neither builder read the Markdown form
+	// of a note, so a call came through as prose and the escaper turned its
+	// caret into \textasciicircum: 38 of the 129 built volumes set a marker
+	// literally, 905 times over, and nothing in the audit said so. A whole book
+	// had to be read to find it, which is exactly the kind of thing this file
+	// exists to stop.
+	//
+	// One check answers for both formats because both take the same body through
+	// the same reading. What is looked at is the TeX, because the escaping makes
+	// the defect unmistakable there: four characters of prose in the EPUB could
+	// be four characters the printing has.
+	printed := printedMarkerRE.FindAllStringIndex(d.TeX, -1)
+	marks := make([]string, 0, len(printed))
+	for _, at := range printed {
+		marks = append(marks, nearby(d.TeX, at[0]))
+	}
+	a.ok("no footnote is printed as its own source", len(printed) == 0,
+		fmt.Sprintf("%d markers reached the page", len(printed)), cap12(marks)...)
 }
+
+// matter checks that the parts of the book which belong to no chapter are bound
+// in: the half title, the title page, the edition line and the contents at the
+// front, and the historical notes and the two indexes at the back.
+//
+// It is here because those are the two parts of the build with nothing else
+// watching them. Every other check in this file is anchored to a chapter, a §
+// or a statement, so a volume could lose its whole front matter and pass all of
+// them: the chapters the manifest names would still be there, the §§ would
+// still run without a gap, and the text length would move by the half of one
+// per cent that four leaves come to. The way a missing title page shows up
+// otherwise is that somebody opens the PDF, which is what this file exists to
+// stop being the way anything shows up.
+//
+// What is looked at is the TeX rather than the PDF, for the same reason the
+// footnote check looks at the TeX: the commands are unmistakable there, and a
+// document that never reached the typesetter is still worth this answer. It is
+// the writer's own vocabulary, so a rename in document.go that forgot this
+// would fail the check rather than pass it quietly, which is the right way
+// round.
+//
+// The back matter is conditional on the volume, not fixed. Not every printing
+// has a historical note and not every one carries both indexes, so the check
+// asks for what this volume holds and says how many of each it found. A volume
+// with none of the three passes with nothing to bind, which is a true statement
+// about the Elements: the Historical Note is a Book of its own in some
+// printings and an appendix to a chapter in others.
+func (a *Audit) matter(v *Volume, d *Document) {
+	if d == nil {
+		return
+	}
+	front := []string{`\bcover`, `\bhalftitle`, `\btitlepage`, `\frontmatter`, `\bcontents`}
+	if v.Meta.Edition != "" {
+		front = append(front, `\bedition{`)
+	}
+	var absent []string
+	for _, cmd := range front {
+		if !strings.Contains(d.TeX, cmd) {
+			absent = append(absent, cmd)
+		}
+	}
+	a.ok("the front matter is bound in", len(absent) == 0,
+		fmt.Sprintf("%d of %d parts set", len(front)-len(absent), len(front)),
+		absent...)
+
+	// A historical note is asked for by its anchor and not by its heading. The
+	// heading is the note's own title where it has one and \bhistoricalname only
+	// where it does not, so looking for the command would pass every volume
+	// whose notes are untitled and fail every volume whose notes are titled,
+	// which is the opposite of a check. The anchor is written either way, and it
+	// carries the chapter, so a volume that lost the note off one chapter of six
+	// is a failure that names which one.
+	var want []string
+	for _, c := range v.Chapters {
+		if c.Historical != nil {
+			want = append(want, "{hist-"+strings.ToLower(c.Numeral)+"}")
+		}
+	}
+	if v.Notation != nil {
+		want = append(want, `{notation}`)
+	}
+	if v.Terminology != nil {
+		want = append(want, `{terminology}`)
+	}
+	// \backmatter opens the division the indexes sit in, so it is asked for
+	// exactly when there is an index to put there and not otherwise.
+	if v.Notation != nil || v.Terminology != nil {
+		want = append(want, `\backmatter`)
+	}
+	var lost []string
+	for _, cmd := range want {
+		if !strings.Contains(d.TeX, cmd) {
+			lost = append(lost, cmd)
+		}
+	}
+	a.ok("the back matter is bound in", len(lost) == 0,
+		fmt.Sprintf("%d of %d parts set", len(want)-len(lost), len(want)), lost...)
+}
+
+// printedMarkerRE is a Markdown footnote call that reached the page as its own
+// source. The caret is the escaper's, which is what makes it certain: a [^1] in
+// the prose is escaped on the way out and nothing else in the corpus writes a
+// bracketed \textasciicircum.
+var printedMarkerRE = regexp.MustCompile(`\[\\textasciicircum\{\}[A-Za-z0-9_-]{1,12}\]`)
 
 // typeset is what the typesetter found.
 func (a *Audit) typeset(v *Volume, b *Build, opt AuditOptions) {
 	if b == nil {
 		return
 	}
-	// First, because everything below it is a report on a document and this is
-	// the question of whether there is one. A TeX error stops the page it is on
-	// and the run writes no PDF, so a build with an error in it has an audit
-	// measuring a manuscript nobody can open.
+	// These two first, because everything below them is a report on a document
+	// and these are the question of whether there is one.
+	//
+	// They are two checks rather than one because they fail apart. A run can stop
+	// with an error and still leave the PDF the last run wrote, and a run can
+	// exit zero and write a PDF of four pages because the emergency stop came
+	// after the title page. Both used to be invisible: the command nilled the
+	// build out when it had no pages, this function returns on a nil build, and a
+	// volume that had stopped inside TeX therefore produced an audit with no
+	// typesetting section in it at all, which reads exactly like a volume that
+	// was never asked to typeset.
+	a.ok("the typesetter ran to the end", b.Failed == "",
+		firstLine(b.Failed, "it exited without an error"))
+	a.ok("the typesetter wrote a PDF", b.Pages > 0,
+		fmt.Sprintf("%d pages in %s", b.Pages, filepath.Base(b.PDF)))
+	// A TeX error stops the page it is on, so a build with an error in it has an
+	// audit measuring a book with a hole in it. Each one names the file under
+	// content/ it came out of where the log said which line of the document it
+	// was on, since the line of the document is a line of a file nobody wrote and
+	// nobody can edit.
 	a.ok("the typesetter finished without an error", len(b.Errors) == 0,
 		fmt.Sprintf("%d errors", len(b.Errors)), b.Errors...)
 	a.ok("the typesetter defined every command the writer used", len(b.Undefined) == 0,
@@ -475,6 +876,19 @@ func (a *Audit) packed(e *EPUB) {
 	a.ok("KaTeX reads every formula in the book", len(e.Refused) == 0,
 		fmt.Sprintf("%d spans refused of %d", len(e.Refused), e.Math+len(e.Refused)),
 		top(e.Refused, 12)...)
+
+	// Which of the two covers the EPUB is carrying. It is reported and is not a
+	// failure, because a build asked for no PDF has nothing to rasterise and a
+	// machine without poppler cannot rasterise it, and an EPUB with the drawn
+	// cover is still a book. What the line is for is that a reader of the report
+	// can tell whether the EPUB's cover is the PDF's cover or a second drawing of
+	// it, which is the difference between two covers that cannot drift and two
+	// that can.
+	how := "drawn as SVG from the class's measurements, since there was no PDF to take it from"
+	if e.CoverIsRaster {
+		how = "page one of the PDF this build set"
+	}
+	a.ok("the EPUB carries a cover", true, how)
 
 	z, err := zip.OpenReader(e.Path)
 	if err != nil {
@@ -740,6 +1154,19 @@ func ppmHeader(raw []byte) ([3]int, []byte, error) {
 		out[n] = v
 	}
 	return out, raw[i+1:], nil
+}
+
+// firstLine is the head of what the typesetter said, for a check detail that
+// has to fit on one line. tectonic's error carries forty lines of log tail after
+// it, which belong in the terminal and not in a table.
+func firstLine(s, whenEmpty string) string {
+	if s == "" {
+		return whenEmpty
+	}
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i]
+	}
+	return s
 }
 
 func abs(n int) int {

@@ -52,10 +52,26 @@ type Build struct {
 	// primed base under a power, and Missing } inserted, out of a subscript
 	// whose opening had been read twice. Both are as fatal to the output as an
 	// undefined command and neither was reported.
+	//
+	// Each carries the corpus file it came out of where the log said which line
+	// of the document it was on, because the line of the document is a line of a
+	// file nobody wrote. See Document.Sources.
 	Errors []string
 	// References that never resolved, which LaTeX prints as two question marks
 	// and mentions once in the log.
 	Unresolved int
+	// Failed is what the typesetter said when it stopped, and empty when it ran
+	// to the end.
+	//
+	// It exists because of how a stopped run used to present. tectonic exits non
+	// zero and writes no PDF, the shelf step copies a PDF only when there is one,
+	// and the audit skipped every typesetting check when there was no build to
+	// look at. So a volume that had stopped inside TeX looked exactly like a
+	// volume that had not changed: nothing was copied, nothing was reported, and
+	// the only sign of it was a line on stderr in the middle of a sweep of forty
+	// volumes. A build that stopped is the loudest thing that can happen to a
+	// book and it was the quietest.
+	Failed string
 }
 
 // Tectonic is the typesetter. It is tectonic rather than a TeX Live
@@ -82,6 +98,22 @@ type Options struct {
 	// Cached refuses to fetch anything, which is the setting for a build that
 	// has to be reproducible against a cache somebody kept.
 	Cached bool
+	// CoverPDF is the PDF whose first page the EPUB takes its cover image from,
+	// and empty for an EPUB built without one.
+	//
+	// It is a path and not a picture because the point of it is that there is one
+	// cover. The class draws it, and the EPUB used to draw it again in SVG from
+	// the same measured numbers written out a second time: #FEC746, 0.050, 0.157,
+	// 0.2745, 0.330, 0.78, twenty two point and thirteen. Two copies of eight
+	// numbers is two covers, and the day somebody moves the title on the printed
+	// one is the day the two books stop being the same book. Rasterising page one
+	// of the PDF the same run just made is the only arrangement where they cannot
+	// disagree, because there is nothing to disagree with.
+	//
+	// The SVG is still written and is still the fallback, since -no-pdf is a real
+	// way to build and an EPUB with no cover at all is worse than an EPUB with a
+	// drawn one.
+	CoverPDF string
 }
 
 // Run writes the document and the class into dir and typesets them.
@@ -124,11 +156,15 @@ func Run(ctx context.Context, dir string, d *Document, opt Options) (*Build, err
 	// The log is read whether or not the run succeeded, because a failed run's
 	// log is the only thing that says why, and a succeeded run's log is where
 	// every one of the quiet failures is recorded.
-	if lerr := b.readLog(); lerr != nil && err == nil {
+	if lerr := b.readLog(d); lerr != nil && err == nil {
 		err = lerr
 	}
 	if err != nil {
-		return b, fmt.Errorf("%s: %w\n%s", Tectonic, err, tail(string(out), 40))
+		err = fmt.Errorf("%s: %w\n%s", Tectonic, err, tail(string(out), 40))
+		// Recorded on the build as well as returned, so that the audit can fail a
+		// check on it. The caller gets the error and the report gets the fact.
+		b.Failed = err.Error()
+		return b, err
 	}
 	if err := b.countPages(); err != nil {
 		return b, err
@@ -163,6 +199,10 @@ var (
 	// TeX writes about a real error has either in it.
 	dumpLineRE = regexp.MustCompile(`\\[A-Z0-9]+/[a-z]+/|\[\]`)
 	csRE       = regexp.MustCompile(`\\([A-Za-z@]+) $`)
+	// The line TeX prints under an error to say where it was, "l.41207 \foo".
+	// It is the line of the generated document, which is why Document.Sources
+	// exists: on its own it names a line of a file nobody wrote.
+	atLineRE   = regexp.MustCompile(`^l\.(\d+)`)
 	unresolvRE = regexp.MustCompile(`LaTeX Warning: There were undefined references`)
 	outputRE   = regexp.MustCompile(`Output written on .* \((\d+) pages?`)
 )
@@ -189,7 +229,11 @@ func glyphName(s string) string {
 // one of the twenty is a line that TeX prints and then carries on regardless.
 // That is the reason for reading it at all: the failures this is looking for do
 // not stop the build, they ship.
-func (b *Build) readLog() error {
+// The document is passed in so that an error can be reported against the file
+// under content/ it came out of. A nil one is allowed, and then an error is
+// reported as TeX gave it: readLog is also what a test over a canned log calls,
+// and a log with no document beside it is still worth reading.
+func (b *Build) readLog(d *Document) error {
 	f, err := os.Open(b.Log)
 	if err != nil {
 		return nil // a run that never got as far as a log has already failed louder
@@ -215,6 +259,14 @@ func (b *Build) readLog() error {
 	// TeX can report a real error before the dump it was going to print is closed.
 	// The line has to look like box content as well, which dumpLineRE is for.
 	inDump := false
+	// The error waiting for TeX to say where it was, as an index into b.Errors,
+	// and how many more lines it is worth waiting. An error whose window runs out
+	// is left as TeX gave it: "! Emergency stop" and "! LaTeX Error: File not
+	// found" are about the run and not about a line of it, and there is nothing
+	// to attribute them to. A message that has been seen before is not recorded
+	// again, so the second copy's window never opens and the file stays on the
+	// first, which is where a reader should look first anyway.
+	pending, window := -1, 0
 	for s.Scan() {
 		line := s.Text()
 		if dumpEndRE.MatchString(line) || line == "" {
@@ -229,6 +281,22 @@ func (b *Build) readLog() error {
 		if !dump && errorRE.MatchString(line) && !seenErr[line] {
 			seenErr[line] = true
 			b.Errors = append(b.Errors, strings.TrimSpace(line))
+			// Where TeX is about to say which line it was on. It says so a line or
+			// two under the message, after whatever context it decided to print, so
+			// this is a short window and not the next line. Six is what the longest
+			// of them needs: a runaway argument prints the argument, the token list
+			// and a blank line before "l.".
+			pending, window = len(b.Errors)-1, 6
+		} else if window > 0 {
+			window--
+			if m := atLineRE.FindStringSubmatch(line); m != nil && pending >= 0 {
+				if n, err := strconv.Atoi(m[1]); err == nil {
+					if path := d.At(n); path != "" {
+						b.Errors[pending] += "  in " + path
+					}
+				}
+				pending, window = -1, 0
+			}
 		}
 		switch {
 		case overfullRE.MatchString(line):

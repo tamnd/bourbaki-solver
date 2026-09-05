@@ -742,6 +742,23 @@ func TestTakeRawLeavesAChunkThatNeverCameBack(t *testing.T) {
 	}
 }
 
+// A rate limit page is not an answer the audit disliked either. It arrives as a
+// successful answer, so unless -raw leaves it alone it is written to the corpus
+// under a full set of headers and a matching source hash, and every pass after
+// it reads a finished translation. Eight sections were found in that state.
+func TestTakeRawLeavesAMessageFromTheProvider(t *testing.T) {
+	j := job{source: "content/en/ac/VII/exercises/s2/06.md"}
+	c := translate.Chunk{Index: 1, Of: 1}
+	bad := []translate.Problem{
+		{Rule: translate.RuleRefusal, Msg: `gateway: "unusual activity has been detected from your device"`},
+		{Rule: translate.RuleMath, Msg: "has 0 math spans and the English has 5"},
+	}
+	got := takeRaw(true, bad, j, c, func(string, ...any) {})
+	if len(got) != 1 || got[0].Rule != translate.RuleRefusal {
+		t.Fatalf("a provider message was taken raw: %v", got)
+	}
+}
+
 // Off, it changes nothing, which is what every run that does not ask for it
 // gets.
 func TestTakeRawOffChangesNothing(t *testing.T) {

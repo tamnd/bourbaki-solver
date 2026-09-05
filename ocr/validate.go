@@ -294,7 +294,123 @@ func checkMath(text string) (Problem, bool) {
 	if problem, ok := checkInlineRuns(text); !ok {
 		return problem, ok
 	}
-	return checkMathTotals(text)
+	if problem, ok := checkMathTotals(text); !ok {
+		return problem, ok
+	}
+	return checkBareTeX(text)
+}
+
+// checkBareTeX is the other half of rule 2: TeX outside the mathematics.
+//
+// Counting delimiters asks whether the spans on the page close. It never asks
+// whether the mathematics is in a span at all, and on a page where the reading
+// lost the delimiters entirely that is the only question worth asking. Page 67
+// of Varietes differentielles is the case. It carries 38 bare control sequences
+// in the prose, \alpha, \varphi, \mathrm and the rest, none of them inside a
+// span, because the reading wrote the mathematics as text and never opened a
+// dollar. All nine rules passed it. Downstream every one of those goes into the
+// assembled section as literal prose and from there into the LaTeX build as an
+// undefined command in horizontal mode.
+//
+// The false positive rate is near zero because prose in these volumes does not
+// contain backslashes. What it does contain is the markdown escapes, \* and \$
+// and the rest, and those are a backslash and a character that is not a letter,
+// so they are not control sequences and are not reported.
+//
+// The footnote commands are the one exception and they are named rather than
+// discovered. 59 pages set \footnote inline and 31 set \footnotetext, both in
+// prose and both deliberately: it is one of the three footnote conventions the
+// corpus uses, the PDF build already sets it correctly, and #448 is where it is
+// decided which convention the corpus keeps. Reporting them here would reject
+// ninety pages that are right about the page they were read from and send them
+// to be read again, which is not what this rule is for.
+//
+// tamnd/bourbaki-solver#444.
+func checkBareTeX(text string) (Problem, bool) {
+	runes := []rune(text)
+	// past is the index after an escaped character, so that a \$ does not open
+	// a span and a backslash at the end of a line does not eat the newline the
+	// line count is made of.
+	past := func(i int) int {
+		if i+1 < len(runes) && runes[i+1] != '\n' {
+			return i + 1
+		}
+		return i
+	}
+	line, inline, display := 1, false, false
+	for i := 0; i < len(runes); i++ {
+		switch {
+		case runes[i] == '\n':
+			line++
+		case runes[i] == '$':
+			if i+1 < len(runes) && runes[i+1] == '$' {
+				display = !display
+				i++
+				continue
+			}
+			if !display {
+				inline = !inline
+			}
+		case runes[i] == '\\':
+			if inline || display {
+				i = past(i)
+				continue
+			}
+			j := i + 1
+			for j < len(runes) && isASCIILetter(runes[j]) {
+				j++
+			}
+			if j == i+1 {
+				i = past(i)
+				continue
+			}
+			if cmd := string(runes[i:j]); !proseTeX[cmd] {
+				return Problem{Rule: RuleMath, Line: line, Detail: fmt.Sprintf(
+					"%s is set in the prose with no math span around it, so the mathematics was read as text", cmd)}, false
+			}
+			i = j - 1
+		}
+	}
+	return Problem{}, true
+}
+
+func isASCIILetter(r rune) bool { return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' }
+
+// proseTeX is the TeX the corpus sets in prose on purpose, and it is short
+// because prose in these volumes is otherwise free of backslashes. Run over all
+// 44 volumes the rule reports 693 commands, and every one of them outside this
+// list is mathematics: \in 120 times, \leq 48, \mathbf 39, \alpha 28, \otimes
+// 27, and a tail of Greek letters and operators one and two at a time.
+//
+// Of the footnote three only \footnote is left, which is #448 decided. The
+// corpus keeps two conventions and not three: the markdown form, [^n] where the
+// note is called and [^n]: text at the foot, which is what the 212 definitions
+// already in the corpus use and the only one of the three that records which
+// note belongs to which call; and inline \footnote{...}, 82 places that both
+// builders now set correctly and that carry their text where they stand.
+// \footnotetext is gone, all 33 of it, because it takes its marker from the
+// counter rather than from its argument and the readings had put the printed
+// marker inside the argument, so the note printed under whatever number the
+// last real footnote left behind. There are 0 places of it in pages/ and 0 of
+// \footnotemark, and both are out of this list so that a reading which brings
+// one back is rejected rather than assembled.
+//
+// The text-mode commands are the corpus setting text, which is what they are
+// for. \textsuperscript is 54 places and nearly all of them are French
+// ordinals, "2\textsuperscript{e} ed." and "xiv\textsuperscript{e} siecle".
+// \emph is 41 and nearly all of them are the citation forms, \emph{ibid.} and
+// \emph{loc. cit.}. \textbf appears inside a footnote holding a journal volume
+// number. \v is the Czech accent, and every one of its three places is
+// Stone-\v{C}ech.
+var proseTeX = map[string]bool{
+	`\footnote`:        true,
+	`\emph`:            true,
+	`\textit`:          true,
+	`\textbf`:          true,
+	`\textsuperscript`: true,
+	`\textsubscript`:   true,
+	`\textasciicircum`: true,
+	`\v`:               true,
 }
 
 // checkMathTotals counts the delimiters over the whole page.

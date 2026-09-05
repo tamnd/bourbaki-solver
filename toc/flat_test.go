@@ -146,3 +146,18 @@ func TestBackMatterIsNotANote(t *testing.T) {
 		}
 	}
 }
+
+func TestTheChapterAFlatVolumeNeverPrintsIsMarkedNominal(t *testing.T) {
+	res, err := Parse([]string{flatContents}, flatMap(),
+		Options{Book: "hist-fr", Title: "Éléments d'histoire des mathématiques"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := res.Get(pagemap.WholeVolume)
+	if !ok {
+		t.Fatalf("no chapter %q: %+v", pagemap.WholeVolume, res.Chapters)
+	}
+	if !c.Nominal {
+		t.Errorf("the chapter is not marked nominal, so every consumer reads it as one the printing sets")
+	}
+}

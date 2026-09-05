@@ -757,9 +757,13 @@ flags:
   -check     say what would change and change nothing
 `
 
-const fixSealUsage = `usage: bourbaki fix seal [flags]
+const fixSealUsage = `usage: bourbaki fix seal [flags] [path...]
 
 Writes content_sha256 over a section file whose body no longer hashes to it.
+
+Named paths are the only ones sealed. With none, every section is read, which
+is the whole corpus unless -lang narrows it, and that is a great deal to reseal
+by accident: prefer naming the file the hand correction was in.
 
 The hash is what tells a stale translation from a current one, so nothing may
 write it without meaning to, and no command did: assemble writes a section from
@@ -846,7 +850,7 @@ func fixStray(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixStrayUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -963,7 +967,7 @@ func fixParens(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixParensUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -1136,7 +1140,7 @@ func fixFolio(args []string) error {
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
 	fill := fs.Bool("fill", false, "take the number from the page map when the body has none")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -1285,7 +1289,7 @@ func fixHeading(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixHeadingUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -1541,7 +1545,7 @@ func fixOpening(args []string) error {
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
 	layer := fs.Bool("text-layer", false, "ask the text layer about an opening that is not on the page")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2199,7 +2203,7 @@ func fixMath(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixMathUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2289,7 +2293,7 @@ func fixPrime(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixPrimeUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2344,7 +2348,7 @@ func fixNotin(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixNotinUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2401,7 +2405,7 @@ func fixDollars(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixDollarsUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2480,7 +2484,7 @@ func fixSection(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSectionUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2566,7 +2570,7 @@ func fixPadding(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixPaddingUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2737,7 +2741,7 @@ func fixStar(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixStarUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2793,7 +2797,7 @@ func fixLabel(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixLabelUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2854,7 +2858,7 @@ func fixElision(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixElisionUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2912,7 +2916,7 @@ func fixDash(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixDashUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -2963,7 +2967,7 @@ func fixSmallCaps(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSmallCapsUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -3024,7 +3028,7 @@ func fixFence(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFenceUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()
@@ -3110,13 +3114,38 @@ func fixSeal(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixSealUsage) }
 	lang := fs.String("lang", "", "only this language")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	named, err := parseFlags(fs, args)
+	if err != nil {
 		return err
 	}
 	root, err := corpus.Root()
 	if err != nil {
 		return err
 	}
+
+	// The paths are what to seal, and until now they were parsed and dropped:
+	// the return of parseFlags went to _, -lang was the only thing that narrowed
+	// the walk, and a run asking for one Vietnamese section resealed 209 of them
+	// along with 4 in en-mt. Every hand edit anyone had in the tree went out
+	// under a command that had been asked to touch a single file, and undoing it
+	// meant reverting by name against git status. A command that rewrites the
+	// hash telling a stale translation from a current one is the last one that
+	// should quietly do more than it was asked, so the paths now bind.
+	only := map[string]bool{}
+	for _, a := range named {
+		p, err := filepath.Abs(a)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(p); err != nil {
+			return err
+		}
+		only[filepath.Clean(p)] = true
+	}
+	// A path that names a real file the walk never offers is a mistake worth a
+	// word rather than a silent no-op: exercises carry no hash of their own and
+	// eachSection skips them, so asking to seal one asks for nothing.
+	seen := map[string]bool{}
 
 	// The hash each resealed file used to carry, against the file it was in, so
 	// that a translation recording it can be named by what it was made from.
@@ -3125,6 +3154,12 @@ func fixSeal(args []string) error {
 	now := map[string]string{}
 	var read, sealed int
 	err = eachSection(root, *lang, func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
+		if len(only) > 0 {
+			if !only[filepath.Clean(path)] {
+				return nil
+			}
+			seen[filepath.Clean(path)] = true
+		}
 		read++
 		want := corpus.ContentSHA256(f.Body)
 		// Every file, and not only the ones sealed here. The manifest row can be
@@ -3149,6 +3184,17 @@ func fixSeal(args []string) error {
 	})
 	if err != nil {
 		return err
+	}
+	var missed []string
+	for p := range only {
+		if !seen[p] {
+			missed = append(missed, rel(root, p))
+		}
+	}
+	if len(missed) > 0 {
+		sort.Strings(missed)
+		return fmt.Errorf("not a section this command can seal: %s",
+			strings.Join(missed, ", "))
 	}
 
 	// manifests/sections.yaml records the same hash a second time, and the two
@@ -3293,7 +3339,7 @@ func fixFootnote(args []string) error {
 	fs.Usage = func() { fmt.Fprint(os.Stderr, fixFootnoteUsage) }
 	book := fs.String("book", "", "only this volume")
 	check := fs.Bool("check", false, "change nothing")
-	if _, err := parseFlags(fs, args); err != nil {
+	if err := noArgs(fs, args); err != nil {
 		return err
 	}
 	root, books, err := corpusAndBooks()

@@ -40,6 +40,16 @@ const (
 	// Column is a bare "1. Title" set at the left margin, used by the 2023
 	// volume, where a no. line carries the same shape but is indented.
 	Column SectionMark = "column"
+	// Body is not a mark at all. It is what a reading carries when it came off
+	// the volume's own pages rather than off a contents page, which is the only
+	// thing there is for a volume whose scan carries no contents to read. Three
+	// volumes are in that position: ac-x-fr and lie-vii-viii-fr print none, and
+	// alg-iv-vii-fr prints one whose middle leaf is not in the file.
+	//
+	// It is a named constant so that a caller can tell the two apart without
+	// spelling the word twice. bourbaki toc build asks, because a volume already
+	// read this way is not a volume it failed on.
+	Body SectionMark = "body"
 )
 
 // PageForm is how the contents prints the page a line points at.
@@ -1048,8 +1058,23 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		if num == "" {
 			return false
 		}
+		// Whether the printing has this chapter or only the manifest does. See
+		// corpus.Chapter.Nominal, which three consumers read and which until now
+		// nothing ever set: keep.go carried it across a rebuild, so it could only
+		// survive a value that was never written in the first place.
+		//
+		// The two cases here are not the same. A one chapter volume whose
+		// contents never names it is a real chapter with a real numeral: the
+		// French Integration chapter IX is printed as IX on every page of it and
+		// is simply absent from its own contents page. A flat volume and a
+		// fascicule span are the opposite. The printing sets no chapter line
+		// anywhere, pagemap named the span itself, and it named it in arabic
+		// precisely because a chapter Bourbaki prints is always roman. Those are
+		// the manifest's own and are marked so, which is what stops the
+		// assembler asking for front matter under a heading that is on no page.
+		nominal := flatVolume(pm) || fascicules(pm)
 		res.Chapters = append(res.Chapters, corpus.Chapter{
-			Book: opt.Book, Numeral: num,
+			Book: opt.Book, Numeral: num, Nominal: nominal,
 			Title: strings.ToUpper(opt.Title), Page: page})
 		cur = &res.Chapters[len(res.Chapters)-1]
 		curSec, underNote = nil, false

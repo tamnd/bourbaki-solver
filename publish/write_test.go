@@ -388,8 +388,13 @@ func TestBrokenMathIsMarkedAndOnlyWhenAskedFor(t *testing.T) {
 		sec.Units = Units(sec.Body)
 	}
 
-	if _, err := s.Build(t.TempDir()); err == nil {
-		t.Fatal("a broken formula built without complaint")
+	// Reported, and reported for every section rather than for the first one
+	// reached. The build carries on so that one pass names every fault.
+	if _, err := s.Build(t.TempDir()); err != nil {
+		t.Fatalf("a page the build could not set stopped the build: %v", err)
+	}
+	if len(s.Unreadable) < len(s.Sections) {
+		t.Fatalf("%d sections are broken and the build reported %d", len(s.Sections), len(s.Unreadable))
 	}
 	if len(s.Broken) != 0 {
 		t.Errorf("%d formulae were marked without being asked for", len(s.Broken))
@@ -405,6 +410,62 @@ func TestBrokenMathIsMarkedAndOnlyWhenAskedFor(t *testing.T) {
 	}
 	if len(s.Broken) == 0 {
 		t.Error("the build did not say what it marked")
+	}
+}
+
+// tamnd/bourbaki-solver#446. A build over twenty thousand pages that returns on
+// the first page it cannot set costs one full pass per fault, and the corpus
+// hands it faults in twos and threes. So one page that cannot be set names
+// itself, and everything else is still written.
+func TestOnePageThatCannotBeSetDoesNotStopTheRest(t *testing.T) {
+	s := testSite(t)
+	bad := s.Sections[0]
+	bad.Body += "\n\nThen $\\frac{1$ and the rest."
+	bad.Units = Units(bad.Body)
+
+	dir := t.TempDir()
+	wrote, err := s.Build(dir)
+	if err != nil {
+		t.Fatalf("one unreadable page stopped the build: %v", err)
+	}
+	rel := filepath.ToSlash(filepath.Join(bad.Lang, bad.Meta.Book, bad.Meta.Chapter, bad.Slug, "index.html"))
+	var named bool
+	for _, u := range s.Unreadable {
+		if u.Rel == rel {
+			named = true
+		}
+		if u.Err == nil {
+			t.Errorf("%s is reported without a reason", u.Rel)
+		}
+	}
+	if !named {
+		t.Errorf("the page that could not be set is not among the %d reported", len(s.Unreadable))
+	}
+
+	// The three sections that are fine are on disk, and the one that is not is
+	// absent rather than half written.
+	for _, sec := range s.Sections[1:] {
+		p := filepath.Join(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug, "index.html")
+		if _, err := os.Stat(filepath.Join(dir, p)); err != nil {
+			t.Errorf("a page the build could set was not written: %v", err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel))); !os.IsNotExist(err) {
+		t.Errorf("the page that could not be set was written anyway: %v", err)
+	}
+	for _, w := range wrote {
+		if w == rel {
+			t.Error("the page that could not be set is counted among those written")
+		}
+	}
+
+	// And a second build reports what that build found, not the sum of both.
+	before := len(s.Unreadable)
+	if _, err := s.Build(t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Unreadable) != before {
+		t.Errorf("a second build reported %d pages where the first reported %d", len(s.Unreadable), before)
 	}
 }
 

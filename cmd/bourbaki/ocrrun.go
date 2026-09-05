@@ -65,6 +65,19 @@ type setup struct {
 // contents is the door for the pages of a table of contents, which are asked a
 // different question. See prompt.Contents.
 func ocrSetup(book, queueRoot string, flagged, contents bool) (setup, error) {
+	return ocrSetupFor(book, queueRoot, flagged, contents, true)
+}
+
+// ocrSetupFor is ocrSetup told whether the page images have to be on disk
+// already.
+//
+// They do for every caller but a windowed run. ocr run -window renders each
+// window itself, and the first thing it does against a volume nothing has
+// touched is render one, so a missing manifest there is the ordinary starting
+// state rather than an error. Everywhere else it is the message that sends
+// somebody to bourbaki render, which is worth far more than a run that finds no
+// pages and says there is nothing to do.
+func ocrSetupFor(book, queueRoot string, flagged, contents, rendered bool) (setup, error) {
 	var out setup
 	root, err := corpus.Root()
 	if err != nil {
@@ -82,7 +95,7 @@ func ocrSetup(book, queueRoot string, flagged, contents bool) (setup, error) {
 		return out, fmt.Errorf("%s is %s and extracts by %s: use bourbaki extract, or -flagged for the pages it could not read",
 			entry.ID, entry.Nature, entry.Extraction)
 	}
-	out.ask = prompt.OCRFor(entry.ID)
+	out.ask = prompt.OCRFor(entry.ID, entry.Book)
 	if contents {
 		out.ask = prompt.Contents()
 	}
@@ -99,7 +112,7 @@ func ocrSetup(book, queueRoot string, flagged, contents bool) (setup, error) {
 		}
 	}
 	manifest, err := render.ReadManifest(root, entry.ID)
-	if err != nil {
+	if err != nil && rendered {
 		return out, fmt.Errorf("%s has not been rendered: %w", entry.ID, err)
 	}
 	q, err := queue.Open(queueRoot)
@@ -116,6 +129,48 @@ func ocrSetup(book, queueRoot string, flagged, contents bool) (setup, error) {
 	out.root, out.entry, out.pmap = root, entry, pmap
 	out.manifest, out.queue, out.only = manifest, q, only
 	return out, nil
+}
+
+// contentsHosts drops the hosts that cannot be asked the contents question, and
+// refuses the run when that leaves none.
+//
+// A host with a reader named on it runs a program that is not chatgpt-tool, and
+// what is behind that program is a card in the box with a fixed prompt in front
+// of it. The batch sends --prompt to it exactly as it does to a browser and the
+// reader takes the images and answers with its own question, so the flag is
+// accepted and has no effect. That was measured on three pages of the French
+// Integration: they came back in forty-four seconds, as good a reading of a
+// contents page as the ordinary prompt gives, which is to say a page of prose
+// with the leader dots counted as text and the printed page numbers scattered
+// through it. The whole point of -contents is that those numbers come back in
+// the column the printing puts them in, and nothing about the answer said the
+// question had been changed.
+//
+// Dropping rather than refusing outright, because a pool is a mixture and the
+// hosts that can be asked should still be. Saying so out loud either way: a run
+// that quietly leaves a host out is the same fault one step further on.
+func contentsHosts(hosts []ocr.Host, contents bool, logf func(string, ...any)) ([]ocr.Host, error) {
+	if !contents {
+		return hosts, nil
+	}
+	kept := make([]ocr.Host, 0, len(hosts))
+	var fixed []string
+	for _, host := range hosts {
+		if strings.TrimSpace(host.Reader) != "" {
+			fixed = append(fixed, host.Name+" reads with "+host.Reader)
+			continue
+		}
+		kept = append(kept, host)
+	}
+	if len(fixed) > 0 {
+		logf("-contents: skipping %s, which carries its own prompt and would answer the ordinary question",
+			strings.Join(fixed, ", "))
+	}
+	if len(kept) == 0 {
+		return nil, fmt.Errorf("-contents: no host left that can be asked a question of its own, "+
+			"every one of the %d in the pool reads with a prompt of its own", len(hosts))
+	}
+	return kept, nil
 }
 
 // contentsRange refuses a contents run that names no pages.
@@ -198,6 +253,54 @@ func (s setup) sources(first, last int, unread bool) []ocr.Source {
 	return out
 }
 
+// outstanding is the pages of a volume that still have reading to do, in page
+// order. It is what a windowed run walks, and it is asked fresh before every
+// window, so nothing has to remember where the last one stopped.
+//
+// Two things put a page on the list and neither of them is a number in a file.
+// The queue holds a job for it that has not finished, pending or leased; or the
+// corpus holds no page file for it at all, which is the state Fill finds a page
+// in that nothing has ever queued. A blank page is committed by the render, so
+// it is neither, which is what the ink measurement bought.
+//
+// Dead is deliberately not on the list. The queue gave up on those after
+// DefaultMaxAttempts and bourbaki queue retry is the door back; a windowed run
+// that swept them up would render, ship and refuse the same pages until it was
+// killed. Leased is on the list because a lease that outlives its run is
+// reaped, and the page is then work again with nobody holding it.
+func (s setup) outstanding(first, last int) ([]int, error) {
+	if s.entry.Pages <= 0 {
+		return nil, fmt.Errorf("%s does not say how many pages it has in %s, which is what a window is cut from",
+			s.entry.ID, corpus.BooksPath(s.root))
+	}
+	waiting, err := s.queue.Outstanding(queue.StageOCR)
+	if err != nil {
+		return nil, err
+	}
+	var out []int
+	for page := 1; page <= s.entry.Pages; page++ {
+		if s.only != nil && !s.only[page] {
+			continue
+		}
+		if first > 0 && page < first {
+			continue
+		}
+		if last > 0 && page > last {
+			continue
+		}
+		switch waiting[ocr.Target(s.entry.ID, page)] {
+		case queue.Pending, queue.Leased:
+			out = append(out, page)
+		case queue.Dead:
+		default:
+			if !committed(s.root, s.entry.ID, page) {
+				out = append(out, page)
+			}
+		}
+	}
+	return out, nil
+}
+
 func ocrFlags(fs *flag.FlagSet) (book, hosts, routes, queueRoot *string, first, last, batch, limit *int, keep, dry *bool) {
 	book = fs.String("book", "", "book id")
 	first = fs.Int("f", 0, "first pdf page")
@@ -219,12 +322,20 @@ func ocrFill(args []string) error {
 	flagged := fs.Bool("flagged", false, "only the pages a native extraction could not read")
 	contents := fs.Bool("contents", false, "read the pages as a table of contents")
 	unread := fs.Bool("unread", false, "only the pages with no reading committed")
+	// -unread narrows the set and this widens it, which is the direction that
+	// was missing. It takes a range and refuses to run without one, because the
+	// pages it puts back are pages that already passed and the cost of pointing
+	// it at a whole volume by accident is a volume of fleet time.
+	again := fs.Bool("again", false, "read pages that already pass the rules again, within -f and -l")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
 	if *book == "" {
 		fs.Usage()
 		os.Exit(2)
+	}
+	if *again && (*first == 0 || *last == 0) {
+		return fmt.Errorf("ocr fill -again needs -f and -l: it queues pages that already pass, so the range has to be said out loud")
 	}
 	if err := contentsRange(*contents, *first, *last); err != nil {
 		return err
@@ -233,7 +344,8 @@ func ocrFill(args []string) error {
 	if err != nil {
 		return err
 	}
-	runner := &ocr.Runner{Book: state.entry.ID, Root: state.root, Queue: state.queue, Prompt: state.ask}
+	runner := &ocr.Runner{Book: state.entry.ID, Root: state.root, Queue: state.queue, Prompt: state.ask,
+		ReadAgain: *again, Logf: func(format string, args ...any) { fmt.Printf(format+"\n", args...) }}
 	sources := state.sources(*first, *last, *unread)
 	added, err := runner.Fill(sources)
 	if err != nil {
@@ -289,6 +401,9 @@ func ocrRun(args []string) error {
 	// a re-render happens by accident whenever the images directory is swept.
 	reread := fs.Bool("reread-protected", false, "read over readings by a stronger model too")
 	salvage := fs.Bool("salvage", false, "on the last attempt, write a page whose only faults a fix pass can put right")
+	// This is the flag that deletes the driver's cursor. See ocrRunWindowed.
+	window := fs.Int("window", 0, "render, read and sweep this many pages at a time until the volume has none left")
+	sweep := fs.Bool("sweep", true, "delete a window's page images once it has been read")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -299,7 +414,10 @@ func ocrRun(args []string) error {
 	if err := contentsRange(*contents, *first, *last); err != nil {
 		return err
 	}
-	state, err := ocrSetup(*book, *queueRoot, *flagged, *contents)
+	if *window < 0 {
+		return fmt.Errorf("-window %d is not a number of pages", *window)
+	}
+	state, err := ocrSetupFor(*book, *queueRoot, *flagged, *contents, *window == 0)
 	if err != nil {
 		return err
 	}
@@ -325,36 +443,79 @@ func ocrRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	if hosts, err = contentsHosts(hosts, *contents, logf); err != nil {
+		return err
+	}
 	if *lanes > 0 {
 		for i := range hosts {
 			hosts[i].Lanes = *lanes
 		}
 	}
 
+	opt := ocrRunOptions{
+		batch: *batch, limit: *limit, first: *first, last: *last,
+		keep: *keep, unread: *unread, reread: *reread, salvage: *salvage, dry: *dry,
+		// A page that fails on a delimiter is asked about in its own thread
+		// before it is sent back to the queue for another full reading. The
+		// queue is the fallback, not the first move: a follow up costs one turn
+		// and a re-read costs a page.
+		//
+		// Not here. A page read on this machine is in no conversation to go
+		// back to, and a re-read is fifteen seconds, so the queue is the whole
+		// repair.
+		repair: !*noRepair && !hereOnly(*hostList),
+	}
+	if *window > 0 {
+		return ocrRunWindowed(ctx, state, hosts, opt, *window, *sweep, logf)
+	}
+	return readOCRPages(ctx, state, hosts, opt, nil, logf)
+}
+
+// ocrRunOptions is what one ocr run was asked for, gathered up because a
+// windowed run does the same thing several times over and threading a dozen
+// flags through that loop is how two windows come to be read differently.
+type ocrRunOptions struct {
+	batch, limit int
+	first, last  int
+	keep         bool
+	unread       bool
+	reread       bool
+	salvage      bool
+	dry          bool
+	repair       bool
+}
+
+// readOCRPages is one pass of the reader: put the pages it was given in the queue,
+// set the fleet at them, write the report.
+//
+// only is the window a windowed run is on, and is nil for a run that takes
+// whatever the range it was given holds. It bounds both halves, the filling and
+// the leasing, because they came apart once already: ocr run -f 22 -l 71 used
+// to queue those pages and then read whatever else the queue held, which on a
+// volume filled once before meant reading page 1.
+func readOCRPages(ctx context.Context, state setup, hosts []ocr.Host, opt ocrRunOptions,
+	only map[int]bool, logf func(string, ...any)) error {
+	if only != nil {
+		state.only = only
+	}
 	runner := &ocr.Runner{
 		Book: state.entry.ID, Root: state.root, Queue: state.queue,
 		Prompt: state.ask, Model: runModel(hosts),
 		Hosts: hosts,
 		Shell: ocr.LocalShell{Remote: fleet.SSH{Timeout: 2 * time.Minute}},
 		Copy:  ocr.LocalCopy{Remote: ocr.Rsync{Timeout: 30 * time.Minute}},
-		Batch: *batch, Limit: *limit, Keep: *keep,
-		First: *first, Last: *last, RereadProtected: *reread, Salvage: *salvage,
+		Batch: opt.batch, Limit: opt.limit, Keep: opt.keep,
+		First: opt.first, Last: opt.last, Only: only,
+		RereadProtected: opt.reread, Salvage: opt.salvage,
 		Expect: state.expect, RetryDPI: render.RetryDPI,
 		Rerender: rerender(state),
 		Logf:     logf,
 	}
-	// A page that fails on a delimiter is asked about in its own thread before
-	// it is sent back to the queue for another full reading. The queue is the
-	// fallback, not the first move: a follow up costs one turn and a re-read
-	// costs a page.
-	//
-	// Not here. A page read on this machine is in no conversation to go back
-	// to, and a re-read is fifteen seconds, so the queue is the whole repair.
-	if !*noRepair && !hereOnly(*hostList) {
+	if opt.repair {
 		runner.Repair = mender(state.root, hosts, state.expect, logf)
 	}
 
-	added, err := runner.Fill(state.sources(*first, *last, *unread))
+	added, err := runner.Fill(state.sources(opt.first, opt.last, opt.unread))
 	if err != nil {
 		return err
 	}
@@ -366,7 +527,7 @@ func ocrRun(args []string) error {
 	for _, host := range hosts {
 		fmt.Printf("  %-8s %d lanes  %s\n", host.Name, host.Lanes, host.Tool)
 	}
-	if *dry {
+	if opt.dry {
 		return nil
 	}
 	if stats.Counts[queue.Pending] == 0 {
@@ -387,6 +548,143 @@ func ocrRun(args []string) error {
 			report.Dead, queue.DefaultMaxAttempts)
 	}
 	return nil
+}
+
+// ocrRunWindowed reads a whole volume a window at a time, and it exists to
+// delete a cursor.
+//
+// The round robin driver used to render a window of pages, call ocr run over
+// that range, sweep the images and write last+1 into a file per book. It
+// stopped when every cursor was past its book's last page. A window that died
+// part way through advanced the cursor anyway: lie-iv-vi-fr read 99 pages of a
+// 240 page window, ended on "context canceled", and the 141 pages it never
+// leased stayed pending in the queue for ever, because the cursor had gone past
+// them and the driver never came back. Counted across the fleet that was 320
+// pages behind their book's cursor, 130 of them in hist, a volume that read as
+// finished and was missing nearly half of what it had never attempted.
+//
+// The only reason to window at all is that this laptop cannot hold a whole
+// volume of images at 300 dpi. That is a rendering constraint, not a reading
+// one, and the queue already knows which pages of a volume have not been read.
+// So the window is cut from the queue rather than from a number in a file, and
+// a window that dies leaves its pages exactly where a window that never ran
+// would have left them: outstanding, and picked up by the next one.
+//
+// A page gets one window per invocation. Without that a page nothing can read
+// is outstanding after its window, comes back as the first page of the next
+// window, and the run never ends; the driver's answer to that was a cap of
+// three sweeps, which is the same idea with a number attached. The next
+// invocation tries it again, and now that there is no cursor, the next
+// invocation is a thing that happens.
+func ocrRunWindowed(ctx context.Context, state setup, hosts []ocr.Host, opt ocrRunOptions,
+	size int, sweep bool, logf func(string, ...any)) error {
+	tried, offered := map[int]bool{}, 0
+	for pass := 1; ; pass++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		left, err := state.outstanding(opt.first, opt.last)
+		if err != nil {
+			return err
+		}
+		// -limit bounds the run and not the window, which is what it says: stop
+		// after this many pages. A pilot of twenty pages against a window of two
+		// hundred is one window of twenty, not ten windows of twenty.
+		want := size
+		if opt.limit > 0 {
+			want = min(want, opt.limit-offered)
+		}
+		var window []int
+		for _, page := range left {
+			if tried[page] {
+				continue
+			}
+			window = append(window, page)
+			if len(window) == want {
+				break
+			}
+		}
+		if want <= 0 {
+			fmt.Printf("%s: %d pages read, which is the limit asked for, and %d are still outstanding\n",
+				state.entry.ID, offered, len(left))
+			return nil
+		}
+		if len(window) == 0 {
+			if held := len(left); held > 0 {
+				fmt.Printf("%s: %d pages are still outstanding after this run and every one was offered a window\n",
+					state.entry.ID, held)
+				return nil
+			}
+			fmt.Printf("%s: nothing outstanding, the volume is read\n", state.entry.ID)
+			return nil
+		}
+		logf("window %d: %d pages, %d to %d, %d outstanding in all",
+			pass, len(window), window[0], window[len(window)-1], len(left))
+		// Under -dry nothing is rendered either. The question -dry asks is what
+		// this run would read, and the answer is the window; rendering it first
+		// would be a minute of pdftoppm to say what the queue already said.
+		if opt.dry {
+			fmt.Printf("%s: %d pages outstanding, the next %d would be %v\n",
+				state.entry.ID, len(left), len(window), window)
+			return nil
+		}
+
+		if _, err := render.Render(ctx, render.Options{
+			Book: state.entry.ID, PDF: filepath.Join(state.root, state.entry.PDF), Corpus: state.root,
+			DPI: render.DefaultDPI, SourceDPI: sourceDPI(state.entry), Gray: true,
+			Only: window, Batch: renderBatch,
+			// A flagged volume is born-digital and every page of it already has
+			// a reading with its folio on it, so a blank page file there would
+			// overwrite one. See blankFiles.
+			WriteBlanks: blankFiles(true, state.only != nil),
+			Logf:        logf,
+		}); err != nil {
+			return err
+		}
+		// The manifest the setup read is from before this window was rendered,
+		// and sources is built from it, so it has to be read back or the window
+		// has no pages in it at all.
+		manifest, err := render.ReadManifest(state.root, state.entry.ID)
+		if err != nil {
+			return err
+		}
+		state.manifest = manifest
+
+		only := map[int]bool{}
+		for _, page := range window {
+			only[page] = true
+			tried[page] = true
+		}
+		offered += len(window)
+		runErr := readOCRPages(ctx, state, hosts, opt, only, logf)
+		if sweep {
+			sweepImages(state.root, state.entry.ID, window, logf)
+		}
+		if runErr != nil {
+			return runErr
+		}
+	}
+}
+
+// renderBatch is pages per pdftoppm call, the same 25 bourbaki render defaults
+// to. A window is a page list rather than a range, so this is what caps how
+// many neighbouring pages are asked for in one call.
+const renderBatch = 25
+
+// sweepImages deletes the page images a window was read from, which is the
+// whole reason a window exists: 240 pages at 300 dpi is what the disk here
+// holds, and a volume is not.
+//
+// A file that is not there is not an error. The window is what the queue was
+// waiting on, and a page can have been swept by a run in the next terminal.
+func sweepImages(root, book string, pages []int, logf func(string, ...any)) {
+	gone := 0
+	for _, page := range pages {
+		if err := os.Remove(render.ImagePath(root, book, page)); err == nil {
+			gone++
+		}
+	}
+	logf("swept %d of %d page images", gone, len(pages))
 }
 
 // rerender is what escalates a page to 600 dpi before a second attempt, and
@@ -697,7 +995,7 @@ func refreshFleet(ctx context.Context, routeFile, names string) error {
 		if strings.TrimSpace(value.Host) == "" {
 			continue
 		}
-		targets = append(targets, fleet.Target{Name: value.Name, Host: value.Host, Port: value.RemotePort})
+		targets = append(targets, fleetTarget(value))
 	}
 	if len(targets) == 0 {
 		return nil

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tamnd/bourbaki-solver/fleet"
@@ -22,6 +23,9 @@ route file and the finished jobs, and fleet probe -deep speaks the HTTP
 completions API, which is a different transport from the one the work goes
 over: a fleet that fails the deep probe answers ask perfectly well, and a
 fleet whose accounts have been moved down to a cut down model passes both.
+
+What it came to is added to the record of asks, so that a host checked by hand
+counts towards the taking column of bourbaki fleet accounts like any other ask.
 
 It is also how a limit gets measured rather than guessed. -fill pads the
 question to a given length with filler that says it is filler, which is how the
@@ -109,6 +113,7 @@ func runFleetAsk(args []string) error {
 		}
 	}
 	answer, err := call.Do(ctx)
+	noteAsk(hosts[0].Name, err)
 	if err != nil {
 		return err
 	}
@@ -119,6 +124,50 @@ func runFleetAsk(args []string) error {
 	}
 	return nil
 }
+
+// noteAsk writes this ask into the record fleet accounts reads back.
+//
+// One command wrote that record, bourbaki translate, so the taking column spoke
+// for the translate driver and for nothing else on the fleet. The usage above
+// calls fleet ask the only honest check that a host will answer, and its verdict
+// went to the terminal and nowhere else; solve kept ask-usage.jsonl, which is
+// this run's questions in full and is nobody's idea of a live board.
+//
+// That column exists to catch a host whose profiles count as ready and will not
+// take a prompt, and it failed to catch one. It read "8/10, first one back now"
+// for a host at the same minute that four asks to that host in a row died with
+// "ChatGPT never accepted the prompt", one of them a question thirty characters
+// long. Every one of those four was this command, so none of them were in the
+// record, and the last entries that were came from a translate run that had
+// already finished. The board was reporting yesterday's driver.
+//
+// A failure to write is printed and not returned. The answer is the point of
+// the command and the reader is standing at the terminal looking at it; losing
+// the bookkeeping is not a reason to exit non-zero on an ask that worked.
+//
+// It is said once. This is called from the solve lanes as well as from the one
+// ask, and a record file that cannot be opened cannot be opened for all of the
+// thousands of questions a run makes: the second copy of that line onwards is
+// noise over the log somebody needs to read.
+func noteAsk(host string, err error) {
+	led := fleet.NewLedger()
+	led.Note(host, fleet.Classify(err))
+	// Append re-reads and rewrites, so two lanes landing together would
+	// otherwise each write what they read and the later one would drop the
+	// other's ask.
+	askRecord.Lock()
+	defer askRecord.Unlock()
+	if err := led.Append(fleet.LedgerPath()); err != nil {
+		askRecordBad.Do(func() {
+			fmt.Fprintf(os.Stderr, "asks could not be added to the record: %v\n", err)
+		})
+	}
+}
+
+var (
+	askRecord    sync.Mutex
+	askRecordBad sync.Once
+)
 
 // padTo pads a question out to a length with filler that says what it is.
 //

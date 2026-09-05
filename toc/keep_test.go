@@ -4,7 +4,20 @@ import (
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/pagemap"
 )
+
+// plainMap is a volume whose printed page is its pdf page plus a fixed offset
+// the whole way down, which is the shape hist-fr actually has: 117 of its pages
+// had their folio read and every one of them agrees on printed = pdf + 2.
+func plainMap(off, pages int) *pagemap.Map {
+	m := &pagemap.Map{}
+	for pdf := 1; pdf <= pages; pdf++ {
+		m.Entries = append(m.Entries, pagemap.Entry{
+			PDFPage: pdf, Page: pdf + off, Confidence: pagemap.FromHead})
+	}
+	return m
+}
 
 // The titles here are the ones the Theory of Sets came out with and the ones
 // they were corrected to, which is the case the whole file exists for.
@@ -17,7 +30,7 @@ func TestACorrectedTitleIsKeptAndReported(t *testing.T) {
 		Sections: []corpus.Section{{Number: 1, Title: "Terms and relations",
 			Subsections: []corpus.Subsection{{Number: 3, Title: "Met?ods .of proof"}}}}}}
 
-	out, kept := KeepTitles(old, fresh)
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
 	if got := out[0].Sections[0].Subsections[0].Title; got != "Methods of proof" {
 		t.Errorf("title %q, want the corrected one", got)
 	}
@@ -38,7 +51,7 @@ func TestARebuildThatAgreesReportsNothing(t *testing.T) {
 	chapters := []corpus.Chapter{{Numeral: "I", Title: "Description of formal mathematics",
 		Sections: []corpus.Section{{Number: 1, Title: "Terms and relations"}}}}
 
-	out, kept := KeepTitles(chapters, chapters)
+	out, kept := KeepTitles(chapters, chapters, plainMap(2, 400))
 	if len(kept) != 0 {
 		t.Errorf("kept %v, want nothing", kept)
 	}
@@ -58,7 +71,7 @@ func TestAnEntryTheManifestDoesNotHaveIsNew(t *testing.T) {
 			Sections: []corpus.Section{{Number: 1, Title: "Collectivizing relations"}}},
 	}
 
-	out, kept := KeepTitles(old, fresh)
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
 	if len(kept) != 0 {
 		t.Errorf("kept %v, want nothing", kept)
 	}
@@ -80,7 +93,7 @@ func TestAnAppendixIsNotTheSectionOfTheSameNumber(t *testing.T) {
 		{Number: 1, Appendix: true, Title: "The Jacobson radical"},
 	}}}
 
-	out, kept := KeepTitles(old, fresh)
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
 	if len(kept) != 1 || kept[0].Where != "chapter VIII § 1" {
 		t.Fatalf("kept %v, want the § alone", kept)
 	}
@@ -98,7 +111,7 @@ func TestTheNosOfAChapterWithNoSection(t *testing.T) {
 	fresh := []corpus.Chapter{{Numeral: "I", Subsections: []corpus.Subsection{
 		{Number: 1, Title: "Convexity inequaIities"}}}}
 
-	out, kept := KeepTitles(old, fresh)
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
 	if len(kept) != 1 || kept[0].Where != "chapter I no. 1" {
 		t.Fatalf("kept %v, want the no. of the chapter", kept)
 	}
@@ -115,7 +128,7 @@ func TestAnEmptyTitleIsNotACorrection(t *testing.T) {
 	fresh := []corpus.Chapter{{Numeral: "I", Sections: []corpus.Section{
 		{Number: 1, Title: "Terms and relations"}}}}
 
-	out, kept := KeepTitles(old, fresh)
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
 	if len(kept) != 0 {
 		t.Errorf("kept %v, want nothing", kept)
 	}
@@ -124,26 +137,36 @@ func TestAnEmptyTitleIsNotACorrection(t *testing.T) {
 	}
 }
 
-// Everything but the title comes from the rebuild. A page that moved is a page
-// map or an erratum doing its job, and toc verify holds pages against the body
-// of the book, which is a check nobody does by hand.
-func TestOnlyTheTitleIsKept(t *testing.T) {
+// The title and the printed page on one line of a contents page are one
+// reading, and a scan that got the title wrong is a scan. This used to assert
+// that only the title was kept; hist-fr is the volume that showed the page on
+// the same line needs keeping for the same reason, and both are checked here
+// now. The pdf page still comes from the map, which is the part that never
+// changed.
+func TestTheTitleAndThePrintedPageOnALineAreKeptTogether(t *testing.T) {
 	old := []corpus.Chapter{{Numeral: "I", Title: "Description of formal mathematics",
-		Page: 15, PDFPage: 20, Sections: []corpus.Section{
-			{Number: 1, Title: "Terms and relations", Page: 15, PDFPage: 20}}}}
+		Page: 15, PDFPage: 13, Sections: []corpus.Section{
+			{Number: 1, Title: "Terms and relations", Page: 15, PDFPage: 13}}}}
 	fresh := []corpus.Chapter{{Numeral: "I", Title: "Description of formaI mathematics",
-		Page: 16, PDFPage: 21, Sections: []corpus.Section{
-			{Number: 1, Title: "Terms and relations", Page: 16, PDFPage: 21}}}}
+		Page: 16, PDFPage: 14, Sections: []corpus.Section{
+			{Number: 1, Title: "Terms and relations", Page: 16, PDFPage: 14}}}}
 
-	out, _ := KeepTitles(old, fresh)
-	if out[0].Page != 16 || out[0].PDFPage != 21 {
-		t.Errorf("chapter at printed %d pdf %d, want the rebuilt pages", out[0].Page, out[0].PDFPage)
-	}
-	if out[0].Sections[0].Page != 16 {
-		t.Errorf("§ at printed %d, want the rebuilt page", out[0].Sections[0].Page)
-	}
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
 	if out[0].Title != "Description of formal mathematics" {
 		t.Errorf("title %q, want the corrected one", out[0].Title)
+	}
+	if out[0].Page != 15 || out[0].PDFPage != 13 {
+		t.Errorf("chapter at printed %d pdf %d, want the corrected 15 and the map's 13",
+			out[0].Page, out[0].PDFPage)
+	}
+	if s := out[0].Sections[0]; s.Page != 15 || s.PDFPage != 13 {
+		t.Errorf("§ at printed %d pdf %d, want 15 and 13", s.Page, s.PDFPage)
+	}
+	// One line, two readings, and each is reported on its own: the title is a
+	// correction somebody made and so is the page, and a summary that counted
+	// them as one would understate what a -retitle would throw away.
+	if len(kept) != 3 {
+		t.Fatalf("reported %v, want the chapter title, its page and the § page", kept)
 	}
 }
 
@@ -155,7 +178,7 @@ func TestTheRebuiltChaptersAreNotWrittenOver(t *testing.T) {
 	fresh := []corpus.Chapter{{Numeral: "I", Sections: []corpus.Section{
 		{Number: 1, Title: "Terms and reIations"}}}}
 
-	KeepTitles(old, fresh)
+	KeepTitles(old, fresh, plainMap(2, 400))
 	if got := fresh[0].Sections[0].Title; got != "Terms and reIations" {
 		t.Errorf("the rebuild now reads %q, want what the volume read", got)
 	}
@@ -172,7 +195,7 @@ func TestTheNominalFlagSurvivesARebuild(t *testing.T) {
 	fresh := []corpus.Chapter{{Numeral: "1", Page: 11, PDFPage: 9,
 		Title: "VARIÉTÉS DIFFÉRENTIELLES ET ANALYTIQUES, FASCICULE DE RÉSULTATS"}}
 
-	out, kept := KeepTitles(old, fresh)
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
 	if !out[0].Nominal {
 		t.Error("the rebuild dropped the nominal flag")
 	}
@@ -187,8 +210,140 @@ func TestAChapterThePrintingHasIsNotMadeNominal(t *testing.T) {
 	old := []corpus.Chapter{{Numeral: "I", Title: "Structures algébriques"}}
 	fresh := []corpus.Chapter{{Numeral: "I", Title: "Structures algébriques"}}
 
-	out, _ := KeepTitles(old, fresh)
+	out, _ := KeepTitles(old, fresh, plainMap(2, 400))
 	if out[0].Nominal {
 		t.Error("chapter I of Algebre came back nominal")
+	}
+}
+
+// A page the rebuild could not resolve. hist § 19 is printed on 203, the page
+// map steps from pdf 204 (printed 202) to pdf 205 (printed 204), and 203 is in
+// the gap, so the rebuild comes back with nothing where the manifest had 205.
+func TestAPageTheRebuildCouldNotResolveKeepsTheOneTheManifestHad(t *testing.T) {
+	// The gap itself: printed 203 is on no pdf page of this map.
+	pm := &pagemap.Map{Entries: []pagemap.Entry{
+		{PDFPage: 204, Page: 202, Confidence: pagemap.FromHead},
+		{PDFPage: 205, Page: 204, Confidence: pagemap.FromHead},
+	}}
+	old := []corpus.Chapter{{Numeral: "1", Page: 1, PDFPage: 9,
+		Sections: []corpus.Section{{Number: 19, Page: 203, PDFPage: 205}}}}
+	fresh := []corpus.Chapter{{Numeral: "1", Page: 1, PDFPage: 9,
+		Sections: []corpus.Section{{Number: 19, Page: 203, PDFPage: 0}}}}
+
+	out, kept := KeepTitles(old, fresh, pm)
+	if got := out[0].Sections[0].PDFPage; got != 205 {
+		t.Errorf("§ 19 is on pdf page %d, want the 205 the manifest had", got)
+	}
+	// The two readings agree, so there is no correction here to report. What
+	// the map could not do is not a thing the contents page got wrong.
+	if len(kept) != 0 {
+		t.Errorf("reported %v, want nothing", kept)
+	}
+}
+
+// The five entries of hist-fr. Its contents page prints "La fonction gamma
+// ... 253" and the heading is on pdf 253, which the map puts at printed 255.
+// Taking the contents at its word cost the volume two headings at toc verify.
+func TestACorrectedPrintedPageIsKeptAndReported(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "1", Page: 3, PDFPage: 1,
+		Sections: []corpus.Section{{Number: 19, Title: "La fonction gamma",
+			Page: 255, PDFPage: 253}}}}
+	fresh := []corpus.Chapter{{Numeral: "1", Page: 3, PDFPage: 1,
+		Sections: []corpus.Section{{Number: 19, Title: "La fonction gamma",
+			Page: 253, PDFPage: 251}}}}
+
+	out, kept := KeepTitles(old, fresh, plainMap(2, 400))
+	s := out[0].Sections[0]
+	if s.Page != 255 || s.PDFPage != 253 {
+		t.Errorf("§ 19 is on printed %d, pdf %d, want the corrected 255 and 253",
+			s.Page, s.PDFPage)
+	}
+	if len(kept) != 1 {
+		t.Fatalf("reported %v, want the one page it kept", kept)
+	}
+	if kept[0].What != "printed page" || kept[0].Was != "255" || kept[0].Now != "253" {
+		t.Errorf("reported %+v, want the printed page 255 against 253", kept[0])
+	}
+}
+
+// The reason pages were not kept at all, and the half that has to survive:
+// a page map corrected tomorrow still moves every pdf page it should. Here the
+// contents reading has not changed and the map has, and the new pdf page wins.
+func TestAPageMapThatMovedStillMovesThePDFPage(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "I", Page: 3, PDFPage: 1,
+		Sections: []corpus.Section{{Number: 1, Page: 13, PDFPage: 11}}}}
+	fresh := []corpus.Chapter{{Numeral: "I", Page: 3, PDFPage: 5,
+		Sections: []corpus.Section{{Number: 1, Page: 13, PDFPage: 15}}}}
+
+	out, kept := KeepTitles(old, fresh, plainMap(-2, 400))
+	if out[0].PDFPage != 5 {
+		t.Errorf("chapter I is on pdf %d, want the map's new 5", out[0].PDFPage)
+	}
+	if s := out[0].Sections[0]; s.Page != 13 || s.PDFPage != 15 {
+		t.Errorf("§ 1 is on printed %d, pdf %d, want 13 and the map's new 15",
+			s.Page, s.PDFPage)
+	}
+	if len(kept) != 0 {
+		t.Errorf("reported %v, want nothing: no reading changed", kept)
+	}
+}
+
+// A printed page kept when the map cannot place it either. The manifest's pdf
+// page is all there is, so it stands rather than becoming zero.
+func TestAKeptPageThatTheMapCannotPlaceHoldsItsPDFPage(t *testing.T) {
+	pm := &pagemap.Map{Entries: []pagemap.Entry{
+		{PDFPage: 204, Page: 202, Confidence: pagemap.FromHead},
+		{PDFPage: 205, Page: 204, Confidence: pagemap.FromHead},
+	}}
+	old := []corpus.Chapter{{Numeral: "1", Page: 202, PDFPage: 204,
+		Sections: []corpus.Section{{Number: 19, Page: 203, PDFPage: 205}}}}
+	fresh := []corpus.Chapter{{Numeral: "1", Page: 202, PDFPage: 204,
+		Sections: []corpus.Section{{Number: 19, Page: 201, PDFPage: 203}}}}
+
+	out, kept := KeepTitles(old, fresh, pm)
+	if s := out[0].Sections[0]; s.Page != 203 || s.PDFPage != 205 {
+		t.Errorf("§ 19 is on printed %d, pdf %d, want the manifest's 203 and 205",
+			s.Page, s.PDFPage)
+	}
+	if len(kept) != 1 {
+		t.Errorf("reported %v, want the one page it kept", kept)
+	}
+}
+
+// Chapter V of evt-i-v opens its historical note on pdf 338, a page whose
+// running head reads HISTORICAL NOTE and which carries a manual flag saying the
+// opening was filed by hand. A whole-shelf rebuild dropped the locator without
+// a word, which is how it was found.
+func TestALocatorTheRebuildLostIsKeptAndReported(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "V", Page: 1, PDFPage: 259,
+		Historical: &corpus.Locator{Page: 80, PDFPage: 338}}}
+	fresh := []corpus.Chapter{{Numeral: "V", Page: 1, PDFPage: 259}}
+
+	out, kept := KeepTitles(old, fresh, plainMap(-258, 400))
+	if out[0].Historical == nil {
+		t.Fatal("the historical note is gone, which is the whole defect")
+	}
+	if h := out[0].Historical; h.Page != 80 || h.PDFPage != 338 {
+		t.Errorf("the note is on printed %d, pdf %d, want 80 and 338", h.Page, h.PDFPage)
+	}
+	if len(kept) != 1 || kept[0].What != "historical note" || kept[0].Now != "nothing" {
+		t.Errorf("reported %+v, want the one note it kept", kept)
+	}
+}
+
+// A chapter that prints no historical note stays without one. Nil in the
+// manifest is not a reading that failed, it is the chapter as it is, and the
+// rebuild finding one there is the rebuild reading a page nobody had read.
+func TestALocatorTheManifestDoesNotHaveIsTakenFromTheRebuild(t *testing.T) {
+	old := []corpus.Chapter{{Numeral: "VIII", Page: 1, PDFPage: 259}}
+	fresh := []corpus.Chapter{{Numeral: "VIII", Page: 1, PDFPage: 259,
+		Historical: &corpus.Locator{Page: 90, PDFPage: 348}}}
+
+	out, kept := KeepTitles(old, fresh, plainMap(-258, 400))
+	if out[0].Historical == nil || out[0].Historical.Page != 90 {
+		t.Errorf("the note the rebuild found was not taken: %+v", out[0].Historical)
+	}
+	if len(kept) != 0 {
+		t.Errorf("reported %v, want nothing: there was no reading here to undo", kept)
 	}
 }

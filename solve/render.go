@@ -98,11 +98,43 @@ func (c *Context) renderOutside(b *strings.Builder) {
 	b.WriteString("References that leave the corpus\n\n")
 	b.WriteString(outsideInstruction)
 	b.WriteString("\n\n")
-	for _, p := range out {
+	for _, p := range out[:min(len(out), mostOutside)] {
 		fmt.Fprintf(b, "- %s\n", p.Raw)
+	}
+	if over := len(out) - mostOutside; over > 0 {
+		fmt.Fprintf(b, "\nand %d more, which are not named here because the list "+
+			"would be longer than the exercise. The rule above is the rule for all "+
+			"of them: where you use a result of a volume you have not been shown, "+
+			"say so in the form it gives.\n", over)
 	}
 	b.WriteString("\n")
 }
+
+// mostOutside is the cap on that list, and it is the cap that matters most.
+//
+// This block is in the floor. order never offers TheExercise, TheSection or
+// Outside up, so a context trimmed until everything that could go has gone still
+// carries this whole, and on the exercises where it is long it is most of what
+// is left. Commutative Algebra VI and VII § 1 exercise 1 each carry 545 of these
+// at 13723 characters, against a question limit of 32000: a trimmer that has
+// given up every reference and every sibling it had is still handing over 13.7k
+// of citation names it was never allowed to touch.
+//
+// It is the same shape as the cited-and-not-shown block above and it is worse,
+// because that one could at least be trimmed once it was counted and this one
+// cannot be. A count is what a list of five hundred names comes to either way.
+//
+// Measured on the floor itself, which is what solve context -ask 1 renders: VI
+// § 1 exercise 1 came to 22339 characters and comes to 10651, VII § 1 exercise 1
+// to 27270 and 15582. The same 11688 either way, because it is the same list.
+//
+// The instruction is what this block is for and the instruction is not a list:
+// it says that a result from a volume not shown must be named as such, and that
+// holds for the five hundred as much as for the forty. Nothing here was ever
+// giving the model the statements, only the names, so what the tail costs is
+// the model's chance to recognise one particular citation as being outside
+// rather than merely absent, and the sentence covers that case in general.
+const mostOutside = 40
 
 // renderNamed tells the model what is in the corpus and is not in front of it.
 //
@@ -114,6 +146,26 @@ func (c *Context) renderOutside(b *strings.Builder) {
 // because the two reasons want different things: a reference the cap dropped is
 // a reference somebody could raise the cap for, and a page citation that
 // narrowed only to a § is one the resolver could be made to read better.
+// It is capped, and the cap is the whole reason a question ever fit.
+//
+// RenderWithin trims the pieces and Chars measures the pieces, and this block is
+// neither trimmed nor counted. So the trimmer would cut a context down to the
+// room it was given and then write this out underneath it, unbounded, and the
+// question went out at whatever length that came to. Exercise 1 of Commutative
+// Algebra I § 1 measured 70.5k of context and left the assembler as a question of
+// 447.9k: 422.3k of it was this block, 5154 §§ at about 82 characters each,
+// which is the depth-2 closure of a Bourbaki cross-reference graph reaching most
+// of the Elements. The engine logged "sent anyway" and sent it, because from
+// where it stands an exercise that will not fit is a fact about the exercise.
+// Nothing was wrong with the exercise. 4284 of the 4434 unattempted exercises
+// were being asked this way, and the 42 that have solutions are all in the two
+// books whose closure happens to be small.
+//
+// A list of five thousand names is a count written the long way and tells the
+// model nothing a count would not. Past the cap the number is printed instead,
+// which is the one thing in the tail worth knowing.
+const mostNamed = 40
+
 func (c *Context) renderNamed(b *strings.Builder) {
 	if len(c.Named) == 0 {
 		return
@@ -122,12 +174,18 @@ func (c *Context) renderNamed(b *strings.Builder) {
 	b.WriteString("These are in the corpus and are not in front of you, for the " +
 		"reason given against each. If the solution turns on one of them, say so " +
 		"rather than guessing at what it says.\n\n")
-	for _, p := range c.Named {
+	for _, p := range c.Named[:min(len(c.Named), mostNamed)] {
 		name := p.Label
 		if p.Tag != "" {
 			name += ", tag " + p.Tag
 		}
 		fmt.Fprintf(b, "- %s: %s\n", name, p.Why.Sentence(c.Options.MaxChars))
+	}
+	if over := len(c.Named) - mostNamed; over > 0 {
+		fmt.Fprintf(b, "\nand %d more, not named here because naming them would be "+
+			"most of the question. They are cited from what you have been shown, at "+
+			"one or two removes, and the same applies: if the solution turns on "+
+			"something you have not been shown, say so.\n", over)
 	}
 	b.WriteString("\n")
 }

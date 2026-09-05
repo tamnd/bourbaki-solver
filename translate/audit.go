@@ -70,6 +70,7 @@ const (
 	RuleLanguage     = "language"
 	RuleBibliography = "bibliography"
 	RuleScript       = "script"
+	RuleRefusal      = "refusal"
 )
 
 // Audit compares a translated body with the English it was made from.
@@ -88,6 +89,7 @@ func Audit(lang, en, tr string) []Problem {
 		return []Problem{{Rule: RuleCommentary, Msg: "the answer is empty"}}
 	}
 	out = append(out, auditFrontMatter(tr)...)
+	out = append(out, auditRefusal(tr)...)
 	out = append(out, auditCommentary(tr)...)
 	out = append(out, auditMath(en, tr)...)
 	out = append(out, auditAttrs(en, tr)...)
@@ -112,6 +114,40 @@ func auditFrontMatter(tr string) []Problem {
 	}
 	return []Problem{{Rule: RuleFrontMatter, Line: 1,
 		Msg: "opens with a front matter fence, and the front matter is written by the tool"}}
+}
+
+// providerKinds are the textguard leaks that are the provider talking rather
+// than the model answering: a rate limit or a block from the gateway, and a
+// model declining the work. The transport returns both as a successful answer
+// because from its side they are one, a page came back with a body in it.
+//
+// These were already found, and by this same check. They were reported under
+// RuleCommentary along with narration, and -raw waives commentary, so the
+// message was written to the corpus under a full set of headers with a matching
+// source hash and looked finished to every pass after it. Eight sections of the
+// Vietnamese corpus were sitting in that state, each one holding "Unusual
+// activity has been detected from your device. Try again later." and a request
+// id. So the detection was never the gap; the waiver was. Giving these two
+// kinds a rule of their own is what lets takeRaw refuse to waive them without
+// also refusing to waive a model that narrated its translation.
+var providerKinds = map[string]bool{"gateway": true, "refusal": true}
+
+// Invariant 6a. A message from the provider is not a translation.
+//
+// Never waived by -raw. -raw exists to keep an answer the audit disliked, on the
+// grounds that a flawed translation is still a translation and is worth having
+// while the corpus is being filled. A refusal is not a translation at all and
+// there is nothing in it to fix later, which puts it with the transport failures
+// rather than with the audit.
+func auditRefusal(tr string) []Problem {
+	var out []Problem
+	for _, leak := range textguard.Check(tr) {
+		if providerKinds[leak.Kind] {
+			out = append(out, Problem{Rule: RuleRefusal, Line: leak.Line,
+				Msg: fmt.Sprintf("the answer is a message from the provider, not a translation, %s: %q", leak.Kind, leak.Detail)})
+		}
+	}
+	return out
 }
 
 // narration is a model saying what it has just done, in the words it says it in
@@ -146,6 +182,12 @@ var narration = []string{
 func auditCommentary(tr string) []Problem {
 	var out []Problem
 	for _, leak := range textguard.Check(tr) {
+		// The provider kinds are reported by auditRefusal instead, under a rule
+		// -raw does not waive. Reporting them here as well would say one bad
+		// answer twice and would put the count of problems out.
+		if providerKinds[leak.Kind] {
+			continue
+		}
 		out = append(out, Problem{Rule: RuleCommentary, Line: leak.Line,
 			Msg: fmt.Sprintf("%s: %q", leak.Kind, leak.Detail)})
 	}
@@ -182,11 +224,24 @@ func auditMath(en, tr string) []Problem {
 			Msg: "a math span is opened and never closed"})
 	}
 	want, _ := mathtex.Split(en)
+	named := false
 	if len(got) != len(want) {
-		out = append(out, Problem{Rule: RuleMath,
-			Msg: fmt.Sprintf("has %d math spans and the English has %d", len(got), len(want))})
+		msg := fmt.Sprintf("has %d math spans and the English has %d", len(got), len(want))
+		lost, added := alignSpans(want, got)
+		if len(lost) > 0 {
+			msg += ", and these are not in it: " + spanList(lost)
+		}
+		if len(added) > 0 {
+			msg += ", and these are in it and not in the English: " + spanList(added)
+		}
+		named = len(lost) > 0 || len(added) > 0
+		out = append(out, Problem{Rule: RuleMath, Msg: msg})
 	}
-	for i := 0; i < len(got) && i < len(want); i++ {
+	// The span-by-span comparison is only worth making while the two lists are
+	// still in step. Once one is short the alignment above has already said
+	// which spans went and which arrived, and every position after the first
+	// drop reports as changed when nothing at that position changed at all.
+	for i := 0; !named && i < len(got) && i < len(want); i++ {
 		if glossary.SameMath(want[i].Text, got[i].Text) && got[i].Display == want[i].Display {
 			continue
 		}
@@ -199,6 +254,123 @@ func auditMath(en, tr string) []Problem {
 		break
 	}
 	return append(out, auditMathProse(en, tr)...)
+}
+
+// spanAlignLimit is the most span pairs the alignment will compare. The whole
+// point of it is a chunk of a few dozen spans, and a quadratic run over a
+// pathological one is not worth the risk of holding a lane up.
+const spanAlignLimit = 40000
+
+// alignSpans says which of the English spans the answer does not have and which
+// of the answer's spans the English does not, by the longest common
+// subsequence of the two lists.
+//
+// A count is not something an answer can be corrected from, and that is what
+// the rule gave the model until now. Two exercises of the last Vietnamese run
+// stood on it for eleven attempts across two hosts and three sittings: one is
+// 54 inline spans in 2685 characters, a span every fifty characters and most of
+// them one letter, and the answers came back holding 52 of them, then 53, then
+// 52 nine times over. "has 52 math spans and the English has 54" tells the
+// model that it lost two of fifty-four and nothing at all about which two, so
+// the re-ask askChunk makes is another draw from the same urn. Naming them
+// makes it a correction.
+//
+// A subsequence and not a set, for the reason auditMath compares in order: a
+// model that reflows a paragraph moves a formula without losing it, and a set
+// comparison of a reflow says nothing happened. A span the model altered rather
+// than dropped falls out of this as one lost and one added, which is the same
+// finding the positional comparison would have made and says more, since it
+// carries no claim about where the span sits.
+//
+// Each one carries the last span the two sides agreed on before it, because the
+// text of a span is not always enough to find it by. A Topology X exercise came
+// back with 61 spans against the English's 60 and the extra one was "a", and
+// that chunk holds $a$ twice over legitimately, so "these are in it and not in
+// the English: "a"" names a letter the answer is right to have and leaves the
+// model to guess which of its three is the one too many. Two models of different
+// families guessed the same way and both guessed wrong. Anchored, it reads as
+// the extra "a" after "|h| \leq |f|", which is one span and not three.
+func alignSpans(want, got []mathtex.Span) (lost, added []spanMove) {
+	if len(want)*len(got) > spanAlignLimit {
+		return nil, nil
+	}
+	same := func(i, j int) bool {
+		return want[i].Display == got[j].Display && glossary.SameMath(want[i].Text, got[j].Text)
+	}
+	n, m := len(want), len(got)
+	dp := make([][]int, n+1)
+	for i := range dp {
+		dp[i] = make([]int, m+1)
+	}
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			switch {
+			case same(i, j):
+				dp[i][j] = dp[i+1][j+1] + 1
+			case dp[i+1][j] >= dp[i][j+1]:
+				dp[i][j] = dp[i+1][j]
+			default:
+				dp[i][j] = dp[i][j+1]
+			}
+		}
+	}
+	// after is the last span the two sides agreed on, which is the anchor both
+	// lists are reported against. It stays empty until the first agreement, and
+	// a span reported with no anchor is one before anything the two sides share.
+	after := ""
+	i, j := 0, 0
+	for i < n && j < m {
+		switch {
+		case same(i, j):
+			after = want[i].Text
+			i, j = i+1, j+1
+		case dp[i+1][j] >= dp[i][j+1]:
+			lost = append(lost, spanMove{Text: want[i].Text, After: after})
+			i++
+		default:
+			added = append(added, spanMove{Text: got[j].Text, After: after})
+			j++
+		}
+	}
+	for ; i < n; i++ {
+		lost = append(lost, spanMove{Text: want[i].Text, After: after})
+	}
+	for ; j < m; j++ {
+		added = append(added, spanMove{Text: got[j].Text, After: after})
+	}
+	return lost, added
+}
+
+// spanMove is one span that is on one side and not the other, and the last span
+// the two sides agreed on before it. After is empty for a span that comes before
+// anything they share, and then there is nothing to anchor it to but the start.
+type spanMove struct {
+	Text  string
+	After string
+}
+
+// spanList quotes the spans, at most six of them, each after the last span the
+// two sides agreed on. A list of forty is a count written the long way and is no
+// more use to the model than the count was.
+//
+// The anchor is dropped where it would not narrow anything: a span that comes
+// before the first agreement has none, and a span whose own text is the anchor's
+// is one of a repeated pair, where "after itself" is a sentence and not a place.
+func spanList(spans []spanMove) string {
+	const most = 6
+	parts := make([]string, 0, most)
+	for _, s := range spans[:min(len(spans), most)] {
+		one := window([]rune(strings.Join(strings.Fields(s.Text), " ")), 0)
+		if s.After != "" && s.After != s.Text {
+			one += " after " + window([]rune(strings.Join(strings.Fields(s.After), " ")), 0)
+		}
+		parts = append(parts, one)
+	}
+	out := strings.Join(parts, ", ")
+	if len(spans) > most {
+		out += fmt.Sprintf(", and %d more", len(spans)-most)
+	}
+	return out
 }
 
 // Invariant 1 read the other way round. A word set inside the mathematics is
@@ -340,6 +512,30 @@ func headings(body string) []heading {
 // numbered paragraph of all thirteen notes to the reader, which is the first
 // page a reader of a Vietnamese volume opens.
 var bibEntryRE = regexp.MustCompile(`^\d+\s*(\(\*?bis\*?\)\s*)?\.\s`)
+
+// refTailRE is the end of a printed reference: the volume, the year in
+// parentheses and the pages. It reads a citation by its tail because the
+// opener is what bibEntryRE cannot be trusted on, and the tail is the part no
+// running sentence has.
+//
+// Exercise 15 of § 2 of Topological Vector Spaces I carries a footnote, and the
+// footnote is a citation: "1 For the exercises 12 and 13, see O. Goldman and N.
+// Iwahori, The space of p-adic norms, Acta math., 109 (1963), pp. 137-177." The
+// marker is a bare 1 with no period after it, so bibEntryRE does not see a
+// bibliography entry, the line stays in the prose, and the only occurrence of
+// the word space in that file is inside the title of the cited paper. The
+// terminology rule then asked for "không gian" in a paper's name, the chunk was
+// refused on all three attempts and the file was one of fifteen the run could
+// not land.
+//
+// Over content/en this shape is on 268 lines of 259,261. bibEntryRE already
+// covers 88 of them and the other 180 are the bracket-numbered references of
+// the historical notes, "[4] E. Heine, Über trigonometrische Reihen, Crelle's
+// Journal, 71 (1870), pp. 353-365.", which have the same fault for the same
+// reason: the German and French titles of the works cited stand as printed, and
+// every English word in one of them was being read as English left in the
+// answer.
+var refTailRE = regexp.MustCompile(`\(\d{4}\),?\s*pp?\.\s*\d`)
 
 // bibAuthorRE and bibTitleRE are what tells an entry from a numbered paragraph.
 //

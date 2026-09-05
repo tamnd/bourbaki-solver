@@ -310,6 +310,17 @@ func TestItemOpenOnRealMarkers(t *testing.T) {
 		"¶ **9)** Consider the operation of s on its enveloping algebra.",
 		"**¶5)** Assume that g is semi-simple.",
 		`$7)^*$Let $d_1, . . . , d_l$ be the characteristic degrees.`,
+		// The section sign standing where the pilcrow is printed. All four are
+		// cut out of the pages as they stand.
+		"**§ 4.** Let $X$ be a set and $c$ a cardinal.",
+		"§ 11. A topological space is said to be solvable.",
+		"§ 9) Soient E un espace vectoriel de dimension $n$.",
+		"**§ 27.** (a) Let A be a commutative ring.",
+		// The pilcrow read as a letter. All four are cut out of the pages.
+		"**T 17) Let A be the set of increasing maps.",
+		"T 6) On suppose G simplement connexe.",
+		"**Q 11) Soit (W, S) un système de Coxeter.",
+		`**Π 13)** \* We keep the general hypothesis.`,
 	} {
 		if !itemOpen(s) {
 			t.Errorf("itemOpen(%q) = false", s)
@@ -320,10 +331,57 @@ func TestItemOpenOnRealMarkers(t *testing.T) {
 		"(i) The module M is simple.",
 		"Let A be a ring and 15) is not how a sentence opens.",
 		"$$ 5) $$",
+		// A cross reference to a subsection, set on a line of its own. The digit
+		// after the full stop is what keeps it out, and chapters I and III of
+		// Lie hold six of them.
+		"§ 4.3",
+		"§ 1.10",
+		// A label is a capital against its number with no space, and the corpus
+		// writes 307 of them. A is a case of an argument and not a mark, which
+		// is why it is not one of the four letters read as a pilcrow.
+		"C1. The space is Hausdorff.",
+		"S2. Let A be a ring.",
+		"E1) The module is free.",
+		"A 2) *Cas général* ($p = 1$).",
 	} {
 		if itemOpen(s) {
 			t.Errorf("itemOpen(%q) = true", s)
 		}
+	}
+}
+
+// The section sign is a misread pilcrow and has to mark what the pilcrow marks,
+// or the exercise it opens comes out unstarred. § 7 of chapter I of Algebra is
+// the case that found it: nothing could read "**§ 4.**", so the § stopped at the
+// third of the forty exercises the volume prints and the other 37 were appended
+// to the body of the third.
+func TestSectionSignIsAPilcrow(t *testing.T) {
+	m := exNumRE.FindStringSubmatch("**§ 4.** Let $X$ be a set and $c$ a cardinal.")
+	if m == nil {
+		t.Fatal(`"**§ 4.**" was not read as a marker`)
+	}
+	if m[2] != "4" {
+		t.Errorf("the marker carries the number %q", m[2])
+	}
+	star, pilcrow := marksOf(m[1])
+	if pilcrow == "" {
+		t.Errorf("marksOf(%q) read no pilcrow off the marker", m[1])
+	}
+	if star != "" {
+		t.Errorf("marksOf(%q) read a star %q that is not printed", m[1], star)
+	}
+}
+
+// The heading of a § spells a section sign and a number as well, so the sign is
+// taken only where the number is the one the § is up to. This is the guard that
+// lets the sign be read at all.
+func TestSectionSignNeedsTheNumberTheSectionIsUpTo(t *testing.T) {
+	const line = "§ 11. A topological space is said to be solvable."
+	if i, _ := itemStart(line, 11); i != 0 {
+		t.Errorf("exercise 11 was not found at the head of the block, i = %d", i)
+	}
+	if i, _ := itemStart(line, 4); i >= 0 {
+		t.Errorf("the line was read as exercise 4 at %d", i)
 	}
 }
 
@@ -412,6 +470,71 @@ func TestSentenceEnd(t *testing.T) {
 		"with the preorder relation (Chapter II, § 6, no.", "see VIII, p.", "cf.", "as in fig."} {
 		if sentenceEnd(s) {
 			t.Errorf("sentenceEnd(%q) = true", s)
+		}
+	}
+}
+
+// The rest of the citation form the books use, in the shape that does the
+// damage: the reference that closes on its own number, so that the number reads
+// as the marker of the exercise the § is next expecting.
+func TestSentenceEndOnTheCitationsTheBooksPrint(t *testing.T) {
+	for _, s := range []string{
+		"montrer que si X est un espace inépuisable (IX, p. 112, exerc.",
+		"the strong dual of E is exhaustible (III, p. 49, exerc.",
+		"is complete ($cf.$ III, p. 20, th.",
+		"a countable base for the bornology (II, p. 34, prop.",
+		"Every Fréchet space has the property (GDF) (I, p. 19, cor.",
+		"si la bornologie canonique (III, p. 3, déf.",
+		"is archimedean (VI, p. 35, Ex.",
+		"of the same section (VIII, p. 129, Exer.",
+		"$\\mathbf{Z}[\\sqrt{D}]$ lorsque $D \\equiv 1$ (mod.",
+		"§ 2, n° 2, prop. 2 et VIII, § 1, n° 3, rem.",
+		"We will see later (Sect.",
+		"si G est dénombrable à l’infini : cf. App.",
+	} {
+		if sentenceEnd(s) {
+			t.Errorf("sentenceEnd(%q) = true", first(s, 50))
+		}
+	}
+}
+
+// The citation that cost § 5 of chapter IX of Topologie generale in French its
+// twenty fifth exercise and everything printed after it.
+func TestItemStartIgnoresACitationOfAnExercise(t *testing.T) {
+	s := "25) Soit R une relation d’équivalence ouverte dans un espace topologique X. " +
+		"Montrer que si X est un espace inépuisable (IX, p. 112, exerc. 7) (resp. un espace de Baire), X/R est inépuisable."
+	if i, _ := itemStart(s, 7); i >= 0 {
+		t.Errorf("itemStart(%q, 7) found an exercise at %d", first(s, 40), i)
+	}
+	if i, _ := itemStart(s, 25); i != 0 {
+		t.Errorf("itemStart(%q, 25) = %d, want 0", first(s, 40), i)
+	}
+}
+
+// The bold closes between the number and the bracket. All seven in the corpus
+// are here in the two shapes it is written in.
+func TestTheBoldCanCloseBeforeTheBracket(t *testing.T) {
+	for _, s := range []struct {
+		line string
+		n    int
+	}{
+		{"**T 1**) Let $E$ be a locally convex metrizable space, and $E'_b$ its strong dual.", 1},
+		{"**T 2**) An infra-barrelled space is semi-barrelled.", 2},
+		{"**T 25**) Let $E$ be a Banach space satisfying the first axiom of countability.", 25},
+		{"**¶ 15**) Soit $A$ un anneau. Montrer que tout $A$-module à gauche $E$ est plat.", 15},
+		{"**¶ 18**) Soit $A$ un anneau absolument plat (exerc. 17).", 18},
+		{"**¶ 28**) Soient $A$ un corps commutatif de caractéristique 2.", 28},
+	} {
+		m := exNumRE.FindStringSubmatch(s.line)
+		if m == nil {
+			t.Errorf("exNumRE does not match %q", first(s.line, 40))
+			continue
+		}
+		if got, _ := strconv.Atoi(m[2]); got != s.n {
+			t.Errorf("exNumRE on %q read %q, want %d", first(s.line, 40), m[2], s.n)
+		}
+		if _, pilcrow := marksOf(m[1]); pilcrow == "" {
+			t.Errorf("marksOf(%q) found no pilcrow", m[1])
 		}
 	}
 }
@@ -838,6 +961,73 @@ func TestARunSplitsTwoMembersThePageRanTogether(t *testing.T) {
 	}
 	if !strings.HasPrefix(got[1].Body, "The following symbols") {
 		t.Errorf("the second member was not read: %q", got[1].Body)
+	}
+}
+
+// The other end of the same cut, and the one the printings actually make: the
+// head carries member 1 on its own line and member 2 opens the line under it.
+// The block above cannot make this cut, because the run is not open until this
+// block has been read as its first member and next is still 0 when it is asked.
+// no. 11 of § 5 of chapter IV of Integration is read this way.
+func TestARunSplitsWhereItsHeadCarriesTheFirstMember(t *testing.T) {
+	in := blocks(
+		"### 11. Espaces de fonctions mesurables",
+		"**Remarques.** — 1) L’espace vectoriel topologique $\\mathcal{S}(X, \\mu; F)$ n’est pas nécessairement localement convexe.\n2) La topologie induite par la topologie de la convergence en mesure est moins fine.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "int", Chapter: "IV", Section: 5}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"int-iv-s5-n11-rem-1",
+		"int-iv-s5-n11-rem-2",
+	})
+	if strings.Contains(got[0].Body, "La topologie induite") {
+		t.Errorf("the second member stayed in the body of the first: %q", got[0].Body)
+	}
+	if !strings.HasPrefix(got[1].Body, "La topologie induite") {
+		t.Errorf("the second member was not read: %q", got[1].Body)
+	}
+}
+
+// The cut looks for the one number the run is up to and it has to be at the
+// front of a line, which is what keeps a member that cites an earlier one whole.
+func TestARunDoesNotSplitOnACrossReferenceToAMember(t *testing.T) {
+	in := blocks(
+		"### 4. Mesures définies par des densités",
+		"**Remarques.** — 1) Le raisonnement de la prop. 3 s’applique, voir 2) ci-dessous.\n3) On notera que cette hypothèse est nécessaire.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "int", Chapter: "V", Section: 5}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"int-v-s5-n4-rem-1"})
+	for _, want := range []string{"voir 2) ci-dessous", "3) On notera"} {
+		if !strings.Contains(got[0].Body, want) {
+			t.Errorf("the body was cut at %q: %q", want, got[0].Body)
+		}
+	}
+}
+
+// The star that opens a passage in small type stands in front of the number and
+// comes off with it, so it has to go back on the body. Five of the eight members
+// of runs that open on it close the passage on the same line, and dropping it
+// leaves the star at the far end without its pair. The members write it escaped,
+// which is not how a head writes it. See smallTypeMark.
+func TestAMemberOfARunKeepsTheStarThatOpensSmallType(t *testing.T) {
+	in := blocks(
+		"### 9. Locally Compact Spaces",
+		"*Examples*",
+		"(1) Every compact space is locally compact.",
+		"\\* (2) The real line $\\mathbf{R}$ is locally compact, since it is the union of the intervals $[-n, +n]$. \\*",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "top", Chapter: "I", Section: 9}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"top-i-s9-n9-exa-1", "top-i-s9-n9-exa-2"})
+	if !strings.HasPrefix(got[1].Body, "\\* The real line") {
+		t.Errorf("the member lost the mark the printing set: %q", got[1].Body)
 	}
 }
 
@@ -1370,5 +1560,75 @@ func TestANoIsReadWhenTheFascicleNumbersItByItsSection(t *testing.T) {
 	m := subsecRE.FindStringSubmatch("### 3. 2-groupes")
 	if m == nil || m[1] != "3" || m[2] != "2-groupes" {
 		t.Errorf("### 3. 2-groupes gives %v", m)
+	}
+}
+
+// The third place the cut has to be made, and the one that needed a guard. A
+// member whose last paragraph runs over the foot of the page arrives as a block
+// of prose with the next member under it, so the block opens on neither member:
+// the cut before statementAt wants the block to open on the member the run is up
+// to, and the cut after it is given a body this block has no statement head to
+// produce. Example 2 of no. 1 of § 4 of chapter I of Functions of a Real Variable
+// is the case, where the display for $x^2$ ends the block and "3) The function
+// $|x|$ is convex" opens the line under it.
+func TestARunSplitsAMemberOffTheBlockThatCarriesTheOneBeforeIt(t *testing.T) {
+	in := blocks(
+		"### 1. Definition of a convex function",
+		"*Examples*",
+		"1) Every affine linear function is convex.",
+		"2) The function $x^2$ is convex on $\\mathbf{R}$.",
+		"for $0 \\leq \\lambda \\leq 1$.\n3) The function $|x|$ is convex on $\\mathbf{R}$.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "fvr", Chapter: "I", Section: 4}, printings["en"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{
+		"fvr-i-s4-n1-exa-1",
+		"fvr-i-s4-n1-exa-2",
+		"fvr-i-s4-n1-exa-3",
+	})
+	if !strings.HasPrefix(got[2].Body, "The function $|x|$") {
+		t.Errorf("the third member was not read: %q", got[2].Body)
+	}
+}
+
+// The guard on that cut. A run stays open across the statements printed between
+// its members, so without it every enumeration in every proof after a Remarque 1
+// is read as Remarque 2. Page 109 of the French Lie II and III is where it cost
+// something: the proof of a proposition enumerates the steps 1) 2) 3), the run
+// opened by Remarque 1 was still counting, and the volume came out with two
+// statements labelled lie-iii-s1-n8-rem-2 and would not assemble at all.
+func TestAnEnumerationInAProofIsNotTheNextMemberOfAnOpenRun(t *testing.T) {
+	in := blocks(
+		"### 8. Fibrés vectoriels",
+		"**Remarque.** — 1) On peut remplacer les lois à gauche par les lois à droite.",
+		"PROPOSITION 4. — *Soit $E$ un fibré vectoriel de base $X$.*",
+		"Pour $x \\in V$, $\\varphi_x$ s’obtient en composant les applications suivantes :\n2) l’application $f$ de $E_0$ dans $E_0$;",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "lie", Chapter: "III", Section: 1}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"lie-iii-s1-n8-rem-1", "lie-iii-s1-prop-4"})
+}
+
+// Ten of the thirteen members that had gone into the body of the one before them
+// were indented rather than run together, because the reading indents a member
+// the printing set as a hanging paragraph. Four spaces were enough to hide the
+// marker from patterns anchored at the head of the line. Exemple 1 of no. 1 of
+// § 9 of chapter I of Algebra is the case.
+func TestAnIndentedMemberIsStillAMemberOfTheRun(t *testing.T) {
+	in := blocks(
+		"### 1. Corps",
+		"Exemples. — 1) Nous définirons au n° 4 le corps des nombres rationnels.\n    2) L’anneau $\\mathbf{Z}/2\\mathbf{Z}$ est évidemment un corps.",
+	)
+	_, got, err := statements(in, corpus.Ref{Book: "alg", Chapter: "I", Section: 9}, printings["fr"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	same(t, labels(got), []string{"alg-i-s9-n1-exa-1", "alg-i-s9-n1-exa-2"})
+	if !strings.HasPrefix(got[1].Body, "L’anneau") {
+		t.Errorf("the indent stayed on the member: %q", got[1].Body)
 	}
 }
