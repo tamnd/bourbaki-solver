@@ -82,3 +82,43 @@ func TestARateIsReportedAgainstWhatItIsHeldTo(t *testing.T) {
 		t.Errorf("a rate with nothing behind it read %q", none)
 	}
 }
+
+// The wrong directory and a broken set both end the run before a host is asked,
+// and they are not the same thing to go and fix, so they must not read the same.
+func TestEveryAnswerMissingIsReportedAsTheWrongCorpusAndNotAsABrokenSet(t *testing.T) {
+	const root = "/somewhere/that/is/not/the/corpus"
+	err := evalMissing(3, "set.json", root, []string{
+		filepath.Join(root, "benchmark", "en", "alg-viii-s1-ex-1.as-solved.md"),
+		filepath.Join(root, "benchmark", "en", "alg-viii-s1-ex-1.flawed-converse.md"),
+		filepath.Join(root, "benchmark", "en", "alg-viii-s1-ex-2.as-solved.md"),
+	})
+	if err == nil {
+		t.Fatal("a set with nothing on disk ran on")
+	}
+	if !strings.Contains(err.Error(), root) {
+		t.Errorf("the root that was searched is not in %q, and it is the thing that was wrong", err)
+	}
+	if !strings.Contains(err.Error(), "BOURBAKI_CORPUS") {
+		t.Errorf("%q does not say how to point the run at a corpus", err)
+	}
+}
+
+func TestSomeAnswersMissingStillNamesTheSetAndTheFirstFile(t *testing.T) {
+	const root = "/a/corpus"
+	first := filepath.Join(root, "benchmark", "en", "alg-viii-s1-ex-2.as-solved.md")
+	err := evalMissing(3, "set.json", root, []string{first})
+	if err == nil {
+		t.Fatal("a set naming a file nobody wrote ran on")
+	}
+	for _, want := range []string{"set.json", first, root} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("%q does not name %s", err, want)
+		}
+	}
+}
+
+func TestNothingMissingIsNotAnError(t *testing.T) {
+	if err := evalMissing(3, "set.json", "/a/corpus", nil); err != nil {
+		t.Errorf("a set that is entirely on disk was refused: %v", err)
+	}
+}
