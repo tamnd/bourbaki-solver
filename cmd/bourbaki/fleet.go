@@ -84,6 +84,29 @@ func (f *fleetFlags) registry() (route.Registry, string, error) {
 	return registry, source, nil
 }
 
+// noSSHHost says that nothing is left to work with, and blames the right thing
+// for it.
+//
+// The message used to name the route file whether or not the route file was the
+// reason. -only narrows the registry before this is reached, so asking probe for
+// a gateway or subscription route by name emptied the selection and was told
+// "no route in routes.json names an ssh host" about a file holding four of them.
+// That was read as the file being wrong and sent somebody to look at it; the
+// answer was that the route asked for is not reachable over ssh and never was.
+// A run against that same route then failed on the first ask, an hour later,
+// with the model's own 400.
+//
+// The file is still to blame when nothing was selected, and then it is still
+// named.
+func (f *fleetFlags) noSSHHost(source, adjective string) error {
+	if names := strings.TrimSpace(f.only); names != "" {
+		return fmt.Errorf("no %sroute named in -only %s reaches a box over ssh, "+
+			"so there is nothing to do here: gateway and subscription routes are asked directly",
+			adjective, names)
+	}
+	return fmt.Errorf("no %sroute in %s names an ssh host", adjective, source)
+}
+
 func (f *fleetFlags) statePath() string {
 	if strings.TrimSpace(f.state) != "" {
 		return f.state
@@ -149,7 +172,7 @@ func runFleetProbe(args []string) error {
 		targets = append(targets, fleetTarget(value))
 	}
 	if len(targets) == 0 {
-		return fmt.Errorf("no route in %s names an ssh host", source)
+		return flags.noSSHHost(source, "")
 	}
 
 	ctx, cancel := signalContext()
@@ -249,7 +272,7 @@ func runFleetAccounts(args []string) error {
 	}
 	targets := sshTargets(registry)
 	if len(targets) == 0 {
-		return fmt.Errorf("no enabled route in %s names an ssh host", source)
+		return flags.noSSHHost(source, "enabled ")
 	}
 
 	ctx, cancel := signalContext()
@@ -323,7 +346,7 @@ func runFleetUp(args []string) error {
 	}
 	links := links(registry, false)
 	if len(links) == 0 {
-		return fmt.Errorf("no enabled route in %s names an ssh host", source)
+		return flags.noSSHHost(source, "enabled ")
 	}
 
 	ctx, cancel := signalContext()
