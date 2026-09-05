@@ -56,8 +56,27 @@ type scorecard struct {
 	// and Disputed is how many of those readings found something the status does
 	// not say. Believed counts what the judges decided; these two are the only
 	// numbers on this card that somebody checked.
-	HandRead    int            `json:"hand_read"`
-	Disputed    int            `json:"disputed"`
+	HandRead int `json:"hand_read"`
+	Disputed int `json:"disputed"`
+	// Contested is how many solutions stand at verified with a reader's finding
+	// against them, and it is the one number on this card that names a file the
+	// corpus is currently getting wrong.
+	//
+	// Disputed already counted these, but it counted them next to hand read,
+	// where they read as a note on the reading rather than on the status.
+	// Believed went on counting all of them, so the card could say believed 37
+	// and disputed 81% of the readings in the same breath and never say that 15
+	// of the 37 were solutions somebody had read and objected to. Two of those
+	// objections are that the proof assumes the result of the preceding
+	// exercise, which is the failure a fluent wrong proof actually looks like
+	// and is exactly what the judges cannot see.
+	//
+	// It is reported and not subtracted. A finding is a reader's note and not a
+	// verdict, some of them are about the delimiters rather than the argument,
+	// and moving a status is a decision about the mathematics that belongs in
+	// the file rather than in a count. The card's job is to stop the number
+	// being quoted without it.
+	Contested   int            `json:"contested"`
 	Corrections map[int]int    `json:"corrections"`
 	Models      map[string]int `json:"models"`
 	Sections    []sectionScore `json:"sections,omitempty"`
@@ -147,6 +166,9 @@ func score(exercises []string, held map[string]solve.Solution, lang string) scor
 				card.HandRead++
 				if len(sol.Meta.Found) > 0 {
 					card.Disputed++
+					if status == corpus.StatusVerified {
+						card.Contested++
+					}
 				}
 			}
 			card.Corrections[sol.Meta.Corrections]++
@@ -194,6 +216,10 @@ func printScorecard(card scorecard, sections bool) {
 	}
 	fmt.Printf("\nanswered     %5d  %5.1f %%\n", card.Answered, percent(card.Answered, card.Exercises))
 	fmt.Printf("believed     %5d  %5.1f %%\n", card.Believed, percent(card.Believed, card.Exercises))
+	if card.Contested > 0 {
+		fmt.Printf("  contested  %5d  %5.1f %% of them a reader has objected to\n",
+			card.Contested, percent(card.Contested, card.Believed))
+	}
 	if card.Parts.Total > 0 {
 		fmt.Printf("parts        %5d  %5.1f %% of them verified\n",
 			card.Parts.Total, percent(card.Parts.Verified, card.Parts.Total))
