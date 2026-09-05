@@ -67,7 +67,7 @@ func runFleetBench(args []string) error {
 		targets = append(targets, fleetTarget(value))
 	}
 	if len(targets) == 0 {
-		return fmt.Errorf("no route in %s names an ssh host", source)
+		return flags.noSSHHost(source, "enabled ")
 	}
 	ctx, cancel := signalContext()
 	defer cancel()
