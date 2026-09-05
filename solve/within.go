@@ -57,9 +57,19 @@ const OverAsk Reason = "over-ask"
 // piece that goes moves into the block that says what is in the corpus and is
 // not in front of you, and a statement cut out of the § leaves its name behind
 // where it stood.
+// A limit of zero or below is a room of nothing and not an absence of a limit,
+// and the two shared a branch here. Every caller works the room out by
+// subtraction, limit less what the rest of the question already takes, so a
+// call whose instructions, reference and candidate solution fill the limit on
+// their own asks for a room of zero or below. That is the tightest a question
+// is ever assembled and the one place trimming earns its keep, and the branch
+// answered it by returning the whole context. Asking for a room of one
+// character trimmed this context to 2491; asking for a room of none returned
+// 10856 of it. The unlimited case never reaches here: the engine returns Render
+// itself when its limit is negative, before any room is worked out.
 func (c *Context) RenderWithin(limit int, cited string) string {
 	out := c.Render()
-	if limit <= 0 || len(out) <= limit {
+	if len(out) <= limit {
 		return out
 	}
 	cited += "\n" + c.Exercise()

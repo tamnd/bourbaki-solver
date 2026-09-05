@@ -46,8 +46,15 @@ func TestAContextThatFitsIsSentWhole(t *testing.T) {
 	if got, want := c.RenderWithin(len(c.Render()), ""), c.Render(); got != want {
 		t.Error("a context inside the limit was trimmed")
 	}
-	if got, want := c.RenderWithin(0, ""), c.Render(); got != want {
-		t.Error("a limit of zero trimmed the context")
+	// This asserted the reverse, that a limit of zero was no limit and sent the
+	// context whole. Nothing asked for it that way: all four callers work the
+	// room out as the limit less what the rest of the question already takes,
+	// and the engine returns Render itself for an unlimited run before a room is
+	// ever computed. What the branch actually served was the truth judge, whose
+	// question carries a reference and a solution and so can leave a room of
+	// nothing, being handed the whole context at the tightest moment there is.
+	if got := c.RenderWithin(0, ""); len(got) >= len(c.Render()) {
+		t.Error("a room of nothing was sent the context whole")
 	}
 }
 
@@ -267,5 +274,45 @@ func TestAShortListOfWhatIsMissingIsPrintedWhole(t *testing.T) {
 	}
 	if strings.Contains(out, "more, not named here") {
 		t.Errorf("a list of 3 was told it had a tail:\n%s", tail(out))
+	}
+}
+
+// A room of nothing is not the same as no limit, and the two shared a branch.
+//
+// within computes the room as the limit less what the rest of the question
+// already takes, so a call whose instructions, reference and candidate solution
+// fill the limit on their own asks for a room of zero or below. That is the
+// tightest a question is ever assembled and the one place trimming matters
+// most. The unlimited case never reaches here: within returns Render itself
+// when the engine's limit is negative, and every other caller computes the room
+// by subtraction the same way.
+//
+// The branch read limit <= 0 and returned the whole context, so the assembler
+// answered "there is no room at all" by sending everything it had.
+func TestAContextGivenNoRoomAtAllGivesUpEverythingItCan(t *testing.T) {
+	c := wide()
+	whole := c.Render()
+
+	for _, room := range []int{0, -1, -5000} {
+		out := c.RenderWithin(room, "")
+		if len(out) >= len(whole) {
+			t.Errorf("a room of %d was rendered at %d characters, the whole of it being %d",
+				room, len(out), len(whole))
+		}
+		// The floor and not nothing: the exercise is never given up, because a
+		// question without it is not a question.
+		if !strings.Contains(out, "the exercise to solve") {
+			t.Errorf("a room of %d dropped the exercise itself", room)
+		}
+	}
+}
+
+// The floor a room of nothing reaches is the floor every tighter room reaches,
+// because the same things are undroppable either way.
+func TestNoRoomAndAVeryTightRoomComeToTheSameThing(t *testing.T) {
+	c := wide()
+	if got, want := c.RenderWithin(0, ""), c.RenderWithin(1, ""); got != want {
+		t.Errorf("a room of 0 rendered %d characters and a room of 1 rendered %d",
+			len(got), len(want))
 	}
 }
