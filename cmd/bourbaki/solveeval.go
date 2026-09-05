@@ -117,9 +117,8 @@ func runSolveEval(args []string) error {
 	if err != nil {
 		return err
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%s names %d answers the corpus does not hold, the first is %s",
-			where, len(missing), missing[0])
+	if err := evalMissing(len(work), where, root, missing); err != nil {
+		return err
 	}
 
 	c, err := solve.Read(root, f.lang)
@@ -251,6 +250,34 @@ func evalPlan(set benchmark.Set, f solveEvalFlags) benchmark.Set {
 }
 
 // evalBodies reads every answer, and names the ones that are not there.
+// evalMissing says what the answers that are not on disk mean, which is two
+// different things depending on how many of them there are.
+//
+// Some of them missing is what the message has always said: the set names a
+// file nobody wrote, and naming the first one is enough to go and look.
+//
+// All of them missing is not that. A set that was ever right does not lose
+// every case at once, and corpus.Root falls back to the working directory when
+// BOURBAKI_CORPUS is unset, so this is what running from the wrong directory
+// looks like and nothing else. The old message said the same sentence for both
+// and named the set and the first file and never the root it looked under, so
+// the wrong directory read as a broken benchmark set. A run was started from
+// the solver checkout, where benchmark/ holds the code and the corpus holds the
+// answers, and was read that way. Both messages now name the root, because the
+// root is the thing that was wrong and it was the one thing not on the screen.
+func evalMissing(cases int, where, root string, missing []string) error {
+	switch {
+	case len(missing) == 0:
+		return nil
+	case len(missing) == cases:
+		return fmt.Errorf("no answer of the %d in %s is under %s, so that is not the corpus: "+
+			"set BOURBAKI_CORPUS or run from the corpus checkout", cases, where, root)
+	default:
+		return fmt.Errorf("%s names %d answers the corpus at %s does not hold, the first is %s",
+			where, len(missing), root, missing[0])
+	}
+}
+
 func evalBodies(set benchmark.Set, root, lang string) (map[string]string, []string, error) {
 	bodies, missing := map[string]string{}, []string(nil)
 	for _, c := range set {
