@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/tamnd/bourbaki-solver/fleet"
@@ -126,10 +127,11 @@ func runFleetAsk(args []string) error {
 
 // noteAsk writes this ask into the record fleet accounts reads back.
 //
-// The usage above calls this the only honest check that a host will answer, and
-// until now its verdict went to the terminal and nowhere else. The record was
-// written by one command, bourbaki translate, so the taking column spoke for
-// the translate driver and for nothing else on the fleet.
+// One command wrote that record, bourbaki translate, so the taking column spoke
+// for the translate driver and for nothing else on the fleet. The usage above
+// calls fleet ask the only honest check that a host will answer, and its verdict
+// went to the terminal and nowhere else; solve kept ask-usage.jsonl, which is
+// this run's questions in full and is nobody's idea of a live board.
 //
 // That column exists to catch a host whose profiles count as ready and will not
 // take a prompt, and it failed to catch one. It read "8/10, first one back now"
@@ -142,13 +144,30 @@ func runFleetAsk(args []string) error {
 // A failure to write is printed and not returned. The answer is the point of
 // the command and the reader is standing at the terminal looking at it; losing
 // the bookkeeping is not a reason to exit non-zero on an ask that worked.
+//
+// It is said once. This is called from the solve lanes as well as from the one
+// ask, and a record file that cannot be opened cannot be opened for all of the
+// thousands of questions a run makes: the second copy of that line onwards is
+// noise over the log somebody needs to read.
 func noteAsk(host string, err error) {
 	led := fleet.NewLedger()
 	led.Note(host, fleet.Classify(err))
+	// Append re-reads and rewrites, so two lanes landing together would
+	// otherwise each write what they read and the later one would drop the
+	// other's ask.
+	askRecord.Lock()
+	defer askRecord.Unlock()
 	if err := led.Append(fleet.LedgerPath()); err != nil {
-		fmt.Fprintf(os.Stderr, "this ask could not be added to the record: %v\n", err)
+		askRecordBad.Do(func() {
+			fmt.Fprintf(os.Stderr, "asks could not be added to the record: %v\n", err)
+		})
 	}
 }
+
+var (
+	askRecord    sync.Mutex
+	askRecordBad sync.Once
+)
 
 // padTo pads a question out to a length with filler that says what it is.
 //

@@ -389,6 +389,16 @@ func (a fleetAsker) Ask(ctx context.Context, id, question string) (solve.Answer,
 		question, "solve-"+strings.ReplaceAll(id, "/", "_"), a.keep)
 	answer, err := ocr.Recorded{Asker: call, Stage: "solve", Host: a.host.Name,
 		Target: id, Chars: len(question), Note: a.note}.Do(ctx)
+	// Both records, because they answer different questions. ask-usage.jsonl is
+	// this run's questions in full and is read afterwards; the ask record is the
+	// last two hours across every run and is what fleet accounts prints before
+	// anybody points more lanes at a host. Solving was in the first and not the
+	// second, so a board drawn during a solve run could say a host was taking
+	// prompts on the strength of a translate run that had already finished.
+	//
+	// Written per ask rather than merged at the end. A run that is killed is the
+	// ordinary case here, and it is the run whose record is worth the most.
+	noteAsk(a.host.Name, err)
 	if err != nil {
 		return solve.Answer{}, err
 	}
