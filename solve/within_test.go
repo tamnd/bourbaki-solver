@@ -1,6 +1,7 @@
 package solve
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -217,5 +218,54 @@ func TestTheStatementTheSolutionArguesFromIsTheOneKept(t *testing.T) {
 	}
 	if strings.Contains(got, "A principal ideal domain is Noetherian") {
 		t.Error("the statement nothing points at was kept instead")
+	}
+}
+
+// manyNamed is a context whose closure reached most of the corpus, which is the
+// ordinary case for a book that cites across volumes and is what the cap is for.
+func manyNamed(n int) *Context {
+	c := wide()
+	for i := range n {
+		c.Named = append(c.Named, Piece{Kind: Reference,
+			Label: fmt.Sprintf("top-iii-s%d", i), Why: SectionOnly})
+	}
+	return c
+}
+
+// The block that says what is in the corpus and is not in front of you is
+// neither trimmed by RenderWithin nor counted by Chars, so before it was capped
+// it was written out under a trimmed context at whatever length it came to and
+// the question went out at that length. Exercise 1 of Commutative Algebra I § 1
+// left the assembler at 447.9k characters against a 28k room, 422.3k of it this
+// block, and the engine sent it because from where it stands an exercise that
+// will not fit is a fact about the exercise.
+func TestAContextThatCitedMostOfTheCorpusStillFitsTheRoomItWasGiven(t *testing.T) {
+	c := manyNamed(5154)
+	out := c.RenderWithin(28000, "")
+
+	if len(out) > 28000 {
+		t.Errorf("the question is %d characters against a room of 28000", len(out))
+	}
+	if strings.Count(out, "\n- top-iii-s") > mostNamed {
+		t.Errorf("named %d of them, want at most %d",
+			strings.Count(out, "\n- top-iii-s"), mostNamed)
+	}
+	if !strings.Contains(out, fmt.Sprintf("and %d more", 5154-mostNamed)) {
+		t.Errorf("the tail was dropped without saying how much of it there was:\n%s", tail(out))
+	}
+}
+
+// The cap is for the pathological case and the ordinary one has to come through
+// it whole. A handful of references somebody could raise the cap for is worth
+// naming one by one, which is what this block was written to do.
+func TestAShortListOfWhatIsMissingIsPrintedWhole(t *testing.T) {
+	c := manyNamed(3)
+	out := c.RenderWithin(28000, "")
+
+	if n := strings.Count(out, "\n- top-iii-s"); n != 3 {
+		t.Errorf("named %d of the 3", n)
+	}
+	if strings.Contains(out, "more, not named here") {
+		t.Errorf("a list of 3 was told it had a tail:\n%s", tail(out))
 	}
 }
