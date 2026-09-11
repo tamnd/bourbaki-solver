@@ -527,3 +527,39 @@ func TestSectionAt(t *testing.T) {
 		t.Errorf("page 3 of chapter II is in %+v", got)
 	}
 }
+
+// A sentence naming the Summary of Results names a fascicule, which is cited
+// the way a Book is cited and assembled as a chapter. Before it was assembled
+// the § after the name was read as a § of the chapter doing the citing, and
+// chapter II of Set Theory has a § 4 with a no. 2 of its own, so the reference
+// resolved and pointed at the wrong text.
+func TestAFasciculeResolvesToTheChapterItWasAssembledAs(t *testing.T) {
+	er := Section{Label: "ens-er-s4", Book: "ens", Chapter: "ER", Number: 4, Runs: []Run{{363, 369}}}
+	ii := Section{Label: "ens-ii-s4", Book: "ens", Chapter: "II", Number: 4, Runs: []Run{{97, 108}}}
+	ix := &Index{Sections: []Section{er, ii}}
+	ix.index()
+	c := Citation{Book: "Summary of Results", Form: FormSection, Section: 4}
+	got, err := ix.Resolve(c, Site{Section: "ens-ii-s4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Label != "ens-er-s4" {
+		t.Errorf("resolved to %+v, want the § of the fascicule", got)
+	}
+}
+
+// A fascicule nothing has assembled leaves the corpus, which is what every
+// reference to one did before any of them was read in.
+func TestAnUnassembledFasciculeStillLeavesTheCorpus(t *testing.T) {
+	ii := Section{Label: "ens-ii-s4", Book: "ens", Chapter: "II", Number: 4, Runs: []Run{{97, 108}}}
+	ix := &Index{Sections: []Section{ii}}
+	ix.index()
+	c := Citation{Book: "Summary of Results", Form: FormSection, Section: 4}
+	got, err := ix.Resolve(c, Site{Section: "ens-ii-s4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.How != OutOfCorpus || got.Book != "ER" {
+		t.Errorf("resolved to %+v, want out of corpus under ER", got)
+	}
+}
