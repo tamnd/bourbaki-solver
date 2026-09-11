@@ -563,3 +563,65 @@ func TestM14IsSilentAfterAnUnclosedSpan(t *testing.T) {
 		t.Errorf("the tail of a file with an unclosed span was reported: %v", got)
 	}
 }
+
+func TestM15(t *testing.T) {
+	// A volume that has settled on one spelling, whichever it is.
+	clean := []Doc{
+		doc("content/en/ens/01.md", `the topology $\mathscr{T}$ on $\mathscr{S}$`),
+		doc("content/en/ens/02.md", `and $\mathscr{T}$ again`),
+	}
+	if got := run(t, m15, clean...); len(got) != 0 {
+		t.Errorf("a volume with one spelling was reported: %v", got)
+	}
+
+	// The shape from tamnd/bourbaki#386: one letter, two commands, one volume.
+	// The minority is what is reported, one finding a file.
+	split := []Doc{
+		doc("content/fr/ens/01.md", `la topologie $\mathcal{T}$`),
+		doc("content/fr/ens/02.md", `la topologie $\mathcal{T}$ encore`+"\n"+`et $\mathcal{T}$ une fois de plus`),
+		doc("content/fr/ens/03.md", `la topologie $\mathscr{T}$ ici`),
+	}
+	got := run(t, m15, split...)
+	if len(got) != 1 {
+		t.Fatalf("gave %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].File != "content/fr/ens/03.md" || got[0].Line != 1 {
+		t.Errorf("the finding is at %s, want content/fr/ens/03.md:1", got[0].At())
+	}
+	for _, want := range []string{`\mathscr{T}`, `\mathcal{T}`, "content/fr/ens"} {
+		if !strings.Contains(got[0].Msg, want) {
+			t.Errorf("the finding does not name %s: %s", want, got[0].Msg)
+		}
+	}
+
+	// Two letters, one spelled each way, is a distinction this rule cannot see
+	// and must not guess at. Only the same letter both ways is one symbol
+	// printed two ways.
+	letters := []Doc{
+		doc("content/en/top/01.md", `the sheaf $\mathcal{F}$ and the filter $\mathscr{G}$`),
+	}
+	if got := run(t, m15, letters...); len(got) != 0 {
+		t.Errorf("two different letters were reported: %v", got)
+	}
+
+	// Two volumes that each have one spelling are two volumes and not one
+	// split. Disagreement between volumes is tamnd/bourbaki#392 and is not
+	// something a reader holding either of them can see.
+	volumes := []Doc{
+		doc("content/en/alg/01.md", `the algebra $\mathscr{A}$`),
+		doc("content/en/top/01.md", `the algebra $\mathcal{A}$`),
+	}
+	if got := run(t, m15, volumes...); len(got) != 0 {
+		t.Errorf("two volumes with one spelling each were reported: %v", got)
+	}
+
+	// The brace is optional in TeX and the corpus writes it both ways.
+	braceless := []Doc{
+		doc("content/en/int/01.md", `the measure $\mathcal M$`),
+		doc("content/en/int/02.md", `the measure $\mathscr{M}$`),
+		doc("content/en/int/03.md", `the measure $\mathscr{M}$`),
+	}
+	if got := run(t, m15, braceless...); len(got) != 1 {
+		t.Fatalf("the braceless spelling was not matched: %v", got)
+	}
+}

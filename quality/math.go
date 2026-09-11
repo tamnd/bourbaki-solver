@@ -3,6 +3,7 @@ package quality
 import (
 	"fmt"
 	"math"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -51,6 +52,8 @@ func init() {
 			Title: "an inline formula is written tight against its dollars", Run: m13},
 		Check{ID: "M14", Group: Mathematics, Hard: false,
 			Title: "no mathematics is left outside math mode", Run: m14},
+		Check{ID: "M15", Group: Mathematics, Hard: false,
+			Title: "one volume, one spelling for the script capitals", Run: m15},
 	)
 }
 
@@ -928,4 +931,94 @@ func lineAt(body string, n int) string {
 		return ""
 	}
 	return strings.TrimSpace(lines[n-1])
+}
+
+// scriptCommand finds the two commands that set a script capital, so that a
+// volume can be asked whether it uses one of them or both.
+var scriptCommand = regexp.MustCompile(`\\math(cal|scr)\s*\{?\s*([A-Za-z])`)
+
+// M15. One volume, one spelling for the script capitals.
+//
+// \mathcal and \mathscr are the same letter and not the same glyph. The class
+// loads mathrsfs, so \mathscr is rsfs10, the swash script, and \mathcal is the
+// calligraphic of LMMathSymbols; a volume that writes \mathcal{T} on one page
+// and \mathscr{T} on the next prints the same symbol two different ways and a
+// reader has no way to know it is the same symbol.
+//
+// Nothing in the reading prompt says which of the two to write, so a model
+// choosing freely produces both, and the corpus census that opened
+// tamnd/bourbaki#392 found 22 of the 44 volumes split. This is the rule that
+// keeps the normalisation from being undone one re-read at a time.
+//
+// It is per letter and per volume, and soft. Per letter because a volume that
+// sets F as script and G as calligraphic is making a distinction this cannot
+// see; only the same letter spelled both ways is certainly one symbol printed
+// two ways. Per volume because that is the unit a reader holds. Soft because
+// the corpus is red on 22 volumes today and a rule that fails the build before
+// the work is done is a rule somebody turns off.
+//
+// The minority spelling is what is reported, one finding a file, because that
+// is the shorter list and because the majority is the spelling the volume has
+// already settled on whether or not anybody decided it.
+func m15(c *Corpus) ([]Finding, error) {
+	type where struct {
+		doc  Doc
+		line int
+	}
+	// volume, letter, command -> the places it is written
+	seen := map[string]map[string]map[string][]where{}
+	for _, d := range c.Docs {
+		vol := filepath.ToSlash(filepath.Dir(d.Path))
+		if n := strings.Split(vol, "/"); len(n) >= 3 {
+			vol = strings.Join(n[:3], "/")
+		}
+		for i, line := range strings.Split(d.Body, "\n") {
+			for _, m := range scriptCommand.FindAllStringSubmatch(line, -1) {
+				cmd, letter := m[1], m[2]
+				if seen[vol] == nil {
+					seen[vol] = map[string]map[string][]where{}
+				}
+				if seen[vol][letter] == nil {
+					seen[vol][letter] = map[string][]where{}
+				}
+				seen[vol][letter][cmd] = append(seen[vol][letter][cmd], where{d, d.BodyLine(i + 1)})
+			}
+		}
+	}
+	var out []Finding
+	for _, vol := range sortedKeys(seen) {
+		for _, letter := range sortedKeys(seen[vol]) {
+			by := seen[vol][letter]
+			cal, scr := by["cal"], by["scr"]
+			if len(cal) == 0 || len(scr) == 0 {
+				continue
+			}
+			few, many, fewCmd, manyCmd := cal, scr, `\mathcal`, `\mathscr`
+			if len(scr) < len(cal) {
+				few, many, fewCmd, manyCmd = scr, cal, `\mathscr`, `\mathcal`
+			}
+			reported := map[string]bool{}
+			for _, w := range few {
+				if reported[w.doc.Path] {
+					continue
+				}
+				reported[w.doc.Path] = true
+				out = append(out, Finding{File: w.doc.Path, Line: w.line,
+					Msg: fmt.Sprintf("%s{%s} here, and %s{%s} %d times in %s against %d of this one, so one symbol prints two ways",
+						fewCmd, letter, manyCmd, letter, len(many), vol, len(few))})
+			}
+		}
+	}
+	return out, nil
+}
+
+// sortedKeys is the keys of a map in order, so that a rule reports the same
+// findings in the same order on every run.
+func sortedKeys[V any](m map[string]V) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }
