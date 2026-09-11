@@ -210,7 +210,7 @@ func suspectPages(state setup, first, last int) (int, []spot, error) {
 			continue
 		}
 		read++
-		text := checkText(file)
+		text := ocr.CheckText(file)
 		if problems := ocr.Validate(text, state.expect(page), ocr.Options{}); len(problems) > 0 {
 			continue
 		}

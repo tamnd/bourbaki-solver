@@ -1,4 +1,4 @@
-package main
+package ocr
 
 import (
 	"strings"
@@ -10,8 +10,8 @@ import (
 // The running head is off the body of every page file on disk, whichever way
 // the page was read. Native extraction parses it out of the text layer, and
 // ocr.readHead cuts it out of the model's answer before the file is written.
-// So the rules only ever see it if checkText puts it back, and for a long time
-// checkText put it back for native pages alone. Rule 4 then asked 4320 OCR
+// So the rules only ever see it if CheckText puts it back, and for a long time
+// CheckText put it back for native pages alone. Rule 4 then asked 4320 OCR
 // pages for a head that had been moved and rejected all of them.
 func TestCheckTextPutsTheHeadBackWhateverReadThePage(t *testing.T) {
 	for _, method := range []corpus.PageMethod{
@@ -28,7 +28,7 @@ func TestCheckTextPutsTheHeadBackWhateverReadThePage(t *testing.T) {
 			},
 			Body: "the first paragraph of the page\n",
 		}
-		got := checkText(file)
+		got := CheckText(file)
 		first := strings.SplitN(got, "\n", 2)[0]
 		if !strings.Contains(first, "A IV.7") {
 			t.Errorf("%s: first line %q has no page label", method, first)
@@ -49,7 +49,7 @@ func TestCheckTextLeavesAHeadlessPageAlone(t *testing.T) {
 		Meta: corpus.PageFrontMatter{Book: "alg-iv-vii", PDFPage: 40, Method: corpus.MethodOCR},
 		Body: "the first paragraph of the page\n",
 	}
-	if got := checkText(file); got != file.Body {
-		t.Errorf("checkText rewrote a page with no head in its front matter: %q", got)
+	if got := CheckText(file); got != file.Body {
+		t.Errorf("CheckText rewrote a page with no head in its front matter: %q", got)
 	}
 }

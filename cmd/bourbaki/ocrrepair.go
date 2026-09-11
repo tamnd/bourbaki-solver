@@ -277,7 +277,7 @@ func brokenPages(state setup, first, last int, rule ocr.Rule) ([]candidate, erro
 		if file.Meta.Method != corpus.MethodOCR {
 			continue
 		}
-		text := checkText(file)
+		text := ocr.CheckText(file)
 		problems := ocr.Validate(text, state.expect(page), ocr.Options{})
 		if rule != "" {
 			problems = filterRule(problems, rule)

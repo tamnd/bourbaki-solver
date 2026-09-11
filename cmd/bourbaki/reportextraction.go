@@ -159,7 +159,7 @@ func extractionOf(root string, entry corpus.Book) (report.Volume, error) {
 		}
 		row.Checked++
 
-		problems := ocr.Validate(checkText(file), expectFor(&entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID, entry.Book)})
+		problems := ocr.Validate(ocr.CheckText(file), ocr.ExpectFor(&entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID, entry.Book)})
 		if len(problems) == 0 {
 			continue
 		}

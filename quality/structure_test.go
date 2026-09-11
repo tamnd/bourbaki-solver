@@ -254,3 +254,51 @@ func TestS13SaysNothingAboutAVolumeWithNoRecordedPages(t *testing.T) {
 		t.Errorf("reported %+v, want nothing", got)
 	}
 }
+
+// S14 runs the ocr rules over what is committed, so a page short enough to be a
+// truncated answer is reported and a page that reads like a page is not. The
+// rules themselves are tested in package ocr; what is tested here is that the
+// audit reaches them, walks every volume, and skips what a read-time run skips.
+func TestS14(t *testing.T) {
+	page := func(n int, method corpus.PageMethod, body string) corpus.PageFile {
+		return corpus.PageFile{
+			Meta: corpus.PageFrontMatter{Book: "alg-x-fr", PDFPage: n, Method: method},
+			Body: body,
+		}
+	}
+	// Four hundred characters is the thinnest page of either volume that
+	// carries text, and ocr.MinChars is two hundred.
+	full := strings.Repeat("Soit E un espace vectoriel topologique sur un corps value. ", 12)
+	c := &Corpus{
+		Root:  t.TempDir(),
+		Books: &corpus.BooksManifest{Books: []corpus.Book{{ID: "alg-x-fr", Book: "alg", Pages: 3}}},
+		Pages: map[string][]corpus.PageFile{"alg-x-fr": {
+			page(40, corpus.MethodOCR, full),
+			page(41, corpus.MethodOCR, "a line and nothing else\n"),
+			page(42, corpus.MethodBlank, ""),
+		}},
+		PagePaths: map[string][]string{"alg-x-fr": {
+			"pages/alg-x-fr/0001.md", "pages/alg-x-fr/0002.md", "pages/alg-x-fr/0003.md",
+		}},
+	}
+	got, err := s14(c)
+	if err != nil {
+		t.Fatalf("the rule returned an error: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("gave %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].File != "pages/alg-x-fr/0002.md" {
+		t.Errorf("the finding is on %s, want pages/alg-x-fr/0002.md", got[0].File)
+	}
+	if !strings.Contains(got[0].Msg, "refused today") {
+		t.Errorf("the finding does not say what it is: %s", got[0].Msg)
+	}
+
+	// A volume with no pages read yet is work not yet done and not a finding,
+	// which is what every other rule in this group does too.
+	c.Pages["alg-x-fr"] = nil
+	if got, err := s14(c); err != nil || len(got) != 0 {
+		t.Errorf("an unread volume was reported: %v %v", got, err)
+	}
+}
