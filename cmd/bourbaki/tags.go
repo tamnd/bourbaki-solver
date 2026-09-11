@@ -395,9 +395,7 @@ func runTagsVerify(args []string) error {
 	if n := len(untagged); n > *maxUntagged {
 		bad = append(bad, tags.Failure{Rule: tags.T03, Msg: fmt.Sprintf(
 			"%d statements are waiting for a tag, over the ceiling of %d", n, *maxUntagged)})
-		for _, f := range untagged[:min(n, 5)] {
-			bad = append(bad, f)
-		}
+		bad = append(bad, untagged[:min(n, 5)]...)
 	} else if n > 0 {
 		fmt.Printf("tags verify: %s, %d statements waiting for a tag, ceiling %d\n", tags.T03, n, *maxUntagged)
 	}
