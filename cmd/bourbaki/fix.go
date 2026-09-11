@@ -67,6 +67,7 @@ commands:
   opening   put back the heading that opens a chapter or a §
   footnote  take the printed mark off a footnote that already has a reference
   seal      write content_sha256 over a section body that was edited by hand
+  reseal    move source_content_sha256 on where only the mathematics moved
 
 Run section first and dollars after it. A section reference written with an
 escaped dollar puts a dollar in the prose that no formula opened, and everything
@@ -797,6 +798,12 @@ Prefer the correction in pages/ where the page is what was misread, since
 assemble overwrites the section from the page and the hand correction with it.
 Use this where the fault is in the assembly and not in the page.
 
+A named path it cannot seal is passed over and named, not refused. Exercises
+carry no content_sha256 of their own, so a list of a § and its exercises -- the
+obvious thing to name after repairing a § -- used to be a list this command
+declined in full, sealing nothing. What to run on the translations a sealed
+source leaves behind is bourbaki fix reseal.
+
 flags:
   -lang L    only this language, default every language
   -check     say what would change and change nothing
@@ -846,6 +853,8 @@ func runFix(args []string) error {
 		return fixFence(args[1:])
 	case "seal":
 		return fixSeal(args[1:])
+	case "reseal":
+		return fixReseal(args[1:])
 	}
 	fmt.Fprint(os.Stderr, fixUsage)
 	os.Exit(2)
@@ -3207,16 +3216,41 @@ func fixSeal(args []string) error {
 	if err != nil {
 		return err
 	}
-	var missed []string
+	// A named path the walk never offered used to fail the whole run, after the
+	// walk and before anything was written, so one exercise in an argument list
+	// sealed nothing at all. Exercises carry no content_sha256 of their own and
+	// eachSection skips them by construction, so a list of a section and its
+	// exercises -- the obvious thing to name after repairing a §  -- was a list
+	// this command refused. It passes over them and says so, and what it can
+	// seal it seals.
+	var missed, elsewhere []string
 	for p := range only {
-		if !seen[p] {
-			missed = append(missed, rel(root, p))
+		if seen[p] {
+			continue
 		}
+		r := filepath.ToSlash(rel(root, p))
+		// A path in one language under -lang another is a contradiction and not
+		// a file of the wrong kind: the walk filtered it out before it was ever
+		// offered, and passing over it silently would read as a run that sealed
+		// what it was asked to.
+		if *lang != "" {
+			if l, _, ok := strings.Cut(strings.TrimPrefix(r, "content/"), "/"); ok && l != *lang {
+				elsewhere = append(elsewhere, r)
+				continue
+			}
+		}
+		missed = append(missed, r)
+	}
+	if len(elsewhere) > 0 {
+		sort.Strings(elsewhere)
+		return fmt.Errorf("not in the language -lang %s asks for: %s",
+			*lang, strings.Join(elsewhere, ", "))
 	}
 	if len(missed) > 0 {
 		sort.Strings(missed)
-		return fmt.Errorf("not a section this command can seal: %s",
-			strings.Join(missed, ", "))
+		for _, m := range missed {
+			fmt.Printf("%s  is not a section this command can seal, passed over\n", m)
+		}
 	}
 
 	// manifests/sections/ records the same hash a second time, and the two

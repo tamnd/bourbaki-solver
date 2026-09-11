@@ -310,23 +310,36 @@ func TestSealTakesARelativePath(t *testing.T) {
 }
 
 // Exercises carry no hash of their own and eachSection does not descend into
-// them, so naming one asks for nothing at all. Saying so beats reporting that
-// zero sections were read and letting it pass for success.
-func TestSealSaysSoWhenTheNamedFileIsNotASectionItCanSeal(t *testing.T) {
-	name := "content/en/alg/VIII/exercises/s1/07.md"
-	root := sealCorpus(t, map[string]string{name: sealFile("A body.\n", corpus.ContentSHA256("old"))})
-	err := fixSeal([]string{filepath.Join(root, filepath.FromSlash(name))})
-	if err == nil {
-		t.Fatal("naming an exercise was accepted, want an error")
+// them, so naming one asks for nothing at all. It used to fail the whole run,
+// after the walk and before anything was written, which meant that naming a §
+// and the exercises under it -- the obvious thing to do after repairing a § --
+// sealed neither the § nor anything else. The exercise is passed over and the
+// section is sealed.
+func TestSealPassesOverAnExerciseAndSealsTheSectionNamedWithIt(t *testing.T) {
+	body := "The centre of a simple ring is a field.\n"
+	section := "content/en/alg/VIII/01_s1_simple_rings.md"
+	exercise := "content/en/alg/VIII/exercises/s1/07.md"
+	root := sealCorpus(t, map[string]string{
+		section:  sealFile(body, corpus.ContentSHA256("old")),
+		exercise: sealFile("A body.\n", corpus.ContentSHA256("old")),
+	})
+	err := fixSeal([]string{
+		filepath.Join(root, filepath.FromSlash(section)),
+		filepath.Join(root, filepath.FromSlash(exercise)),
+	})
+	if err != nil {
+		t.Fatalf("an exercise in the list failed the whole run: %v", err)
 	}
-	if !strings.Contains(err.Error(), "07.md") {
-		t.Errorf("the error does not name the file: %v", err)
+	if got, want := readSection(t, root, section).Meta.ContentSHA256, corpus.ContentSHA256(body); got != want {
+		t.Errorf("the section named alongside an exercise has hash %s, want %s", got, want)
 	}
 }
 
 // A path in one language under -lang another is a contradiction, and the file
 // is filtered out of the walk before it is ever offered. That must read as the
-// mistake it is rather than as a run that sealed nothing.
+// mistake it is rather than as a run that sealed nothing. This is the one
+// refusal that stays a refusal: it is not a file of the wrong kind, it is an
+// argument list that disagrees with itself.
 func TestSealSaysSoWhenThePathIsOutsideTheLanguageAsked(t *testing.T) {
 	name := "content/vi/alg/VIII/01_s1_vanh_don.md"
 	root := sealCorpus(t, map[string]string{name: sealFile("Thân bài.\n", corpus.ContentSHA256("cũ"))})

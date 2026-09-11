@@ -119,6 +119,13 @@ func (c *Corpus) Pairs() []Pair {
 // which is the only text a glossary term can honestly be looked for in. It is
 // exactly what L06 reads, exported so that the report and the rule cannot drift
 // apart on what counts as a mention.
+//
+// bourbaki fix reseal reads it for a second reason. It has to decide whether a
+// source that moved moved in a way a translation must follow, and the answer is
+// this: if the prose of the source is what it was, the words the translator
+// rendered are still the words on the page, and only the mathematics the
+// translator was told to copy has changed. Two definitions of what a translator
+// was asked to render would be one too many.
 func Prose(body string) string { return prose(body) }
 
 // pairs are the translated files that name an English source, with the ones
