@@ -187,6 +187,19 @@ func m03(c *Corpus) ([]Finding, error) {
 				}
 			}
 		}
+		// The lines a math span covers, so that the capital-alone check below
+		// can tell prose from TeX. A capital on its own line inside a display is
+		// how multi-line mathematics is written: the exercise of Algebre II,
+		// § 10 sets $$... = P \begin{pmatrix}...\end{pmatrix} Q$$ over eleven
+		// lines and the Q is one of them. The fault this check is for is a
+		// capital left standing in the prose, which is what a diagram flattened
+		// into three lines leaves behind.
+		inMath := map[int]bool{}
+		for _, s := range spans {
+			for n := 0; n <= strings.Count(s.Text, "\n"); n++ {
+				inMath[s.Line+n] = true
+			}
+		}
 		for i, line := range strings.Split(d.Body, "\n") {
 			at := d.BodyLine(i + 1)
 			for _, r := range line {
@@ -200,7 +213,7 @@ func m03(c *Corpus) ([]Finding, error) {
 				out = append(out, Finding{File: d.Path, Line: at,
 					Msg: "7→ is what pdftotext makes of ↦: " + ellipsis(line, 50)})
 			}
-			if t := strings.TrimSpace(line); len([]rune(t)) == 1 && unicode.IsUpper([]rune(t)[0]) {
+			if t := strings.TrimSpace(line); len([]rune(t)) == 1 && unicode.IsUpper([]rune(t)[0]) && !inMath[i+1] {
 				out = append(out, Finding{File: d.Path, Line: at,
 					Msg: fmt.Sprintf("a line with nothing on it but %q, which is a display that came apart", t)})
 			}
@@ -237,13 +250,20 @@ func strandedAnywhere(r rune) (string, bool) {
 		return "a replacement glyph, so a character was lost", true
 	case r >= 0xE000 && r <= 0xF8FF:
 		return "a private use character, which is a font artefact and not text", true
-	case r >= 0x02B0 && r <= 0x02FF:
+	case r >= 0x02C6 && r <= 0x02FF:
 		// A spacing accent stands on its own only where the letter it was drawn
 		// over has come away from it. The volume has four, all U+02C6 and all
 		// the hat of a \widehat that was flattened: "Gˆ" for \widehat{G} and
 		// "ˆ$\tau" for \widehat{\tau}. They are not repaired mechanically,
 		// because putting the accent back means deciding which symbol it was
 		// over and how far the brace reaches, and that is reading the page.
+		//
+		// The block starts at U+02B0 and this starts at U+02C6, because the
+		// first twenty-two characters of it are modifier letters and not
+		// accents. They are letters raised and set small, and a French
+		// bibliography uses them as they are meant to be used: the historical
+		// note of General Topology IV cites Cauchy's Cours d'Analyse, 1ʳᵉ
+		// partie, where the r is U+02B3 and is nothing's accent.
 		return fmt.Sprintf("the accent %q with no letter under it, which is a lost \\widehat", r), true
 	}
 	return "", false

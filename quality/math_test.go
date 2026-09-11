@@ -167,6 +167,35 @@ func TestM03ReportsASpanOnce(t *testing.T) {
 	}
 }
 
+// A capital alone on a line is a flattened diagram in the prose and ordinary
+// TeX inside a display, and the rule has to tell them apart. The exercise of
+// Algebre II, § 10 sets a product of three matrices over eleven lines and the Q
+// of P D Q is one of them.
+func TestM03ReadsACapitalInsideADisplayAsMathematics(t *testing.T) {
+	body := "We have\n\n$$\nM = P\n\\begin{pmatrix}\na & 0 \\\\\n0 & b\n\\end{pmatrix}\nQ\n$$\n\nand so on."
+	if got := run(t, m03, doc("a.md", body)); len(got) != 0 {
+		t.Errorf("a capital on its own line inside a display was reported: %v", got)
+	}
+	// The same capital in the prose is the fault the check exists for.
+	got := run(t, m03, doc("a.md", "the diagram is\n\nH\n\nand it commutes"))
+	if len(got) != 1 {
+		t.Fatalf("got %d findings for a capital in the prose, want 1: %v", len(got), got)
+	}
+}
+
+// The spacing modifier block opens with letters and not with accents, and a
+// French bibliography sets an ordinal with them.
+func TestM03LeavesAModifierLetterAlone(t *testing.T) {
+	got := run(t, m03, doc("a.md", "A. Cauchy, Cours d’Analyse, 1ʳᵉ partie, 1821."))
+	if len(got) != 0 {
+		t.Errorf("an ordinal set with modifier letters was reported: %v", got)
+	}
+	// The accent proper is still a lost \widehat.
+	if got := run(t, m03, doc("a.md", "the completion Gˆ of G")); len(got) != 1 {
+		t.Fatalf("got %d findings for a stranded circumflex, want 1: %v", len(got), got)
+	}
+}
+
 func TestM05(t *testing.T) {
 	if got := run(t, m05, doc("a.md", "a clean paragraph")); len(got) != 0 {
 		t.Errorf("a clean file was reported: %v", got)
