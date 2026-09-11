@@ -259,17 +259,23 @@ func fixReseal(args []string) error {
 // stops there. -depth is the guard for the other case: a file with a long
 // history and a record from before it that would otherwise be read in full to
 // prove a negative.
+//
+// --all and not HEAD, which is the difference between finding the body and not.
+// The corpus squash-merges its pull requests, so the commits of a branch are
+// reachable from a ref and are not ancestors of main, and every body the branch
+// held between its first commit and its last is off main's history entirely. The
+// six notation indices were exactly that: the Vietnamese was translated from the
+// English as it stood on the branch that first wrote it, main has only the
+// squashed result, and asking main alone said no commit of the source ever
+// hashed to what the translation records. It did; the commit is just not an
+// ancestor of HEAD.
 func bodyHistory(root, rel string, want map[string]bool, depth int) (map[string]string, error) {
 	found := map[string]string{}
 	if len(want) == 0 {
 		return found, nil
 	}
-	// A body on disk that was never committed is the commonest case of all: the
-	// repair is in the working tree and has not been committed yet, and the hash
-	// the translation records is the last committed one. HEAD is therefore not
-	// where this starts; it starts at the file as git has it and works back.
 	out, err := exec.Command("git", "-C", root, "rev-list",
-		"-n", strconv.Itoa(depth), "HEAD", "--", rel).Output()
+		"-n", strconv.Itoa(depth), "--all", "--", rel).Output()
 	if err != nil {
 		// A corpus that is not a git checkout, or a path git does not know. The
 		// command still has something to say about every other file, so this is
