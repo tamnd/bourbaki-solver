@@ -225,7 +225,7 @@ func ocrCheck(args []string) error {
 		}
 		checked++
 
-		problems := ocr.Validate(checkText(file), expectFor(entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID, entry.Book)})
+		problems := ocr.Validate(ocr.CheckText(file), ocr.ExpectFor(entry, pmap, manifest, page), ocr.Options{Prompt: prompt.OCRAnything(entry.ID, entry.Book)})
 		if *only != "" {
 			problems = filterRule(problems, ocr.Rule(*only))
 		}
@@ -271,52 +271,6 @@ func ocrCheck(args []string) error {
 		fmt.Printf("  %-10s %4d  %s\n", rule, counts[rule], pageList(pages))
 	}
 	return nil
-}
-
-// checkText reconstructs what a model would have returned for a page.
-//
-// Both extraction paths file the running head in the front matter, and neither
-// body starts with it. Native extraction parses it out of the text layer.
-// Vision OCR is asked for it on the first line of the answer, and ocr.readHead
-// takes that line, splits it into the label, the title and the locator, and
-// cuts it out of the body before the page file is written. So the head is off
-// the body by the time a page file exists, whichever way the page was read.
-//
-// This used to put the head back for native pages only, on the reading that an
-// OCR body still opens with it. It does not, and the cost of the mistake was
-// the largest single number in the extraction report: of the 4903 OCR pages in
-// the nineteen head-label volumes, 4320 carry a page label in the front matter
-// and not one carried it on the first body line, so rule 4 asked every one of
-// them for a head that had been moved and rejected all of them. 5162 rejections
-// against 105 for the next rule, none of them a real defect.
-//
-// The other 583 have no head in the front matter, which means readHead did not
-// recognise one in the answer. Those keep their bare body and rule 4 keeps
-// judging them, which is the case the rule exists for.
-func checkText(file corpus.PageFile) string {
-	head := headOf(file.Meta)
-	if head == "" {
-		return file.Body
-	}
-	return head + "\n\n" + file.Body
-}
-
-// headOf is the running head of a page put back into the one line it was
-// printed on, out of the parts the front matter holds it in.
-func headOf(meta corpus.PageFrontMatter) string {
-	return strings.TrimSpace(strings.Join([]string{
-		meta.PageLabel, meta.RunningHead, locatorOf(meta),
-	}, "  "))
-}
-
-func locatorOf(meta corpus.PageFrontMatter) string {
-	if meta.Locator == nil || meta.Locator.Section == 0 {
-		return ""
-	}
-	if meta.Locator.Subsec > 0 {
-		return fmt.Sprintf("§ %d.%d", meta.Locator.Section, meta.Locator.Subsec)
-	}
-	return fmt.Sprintf("§ %d", meta.Locator.Section)
 }
 
 func filterRule(problems []ocr.Problem, rule ocr.Rule) []ocr.Problem {

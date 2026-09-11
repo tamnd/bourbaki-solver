@@ -12,8 +12,10 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/footnote"
+	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/pagemap"
 	"github.com/tamnd/bourbaki-solver/prompt"
+	"github.com/tamnd/bourbaki-solver/render"
 )
 
 // The structure rules ask whether the corpus has the shape the book has: every
@@ -58,6 +60,9 @@ func init() {
 		Check{ID: "S13", Group: Structure, Hard: true,
 			Title: "the pages the contents was read off still carry the contents prompt",
 			Run:   s13},
+		Check{ID: "S14", Group: Structure, Hard: false,
+			Title: "every committed page passes the rules that gated its reading",
+			Run:   s14},
 	)
 }
 
@@ -1046,5 +1051,66 @@ func s13(c *Corpus) ([]Finding, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out, nil
+}
+
+// S14. Every committed page passes the rules that gated its reading.
+//
+// The ocr rules run when a page comes back from a model, and a reading they
+// reject is asked again. Nothing ran them afterwards, so a page that got in
+// some other way stayed in: read before the rule existed, read before the rule
+// was tightened, repaired by hand, or accepted by a run that was not checking.
+// A census over all 44 volumes found 810 of the 15268 committed pages that the
+// rules would refuse today, 5.3 per cent, and the only way to see the number
+// was to run bourbaki ocr check over 44 volumes by hand. tamnd/bourbaki#383 is
+// that census and this is the standing number it asked for.
+//
+// It runs the rules themselves, through ocr.CheckText and ocr.ExpectFor, and
+// not a second reading of them. A rule written twice drifts, and an audit that
+// reported pages as rejected that no run would have rejected would be worse
+// than no audit: the number is only worth having if it is the same number the
+// reader of a page would get.
+//
+// Soft, and it will be soft for a while. 810 pages is a re-read campaign and
+// not a fix, most of the math count is tamnd/bourbaki#377 wearing a different
+// hat, and a rule that failed the build today would be a rule somebody turned
+// off before the campaign started. What it is for is the ceiling: the count is
+// in the report, and a page that goes in tomorrow without passing shows up
+// beside the 810 instead of disappearing into them.
+//
+// A page the extraction marked blank is not judged, the way bourbaki ocr check
+// does not judge one. A volume with no page map has the running head and page
+// label rules skipped rather than guessed at, which ocr.ExpectFor arranges by
+// being handed a nil map.
+func s14(c *Corpus) ([]Finding, error) {
+	if c.Books == nil {
+		return nil, nil
+	}
+	var out []Finding
+	for _, book := range c.Books.Books {
+		pages := c.Pages[book.ID]
+		if len(pages) == 0 {
+			continue
+		}
+		// Blank pages come from the render manifest when there is one. A volume
+		// that was never rendered has none, and every page is read as inked.
+		manifest, _ := render.ReadManifest(c.Root, book.ID)
+		opts := ocr.Options{Prompt: prompt.OCRAnything(book.ID, book.Book)}
+		for i, page := range pages {
+			if page.Meta.Method == corpus.MethodBlank {
+				continue
+			}
+			problems := ocr.Validate(ocr.CheckText(page), ocr.ExpectFor(&book, c.Maps[book.ID], manifest, page.Meta.PDFPage), opts)
+			if len(problems) == 0 {
+				continue
+			}
+			at := ""
+			if paths := c.PagePaths[book.ID]; i < len(paths) {
+				at = paths[i]
+			}
+			out = append(out, Finding{File: at, Line: 1,
+				Msg: fmt.Sprintf("the reading would be refused today: %s", ocr.Reasons(problems))})
+		}
+	}
 	return out, nil
 }

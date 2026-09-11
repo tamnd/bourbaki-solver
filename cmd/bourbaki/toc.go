@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/ocr"
 	"github.com/tamnd/bourbaki-solver/pagemap"
 	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/toc"
@@ -295,7 +296,7 @@ func contentsReadings(root, book string) (map[int]string, error) {
 		// index in a volume that prints its contents at the back, where the page
 		// map has already given those pages to the last chapter.
 		body := file.Body
-		if head := headOf(file.Meta); head != "" {
+		if head := ocr.HeadOf(file.Meta); head != "" {
 			body = head + "\n\n" + body
 		}
 		out[file.Meta.PDFPage] = body

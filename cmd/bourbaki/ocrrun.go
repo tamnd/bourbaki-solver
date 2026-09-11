@@ -196,7 +196,7 @@ func contentsRange(contents bool, first, last int) error {
 }
 
 func (s setup) expect(page int) ocr.Expect {
-	return expectFor(s.entry, s.pmap, s.manifest, page)
+	return ocr.ExpectFor(s.entry, s.pmap, s.manifest, page)
 }
 
 // expectFor is what the pipeline already knows about a page, which is what the
@@ -204,33 +204,6 @@ func (s setup) expect(page int) ocr.Expect {
 //
 // run and check have to build this the same way or check would be measuring
 // something other than the decision run makes, which is the one thing it is for.
-func expectFor(entry *corpus.Book, pmap *pagemap.Map, manifest render.Manifest, page int) ocr.Expect {
-	value := ocr.Expect{Book: entry.ID, PDFPage: page, Grammar: pagemap.Grammar(entry.Grammar)}
-	if found, ok := manifest.Find(page); ok {
-		value.Blank = found.Blank
-		value.Sparse = found.Ink < ocr.SparseInk
-	}
-	if pmap != nil {
-		if found, ok := pmap.Lookup(page); ok {
-			value.Chapter, value.Page = found.Chapter, found.Page
-			value.Confidence = found.Confidence
-			// A page whose number was read off its own running head has one by
-			// definition. Anywhere else the page map cannot say, and asking for
-			// a head that a chapter opener does not print would fail one page
-			// per chapter.
-			//
-			// Except that head does not always mean read off this page. An
-			// erratum supplies the head an opener never printed, so that the
-			// fit has an anchor where the printing gives it none, and the map
-			// records that at confidence head like any other. The opener is
-			// then asked for the very line the erratum exists because it is
-			// missing. Every house suppresses the head on an opener, so the map
-			// settles it and the confidence does not.
-			value.HasHead = found.Confidence == pagemap.FromHead && !pmap.OpensChapter(page)
-		}
-	}
-	return value
-}
 
 // sources is the pages of a volume that a run may read, bounded by the range
 // asked for.
