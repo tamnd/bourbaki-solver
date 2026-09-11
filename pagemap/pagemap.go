@@ -1982,6 +1982,37 @@ func (m *Map) Lookup(pdfPage int) (Entry, bool) {
 	return m.Entries[pdfPage-1], true
 }
 
+// OpensChapter says whether this PDF page is the one a chapter opens on.
+//
+// Every house in the series suppresses the running head on that page: it prints
+// the chapter title instead, and is numbered all the same. So the question is
+// asked of the map rather than of the reading, and the answer is the first PDF
+// page the map gives a chapter to.
+//
+// It exists because a number at confidence head is otherwise taken as proof
+// that the page prints a running head, which is true of a number read off one
+// and false of a number an erratum supplied. Algebre commutative chapitre 10 is
+// the second case: its opener prints AC X.1 nowhere, the erratum names it so
+// the fit has an anchor in front of the missing leaf, and the map then said
+// head and the rules asked the opener for a running head it does not print.
+// Over every page map in the corpus that is the only chapter opener carrying a
+// head, so this costs one page and settles the class.
+func (m *Map) OpensChapter(pdfPage int) bool {
+	if m == nil {
+		return false
+	}
+	e, ok := m.Lookup(pdfPage)
+	if !ok || e.Chapter == "" {
+		return false
+	}
+	for _, other := range m.Entries {
+		if other.Chapter == e.Chapter && other.PDFPage < pdfPage {
+			return false
+		}
+	}
+	return true
+}
+
 // MissingPage says whether the volume prints a page the file does not carry.
 //
 // PDFPageOf comes back empty for two quite different reasons and cannot tell

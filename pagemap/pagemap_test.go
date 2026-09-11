@@ -1429,3 +1429,63 @@ func TestAContentsEntryIsNotReadAsALabelledHead(t *testing.T) {
 		t.Errorf("anchors %v, want one reading of I.15", as)
 	}
 }
+
+// The opener of Algebre commutative chapitre 10 is the case OpensChapter is
+// for: the erratum supplies AC X.1 so the fit has an anchor in front of the
+// missing leaf, the map records it at confidence head, and nothing on the page
+// is a running head.
+func TestTheChapterOpenerIsKnownFromTheMap(t *testing.T) {
+	m := &Map{Book: "ac-x-fr", Pagination: PerChapter, PDFPages: 3, Entries: []Entry{
+		{PDFPage: 1, Chapter: "X", Page: 1, Confidence: FromHead, Raw: "AC X.1"},
+		{PDFPage: 2, Chapter: "X", Page: 3, Confidence: FromLabel},
+		{PDFPage: 3, Chapter: "X", Page: 4, Confidence: FromLabel},
+	}}
+	if !m.OpensChapter(1) {
+		t.Error("pdf 1 is the page chapter X opens on")
+	}
+	for _, pdf := range []int{2, 3} {
+		if m.OpensChapter(pdf) {
+			t.Errorf("pdf %d is inside chapter X, not its opener", pdf)
+		}
+	}
+}
+
+// Front matter belongs to no chapter, and a page off the end is not a page.
+func TestAPageWithNoChapterOpensNothing(t *testing.T) {
+	m := &Map{Book: "mini", Pagination: Continuous, PDFPages: 3, Entries: []Entry{
+		{PDFPage: 1, Confidence: Unknown},
+		{PDFPage: 2, Chapter: "I", Page: 1, Confidence: FromFolio},
+		{PDFPage: 3, Chapter: "I", Page: 2, Confidence: FromFolio},
+	}}
+	if m.OpensChapter(1) {
+		t.Error("a front matter page opens no chapter")
+	}
+	if !m.OpensChapter(2) {
+		t.Error("pdf 2 is where chapter I opens")
+	}
+	for _, pdf := range []int{0, 4} {
+		if m.OpensChapter(pdf) {
+			t.Errorf("pdf %d is not a page of this volume", pdf)
+		}
+	}
+	var nilMap *Map
+	if nilMap.OpensChapter(1) {
+		t.Error("no map knows of no opener")
+	}
+}
+
+// A volume read chapter by chapter opens each of them once.
+func TestEachChapterHasItsOwnOpener(t *testing.T) {
+	m := &Map{Book: "mini", Pagination: Continuous, PDFPages: 4, Entries: []Entry{
+		{PDFPage: 1, Chapter: "I", Page: 1, Confidence: FromHead},
+		{PDFPage: 2, Chapter: "I", Page: 2, Confidence: FromHead},
+		{PDFPage: 3, Chapter: "II", Page: 3, Confidence: FromHead},
+		{PDFPage: 4, Chapter: "II", Page: 4, Confidence: FromHead},
+	}}
+	want := map[int]bool{1: true, 2: false, 3: true, 4: false}
+	for pdf, opens := range want {
+		if m.OpensChapter(pdf) != opens {
+			t.Errorf("pdf %d: opener %v, want %v", pdf, m.OpensChapter(pdf), opens)
+		}
+	}
+}
