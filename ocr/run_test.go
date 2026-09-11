@@ -13,6 +13,7 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/queue"
 )
 
@@ -285,6 +286,45 @@ func TestFillReadsARejectedPageAgain(t *testing.T) {
 	}
 	if added != 3 {
 		t.Fatalf("filled %d jobs, want all 3 with page 2 rejected", added)
+	}
+}
+
+// This is the fault of tamnd/bourbaki#380. int-i-iv-fr pdf 282 to 284 were read
+// as a contents and then read again as prose; the column of printed page numbers
+// went, and the only sign was toc build going quiet about that volume. The
+// prompt hashes differ, so to the staleness test the contents reading looks like
+// a stale one and the page goes to the model.
+func TestFillHoldsBackAPageReadAsAContents(t *testing.T) {
+	w := newWorld(t, 3)
+	runner := w.runner(t, newFleet(nil))
+	writePage(t, w.root, 2, w.pages[1].SHA256, prompt.ContentsSHA256(),
+		"§ 1. Sets ...... 11\n§ 2. Relations ...... 24\n")
+
+	added, err := runner.Fill(w.pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 2 {
+		t.Fatalf("filled %d jobs, want 2 with the contents page held back", added)
+	}
+}
+
+// The run that asks the contents question is the run that may read it, and it
+// needs no flag to say so: the two hashes are equal and the guard falls through.
+func TestFillReadsAContentsPageAgainUnderTheContentsPrompt(t *testing.T) {
+	w := newWorld(t, 3)
+	runner := w.runner(t, newFleet(nil))
+	runner.Prompt = prompt.Contents()
+	// Read from a different image, so it is stale and would be queued anyway.
+	writePage(t, w.root, 2, "an older rendering", prompt.ContentsSHA256(),
+		"§ 1. Sets ...... 11\n§ 2. Relations ...... 24\n")
+
+	added, err := runner.Fill(w.pages)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 3 {
+		t.Fatalf("filled %d jobs, want all 3 with the contents page read again", added)
 	}
 }
 

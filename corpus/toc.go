@@ -26,9 +26,22 @@ type TOCManifest struct {
 
 // BookTOC is one volume's contents, and one file under manifests/toc/.
 type BookTOC struct {
-	ID       string    `yaml:"id"`
-	Grammar  string    `yaml:"grammar"`
-	Chapters []Chapter `yaml:"chapters"`
+	ID      string `yaml:"id"`
+	Grammar string `yaml:"grammar"`
+	// ContentsPDFPages are the pdf pages the contents was read off, and are
+	// empty for a volume whose contents was derived from the body instead.
+	//
+	// They are here to be checked against. A contents page is read with a
+	// prompt of its own, which asks for the indentation, the leader dots and
+	// the column of printed page numbers; an ordinary reading of the same page
+	// keeps the words and drops the numbers, and the corpus holds one reading
+	// per page. So an ordinary run over a volume whose contents has been read
+	// writes over it, and until this was written down there was nothing that
+	// knew which pages were supposed to carry which prompt. It has happened, to
+	// int-i-iv-fr pdf 282 to 284, and the only sign was toc build no longer
+	// finding a contents page at all.
+	ContentsPDFPages []int     `yaml:"contents_pdf_pages,omitempty"`
+	Chapters         []Chapter `yaml:"chapters"`
 }
 
 // LoadTOC reads manifests/toc/. A missing directory is an empty manifest, so

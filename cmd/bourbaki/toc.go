@@ -181,7 +181,8 @@ func tocBuild(args []string) error {
 		if *dry {
 			continue
 		}
-		man.Upsert(corpus.BookTOC{ID: b.ID, Grammar: res.Grammar.String(), Chapters: res.Chapters})
+		man.Upsert(corpus.BookTOC{ID: b.ID, Grammar: res.Grammar.String(),
+			ContentsPDFPages: res.PDFPages, Chapters: res.Chapters})
 	}
 	if skipped > 0 {
 		fmt.Printf("%d volumes have no page map yet and were not read\n", skipped)

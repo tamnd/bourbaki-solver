@@ -1,10 +1,12 @@
 package quality
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
+	"github.com/tamnd/bourbaki-solver/prompt"
 )
 
 // content/en-mt holds English written by a model out of the French printing.
@@ -147,5 +149,108 @@ func TestS12LeavesATranslationOutOfIt(t *testing.T) {
 		if strings.HasPrefix(f.File, "content/vi/") {
 			t.Errorf("the Vietnamese was reported: %+v", f)
 		}
+	}
+}
+
+// s13Corpus is one volume whose contents was read off two pages, pdf 8 and 9,
+// with whatever reading and prompt the caller hands over for each.
+func s13Corpus(pages ...corpus.PageFile) *Corpus {
+	c := &Corpus{
+		TOC: &corpus.TOCManifest{Books: []corpus.BookTOC{
+			{ID: "ens", ContentsPDFPages: []int{8, 9}},
+		}},
+		Pages:     map[string][]corpus.PageFile{},
+		PagePaths: map[string][]string{},
+	}
+	for i, p := range pages {
+		p.Meta.Book = "ens"
+		p.Meta.PDFPage = 8 + i
+		c.Pages["ens"] = append(c.Pages["ens"], p)
+		c.PagePaths["ens"] = append(c.PagePaths["ens"], fmt.Sprintf("pages/ens/%04d.md", 8+i))
+	}
+	return c
+}
+
+// contentsPage is a page read the way a contents page should be: every line an
+// entry, every entry ending in the printed page number it points at.
+func contentsPage(sha string) corpus.PageFile {
+	return corpus.PageFile{
+		Meta: corpus.PageFrontMatter{PromptSHA256: sha},
+		Body: "§ 1. Sets ...... 11\n§ 2. Relations ...... 24\n§ 3. Functions ...... 37\n",
+	}
+}
+
+func TestS13PassesWhenTheContentsWasReadWithTheContentsPrompt(t *testing.T) {
+	c := s13Corpus(contentsPage(prompt.ContentsSHA256()), contentsPage(prompt.ContentsSHA256()))
+	got, err := s13(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
+	}
+}
+
+// The 60 pages the corpus holds today. The prompt is the wrong one and the
+// numbers came through anyway, and a page with its numbers is not damage.
+func TestS13LeavesAWrongPromptThatKeptTheNumbersAlone(t *testing.T) {
+	c := s13Corpus(contentsPage(prompt.OCRSHA256()), contentsPage(prompt.OCRSHA256()))
+	got, err := s13(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
+	}
+}
+
+// This is the fault it was written for: int-i-iv-fr pdf 282 to 284, read as a
+// contents and then read again as prose, the numbers gone and nothing saying so.
+func TestS13ReportsAContentsPageReadAsProse(t *testing.T) {
+	prose := corpus.PageFile{
+		Meta: corpus.PageFrontMatter{PromptSHA256: prompt.OCRSHA256()},
+		Body: "§ 1. Sets\n§ 2. Relations\n§ 3. Functions\n",
+	}
+	c := s13Corpus(contentsPage(prompt.ContentsSHA256()), prose)
+	got, err := s13(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("reported %+v, want the one page that lost its numbers", got)
+	}
+	if got[0].File != "pages/ens/0009.md" {
+		t.Errorf("named %q", got[0].File)
+	}
+	if !strings.Contains(got[0].Msg, "0 of its 3 lines") {
+		t.Errorf("said %q", got[0].Msg)
+	}
+}
+
+// The born-digital volumes take their contents off the pdf's own text layer.
+// Those pages carry no reading and no prompt hash, and asking them about a
+// prompt would report every one of them.
+func TestS13DoesNotAskAPageThatWasNeverRead(t *testing.T) {
+	c := s13Corpus(contentsPage(prompt.ContentsSHA256()), corpus.PageFile{})
+	got, err := s13(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
+	}
+}
+
+// A volume toc build has not run over since the field was added names no pages,
+// and the rule has nothing to say about it rather than something wrong.
+func TestS13SaysNothingAboutAVolumeWithNoRecordedPages(t *testing.T) {
+	c := s13Corpus(contentsPage(prompt.OCRSHA256()))
+	c.TOC.Books[0].ContentsPDFPages = nil
+	got, err := s13(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
 	}
 }
