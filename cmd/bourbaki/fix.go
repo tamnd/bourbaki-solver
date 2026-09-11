@@ -225,6 +225,13 @@ carrying a subscript, since either is as likely to be a sum or a product as a
 letter, and those are left alone and printed for somebody to read the page and
 decide. M03 reports them too.
 
+It runs over content/ as well as pages/, for fix prime's reason. A translation
+has no page under it, so a glyph left bare in content/en-mt or content/vi stays
+bare however often this is run over the pages, and M03 reported 525 of them
+against 726 on the printings. The ambiguous characters are printed from the
+pages only, since the reading to be done is of the printed page and the
+translation has none; M03 goes on reporting them wherever they are.
+
 Run bourbaki assemble afterwards, or the section files still hold the old text.
 
 flags:
@@ -2236,6 +2243,15 @@ func fixMath(args []string) error {
 		return err
 	}
 
+	// The translations too. They are assembled from nothing, so a page repaired
+	// above never reaches them, and the refusals are dropped here because the
+	// answer to one is to read the printed page and a translation has none.
+	files, content, followed, err := repairContent(root, *check, "characters",
+		func(s string) (string, int) { b, n, _ := mathtex.Repair(s); return b, n })
+	if err != nil {
+		return err
+	}
+
 	for _, r := range refused {
 		fmt.Fprintln(os.Stderr, "fix math: left alone, "+r.String())
 	}
@@ -2245,6 +2261,12 @@ func fixMath(args []string) error {
 	}
 	fmt.Printf("fix math: %d pages read, %s %d characters in %d of them, %d left alone\n",
 		pages, verb, chars, changed, len(refused))
+	moved := "moved"
+	if *check {
+		moved = "would move"
+	}
+	fmt.Printf("fix math: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, moved)
 	if changed > 0 && !*check {
 		fmt.Println("fix math: run bourbaki assemble to carry this into the section files")
 	}
