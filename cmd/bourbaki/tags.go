@@ -31,6 +31,7 @@ commands:
   retire    take a tag out of use for good, for a statement that has left
   migrate   rewrite a tag's label to the one tags/aliases says it became
   verify    check the invariants, which is what CI runs
+              -max-untagged N  statements may still be waiting for a tag
   list      print the tags, or look one up
 
 `
@@ -345,6 +346,7 @@ func runTagsMigrate(args []string) error {
 func runTagsVerify(args []string) error {
 	fs := flag.NewFlagSet("tags verify", flag.ExitOnError)
 	base := fs.String("base", "origin/main", "the commit to check tags/tags was only appended to since")
+	maxUntagged := fs.Int("max-untagged", 0, "how many statements may still be waiting for a tag")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -382,6 +384,22 @@ func runTagsVerify(args []string) error {
 		fmt.Printf("tags verify: T05 not checked, %v\n", gitErr)
 	default:
 		bad = append(bad, tags.AppendOnly(diff, set.Aliases, set.Inactive)...)
+	}
+	// A statement with no tag yet is held against a ceiling rather than failed
+	// on. Tagging is append-only, so a volume is tagged once its pages have
+	// settled, and until the last of them is read the corpus is meant to have
+	// statements waiting. Gating on the count would mean a red build for months,
+	// which tells nobody anything, and would hide every check after this one.
+	// The ceiling comes down as volumes are tagged and it does not go up.
+	untagged, bad := tags.Split(bad)
+	if n := len(untagged); n > *maxUntagged {
+		bad = append(bad, tags.Failure{Rule: tags.T03, Msg: fmt.Sprintf(
+			"%d statements are waiting for a tag, over the ceiling of %d", n, *maxUntagged)})
+		for _, f := range untagged[:min(n, 5)] {
+			bad = append(bad, f)
+		}
+	} else if n > 0 {
+		fmt.Printf("tags verify: %s, %d statements waiting for a tag, ceiling %d\n", tags.T03, n, *maxUntagged)
 	}
 	if len(bad) > 0 {
 		var lines []string

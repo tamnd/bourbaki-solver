@@ -259,3 +259,30 @@ func TestRunAt(t *testing.T) {
 		t.Errorf("with no runs recorded %s is in run %d, want 0", "0400", got)
 	}
 }
+
+// A statement that has never been given a tag is the one T03 failure a build
+// may be told to live with, so Split has to hand it back on its own and leave
+// the two that say a tag and a file disagree where they are.
+func TestSplitSetsTheUntaggedApartFromTheDisagreements(t *testing.T) {
+	set := &Set{Tags: []Entry{{Tag: "0001", Label: "a"}}}
+	found := map[string][]Item{"en": {
+		{Path: "f.md", Line: 3, Label: "a", Tag: "0001"},
+		{Path: "f.md", Line: 9, Label: "b"},
+		{Path: "f.md", Line: 12, Label: "c", Tag: "0009"},
+	}}
+	untagged, broken := Split(Verify(set, found, []string{"en"}))
+	if len(untagged) != 1 {
+		t.Fatalf("untagged = %v, want the one statement with no tag", untagged)
+	}
+	if !strings.Contains(untagged[0].Msg, "f.md:9") {
+		t.Errorf("untagged[0] = %q, want the statement on line 9", untagged[0])
+	}
+	for _, f := range broken {
+		if f.Untagged {
+			t.Errorf("broken holds an untagged failure: %v", f)
+		}
+	}
+	if len(broken) == 0 {
+		t.Error("broken is empty, want the tag that is in no file of tags/")
+	}
+}
