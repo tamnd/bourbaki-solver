@@ -279,3 +279,32 @@ func TestParseLabelReadsSubsecFormByScope(t *testing.T) {
 		}
 	}
 }
+
+// The Summary of Results is bound after chapter IV of Theory of Sets and
+// assembled as content/en/ens/ER, so a walk of the Book in its own order has to
+// take the letters and put them last.
+func TestChapterOrderPutsAFasciculeAfterTheChapters(t *testing.T) {
+	er, err := ChapterOrder("ER")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ch := range []string{"I", "IV", "XVII", "1", "2"} {
+		n, err := ChapterOrder(ch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if er <= n {
+			t.Errorf("ER orders %d, chapter %s orders %d, want the fascicule last", er, ch, n)
+		}
+	}
+	rs, err := ChapterOrder("RS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !(er < rs) {
+		t.Errorf("ER orders %d and RS %d, want them in the order of their letters", er, rs)
+	}
+	if _, err := ChapterOrder("Er"); err == nil {
+		t.Error("a name that is not a numeral and not a fascicule's letters was taken")
+	}
+}
