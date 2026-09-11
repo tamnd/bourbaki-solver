@@ -378,6 +378,64 @@ SUMMARY OF RESULTS . . . . . . . . . . . . . . . . . . . . . . . . . . 8
 	}
 }
 
+// The same contents once the volume has said what the part is. The §§ under it
+// are kept, under a chapter of the part's own, which is what makes the thirty
+// nine pages of the Summary of Results reachable at all.
+func TestANamedPartOpensAChapterOfItsOwn(t *testing.T) {
+	const pg = `CHAPTER I STRUCTURES . . . . . . . . . . . . . . . . . . . . . . . . . 1
+§ 1. Structures and isomorphisms . . . . . . . . . . . . . . . . . . . 1
+§ 2. Morphisms . . . . . . . . . . . . . . . . . . . . . . . . . . . . 4
+SUMMARY OF RESULTS . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+§ 1. Elements and subsets of a set . . . . . . . . . . . . . . . . . . 8
+§ 2. Functions . . . . . . . . . . . . . . . . . . . . . . . . . . . . 9
+`
+	res, err := Parse([]string{pg}, testMapFor("I"), Options{Book: "test",
+		Chapters: []string{"I"},
+		Parts:    []corpus.Fascicule{{Numeral: "ER", Title: "Summary of Results"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Problems) > 0 {
+		t.Errorf("problems: %v", res.Problems)
+	}
+	if c, _ := res.Get("I"); len(c.Sections) != 2 {
+		t.Errorf("chapter I has %d sections, want its own 2", len(c.Sections))
+	}
+	er, ok := res.Get("ER")
+	if !ok {
+		t.Fatalf("the part opened no chapter: %+v", res.Chapters)
+	}
+	if !er.Nominal {
+		t.Error("the part was opened as a chapter the printing names")
+	}
+	if er.Title != "SUMMARY OF RESULTS" || er.Page != 8 {
+		t.Errorf("the part came out %q on page %d", er.Title, er.Page)
+	}
+	if len(er.Sections) != 2 {
+		t.Fatalf("the part has %d sections, want the 2 listed under it", len(er.Sections))
+	}
+	if er.Sections[1].Number != 2 || er.Sections[1].Title != "Functions" {
+		t.Errorf("its second § came out %+v", er.Sections[1])
+	}
+}
+
+// The manifest writes the title the way the page prints it and the contents is
+// read off a scan, so the two agree on their letters and need not agree on
+// anything else.
+func TestAPartIsMatchedOnItsLetters(t *testing.T) {
+	for _, name := range []string{"SUMMARY OF RESULTS", "Summary of results",
+		"Summary  of  Results."} {
+		o := Options{Parts: []corpus.Fascicule{{Numeral: "ER", Title: name}}}
+		if _, ok := o.part("SUMMARY OF RESULTS"); !ok {
+			t.Errorf("the manifest title %q matched nothing", name)
+		}
+	}
+	o := Options{Parts: []corpus.Fascicule{{Numeral: "ER", Title: "Summary of Results"}}}
+	if _, ok := o.part("INDEX OF NOTATION"); ok {
+		t.Error("a different part was matched")
+	}
+}
+
 // The running head over the contents is set flush left and in capitals, like a
 // part, and closing the chapter on it would throw the page away.
 func TestContentsRunningHeadIsNotAPart(t *testing.T) {

@@ -241,7 +241,8 @@ func readContents(ctx context.Context, root string, b *corpus.Book, pm *pagemap.
 	}
 	return toc.Parse(pages, pm, toc.Options{
 		Book: b.ID, Chapters: b.Chapters, Title: b.Title,
-		FrontMatterPDF: frontMatterPDF(b), Restarts: b.Restarts})
+		FrontMatterPDF: frontMatterPDF(b), Restarts: b.Restarts,
+		Parts: b.Fascicules})
 }
 
 // contentsReadings is what the model read off the pages of the table of

@@ -100,6 +100,40 @@ type Book struct {
 	// which end of the book they stand at.
 	NotationIndex    *Introduction `yaml:"notation_index,omitempty"`
 	TerminologyIndex *Introduction `yaml:"terminology_index,omitempty"`
+	// Fascicules are the separately published fascicules a binder put inside
+	// this volume, which are not chapters of it and are not back matter either.
+	Fascicules []Fascicule `yaml:"fascicules,omitempty"`
+}
+
+// Fascicule is a separately published fascicule bound into a volume of
+// chapters.
+//
+// The English Theory of Sets closes with the Summary of Results, printed 347 to
+// 385, and it is not a chapter. In the French it is E.R., a fascicule de
+// resultats published before the chapters were and sold on its own, and
+// Springer bound it into the back of the volume. It carries eight §§ numbered
+// from 1, the rest of the Elements cites it as a Book in its own right, and the
+// corpus already has the id ER for it in the references.
+//
+// The table of contents lists it flush left and in capitals with no number on
+// it, the way it lists a chapter line, which is enough for the contents reader
+// to see that the chapter before it has ended and not enough to say what the
+// thing is. Nothing on the paper gives the id, so it is written here, the way a
+// transposition and a restart are: a fact about the printing that a reader knows
+// and the file does not say.
+//
+// A volume that declares no part is unchanged. The line still closes the chapter
+// before it and what follows is still dropped, because a part nobody has named
+// is a block the corpus has nowhere to put.
+type Fascicule struct {
+	// Numeral is what the fascicule is called where a chapter carries its roman
+	// numeral. It names the directory the part assembles into, content/en/ens/
+	// ER, and it is the book id the references to the part already carry.
+	Numeral string `yaml:"numeral"`
+	// Title is the line the table of contents prints, as it prints it. It is
+	// what the contents reader matches on, so it is the whole of how a part is
+	// recognised, and it is compared on its letters and not on its spacing.
+	Title string `yaml:"title"`
 }
 
 // Transposition is two PDF pages a file carries the wrong way round.

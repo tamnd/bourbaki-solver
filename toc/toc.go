@@ -26,6 +26,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
@@ -92,6 +93,39 @@ type Options struct {
 	// than a chapter, and two of the checks read differently for it. See
 	// validate.
 	Restarts []int
+	// Parts are the fascicules the manifest says this volume has bound into it,
+	// which the contents lists the way it lists a chapter. See corpus.Part. A
+	// volume that declares none is read as it always was: the line closes the
+	// chapter before it and what follows it is dropped.
+	Parts []corpus.Fascicule
+}
+
+// part is the fascicule this contents line names, and false where the manifest
+// declares none by that name.
+//
+// The title is compared on its letters. The contents sets "SUMMARY OF RESULTS"
+// with the leaders run in against the last word about as often as not, and the
+// manifest is written by a reader who is copying what the page prints rather
+// than counting its spaces.
+func (o Options) part(title string) (corpus.Fascicule, bool) {
+	for _, p := range o.Parts {
+		if flatTitle(p.Title) == flatTitle(title) {
+			return p, true
+		}
+	}
+	return corpus.Fascicule{}, false
+}
+
+// flatTitle is a title reduced to its letters and digits in one case, which is
+// what two readings of the same printed line have in common.
+func flatTitle(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToUpper(r))
+		}
+	}
+	return b.String()
 }
 
 // Result is what one volume's contents yielded.
@@ -1175,9 +1209,29 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 			// the note's, not the last §'s, so the § is closed here.
 			curSec, underNote = nil, true
 		case kindPart:
-			// Whatever follows belongs to the part, not to the chapter that
-			// happened to be open, so nothing is collected again until the next
-			// chapter line.
+			// A part the manifest has named is a block of the corpus's own, so
+			// it is opened the way a chapter is and the §§ under it are kept.
+			// The English Theory of Sets closes with the Summary of Results,
+			// which is a fascicule in its own right with eight §§ of its own,
+			// and until it was opened here its thirty nine pages were read,
+			// committed, and in nothing the corpus could reach.
+			//
+			// Nominal, because the printing sets no chapter line over it: the
+			// page carries the name of the fascicule and then goes straight into
+			// its § 1, so there is no front matter to gather and no chapter
+			// marker to find. See corpus.Chapter.Nominal.
+			if p, ok := opt.part(e.title); ok {
+				res.Chapters = append(res.Chapters, corpus.Chapter{
+					Book: opt.Book, Numeral: p.Numeral, Nominal: true,
+					Title: shout(e.title), Page: t.page})
+				cur = &res.Chapters[len(res.Chapters)-1]
+				curSec, underNote = nil, false
+				break
+			}
+			// A part nobody has named is only the news that the chapter before
+			// it has ended. Whatever follows belongs to the part, not to the
+			// chapter that happened to be open, so nothing is collected again
+			// until the next chapter line.
 			cur, curSec, underNote = nil, nil, true
 		}
 	}
@@ -1364,7 +1418,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 
 	res.Chapters = mergeChapters(res.Chapters)
 	chapterExercises(res)
-	resolve(res, pm)
+	resolve(res, pm, opt)
 	res.Problems = append(res.Problems, res.validate(pm, opt)...)
 	return res, nil
 }
@@ -1794,32 +1848,53 @@ func Detect(pages []string) Grammar {
 // resolve turns every printed page in the tree into a PDF page, using the map
 // built from the running heads. This is what lets extraction open the file at
 // the right leaf without anybody counting.
-func resolve(res *Result, pm *pagemap.Map) {
+func resolve(res *Result, pm *pagemap.Map, opt Options) {
 	for i := range res.Chapters {
 		c := &res.Chapters[i]
-		c.PDFPage, _ = pm.PDFPageOf(c.Numeral, c.Page)
+		num := c.Numeral
+		if _, ok := opt.part(c.Title); ok {
+			num = enclosing(pm, c.Page)
+		}
+		c.PDFPage, _ = pm.PDFPageOf(num, c.Page)
 		for j := range c.Subsections {
 			sub := &c.Subsections[j]
-			sub.PDFPage, _ = pm.PDFPageOf(c.Numeral, sub.Page)
+			sub.PDFPage, _ = pm.PDFPageOf(num, sub.Page)
 		}
 		for j := range c.Sections {
 			s := &c.Sections[j]
-			s.PDFPage, _ = pm.PDFPageOf(c.Numeral, s.Page)
+			s.PDFPage, _ = pm.PDFPageOf(num, s.Page)
 			for k := range s.Subsections {
 				sub := &s.Subsections[k]
-				sub.PDFPage, _ = pm.PDFPageOf(c.Numeral, sub.Page)
+				sub.PDFPage, _ = pm.PDFPageOf(num, sub.Page)
 			}
 			if s.Exercises != nil {
-				s.Exercises.PDFPage, _ = pm.PDFPageOf(c.Numeral, s.Exercises.Page)
+				s.Exercises.PDFPage, _ = pm.PDFPageOf(num, s.Exercises.Page)
 			}
 		}
 		if c.Exercises != nil {
-			c.Exercises.PDFPage, _ = pm.PDFPageOf(c.Numeral, c.Exercises.Page)
+			c.Exercises.PDFPage, _ = pm.PDFPageOf(num, c.Exercises.Page)
 		}
 		if c.Historical != nil {
-			c.Historical.PDFPage, _ = pm.PDFPageOf(c.Numeral, c.Historical.Page)
+			c.Historical.PDFPage, _ = pm.PDFPageOf(num, c.Historical.Page)
 		}
 	}
+}
+
+// enclosing names the chapter whose span holds a printed page.
+//
+// A part bound into the back of a volume has no span of its own. The printing
+// sets no chapter line over it, so the page map files its leaves under the
+// chapter in front of it, and that is the name its printed pages answer to
+// rather than the numeral the manifest gave the part. Where no span holds the
+// page the answer is the empty chapter, which the map reads as any chapter and
+// which is the best that can be said.
+func enclosing(pm *pagemap.Map, page int) string {
+	for _, sp := range pm.Chapters {
+		if page >= sp.FirstPage && page <= sp.LastPage {
+			return sp.Chapter
+		}
+	}
+	return ""
 }
 
 // Counts is what the parse found, for the report.
