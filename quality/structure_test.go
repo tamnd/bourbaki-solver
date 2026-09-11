@@ -85,6 +85,37 @@ func TestS12PassesWhenTheManifestNamesEveryFileAndDescribesIt(t *testing.T) {
 // that was not read through and took its entries out with it, and every file of
 // that chapter kept its text while nothing that reads the manifest could reach
 // it.
+// The two indexes are in the manifest, in fields of their own after the
+// chapters, and the rule did not read those fields. So every index of the
+// corpus, 79 files, was reported as reachable by nothing while its entry sat in
+// the manifest beside the chapter it follows.
+func TestS12ReadsTheTwoIndexesTheManifestNamesAfterTheChapters(t *testing.T) {
+	body := "the body of a section\n"
+	index := func(path string) Doc {
+		return Doc{Path: path, Lang: "en", Kind: KindSection, Body: body, head: 1,
+			Section: &corpus.SectionFrontMatter{Book: "ens", ContentSHA256: corpus.ContentSHA256(body)}}
+	}
+	c := s12Corpus([]corpus.SectionRecord{
+		s12Record("content/en/ens/IV/01_s1.md"),
+		s12Record("content/en/ens/IV/02_s2.md"),
+	})
+	c.Docs = append(c.Docs,
+		index("content/en/ens/index_of_notation_i_iv.md"),
+		index("content/en/ens/index_of_terminology_i_iv.md"))
+	notation := s12Record("content/en/ens/index_of_notation_i_iv.md")
+	terminology := s12Record("content/en/ens/index_of_terminology_i_iv.md")
+	c.Sections.Books[0].NotationIndex = &notation
+	c.Sections.Books[0].TerminologyIndex = &terminology
+
+	got, err := s12(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
+	}
+}
+
 func TestS12ReportsAFileTheManifestDoesNotName(t *testing.T) {
 	c := s12Corpus([]corpus.SectionRecord{s12Record("content/en/ens/IV/01_s1.md")})
 	got, err := s12(c)

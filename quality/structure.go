@@ -937,6 +937,16 @@ func s12(c *Corpus) ([]Finding, error) {
 				named[s.Path] = s
 			}
 		}
+		// The two indexes stand after the last chapter and are in the manifest
+		// like anything else. They were left out of this map, so the rule read
+		// the manifest's own fields past them and reported all 79 index files
+		// of the corpus as reachable by nothing.
+		if b.NotationIndex != nil {
+			named[b.NotationIndex.Path] = *b.NotationIndex
+		}
+		if b.TerminologyIndex != nil {
+			named[b.TerminologyIndex.Path] = *b.TerminologyIndex
+		}
 	}
 
 	var out []Finding
