@@ -23,19 +23,18 @@ func fixture(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write("manifests/sections.yaml", `books:
-    - id: alg-viii
-      chapters:
-        - chapter: VIII
-          sections:
-            - kind: front
-              path: content/en/alg/VIII/00_frontmatter.md
-              book_pages: A VIII.1
-            - kind: section
-              section: 1
-              path: content/en/alg/VIII/01_s1_a.md
-              label: alg-viii-s1
-              book_pages: A VIII.1 - A VIII.23
+	write("manifests/sections/alg-viii.yaml", `id: alg-viii
+chapters:
+    - chapter: VIII
+      sections:
+        - kind: front
+          path: content/en/alg/VIII/00_frontmatter.md
+          book_pages: A VIII.1
+        - kind: section
+          section: 1
+          path: content/en/alg/VIII/01_s1_a.md
+          label: alg-viii-s1
+          book_pages: A VIII.1 - A VIII.23
 `)
 	write("manifests/exercises.json", `{"books":[{"id":"alg-viii","chapters":[{"chapter":"VIII",
 	  "sections":[{"section":1,"label":"alg-viii-s1","dir":"s1","count":2,"first":1,"last":2}]}]}]}`)
@@ -432,30 +431,20 @@ func TestBuildRejectsAMissingLanguage(t *testing.T) {
 // the counts would then depend on which one was read last.
 func TestASecondPrintingIsNotASecondSection(t *testing.T) {
 	root := fixture(t)
-	french := `books:
-    - id: alg-viii
-      chapters:
-        - chapter: VIII
-          sections:
-            - kind: front
-              path: content/en/alg/VIII/00_frontmatter.md
-              book_pages: A VIII.1
-            - kind: section
-              section: 1
-              path: content/en/alg/VIII/01_s1_a.md
-              label: alg-viii-s1
-              book_pages: A VIII.1 - A VIII.23
-    - id: alg-viii-fr
-      chapters:
-        - chapter: VIII
-          sections:
-            - kind: section
-              section: 1
-              path: content/fr/alg/VIII/01_s1_a.md
-              label: alg-viii-s1
-              book_pages: A VIII.1 - A VIII.23
+	// The English volume is already in the manifest from the fixture, and the
+	// manifest is a file to a volume, so the French printing is one more file
+	// beside it rather than a rewrite of the whole.
+	french := `id: alg-viii-fr
+chapters:
+    - chapter: VIII
+      sections:
+        - kind: section
+          section: 1
+          path: content/fr/alg/VIII/01_s1_a.md
+          label: alg-viii-s1
+          book_pages: A VIII.1 - A VIII.23
 `
-	if err := os.WriteFile(filepath.Join(root, "manifests", "sections.yaml"), []byte(french), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "manifests", "sections", "alg-viii-fr.yaml"), []byte(french), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// The French printing is on disk, so that what this test catches is the

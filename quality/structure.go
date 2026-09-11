@@ -945,19 +945,19 @@ func s12(c *Corpus) ([]Finding, error) {
 		rec, ok := named[d.Path]
 		if !ok {
 			out = append(out, Finding{File: d.Path,
-				Msg: "no entry in manifests/sections.yaml, so nothing that reads the manifest can reach this file"})
+				Msg: "no entry in manifests/sections/, so nothing that reads the manifest can reach this file"})
 			continue
 		}
 		if have := corpus.ContentSHA256(d.Body); rec.ContentSHA256 != have {
 			out = append(out, Finding{File: d.Path,
-				Msg: fmt.Sprintf("manifests/sections.yaml holds content_sha256 %s and the body here hashes to %s",
+				Msg: fmt.Sprintf("manifests/sections/ holds content_sha256 %s and the body here hashes to %s",
 					short(rec.ContentSHA256), short(have))})
 		}
 	}
 	for path := range named {
 		if !onDisk[path] {
 			out = append(out, Finding{File: path,
-				Msg: "named in manifests/sections.yaml and there is no such file"})
+				Msg: "named in manifests/sections/ and there is no such file"})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })

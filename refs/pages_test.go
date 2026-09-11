@@ -26,16 +26,15 @@ func pagesFixture(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write("manifests/sections.yaml", `books:
-    - id: alg-viii
-      chapters:
-        - chapter: VIII
-          sections:
-            - kind: section
-              section: 1
-              path: content/en/alg/VIII/01_s1_a.md
-              label: alg-viii-s1
-              book_pages: A VIII.1 - A VIII.4
+	write("manifests/sections/alg-viii.yaml", `id: alg-viii
+chapters:
+    - chapter: VIII
+      sections:
+        - kind: section
+          section: 1
+          path: content/en/alg/VIII/01_s1_a.md
+          label: alg-viii-s1
+          book_pages: A VIII.1 - A VIII.4
 `)
 	write("manifests/exercises.json", `{"books":[{"id":"alg-viii","chapters":[{"chapter":"VIII",
 	  "sections":[{"section":1,"label":"alg-viii-s1","dir":"s1","count":0,"first":0,"last":0}]}]}]}`)

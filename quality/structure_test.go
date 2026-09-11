@@ -95,7 +95,7 @@ func TestS12ReportsAFileTheManifestDoesNotName(t *testing.T) {
 	if got[0].File != "content/en/ens/IV/02_s2.md" {
 		t.Errorf("named %q", got[0].File)
 	}
-	if !strings.Contains(got[0].Msg, "no entry in manifests/sections.yaml") {
+	if !strings.Contains(got[0].Msg, "no entry in manifests/sections/") {
 		t.Errorf("said %q", got[0].Msg)
 	}
 }
