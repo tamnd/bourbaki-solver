@@ -1310,6 +1310,18 @@ func askChunk(ctx context.Context, root string, host ocr.Host, g *glossary.Gloss
 		// index entry that came back both escaped and re-laid out would
 		// otherwise be repaired by neither.
 		answer.Text = translate.Unescape(body, answer.Text)
+		// Redollar goes before Respace and not after, because Respace repairs a
+		// span that is there and this is the one that puts a span back: a letter
+		// standing bare in the prose is not a span for Respace to compare, and
+		// after Redollar has written it out of the English character for
+		// character there is nothing left in it to re-lay out. See
+		// translate.Redollar for the case, exercise 11 of Commutative Algebra
+		// III § 3, and for why refusing is the wrong end to fix it at.
+		if put := translate.Redollar(body, answer.Text); put != answer.Text {
+			logf("%s chunk %d of %d: a symbol came back standing bare in the prose, and the dollars are put back round it",
+				j.source, c.Index, c.Of)
+			answer.Text = put
+		}
 		answer.Text = translate.Respace(body, answer.Text)
 		// And the second repair, for the same reason: a citation the model wrote
 		// in the words of the language it was translating into is a citation
@@ -1467,10 +1479,11 @@ func outOfTurns(err error) bool {
 func refusedBefore(root, lang string, terms *glossary.Glossary, j job, c translate.Chunk, body string) []translate.Problem {
 	var out []translate.Problem
 	for _, text := range archivedAnswers(root, lang, j.source, c.Index, body) {
-		// Read the way the run reads: both repairs first, so that the note
-		// carries what an answer is refused for and not what it would have been
-		// refused for if nobody had put its formulas and its citations back.
-		text = translate.Readdress(lang, body, translate.Respace(body, text))
+		// Read the way the run reads: all three repairs first, and in the run's
+		// order, so that the note carries what an answer is refused for and not
+		// what it would have been refused for if nobody had put its symbols, its
+		// formulas and its citations back.
+		text = translate.Readdress(lang, body, translate.Respace(body, translate.Redollar(body, text)))
 		out = merge(out, translate.Audit(lang, body, text))
 		out = merge(out, translate.AuditTerms(lang, terms, body, text))
 	}
