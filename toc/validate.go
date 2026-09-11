@@ -61,17 +61,50 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 		restart[pdf] = true
 	}
 	fascicule := func(sp pagemap.Span) bool { return restart[sp.FirstPDF] }
+	// A part the manifest has named is the other kind of fascicule: one bound
+	// into the back of a volume rather than printed as a volume of its own. The
+	// Summary of Results of Theory of Sets is the case. The printing sets no
+	// chapter line over it, so the page map has no span for it and runs the
+	// chapter in front of it straight through to the end of the file, and the
+	// volume's chapter count stays the count of its chapters. What the checks
+	// below want of it is everything the contents can answer on its own.
+	part := map[string]bool{}
+	for _, p := range opt.Parts {
+		part[p.Numeral] = true
+	}
+	parts, last := 0, pagemap.Span{}
+	for _, c := range r.Chapters {
+		if part[c.Numeral] {
+			parts++
+		}
+	}
+	for _, sp := range pm.Chapters {
+		if sp.LastPage > last.LastPage {
+			last = sp
+		}
+	}
 	// sections is how many § the chapters so far have listed, which is what a
 	// fascicule's numbering carries on from. See the § check below.
 	sections := 0
-	if len(opt.Chapters) > 0 && len(r.Chapters) != len(opt.Chapters) {
+	if len(opt.Chapters) > 0 && len(r.Chapters)-parts != len(opt.Chapters) {
 		add("", 0, "the contents lists %d chapters, the volume has %d",
-			len(r.Chapters), len(opt.Chapters))
+			len(r.Chapters)-parts, len(opt.Chapters))
 	}
 
 	for _, c := range r.Chapters {
 		sp, ok := want[c.Numeral]
-		if !ok {
+		switch {
+		case ok:
+		case part[c.Numeral]:
+			// The span a part is given is the one its own contents draws: it
+			// opens where the contents says it opens and closes where the
+			// volume does. That is not a second opinion to check the contents
+			// against, and none is to be had, but it keeps the page checks
+			// below asking a real question of the entries under it, which is
+			// that they fall inside the part and inside the volume.
+			sp = pagemap.Span{Chapter: c.Numeral, FirstPDF: c.PDFPage,
+				FirstPage: c.Page, LastPDF: last.LastPDF, LastPage: last.LastPage}
+		default:
 			add(c.Numeral, 0, "the contents lists a chapter the page map never found")
 			continue
 		}
