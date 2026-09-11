@@ -21,6 +21,22 @@ func TestFootlessTakesTheMarkerOffAHeading(t *testing.T) {
 	}
 }
 
+// The other way a reading writes the marker. Both lines are headings this corpus
+// prints, page 174 of Varietes differentielles et analytiques and page 46 of
+// Algebre I a III, and the second sets a space in front of the bracket.
+func TestFootlessTakesOffAMarkdownFootnoteReference(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{"§ 15. Variétés d’applications[^1]", "§ 15. Variétés d’applications"},
+		{"7. Divisibility of polynomials in one indeterminate [^1]",
+			"7. Divisibility of polynomials in one indeterminate"},
+		{"le bord de A.[^1] Si $a\\in\\partial A$", "le bord de A. Si $a\\in\\partial A$"},
+	} {
+		if got := Footless(c.in); got != c.want {
+			t.Errorf("Footless(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // A superscript on a closing parenthesis is an exponent and not a marker, and
 // the three lines of this corpus that set one are all of that shape. A title
 // with no marker on it comes back as it was.
