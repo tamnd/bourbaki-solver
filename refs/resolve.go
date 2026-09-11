@@ -78,6 +78,18 @@ var corpusBooks = map[string]string{
 	"TS":  "ts",
 }
 
+// fascicules is the Book a fascicule's own code stands for, and the chapter of
+// that Book the fascicule was assembled as.
+//
+// A fascicule is cited exactly the way a Book is cited, "cf. Summary of Results,
+// §4, no. 10", so the parser gives it a code of its own and the sentence names
+// no chapter. It is not a Book: assembly puts the Summary of Results into the
+// corpus as chapter ER of Set Theory, from the manifest's fascicules, and that
+// is what a sentence naming it means.
+var fascicules = map[string]struct{ Book, Chapter string }{
+	"ER": {"Theory of Sets", "ER"},
+}
+
 // Site is where the sentence making a reference stands. The § is what a bare
 // "Proposition 4" means. The file and the line are what settles a bare
 // "Corollary 1" in a § that prints several, since the one meant is the one
@@ -122,6 +134,29 @@ func (ix *Index) holdsChapter(book, chapter string) bool {
 	return false
 }
 
+// asChapter rewrites a citation to a fascicule as a citation to the chapter the
+// fascicule was assembled as, and leaves every other citation as it stands.
+//
+// Until the Summary of Results was assembled a reference to it left the corpus,
+// and the name was not the worst of what that cost: the § after it was read as a
+// § of the chapter doing the citing, so "Summary of Results, §4, no. 2" from
+// chapter II went looking in chapter II, which has a § 4 with a no. 2 of its
+// own. Naming the chapter here is what stops that, and it is also the whole of
+// what the resolution needs, since from there it is an ordinary citation to
+// chapter ER of Set Theory.
+//
+// A fascicule the corpus has not assembled is left alone and leaves the corpus
+// the way it did before, so this turns on nothing but whether the chapter is
+// there to be pointed at.
+func (ix *Index) asChapter(c Citation) Citation {
+	f, ok := fascicules[Code(c.Book)]
+	if !ok || !ix.holdsChapter(corpusBooks[Code(f.Book)], f.Chapter) {
+		return c
+	}
+	c.Book, c.Chapter = f.Book, f.Chapter
+	return c
+}
+
 // codeFor is the letter the Éléments give a Book, from the name a label uses.
 func codeFor(book string) string {
 	for code, b := range corpusBooks {
@@ -151,6 +186,7 @@ func (ix *Index) Resolve(c Citation, at Site) (Target, error) {
 }
 
 func (ix *Index) resolve(c Citation, at Site) (Target, error) {
+	c = ix.asChapter(c)
 	book, out, leaves := ix.bookOf(c, at)
 	if leaves {
 		return out, nil
