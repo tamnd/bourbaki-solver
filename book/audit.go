@@ -241,6 +241,13 @@ func (a *Audit) structure(v *Volume) {
 				}
 			}
 		}
+		// A chapter with no numbered § at all, which is what a chapter read
+		// only as far as its front matter and its historical note looks like,
+		// has nothing to have a hole in. Running from the sentinel would ask
+		// it for a §0 it never claimed to have.
+		if len(seen) == 0 {
+			continue
+		}
 		for n := low; n <= high; n++ {
 			if !seen[n] {
 				holes = append(holes, fmt.Sprintf("chapter %s has no §%d and has a §%d", c.Numeral, n, high))

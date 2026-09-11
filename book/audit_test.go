@@ -73,6 +73,18 @@ func TestStructureFindsAGapInTheSections(t *testing.T) {
 // starting over. The manifest wraps each fascicule in a nominal chapter, so
 // chapter 2 has no § 1 through § 7 and is not meant to. Counting the run from 1
 // called that seven lost files on a volume that was whole.
+func TestStructureAsksNoGapOfAChapterWithNoNumberedParagraph(t *testing.T) {
+	v := sample()
+	// A chapter read only as far as its front matter and its historical note.
+	// The Vietnamese Integration I is one: it has no § file at all yet.
+	v.Chapters[0].Sections = nil
+	a := &Audit{}
+	a.structure(v)
+	if c := find(t, a, "§§ of every chapter"); !c.OK {
+		t.Errorf("a chapter with no § was asked for a §0: %v", c.Notes)
+	}
+}
+
 func TestStructureLetsAChapterStartWhereThePrintingStartsIt(t *testing.T) {
 	v := sample()
 	for _, s := range v.Chapters[0].Sections {
