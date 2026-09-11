@@ -51,6 +51,18 @@ func Load(root, id, lang string) (*Volume, error) {
 		}
 		v.Chapters = append(v.Chapters, c)
 	}
+	// A fascicule is bound into the back of the volume, after the last chapter,
+	// which is where the printing puts it: the Summary of Results runs from page
+	// 347 of Theory of Sets, straight on from the end of chapter IV. It is
+	// assembled as a chapter of its own, so it is loaded as one, and appending it
+	// here is what binds it in the order the printing bound it.
+	for _, f := range meta.Fascicules {
+		c, err := loadChapter(root, pick(dirs, meta.Book, f.Numeral), meta.Book, f.Numeral, lang)
+		if err != nil {
+			return nil, err
+		}
+		v.Chapters = append(v.Chapters, c)
+	}
 	if n := meta.ReaderNote; n != nil {
 		name := frontName(n.File, "00_to_the_reader.md")
 		note, err := loadFront(root, pick(dirs, meta.Book, name), meta.Book, lang, name)
