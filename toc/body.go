@@ -506,7 +506,7 @@ func (b *builder) appendixOpening(page BodyPage) (int, string, bool) {
 	return n + 1, title, true
 }
 
-// appendixTitle is what the appendix this page opens is called, in the two
+// appendixTitle is what the appendix this page opens is called, in the three
 // shapes a page of one comes in.
 //
 // As the reading left it the page carries the word in its running head and opens
@@ -517,6 +517,14 @@ func (b *builder) appendixOpening(page BodyPage) (int, string, bool) {
 // repaired and the second reading has to say what the first one said. Reading
 // only the first shape turned the appendix to chapter VII of Lie back into a
 // § 6 with no title the moment the repair had run.
+//
+// The third shape is an appendix that does not open its page. Page 47 of Lie 7
+// and 8 closes the first appendix a third of the way down and sets APPENDICE II
+// and its title under it, so the page begins in prose: the first two shapes both
+// ask what the top of the page says and neither of them can see it. What names
+// it there is the word set as a heading of its own, with the title as the next
+// heading after it, which is the same pair the first shape reads and only
+// further down the page.
 func appendixTitle(page BodyPage) (string, bool) {
 	var lead []string
 	for raw := range strings.SplitSeq(page.Body, "\n") {
@@ -533,6 +541,9 @@ func appendixTitle(page BodyPage) (string, bool) {
 		}
 		return lead[1], true
 	}
+	if title, ok := appendixUnderway(page.Body); ok {
+		return title, true
+	}
 	if headAppendix.FindStringSubmatch(page.RunningHead) == nil {
 		return "", false
 	}
@@ -541,6 +552,34 @@ func appendixTitle(page BodyPage) (string, bool) {
 		return "", false
 	}
 	return title, true
+}
+
+// appendixUnderway is the appendix opened part way down a page that began in
+// something else, and the title it is given.
+//
+// Only a marked heading counts here, because the page around it is prose and
+// prose says the word. A line of the running text that happens to read "voir
+// l'appendice II" is a reference and not an opening, and the mark is the whole
+// of what tells them apart. The title is the next marked heading, so that the
+// pair read is the one the press sets: the word on its own line, the title under
+// it, and the appendix after that.
+func appendixUnderway(body string) (string, bool) {
+	word := false
+	for raw := range strings.SplitSeq(body, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(raw), "#") {
+			continue
+		}
+		line := plainHeading(raw)
+		if !word {
+			word = bodyAppendixLine.MatchString(line)
+			continue
+		}
+		if !titleShaped(line) {
+			return "", false
+		}
+		return line, true
+	}
+	return "", false
 }
 
 // titleShaped says the line could be a title and not the opening of a paragraph.
