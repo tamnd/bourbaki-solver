@@ -509,3 +509,57 @@ func TestM13(t *testing.T) {
 		t.Errorf("a solution gave %d findings, want 1: %v", len(got), got)
 	}
 }
+
+func TestM14(t *testing.T) {
+	// Mathematics that is inside a span is not a finding, however much of it
+	// there is and whichever delimiters it uses.
+	clean := doc("a.md", "for every $x \\in E$ we have\n$$\nf(x) \\otimes g \\leq 0\n$$\nand nothing else")
+	if got := run(t, m14, clean); len(got) != 0 {
+		t.Errorf("a file written the corpus's way was reported: %v", got)
+	}
+
+	// The shape from #377: a line of a table of contents where the reading
+	// wrote the TeX and never opened a span.
+	contents := doc("b.md", "1. A first no.\n6. Properties of E \\otimes_A F relative to exact sequences ... 251\n")
+	got := run(t, m14, contents)
+	if len(got) != 1 {
+		t.Fatalf("gave %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].Line != 2 {
+		t.Errorf("the finding is on line %d, want 2", got[0].Line)
+	}
+	if !strings.Contains(got[0].Msg, "\\otimes") {
+		t.Errorf("the finding does not name the control sequence: %s", got[0].Msg)
+	}
+}
+
+// One finding a line and not one a control sequence. A contents line has nine
+// of them and they are one mistake.
+func TestM14ReportsALineOnce(t *testing.T) {
+	d := doc("c.md", "Hom_B(E \\otimes_A F, G) \\to Hom_A(F, Hom_B(E, G))")
+	if got := run(t, m14, d); len(got) != 1 {
+		t.Errorf("gave %d findings, want 1: %v", len(got), got)
+	}
+}
+
+// The markup macros are the prose's own and are left alone. Whether the corpus
+// should write LaTeX markup in Markdown is a different question from this one.
+func TestM14LeavesTheMarkupMacrosAlone(t *testing.T) {
+	d := doc("d.md", "the theorem of Cauchy\\footnote{See the historical note.}\n*Bourbaki*, 2\\textsuperscript{e} \\'edition")
+	got := run(t, m14, d)
+	for _, f := range got {
+		if strings.Contains(f.Msg, "\\footnote") || strings.Contains(f.Msg, "\\textsuperscript") {
+			t.Errorf("a markup macro was reported: %s", f.Msg)
+		}
+	}
+}
+
+// An unclosed span makes everything after it look like prose, and M01 already
+// reports the one fault that caused it. Reporting the rest here would bury M01
+// under its own consequences.
+func TestM14IsSilentAfterAnUnclosedSpan(t *testing.T) {
+	d := doc("e.md", "we have $x \\in E and then\nf \\otimes g and then\nh \\leq k")
+	if got := run(t, m14, d); len(got) != 0 {
+		t.Errorf("the tail of a file with an unclosed span was reported: %v", got)
+	}
+}

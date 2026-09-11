@@ -3,6 +3,7 @@ package quality
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -48,6 +49,8 @@ func init() {
 			Title: "the mathematics is written between dollars", Run: m12},
 		Check{ID: "M13", Group: Mathematics, Hard: false,
 			Title: "an inline formula is written tight against its dollars", Run: m13},
+		Check{ID: "M14", Group: Mathematics, Hard: false,
+			Title: "no mathematics is left outside math mode", Run: m14},
 	)
 }
 
@@ -819,4 +822,110 @@ func m13(c *Corpus) ([]Finding, error) {
 		}
 	}
 	return out, nil
+}
+
+// markupOutsideMath is the control sequences that belong in the prose, so that
+// finding one there is not a finding.
+//
+// They are the typographic ones: a footnote mark, an emphasis, a superscript
+// for an ordinal. The corpus has 219 \emph, 169 \textsuperscript and 116
+// \footnote in its prose, and every one of them is doing the job it was written
+// for. Whether the corpus should be writing LaTeX markup in Markdown at all is
+// a real question and it is a different one from this rule's, which is only
+// whether some mathematics never got its dollars.
+var markupOutsideMath = map[string]bool{
+	"\\emph": true, "\\footnote": true, "\\textsuperscript": true,
+	"\\textbf": true, "\\textit": true, "\\hspace": true,
+}
+
+// controlWordOutside finds a TeX control word: a backslash and the letters
+// after it. \$ and \_ and the other escapes are one non-letter character and do
+// not match, which is what we want, since an escaped dollar is prose.
+var controlWordOutside = regexp.MustCompile(`\\[A-Za-z]+`)
+
+// M14. No mathematics is left outside math mode.
+//
+// A control sequence in the prose prints as itself. `E \otimes_A F` in a line
+// of a table of contents is a backslash, the word otimes, an underscore and the
+// rest, set in the reading face, and it is on the site that way.
+//
+// The reading knew it was mathematics. It wrote \otimes and \geq and
+// subscripted the letters; it just never opened a span. So this is a fault of
+// delimiters and not of transcription, and the information needed to repair it
+// is already in the file.
+//
+// P04 and M04 cannot see it. Both render the math spans with KaTeX and report
+// what will not set, and mathematics that never entered a span is not a span.
+// The audit was green over sixteen hundred lines of bare TeX for that reason,
+// and #361 -- the indices of notation, where a whole column of entries was
+// written without dollars -- was found by reading the site rather than by the
+// rules.
+//
+// Soft rather than hard. 938 assembled files have at least one, and a hard rule
+// that fails a third of the corpus on the day it lands is a rule that gets
+// turned off; see the note in .githooks/pre-commit about standing findings. It
+// goes hard when the count is down.
+//
+// The span that was left open is not read. An unclosed delimiter makes every
+// control sequence after it look like prose, and M01 already reports the one
+// fault that caused all of them.
+func m14(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, d := range c.Docs {
+		spans, unclosed := Math(d.Body)
+		rs := []rune(d.Body)
+		blank := make([]bool, len(rs))
+		for _, s := range spans {
+			for i := s.Start; i < s.End && i < len(blank); i++ {
+				blank[i] = true
+			}
+		}
+		if unclosed != nil {
+			for i := unclosed.Start; i < len(blank); i++ {
+				blank[i] = true
+			}
+		}
+		prose := make([]rune, len(rs))
+		line := make([]int, len(rs))
+		at := 1
+		for i, r := range rs {
+			line[i] = at
+			if r == '\n' {
+				at++
+			}
+			if blank[i] {
+				prose[i] = ' '
+				continue
+			}
+			prose[i] = r
+		}
+		// One finding a line rather than one a control sequence. A contents
+		// page has nine on a line and they are all the same mistake.
+		reported := map[int]bool{}
+		for _, at := range controlWordOutside.FindAllStringIndex(string(prose), -1) {
+			// FindAllStringIndex counts bytes and the offsets above are runes.
+			n := len([]rune(string(prose)[:at[0]]))
+			word := string(prose)[at[0]:at[1]]
+			if markupOutsideMath[word] {
+				continue
+			}
+			if n >= len(line) || reported[line[n]] {
+				continue
+			}
+			reported[line[n]] = true
+			out = append(out, Finding{File: d.Path, Line: d.BodyLine(line[n]),
+				Msg: fmt.Sprintf("%s is set in the prose, so the mathematics prints as its own source: %s",
+					word, ellipsis(lineAt(d.Body, line[n]), 60))})
+		}
+	}
+	return out, nil
+}
+
+// lineAt is the nth line of a body, counting from one.
+func lineAt(body string, n int) string {
+	lines := strings.Split(body, "\n")
+	if n < 1 || n > len(lines) {
+		return ""
+	}
+	return strings.TrimSpace(lines[n-1])
 }
