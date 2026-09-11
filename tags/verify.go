@@ -26,12 +26,35 @@ const (
 // names and reports the one the model spec gives it.
 
 // A Failure is one broken invariant, said in one line.
+//
+// Untagged marks the one kind of T03 failure that is not a corruption: a
+// statement that has never been given a tag. Every other failure says two
+// things disagree; this one says a thing is not there yet, and the corpus is
+// still being read, so a caller may want to hold it against a ceiling rather
+// than fail on it. See Split.
 type Failure struct {
-	Rule string
-	Msg  string
+	Rule     string
+	Msg      string
+	Untagged bool
 }
 
 func (f Failure) String() string { return f.Rule + ": " + f.Msg }
+
+// Split separates the statements that have no tag from the failures that are
+// disagreements. A tag assigned is permanent under T05, so a volume is tagged
+// once its pages have settled and not before; until then the untagged count is
+// a number that comes down, which is a different thing from a broken invariant
+// and is reported as one.
+func Split(fs []Failure) (untagged, broken []Failure) {
+	for _, f := range fs {
+		if f.Untagged {
+			untagged = append(untagged, f)
+			continue
+		}
+		broken = append(broken, f)
+	}
+	return untagged, broken
+}
 
 // Verify checks everything that can be checked from the files alone, which is
 // every invariant but T05. T05 is about the history of the file rather than its
@@ -62,23 +85,23 @@ func (s *Set) check() []Failure {
 	seenLabel := map[string]string{}
 	for _, e := range append(append([]Entry(nil), s.Tags...), s.New...) {
 		if _, err := Parse(string(e.Tag)); err != nil {
-			out = append(out, Failure{T01, err.Error()})
+			out = append(out, Failure{Rule: T01, Msg: err.Error()})
 		}
 		if seenTag[e.Tag] {
-			out = append(out, Failure{T01, fmt.Sprintf("the tag %s is on two lines", e.Tag)})
+			out = append(out, Failure{Rule: T01, Msg: fmt.Sprintf("the tag %s is on two lines", e.Tag)})
 		}
 		seenTag[e.Tag] = true
 		if was, dup := seenLabel[e.Label]; dup {
-			out = append(out, Failure{T02, fmt.Sprintf("the label %s is held by %s and by %s", e.Label, was, e.Tag)})
+			out = append(out, Failure{Rule: T02, Msg: fmt.Sprintf("the label %s is held by %s and by %s", e.Label, was, e.Tag)})
 		}
 		seenLabel[e.Label] = string(e.Tag)
 	}
 	for _, r := range s.Inactive {
 		if seenTag[r.Tag] {
-			out = append(out, Failure{T06, fmt.Sprintf("the tag %s is live and retired at once", r.Tag)})
+			out = append(out, Failure{Rule: T06, Msg: fmt.Sprintf("the tag %s is live and retired at once", r.Tag)})
 		}
 		if was, dup := seenLabel[r.Label]; dup {
-			out = append(out, Failure{T02, fmt.Sprintf("the label %s is held by %s and retired as %s", r.Label, was, r.Tag)})
+			out = append(out, Failure{Rule: T02, Msg: fmt.Sprintf("the label %s is held by %s and retired as %s", r.Label, was, r.Tag)})
 		}
 		seenLabel[r.Label] = string(r.Tag)
 	}
@@ -109,14 +132,14 @@ func checkCorpus(s *Set, found map[string][]Item, printings []string) []Failure 
 			}
 			switch {
 			case it.Bad != "":
-				out = append(out, Failure{T09, fmt.Sprintf("%s is tagged %q, which is not four of 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+				out = append(out, Failure{Rule: T09, Msg: fmt.Sprintf("%s is tagged %q, which is not four of 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
 					at(it), it.Bad)})
 			case it.Tag == "":
-				out = append(out, Failure{T03, fmt.Sprintf("%s has no tag", at(it))})
+				out = append(out, Failure{Rule: T03, Msg: fmt.Sprintf("%s has no tag", at(it)), Untagged: true})
 			case byLabel[it.Label] == "":
-				out = append(out, Failure{T03, fmt.Sprintf("%s carries the tag %s, which is in no file of tags/", at(it), it.Tag)})
+				out = append(out, Failure{Rule: T03, Msg: fmt.Sprintf("%s carries the tag %s, which is in no file of tags/", at(it), it.Tag)})
 			case byLabel[it.Label] != it.Tag:
-				out = append(out, Failure{T03, fmt.Sprintf("%s carries the tag %s and tags/ gives it %s",
+				out = append(out, Failure{Rule: T03, Msg: fmt.Sprintf("%s carries the tag %s and tags/ gives it %s",
 					at(it), it.Tag, byLabel[it.Label])})
 			}
 		}
@@ -124,7 +147,7 @@ func checkCorpus(s *Set, found map[string][]Item, printings []string) []Failure 
 	if len(printed) > 0 {
 		for _, e := range s.Tags {
 			if _, ok := printed[e.Label]; !ok {
-				out = append(out, Failure{T04, fmt.Sprintf("the tag %s names %s, which is in no file of the corpus", e.Tag, e.Label)})
+				out = append(out, Failure{Rule: T04, Msg: fmt.Sprintf("the tag %s names %s, which is in no file of the corpus", e.Tag, e.Label)})
 			}
 		}
 	}
@@ -134,17 +157,17 @@ func checkCorpus(s *Set, found map[string][]Item, printings []string) []Failure 
 		}
 		for _, it := range items {
 			if it.Bad != "" {
-				out = append(out, Failure{T09, fmt.Sprintf("%s is tagged %q, which is not four of 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+				out = append(out, Failure{Rule: T09, Msg: fmt.Sprintf("%s is tagged %q, which is not four of 0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ",
 					at(it), it.Bad)})
 				continue
 			}
 			want, ok := printed[it.Label]
 			if !ok {
-				out = append(out, Failure{T07, fmt.Sprintf("%s translates %s, which no printing in the corpus has", at(it), it.Label)})
+				out = append(out, Failure{Rule: T07, Msg: fmt.Sprintf("%s translates %s, which no printing in the corpus has", at(it), it.Label)})
 				continue
 			}
 			if it.Tag != want {
-				out = append(out, Failure{T07, fmt.Sprintf("%s carries the tag %s and the English it translates carries %s",
+				out = append(out, Failure{Rule: T07, Msg: fmt.Sprintf("%s carries the tag %s and the English it translates carries %s",
 					at(it), it.Tag, want)})
 			}
 		}
@@ -206,7 +229,7 @@ func Order(items []Item, runs []Run) []Failure {
 		}
 		key := where{it.Path, RunAt(runs, it.Tag)}
 		if was, seen := last[key]; seen && it.Tag < was.Tag {
-			out = append(out, Failure{T10, fmt.Sprintf("%s has %s after %s, which the same run assigned later",
+			out = append(out, Failure{Rule: T10, Msg: fmt.Sprintf("%s has %s after %s, which the same run assigned later",
 				at(it), it.Tag, was.Tag)})
 		}
 		last[key] = it
@@ -273,7 +296,7 @@ func AppendOnly(diff string, aliases []Alias, retired []Retired) []Failure {
 				continue
 			}
 		}
-		out = append(out, Failure{T05, fmt.Sprintf("the line %q was taken out of tags, and only migrate may do that", line)})
+		out = append(out, Failure{Rule: T05, Msg: fmt.Sprintf("the line %q was taken out of tags, and only migrate may do that", line)})
 	}
 	return out
 }
