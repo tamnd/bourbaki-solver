@@ -14,9 +14,9 @@ import (
 // That is the whole of the fault this fixture is here for. A translation is the
 // English file with the language swapped in its path, and the index was built
 // on that assumption for every language that is not English. The French is not
-// a translation. It is a second printing, it has its own records in
-// sections.yaml, and swapping the language into an English path names a file
-// nobody wrote.
+// a translation. It is a second printing, it has its own file under
+// manifests/sections/, and swapping the language into an English path names a
+// file nobody wrote.
 func twoPrintings(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -29,25 +29,25 @@ func twoPrintings(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write("manifests/sections.yaml", `books:
-    - id: alg-viii
-      chapters:
-        - chapter: VIII
-          sections:
-            - kind: section
-              section: 1
-              path: content/en/alg/VIII/01_s1_artinian_modules.md
-              label: alg-viii-s1
-              book_pages: A VIII.1 - A VIII.23
-    - id: alg-viii-fr
-      chapters:
-        - chapter: VIII
-          sections:
-            - kind: section
-              section: 1
-              path: content/fr/alg/VIII/01_s1_modules_artiniens.md
-              label: alg-viii-s1
-              book_pages: A VIII.1 - A VIII.23
+	write("manifests/sections/alg-viii.yaml", `id: alg-viii
+chapters:
+    - chapter: VIII
+      sections:
+        - kind: section
+          section: 1
+          path: content/en/alg/VIII/01_s1_artinian_modules.md
+          label: alg-viii-s1
+          book_pages: A VIII.1 - A VIII.23
+`)
+	write("manifests/sections/alg-viii-fr.yaml", `id: alg-viii-fr
+chapters:
+    - chapter: VIII
+      sections:
+        - kind: section
+          section: 1
+          path: content/fr/alg/VIII/01_s1_modules_artiniens.md
+          label: alg-viii-s1
+          book_pages: A VIII.1 - A VIII.23
 `)
 	write("manifests/exercises.json", `{"books":[{"id":"alg-viii","chapters":[{"chapter":"VIII",
 	  "sections":[{"section":1,"label":"alg-viii-s1","dir":"s1","count":0,"first":0,"last":0}]}]}]}`)

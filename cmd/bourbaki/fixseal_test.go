@@ -220,14 +220,14 @@ func TestSealLeavesTheManifestAloneWhenNothingMoved(t *testing.T) {
 	if err := m.Save(root); err != nil {
 		t.Fatal(err)
 	}
-	before, err := os.ReadFile(corpus.SectionsPath(root))
+	before, err := os.ReadFile(corpus.SectionsPath(root, "alg-viii"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := fixSeal(nil); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.ReadFile(corpus.SectionsPath(root))
+	after, err := os.ReadFile(corpus.SectionsPath(root, "alg-viii"))
 	if err != nil {
 		t.Fatal(err)
 	}

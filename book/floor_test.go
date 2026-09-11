@@ -74,7 +74,7 @@ func TestTheFloorIsOffWhenItIsZero(t *testing.T) {
 func TestAVolumeTheSectionsManifestDoesNotKnowIsNotRefused(t *testing.T) {
 	// A measurement nobody could take is not a reason to stop a build. The audit
 	// reports the missing manifest as its own failed check, which is the right
-	// place for it: the fault is in manifests/sections.yaml and not in the
+	// place for it: the fault is in manifests/sections/ and not in the
 	// volume, and refusing here would hide that behind a coverage number that
 	// was never computed.
 	v := &Volume{Lang: "vi", Meta: corpus.Book{ID: "no-such-volume", Lang: "fr"}}

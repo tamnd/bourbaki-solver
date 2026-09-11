@@ -29,7 +29,7 @@ func TestSectionsRoundTrip(t *testing.T) {
 	if err := m.Save(root); err != nil {
 		t.Fatal(err)
 	}
-	b, err := os.ReadFile(SectionsPath(root))
+	b, err := os.ReadFile(SectionsPath(root, "alg-viii"))
 	if err != nil {
 		t.Fatal(err)
 	}

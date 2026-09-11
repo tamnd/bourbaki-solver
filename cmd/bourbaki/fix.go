@@ -775,7 +775,7 @@ It is not a repair of the text and it does not look at the text. It reads what
 the file says its body hashes to, hashes the body, and where the two differ it
 writes the second. A file already sealed is not rewritten.
 
-manifests/sections.yaml records the same hash a second time and is written with
+manifests/sections/ records the same hash a second time and is written with
 it, since assemble -check compares the manifest it would write against the
 committed one and a section sealed without its row fails that check with no way
 to pass it. Only a row the manifest already has is touched.
@@ -3197,7 +3197,7 @@ func fixSeal(args []string) error {
 			strings.Join(missed, ", "))
 	}
 
-	// manifests/sections.yaml records the same hash a second time, and the two
+	// manifests/sections/ records the same hash a second time, and the two
 	// have to move together: assemble -check compares the manifest it would
 	// write against the committed one, and a section sealed here without the
 	// manifest is a corpus that fails that check with no way to pass it. The
@@ -3234,7 +3234,7 @@ func fixSeal(args []string) error {
 	return nil
 }
 
-// sealManifest writes the new hashes into manifests/sections.yaml and returns
+// sealManifest writes the new hashes into manifests/sections/ and returns
 // how many rows moved. A row whose hash already agrees is left as it is, and a
 // path the manifest does not know is not added: the manifest is assembly's
 // account of what it wrote, and a file assembly never wrote does not belong in

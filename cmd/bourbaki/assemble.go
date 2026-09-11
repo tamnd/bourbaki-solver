@@ -18,7 +18,7 @@ import (
 // assemble is the stage that turns five hundred page files into twenty-six
 // chapter files. It reads pages/ and manifests/toc/ and nothing else, so it
 // runs anywhere the repository is checked out, PDFs or no PDFs, and it writes
-// content/, manifests/sections.yaml, and a line per section to the terminal.
+// content/, manifests/sections/, and a line per section to the terminal.
 //
 // -check is the same run with the writes taken out and a comparison put in its
 // place. It is what CI runs: the whole stage is meant to be a pure function of
@@ -63,7 +63,7 @@ import (
 // wrote. That is the whole of the fix for a fault that cost an afternoon. The
 // manifests are written a volume at a time, out of the chapters the run walked,
 // so for as long as a skipped chapter contributed nothing, one partial assemble
-// of Theory of Sets took all of chapter IV out of manifests/sections.yaml and
+// of Theory of Sets took all of chapter IV out of manifests/sections/ and
 // manifests/exercises.json. The files under content/ were untouched and still
 // right, the command reported the skip as ordinary progress, and the only sign
 // anything had happened was 31 R01 findings two rules downstream saying that
@@ -421,12 +421,14 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 		return nil, nil, sum, err
 	}
 
-	sections.Upsert(rec)
-	manifest, err := sections.Bytes()
+	// The one volume's file and not the whole manifest. manifests/sections/ is
+	// a file to a volume, so an assemble of Algebra I to III has something to
+	// say about one of them and nothing to say about the other thirty-nine.
+	manifest, err := rec.Bytes()
 	if err != nil {
 		return nil, nil, sum, err
 	}
-	files[corpus.SectionsPath(root)] = manifest
+	files[corpus.SectionsPath(root, book)] = manifest
 
 	exm.Upsert(exrec)
 	exmanifest, err := exm.Bytes()

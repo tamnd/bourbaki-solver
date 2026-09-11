@@ -125,11 +125,11 @@ func (r PrintingRow) Agrees() bool {
 func Compare(sm *corpus.SectionsManifest, p Pair) (*Printings, error) {
 	l, ok := chapterOf(sm, p.Left, p.Chapter)
 	if !ok {
-		return nil, fmt.Errorf("%s has no assembled chapter %s in manifests/sections.yaml", p.Left, p.Chapter)
+		return nil, fmt.Errorf("%s has no assembled chapter %s in manifests/sections/", p.Left, p.Chapter)
 	}
 	r, ok := chapterOf(sm, p.Right, p.Chapter)
 	if !ok {
-		return nil, fmt.Errorf("%s has no assembled chapter %s in manifests/sections.yaml", p.Right, p.Chapter)
+		return nil, fmt.Errorf("%s has no assembled chapter %s in manifests/sections/", p.Right, p.Chapter)
 	}
 	out := &Printings{Pair: p}
 	rows := map[string]*PrintingRow{}

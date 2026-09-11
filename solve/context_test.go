@@ -26,21 +26,20 @@ func fixture(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
-	write("manifests/sections.yaml", `books:
-    - id: alg-viii
-      chapters:
-        - chapter: VIII
-          sections:
-            - kind: section
-              section: 1
-              path: content/en/alg/VIII/01_s1_a.md
-              label: alg-viii-s1
-              book_pages: A VIII.1 - A VIII.8
-            - kind: section
-              section: 2
-              path: content/en/alg/VIII/02_s2_b.md
-              label: alg-viii-s2
-              book_pages: A VIII.9 - A VIII.16
+	write("manifests/sections/alg-viii.yaml", `id: alg-viii
+chapters:
+    - chapter: VIII
+      sections:
+        - kind: section
+          section: 1
+          path: content/en/alg/VIII/01_s1_a.md
+          label: alg-viii-s1
+          book_pages: A VIII.1 - A VIII.8
+        - kind: section
+          section: 2
+          path: content/en/alg/VIII/02_s2_b.md
+          label: alg-viii-s2
+          book_pages: A VIII.9 - A VIII.16
 `)
 	write("manifests/exercises.json", `{"books":[{"id":"alg-viii","chapters":[{"chapter":"VIII",
 	  "sections":[{"section":1,"label":"alg-viii-s1","dir":"s1","count":4,"first":1,"last":4},
