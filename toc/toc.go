@@ -96,8 +96,17 @@ type Options struct {
 
 // Result is what one volume's contents yielded.
 type Result struct {
-	Book     string
-	Grammar  Grammar
+	Book    string
+	Grammar Grammar
+	// PDFPages are the pdf pages the contents was read off, in order. They are
+	// written into the manifest so that something can check them later: a
+	// contents page is read with a prompt of its own, an ordinary run over the
+	// same volume overwrites that reading with one that drops the column of
+	// page numbers, and until this was recorded there was nothing in the corpus
+	// that knew which pages were supposed to carry which prompt. It has
+	// happened, to int-i-iv-fr pdf 282 to 284, and the only sign was that toc
+	// build stopped finding a contents page.
+	PDFPages []int
 	Chapters []corpus.Chapter
 	Problems []Problem
 }
@@ -1003,7 +1012,7 @@ func Parse(pages []string, pm *pagemap.Map, opt Options) (*Result, error) {
 		return nil, fmt.Errorf("toc: %s has no page that looks like a table of contents", opt.Book)
 	}
 
-	res := &Result{Book: opt.Book, Grammar: g}
+	res := &Result{Book: opt.Book, Grammar: g, PDFPages: candAt}
 	var cur *corpus.Chapter
 	var curSec *corpus.Section
 	// underNote says the lines being read belong to a historical note or to a

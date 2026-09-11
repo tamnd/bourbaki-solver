@@ -17,6 +17,7 @@ import (
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/footnote"
+	"github.com/tamnd/bourbaki-solver/prompt"
 	"github.com/tamnd/bourbaki-solver/queue"
 	"github.com/tamnd/bourbaki-solver/textguard"
 )
@@ -269,7 +270,7 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	var added, waited, again int
+	var added, waited, again, contents int
 	for _, source := range sources {
 		if source.Blank {
 			continue
@@ -282,6 +283,9 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 			continue
 		case needsABetterReader:
 			waited++
+			continue
+		case readAsAContents:
+			contents++
 			continue
 		}
 		job := queue.New(queue.StageOCR, Target(r.Book, source.Page), source.SHA256, promptSHA)
@@ -322,6 +326,11 @@ func (r *Runner) Fill(sources []Source) (int, error) {
 		}
 		r.logf("%d pages %s a stronger reader than this run has, left for that reader", waited, what)
 	}
+	if contents > 0 {
+		r.logf("%d pages were read as a table of contents, and this run asks the ordinary "+
+			"question, which would lose the printed page numbers: use -contents to read them again",
+			contents)
+	}
 	return added, nil
 }
 
@@ -339,6 +348,10 @@ const (
 	// came off a reader stronger than any this run has. It is work to do and
 	// this run is not the one to do it.
 	needsABetterReader
+	// readAsAContents is a page carrying a reading that came off the contents
+	// prompt, met by a run asking the ordinary question. It is not work at all,
+	// and a run that did it would destroy what is there.
+	readAsAContents
 )
 
 // state says what is on disk for a page: nothing this run would accept, an
@@ -377,6 +390,24 @@ func (r *Runner) state(source Source, promptSHA string) pageState {
 	}
 	if file.Meta.Method != corpus.MethodOCR {
 		return unread
+	}
+	// A contents reading is not a stale reading, it is an answer to a different
+	// question, and the ordinary run is the one thing that must not touch it.
+	//
+	// The staleness test below would call it stale, because the prompt hashes
+	// differ, and hand it to the model; the reading that came back would keep the
+	// words and drop the column of printed page numbers that is the whole of a
+	// contents page, and nothing downstream would say so. It has happened, to
+	// int-i-iv-fr pdf 282 to 284, and the only sign was toc build going quiet.
+	//
+	// Here rather than in file, because here is before the page is sent: a page
+	// nobody may write should not cost minutes on a rented box first.
+	//
+	// No flag turns this off. A run that wants a contents page read is the run
+	// that asks the contents question, and -contents makes the two hashes equal
+	// and this falls through on its own.
+	if file.Meta.PromptSHA256 == prompt.ContentsSHA256() && promptSHA != file.Meta.PromptSHA256 {
+		return readAsAContents
 	}
 	// Both inputs are compared, and both are behind the same guard. A page read
 	// from a different image or under a different prompt is a stale reading and

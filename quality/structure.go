@@ -13,6 +13,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/footnote"
 	"github.com/tamnd/bourbaki-solver/pagemap"
+	"github.com/tamnd/bourbaki-solver/prompt"
 )
 
 // The structure rules ask whether the corpus has the shape the book has: every
@@ -54,6 +55,9 @@ func init() {
 			Title: "the printings of a § hold the same exercises", Run: s11},
 		Check{ID: "S12", Group: Structure, Hard: true,
 			Title: "the sections manifest names every § file and describes it", Run: s12},
+		Check{ID: "S13", Group: Structure, Hard: true,
+			Title: "the pages the contents was read off still carry the contents prompt",
+			Run:   s13},
 	)
 }
 
@@ -958,6 +962,87 @@ func s12(c *Corpus) ([]Finding, error) {
 		if !onDisk[path] {
 			out = append(out, Finding{File: path,
 				Msg: "named in manifests/sections/ and there is no such file"})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
+	return out, nil
+}
+
+// S13. No page the contents was read off has lost its column of page numbers.
+//
+// A table of contents is asked a different question from the rest of the book.
+// The contents prompt asks for the indentation, the leader dots and the column
+// of printed page numbers, because on a contents page those numbers are the
+// whole of the content; the ordinary prompt keeps the words and is free to drop
+// them. The corpus holds one reading per page, so an ordinary run over a volume
+// whose contents has already been read writes over it.
+//
+// It has happened. int-i-iv-fr pdf 282 to 284 were read as a contents and then
+// read again as prose, and the only sign was that toc build stopped finding a
+// contents page in that volume. Nothing could catch it, because nothing knew
+// which pages were supposed to carry which prompt. Now toc build writes down
+// the pages it read the contents off and this asks after them.
+//
+// It asks after the numbers, not after the prompt hash. 60 pages in 10 volumes
+// are named as a contents source and carry an ordinary reading, and every one
+// of them kept its numbers: the lowest is 82 % of lines ending in a page number
+// and 37 of the 60 are at 100 %. Reading a contents page with the ordinary
+// prompt is a gamble that usually comes off, and a rule that called those 60
+// broken would be saying something untrue about all of them. So the test is the
+// damage itself, at half the lines, which no surviving page comes near.
+//
+// A page with no prompt at all is not asked. The born-digital volumes take
+// their contents off the pdf's own text layer, where the numbers survive, and
+// those pages carry no reading and no prompt hash: 51 pages in 12 volumes read
+// as a contents and none of them damage.
+
+// leaders counts the non-blank lines of a contents reading, and how many of
+// them end in the printed page number that is the point of the line. A leader
+// line ends in its number whether or not the dots that lead to it survived, so
+// this is the one mark of a contents page that no reading drops by accident.
+func leaders(body string) (lines, numbered int) {
+	for _, ln := range strings.Split(body, "\n") {
+		ln = strings.TrimRight(ln, " \t")
+		if strings.TrimSpace(ln) == "" {
+			continue
+		}
+		lines++
+		if i := strings.LastIndexFunc(ln, func(r rune) bool { return r < '0' || r > '9' }); i < len(ln)-1 {
+			numbered++
+		}
+	}
+	return lines, numbered
+}
+func s13(c *Corpus) ([]Finding, error) {
+	want := prompt.ContentsSHA256()
+	var out []Finding
+	for _, b := range c.TOC.Books {
+		if len(b.ContentsPDFPages) == 0 {
+			continue
+		}
+		at := map[int]int{}
+		for i, p := range c.Pages[b.ID] {
+			at[p.Meta.PDFPage] = i
+		}
+		for _, pdf := range b.ContentsPDFPages {
+			i, ok := at[pdf]
+			if !ok {
+				continue
+			}
+			got := c.Pages[b.ID][i].Meta.PromptSHA256
+			if got == "" || got == want {
+				continue
+			}
+			lines, numbered := leaders(c.Pages[b.ID][i].Body)
+			if lines == 0 || numbered*2 >= lines {
+				continue
+			}
+			out = append(out, Finding{File: c.PagePaths[b.ID][i], Line: 1,
+				Msg: fmt.Sprintf("the contents of %s was read off this page, the reading "+
+					"committed on it came from the ordinary prompt %s rather than the contents "+
+					"prompt %s, and only %d of its %d lines still end in a printed page number, "+
+					"so the column the contents is made of is gone",
+					b.ID, short(got), short(want), numbered, lines)})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].File < out[j].File })
