@@ -26,6 +26,21 @@ import (
 // is refused.
 var footnote = regexp.MustCompile(`([^)])\s*\$\s*\^\s*\{?\s*\d{1,2}\s*\}?\s*\$`)
 
+// reference is the same marker written the other way the readings write it,
+// which is the footnote reference markdown has of its own.
+//
+// A reading is free to set the marker either way and both ways are on the page.
+// Page 174 of Varietes differentielles et analytiques heads § 15 "Variétés
+// d'applications[^1]" and carries the note itself at the foot of the page, and
+// page 46 of Algebre I a III heads no. 7 "Divisibility of polynomials in one
+// indeterminate [^1]". Whichever form the reading chose, the title is the words
+// in front of the marker.
+//
+// Nothing is carried through this replacement because there is no second reading
+// of the bracket to keep away from: a caret inside square brackets is a footnote
+// reference in markdown and is a character class nowhere this corpus writes.
+var reference = regexp.MustCompile(`\s*\[\^\d{1,2}\]`)
+
 // Footless is a title with the footnote markers taken off it.
 //
 // Page 69 of Groupes et algebres de Lie IX heads § 7 with a marker after the
@@ -36,8 +51,11 @@ var footnote = regexp.MustCompile(`([^)])\s*\$\s*\^\s*\{?\s*\d{1,2}\s*\}?\s*\$`)
 //
 // Flattening cannot do this on its own. It throws away the dollars and the caret
 // and keeps the digit, so the two sides come out differing by a 1 that is no
-// part of either title.
-func Footless(s string) string { return footnote.ReplaceAllString(s, "$1") }
+// part of either title. The markdown reference is worse, since flattening keeps
+// the digit there too and the entry the contents gives has neither.
+func Footless(s string) string {
+	return reference.ReplaceAllString(footnote.ReplaceAllString(s, "$1"), "")
+}
 
 // Accentless is a string with the accents a printing of this corpus was found
 // dropping folded away, and every other accent left standing.
