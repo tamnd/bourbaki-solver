@@ -484,3 +484,36 @@ func TestOrdinaryProseIsNotTakenForTheGateway(t *testing.T) {
 		}
 	}
 }
+
+// The offer to go on. A model that reads the page correctly and then asks the
+// reader what it should do next has written a line the page does not have, and
+// it is at the foot rather than the head, where the narration phrases do not
+// look. Page 109 of Theory of Sets reached the corpus this way and passed all
+// nine rules.
+func TestAnOfferToGoOnIsCaught(t *testing.T) {
+	for _, closer := range []string{
+		"Would you like a concise explanation of Proposition 2, or a line-by-line unpacking of the proof?",
+		"Would you prefer the display set on its own line?",
+		"Do you want me to continue with the next page?",
+		"I can also give the French of this passage.",
+	} {
+		text := "E II.24\n\nLet $f$ be a mapping of $A$ into $B$.\n\n" + closer
+		leaks := Check(text)
+		if len(leaks) != 1 || leaks[0].Kind != "meta" {
+			t.Errorf("%q: leaks %+v, want one meta", closer, leaks)
+			continue
+		}
+		if leaks[0].Line != 5 {
+			t.Errorf("%q: reported on line %d, want 5", closer, leaks[0].Line)
+		}
+	}
+}
+
+// "Shall I" is not on the list, and it must not go on it. Bourbaki proposes its
+// own next step in the first person, and the corpus has 94 lines that do.
+func TestAProposalInTheTextIsNotALeak(t *testing.T) {
+	text := "A I.24\n\nShall I say that $G$ is simple? Let us rather prove the converse."
+	if leaks := Check(text); len(leaks) != 0 {
+		t.Errorf("the book's own prose read as a leak: %+v", leaks)
+	}
+}

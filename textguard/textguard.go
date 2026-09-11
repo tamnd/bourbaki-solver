@@ -140,6 +140,27 @@ var metas = []string{
 	"let me know if",
 	"hope this helps",
 	"note that i have",
+
+	// The offer to go on. These come after the transcription rather than
+	// before it, which is why the phrases above miss them: the model reads the
+	// page correctly, ends, and then asks the reader what to do next.
+	//
+	// Page 109 of Theory of Sets went into the corpus ending "Would you like a
+	// concise explanation of Proposition 2, or a line-by-line unpacking of the
+	// proof?" and was accepted by all nine rules. It is prose, it is in English,
+	// it is on its own line at the foot of a page that is otherwise a faithful
+	// reading, and nothing above could see it.
+	//
+	// The second person is what makes them safe to match. These volumes address
+	// the reader as "we" or not at all, and over the whole corpus -- 4862
+	// readings and every assembled file -- "would you like" occurs exactly once,
+	// in the leak above, and the other three occur not at all. "shall I" occurs
+	// 94 times and is not here, because it is how a proof proposes its own next
+	// step and half of those are Bourbaki's own.
+	"would you like",
+	"would you prefer",
+	"do you want me to",
+	"i can also ",
 }
 
 // Deliberately not here: in summary, to summarize, and the like. A model that
