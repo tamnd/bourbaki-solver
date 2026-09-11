@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/pagemap"
 )
 
@@ -257,6 +258,70 @@ func TestBodyReportsAnAppendixTheHeadsNameAndThePagesDoNotOpen(t *testing.T) {
 	}
 	if !strings.Contains(p.Detail, "name 2 appendices, I and II") {
 		t.Errorf("detail = %q, want it to name both appendices", p.Detail)
+	}
+}
+
+// The same page once the heading has been put back on it. The appendix opens a
+// third of the way down, under the end of the one before it, so the page begins
+// in prose and the word and the title are further down: it is read all the same,
+// and the volume then opens both appendices its heads name.
+func TestBodyOpensAnAppendixThatBeginsPartWayDownAPage(t *testing.T) {
+	pages := liePages()[:6]
+	pages = append(pages, BodyPage{PDFPage: 7,
+		RunningHead: "App. II APPLICATIONS POLYNOMIALES ET TOPOLOGIE DE ZARISKI",
+		Body: "Cela résulte des prop. 3 et 4.\n" +
+			"\n" +
+			"## APPENDICE II\n" +
+			"\n" +
+			"# Une propriété de connexion\n" +
+			"\n" +
+			"*Lemme 1.* — *Soient $X$ un espace topologique connexe.*\n"})
+	res := FromBody(pages, bodyMap("VII", 1, 7, 7),
+		Options{Book: "lie-vii-viii-fr"})
+	if len(res.Problems) != 0 {
+		t.Errorf("problems = %v, want none: both appendices are open now", res.Problems)
+	}
+	var app []corpus.Section
+	for _, s := range res.Chapters[0].Sections {
+		if s.Appendix {
+			app = append(app, s)
+		}
+	}
+	if len(app) != 2 {
+		t.Fatalf("appendices = %+v, want both of them", app)
+	}
+	if app[1].Number != 2 || app[1].Title != "Une propriété de connexion" {
+		t.Errorf("the second appendix came out %+v", app[1])
+	}
+	if app[1].PDFPage != 7 {
+		t.Errorf("the second appendix opens on pdf %d, want 7", app[1].PDFPage)
+	}
+}
+
+// The mark is the whole of what says an opening part way down a page, because
+// the page around it is prose and prose says the word too. An unmarked line is
+// the reading of page 47 as it stood before the heading was put back, and it is
+// also what a sentence pointing at the appendix looks like once the line breaks
+// have been taken out of it.
+func TestBodyDoesNotOpenAnUnmarkedAppendixPartWayDownAPage(t *testing.T) {
+	pages := liePages()[:6]
+	pages = append(pages, BodyPage{PDFPage: 7,
+		RunningHead: "Ch. VII, App. 1",
+		Body: "Cela résulte des prop. 3 et 4.\n" +
+			"\n" +
+			"Appendice II\n" +
+			"\n" +
+			"Une propriété de connexion\n"})
+	res := FromBody(pages, bodyMap("VII", 1, 7, 7),
+		Options{Book: "lie-vii-viii-fr"})
+	var app int
+	for _, s := range res.Chapters[0].Sections {
+		if s.Appendix {
+			app++
+		}
+	}
+	if app != 1 {
+		t.Errorf("appendices = %d, want the 1 the pages open", app)
 	}
 }
 
