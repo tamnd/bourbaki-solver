@@ -68,6 +68,7 @@ commands:
   footnote  take the printed mark off a footnote that already has a reference
   seal      write content_sha256 over a section body that was edited by hand
   reseal    move source_content_sha256 on where only the mathematics moved
+  retranslated  record a named translation brought up to date with its source
 
 Run section first and dollars after it. A section reference written with an
 escaped dollar puts a dollar in the prose that no formula opened, and everything
@@ -855,6 +856,8 @@ func runFix(args []string) error {
 		return fixSeal(args[1:])
 	case "reseal":
 		return fixReseal(args[1:])
+	case "retranslated":
+		return fixRetranslated(args[1:])
 	}
 	fmt.Fprint(os.Stderr, fixUsage)
 	os.Exit(2)

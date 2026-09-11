@@ -55,6 +55,11 @@ Everything else is left alone and named:
 So a file that was stale before the repair stays stale, which is what #164 and
 L05 are for. This command can only ever remove staleness it can explain.
 
+What to run on the ones it leaves behind, once the words have actually been
+carried across, is bourbaki fix retranslated. That one records a person's
+assertion rather than a proof, so it takes one named path per file and prints
+the drift it is answering for.
+
 Named paths are the only ones considered. With none, every translation is read,
 which is the whole corpus unless -lang narrows it.
 
@@ -300,4 +305,235 @@ func bodyHistory(root, rel string, want map[string]bool, depth int) (map[string]
 		}
 	}
 	return found, nil
+}
+
+const fixRetranslatedUsage = `usage: bourbaki fix retranslated <path>...
+
+Records that a named translation has been brought up to date with its source by
+hand.
+
+fix reseal settles the stale translations it can prove nothing was owed on: the
+source says the same words and only the mathematics between them moved. What it
+leaves behind are the ones where the words did move, and those want the words
+carried across before anything may be written. Until this command there was no
+way to say they had been. A re-translation writes source_content_sha256 itself,
+so a section the fleet redoes settles on its own; a section a person repairs in
+content/ does not, and the only way to record it was to edit the field by hand,
+which is exactly the unaccountable blessing the rest of this is built to stop.
+
+So this is that assertion, made where it can be seen. It writes nothing the
+fleet would not have written and claims nothing fix reseal could have proved:
+it is a person saying "I read the two and the translation now says what the
+source says", and the value of it is that it is written down with the drift it
+is answering for.
+
+Paths are required, always. There is no sweep, no -lang, no way to run this
+over a tree: a command that blesses a disagreement between a translation and
+its source must cost one argument per file, so that blessing a hundred of them
+is a hundred deliberate acts and not one careless one.
+
+For each path it prints the drift it is settling -- the prose of the source as
+the translation recorded it against the prose of the source now -- so what was
+claimed is in the terminal, and in the commit message if it is pasted there. A
+translation that is not stale is said so and left alone; the field is not
+rewritten where nothing moved.
+
+flags:
+  -check     say what would move and move nothing
+`
+
+func fixRetranslated(args []string) error {
+	fs := flag.NewFlagSet("fix retranslated", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixRetranslatedUsage) }
+	check := fs.Bool("check", false, "change nothing")
+	named, err := parseFlags(fs, args)
+	if err != nil {
+		return err
+	}
+	if len(named) == 0 {
+		return fmt.Errorf("name the translations to record, one path each: this command has no sweep")
+	}
+	root, err := corpus.Root()
+	if err != nil {
+		return err
+	}
+
+	only := map[string]bool{}
+	for _, a := range named {
+		p, err := filepath.Abs(a)
+		if err != nil {
+			return err
+		}
+		if _, err := os.Stat(p); err != nil {
+			return err
+		}
+		only[filepath.Clean(p)] = true
+	}
+
+	bodies := map[string]string{}
+	sourceBody := func(from string) (string, error) {
+		if b, ok := bodies[from]; ok {
+			return b, nil
+		}
+		raw, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(from)))
+		if err != nil {
+			return "", err
+		}
+		_, body, err := corpus.SplitFrontMatter(raw)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", from, err)
+		}
+		bodies[from] = string(body)
+		return bodies[from], nil
+	}
+
+	seen := map[string]bool{}
+	var stale []resealable
+	var current []string
+	consider := func(path, from, recorded string, write func(string) error) error {
+		if !only[filepath.Clean(path)] {
+			return nil
+		}
+		seen[filepath.Clean(path)] = true
+		if from == "" || recorded == "" {
+			fmt.Printf("%s  names no source it was translated from, nothing to record\n", rel(root, path))
+			return nil
+		}
+		body, err := sourceBody(from)
+		if err != nil {
+			return fmt.Errorf("%s: %w", rel(root, path), err)
+		}
+		now := corpus.ContentSHA256(body)
+		if recorded == now {
+			current = append(current, rel(root, path))
+			return nil
+		}
+		stale = append(stale, resealable{path: path, from: from, recorded: recorded, now: now, write: write})
+		return nil
+	}
+
+	err = eachSection(root, "", func(path string, f *corpus.File[corpus.SectionFrontMatter]) error {
+		return consider(path, f.Meta.TranslatedFrom, f.Meta.SourceSHA256, func(sha string) error {
+			f.Meta.SourceSHA256 = sha
+			return f.Write(path)
+		})
+	})
+	if err != nil {
+		return err
+	}
+	err = eachExercise(root, "", func(path string, f *corpus.File[corpus.ExerciseFrontMatter]) error {
+		return consider(path, f.Meta.TranslatedFrom, f.Meta.SourceSHA256, func(sha string) error {
+			f.Meta.SourceSHA256 = sha
+			return f.Write(path)
+		})
+	})
+	if err != nil {
+		return err
+	}
+	var missed []string
+	for p := range only {
+		if !seen[p] {
+			missed = append(missed, rel(root, p))
+		}
+	}
+	if len(missed) > 0 {
+		sort.Strings(missed)
+		return fmt.Errorf("not a translation this command reads: %s", strings.Join(missed, ", "))
+	}
+	sort.Strings(current)
+	for _, c := range current {
+		fmt.Printf("%s  already records the source it has, nothing to do\n", c)
+	}
+
+	want := map[string]map[string]bool{}
+	for _, s := range stale {
+		if want[s.from] == nil {
+			want[s.from] = map[string]bool{}
+		}
+		want[s.from][s.recorded] = true
+	}
+	then := map[string]map[string]string{}
+	for from := range want {
+		found, err := bodyHistory(root, from, want[from], 500)
+		if err != nil {
+			return err
+		}
+		then[from] = found
+	}
+
+	sort.Slice(stale, func(i, j int) bool { return stale[i].path < stale[j].path })
+	for _, s := range stale {
+		fmt.Printf("\n%s\n  %s  %s -> %s\n", rel(root, s.path), s.from, short(s.recorded), short(s.now))
+		nowBody, err := sourceBody(s.from)
+		if err != nil {
+			return err
+		}
+		if was, ok := then[s.from][s.recorded]; !ok {
+			fmt.Printf("  no commit of the source hashes to what it recorded, so the drift cannot be shown\n")
+		} else {
+			for _, line := range proseDrift(was, nowBody) {
+				fmt.Printf("  %s\n", line)
+			}
+		}
+		if *check {
+			continue
+		}
+		if err := s.write(s.now); err != nil {
+			return err
+		}
+	}
+
+	verb := "recorded"
+	if *check {
+		verb = "would record"
+	}
+	fmt.Printf("\nfix retranslated: %d named, %s %d of them, %d were already current\n",
+		len(only), verb, len(stale), len(current))
+	return nil
+}
+
+// proseDrift is the lines of prose the source gained and lost between the body
+// a translation recorded and the body it has now, each marked. It is what the
+// person running fix retranslated is answering for, printed so that the claim
+// and the thing claimed about are in the same place.
+//
+// It compares quality.Prose of each and not the bodies, for fix reseal's
+// reason: the mathematics is copied and not translated, so a formula that moved
+// is not something a translator owes anything on and is only noise here.
+func proseDrift(was, now string) []string {
+	before := map[string]int{}
+	for _, l := range strings.Split(quality.Prose(was), "\n") {
+		if strings.TrimSpace(l) != "" {
+			before[l]++
+		}
+	}
+	after := map[string]int{}
+	for _, l := range strings.Split(quality.Prose(now), "\n") {
+		if strings.TrimSpace(l) != "" {
+			after[l]++
+		}
+	}
+	var out []string
+	for _, l := range strings.Split(quality.Prose(was), "\n") {
+		if strings.TrimSpace(l) != "" && after[l] == 0 {
+			out = append(out, "- "+driftLine(l))
+		}
+	}
+	for _, l := range strings.Split(quality.Prose(now), "\n") {
+		if strings.TrimSpace(l) != "" && before[l] == 0 {
+			out = append(out, "+ "+driftLine(l))
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, "(the prose is the same; the source moved in its mathematics alone, which fix reseal settles)")
+	}
+	return out
+}
+
+func driftLine(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if len(s) <= 240 {
+		return s
+	}
+	return s[:240] + "..."
 }
