@@ -571,6 +571,31 @@ func TestL12FindsTheWordsOfAFormulaLeftInEnglish(t *testing.T) {
 	}
 }
 
+// content/en-mt is a translation whose answer is English, so the one test L12
+// has, that no English word survives in the run, is one it cannot pass. The
+// French word "a" counts as English on the list, so a correctly translated
+// French \text was reported as prose left in English, and the only way to
+// silence the rule would have been to spoil the translation.
+func TestL12LeavesTheMachineEnglishAlone(t *testing.T) {
+	fr := Doc{
+		Path: "content/fr/ac/IX/exercises/s1/29.md", Lang: "fr", Kind: KindSection,
+		Body: `$\Phi(a) = \Phi_n(a^p). \text{ On a donc}$`, head: 1,
+		Section: &corpus.SectionFrontMatter{},
+	}
+	enmt := Doc{
+		Path: "content/en-mt/ac/IX/exercises/s1/29.md", Lang: "en-mt", Kind: KindSection,
+		Body: `$\Phi(a) = \Phi_n(a^p). \text{ We therefore have}$`, head: 1,
+		Section: &corpus.SectionFrontMatter{TranslatedFrom: fr.Path},
+	}
+	got, err := l12(&Corpus{Docs: []Doc{enmt}, Sources: []Doc{fr}})
+	if err != nil {
+		t.Fatalf("the rule returned an error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("L12 reports the machine English: %v", got)
+	}
+}
+
 // The same formula with its words translated is a translated formula, and L01
 // has to let it through or the section can never be written at all.
 func TestL01AndL12AcceptAFormulaWhoseWordsWereTranslated(t *testing.T) {

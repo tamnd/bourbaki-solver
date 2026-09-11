@@ -600,9 +600,22 @@ func l11(c *Corpus) ([]Finding, error) {
 // Hard, and for L07's reason rather than L10's: a formula that says "not" to a
 // reader who does not read English is not a formula that reader can use, and
 // nothing else in the audit will ever mention it.
+// isEnglishTree says whether a tree holds English: content/en, where Springer
+// printed a translation, and content/en-mt, where this project read the French.
+func isEnglishTree(lang string) bool {
+	return strings.EqualFold(lang, "en") || strings.EqualFold(lang, "en-mt")
+}
+
 func l12(c *Corpus) ([]Finding, error) {
 	ps, out := c.pairs()
 	for _, p := range ps {
+		if isEnglishTree(p.tr.Lang) {
+			// The answer is meant to be in English, so "no English word is
+			// left in the run" is not a question that can be asked of it. The
+			// French that content/en-mt leaves behind is L16's, and the run
+			// inside a \text is the part of it L16 does not reach yet.
+			continue
+		}
 		tr, _ := Math(p.tr.Body)
 		en, _ := Math(p.en.Body)
 		if len(tr) != len(en) {
