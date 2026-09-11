@@ -175,15 +175,46 @@ func RomanOrder(s string) (int, error) {
 // on the whole corpus rather than on the one volume. Reading it as the number
 // it is puts those volumes in the order they are bound, which is the order the
 // book has, and leaves every volume that does print chapters exactly as it was.
+//
+// A fascicule is the third kind. The Summary of Results is bound into the back
+// of Theory of Sets and assembled under the letters the Éléments quote it by,
+// content/en/ens/ER, which is neither a roman numeral nor a number. It is bound
+// after the chapters, so it orders after all of them, and two fascicules of one
+// volume order between themselves by their letters.
 func ChapterOrder(s string) (int, error) {
 	if n, err := RomanOrder(s); err == nil {
 		return n, nil
 	}
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("not a chapter numeral: %q", s)
+	s = strings.TrimSpace(s)
+	if n, err := strconv.Atoi(s); err == nil && n >= 1 {
+		return n, nil
 	}
-	return n, nil
+	if n, ok := fasciculeOrder(s); ok {
+		return n, nil
+	}
+	return 0, fmt.Errorf("not a chapter numeral: %q", s)
+}
+
+// afterChapters is past every chapter number the Éléments print, the longest
+// run of them being the seventeen of Integration.
+const afterChapters = 1000
+
+// fasciculeOrder is where a fascicule's letters sort, which is after every
+// chapter and, among fascicules, by the letters themselves.
+func fasciculeOrder(s string) (int, bool) {
+	if s == "" {
+		return 0, false
+	}
+	n := 0
+	for _, r := range s {
+		if r < 'A' || r > 'Z' {
+			return 0, false
+		}
+		if n < afterChapters {
+			n = n*26 + int(r-'A') + 1
+		}
+	}
+	return afterChapters + n, true
 }
 
 // Scope is what a statement's number is counted within. Bourbaki does not
