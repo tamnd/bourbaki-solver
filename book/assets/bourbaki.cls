@@ -61,8 +61,27 @@
 % one of them was probed against this stack. It misses \widecheck, which has a
 % fallback below, and nothing else. \overparen and \wideparen used to be pointed
 % at newtxmath's \widearc and no longer can be; the corpus turns out to use
-% neither, so the two \providecommand lines that did it are gone with the
-% package.
+% neither, and what it does use is \overgroup, which is below.
+%
+% yhmath is here for one glyph: the wide arc the printing draws over a compound
+% whose inverse is being named. Page 359 of Theory of Sets sets the inverse of
+% X x Y as an arc spanning both letters with -1 above it, and KaTeX calls that
+% arc \overgroup, so that is what the corpus writes and this has to set. Nothing
+% in the CM stack draws it.
+%
+% yhmath brings three things with it that are not wanted, and all three are put
+% back immediately. It widens \widehat and \widetilde, and it declares the
+% largesymbols font as yhex rather than cmex, which would change every \sum,
+% \int and \prod in 132 volumes for the sake of one arc. The reference printing
+% embeds CMEX10 and so does this build, and that is the point of the paragraph
+% above.
+\let\bcmwidehat\widehat
+\let\bcmwidetilde\widetilde
+\RequirePackage{yhmath}
+\let\widehat\bcmwidehat
+\let\widetilde\bcmwidetilde
+\DeclareSymbolFont{largesymbols}{OMX}{cmex}{m}{n}
+\providecommand{\overgroup}[1]{\wideparen{#1}}
 \RequirePackage{graphicx}
 \RequirePackage{xcolor}
 \RequirePackage{eso-pic}
