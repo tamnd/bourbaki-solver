@@ -242,6 +242,26 @@ var texOf = map[rune]string{
 	// U+0131, the dotless i, which is what an accented i is set as. Three of
 	// them, all \widetilde{ı} in § 16.
 	'\u0131': `\imath`,
+
+	// The operators, which are the other half of what M03 reports and were the
+	// larger half of it: 597 against the 644 letters, once the letters were
+	// repaired. They are here on the same terms as the letters above, one glyph
+	// for the TeX that prints that same glyph, and they are easier than the
+	// letters rather than harder, because none of them is also something else.
+	// A capital sigma is a letter or a sum and only the subscript tells, which
+	// is why \u03a3 is refused below; U+2211 is the summation sign and nothing but,
+	// so it is \sum with nothing to decide.
+	//
+	// The minus sign is U+2212 and not the hyphen. The hyphen is left where it
+	// is, since a hyphen inside a span is as likely to be a real one, in an
+	// identifier or in a hyphenated word inside a \text.
+	'\u2208': `\in`, '\u2209': `\notin`, '\u2282': `\subset`, '\u2283': `\supset`,
+	'\u2229': `\cap`, '\u222a': `\cup`, '\u2227': `\wedge`,
+	'\u2297': `\otimes`, '\u2295': `\oplus`, '\u2218': `\circ`,
+	'\u2192': `\to`, '\u2190': `\leftarrow`, '\u21a6': `\mapsto`,
+	'\u2264': `\leq`, '\u2265': `\geq`, '\u2260': `\neq`, '\u2261': `\equiv`,
+	'\u2212': `-`, '\u221e': `\infty`, '\u22ef': `\cdots`,
+	'\u2211': `\sum`, '\u222b': `\int`,
 }
 
 // ambiguous are the two capitals that are also operators. A capital sigma with

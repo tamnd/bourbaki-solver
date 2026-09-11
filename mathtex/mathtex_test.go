@@ -174,6 +174,44 @@ func TestRepair(t *testing.T) {
 	}
 }
 
+// The operators are the other half of the table and the larger half of what M03
+// reported. The element sign alone was 245 of them.
+func TestRepairPutsAnOperatorBackInItsTeX(t *testing.T) {
+	cases := []struct {
+		body string
+		want string
+		n    int
+	}{
+		{"for $x ∈ E$ we have", `for $x \in E$ we have`, 1},
+		{"the module $E ⊗_A F$ is", `the module $E \otimes_A F$ is`, 1},
+		{"the map $x ↦ f(x)$ is", `the map $x \mapsto f(x)$ is`, 1},
+		{"the set $K − A$ is", `the set $K - A$ is`, 1},
+		{"for $n ≥ 1$ and $m ≤ 2$", `for $n \geq 1$ and $m \leq 2$`, 2},
+		// U+2211 is the summation sign and is not the capital sigma refused
+		// below, so there is nothing here to decide.
+		{`$∑_i a_i$`, `$\sum_i a_i$`, 1},
+		// A command run against a letter still wants its space.
+		{"we take $A ∩B$", `we take $A \cap B$`, 1},
+		// Outside the mathematics an operator is prose, like every other entry
+		// in the table. M14 has the ones that never entered a span.
+		{"for x ∈ E we have", "for x ∈ E we have", 0},
+	}
+	for _, c := range cases {
+		t.Run(c.body, func(t *testing.T) {
+			got, n, refused := Repair(c.body)
+			if got != c.want {
+				t.Errorf("Repair(%q)\n = %q\nwant %q", c.body, got, c.want)
+			}
+			if n != c.n {
+				t.Errorf("Repair(%q) replaced %d characters, want %d", c.body, n, c.n)
+			}
+			if len(refused) != 0 {
+				t.Errorf("Repair(%q) refused %v", c.body, refused)
+			}
+		})
+	}
+}
+
 // A capital sigma is the letter or it is a sum, and the only thing in the
 // Markdown that tells them apart is what follows it. Substituting either way
 // without looking would be an invention, so the shape decides and the rest is
