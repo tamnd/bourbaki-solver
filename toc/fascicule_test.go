@@ -1,6 +1,7 @@
 package toc
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/tamnd/bourbaki-solver/pagemap"
@@ -135,5 +136,117 @@ func TestAVolumeWithRealChaptersIsNotReadAsFascicules(t *testing.T) {
 	}
 	if fascicules(nil) {
 		t.Error("no page map was read as fascicules")
+	}
+}
+
+// validateMap is a page map big enough to hold the pages the two contents
+// below list: fascicule 1 prints 11 to 40 on pdf 1 to 30, fascicule 2 prints 6
+// to 35 on pdf 31 to 60, and the printed numbering restarts at pdf 31.
+func validateMap() *pagemap.Map {
+	m := &pagemap.Map{Book: "var-fr", Pagination: pagemap.Continuous, PDFPages: 60,
+		Chapters: []pagemap.Span{
+			{Chapter: "1", FirstPDF: 1, LastPDF: 30, FirstPage: 11, LastPage: 40},
+			{Chapter: "2", FirstPDF: 31, LastPDF: 60, FirstPage: 6, LastPage: 35},
+		}}
+	for i := 1; i <= 60; i++ {
+		e := pagemap.Entry{PDFPage: i, Confidence: pagemap.FromHead}
+		if i <= 30 {
+			e.Chapter, e.Page = "1", 10+i
+		} else {
+			e.Chapter, e.Page = "2", i-25
+		}
+		m.Entries = append(m.Entries, e)
+	}
+	return m
+}
+
+const firstOfTwo = `TABLE DES MATIÈRES
+(paragraphes 1 à 3)
+
+§ 1. Fonctions différentiables ...... 11
+§ 2. Variétés différentielles ...... 20
+§ 3. Espaces tangents ...... 31
+`
+
+// The second fascicule opens at § 4, carries its own notations on printed page
+// 7, and heads its first § on 9, three pages after the fascicule itself starts.
+const secondOfTwo = `TABLE DES MATIÈRES
+(paragraphes 4 à 6)
+
+Notations et Conventions ...... 7
+
+§ 4. Formes différentielles ...... 9
+§ 5. Intégration ...... 19
+§ 6. Cohomologie ...... 27
+`
+
+// A fascicule does not start its § numbering over and does not open on the
+// first page the page map gives it, because it carries its own front matter.
+// Both were checked as though it were a chapter, and the real Varietes then
+// reported ten problems it had no way to fix: eight § "missing or doubled",
+// one chapter starting in the wrong place, and the count.
+func TestAFasciculeIsNotJudgedAsAChapter(t *testing.T) {
+	pages := make([]string, 60)
+	pages[2] = firstOfTwo
+	pages[58] = secondOfTwo
+	opt := Options{Book: "var-fr", Title: "Variétés différentielles et analytiques",
+		Chapters: []string{"1", "2"}, Restarts: []int{31}}
+
+	res, err := Parse(pages, validateMap(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probs := Hard(res.Problems); len(probs) != 0 {
+		t.Errorf("a volume in two fascicules reported %d problems: %v", len(probs), probs)
+	}
+
+	// Without the restart the same volume is judged as two chapters, which is
+	// what it looked like before: § 4 is not the first § of a chapter and the
+	// second chapter does not open where the map says.
+	opt.Restarts = nil
+	res, err = Parse(pages, validateMap(), opt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(Hard(res.Problems)) == 0 {
+		t.Error("read as chapters the same contents should not pass")
+	}
+}
+
+// The numbering still has to run on without a gap. A fascicule opening at § 5
+// where the one before it ended at § 3 is a misread digit exactly as § 3
+// following § 1 in a chapter would be.
+func TestAFasciculeThatSkipsASectionIsStillAMisread(t *testing.T) {
+	pages := make([]string, 60)
+	pages[2] = firstOfTwo
+	pages[58] = strings.Replace(secondOfTwo, "§ 4. Formes", "§ 5. Formes", 1)
+	res, err := Parse(pages, validateMap(),
+		Options{Book: "var-fr", Title: "Variétés différentielles et analytiques",
+			Chapters: []string{"1", "2"}, Restarts: []int{31}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(Hard(res.Problems)) == 0 {
+		t.Fatal("a fascicule opening at § 5 after § 3 should be a problem")
+	}
+}
+
+// A fascicule's contents may not start it before the fascicule does. That is a
+// misread digit and the one thing the check still asks of it.
+func TestAFasciculeStartingBeforeItselfIsAProblem(t *testing.T) {
+	pages := make([]string, 60)
+	pages[2] = firstOfTwo
+	pages[58] = strings.Replace(secondOfTwo, "§ 4. Formes différentielles ...... 9",
+		"§ 4. Formes différentielles ...... 6", 1)
+	pm := validateMap()
+	pm.Chapters[1].FirstPage = 8
+	res, err := Parse(pages, pm,
+		Options{Book: "var-fr", Title: "Variétés différentielles et analytiques",
+			Chapters: []string{"1", "2"}, Restarts: []int{31}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(Hard(res.Problems)) == 0 {
+		t.Fatal("a fascicule whose contents starts it before the map does should be a problem")
 	}
 }

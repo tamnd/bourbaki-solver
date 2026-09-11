@@ -240,7 +240,7 @@ func readContents(ctx context.Context, root string, b *corpus.Book, pm *pagemap.
 	}
 	return toc.Parse(pages, pm, toc.Options{
 		Book: b.ID, Chapters: b.Chapters, Title: b.Title,
-		FrontMatterPDF: frontMatterPDF(b)})
+		FrontMatterPDF: frontMatterPDF(b), Restarts: b.Restarts})
 }
 
 // contentsReadings is what the model read off the pages of the table of
@@ -648,7 +648,7 @@ func tocBody(args []string) error {
 		return fmt.Errorf("%s has no pages read yet", b.ID)
 	}
 	res := toc.FromBody(pages, pm, toc.Options{
-		Book: b.ID, Chapters: b.Chapters, Title: b.Title})
+		Book: b.ID, Chapters: b.Chapters, Title: b.Title, Restarts: b.Restarts})
 	if was, ok := man.Get(b.ID); ok && !*retitle {
 		chapters, kept := toc.KeepTitles(was.Chapters, res.Chapters, pm)
 		res.Chapters = chapters
