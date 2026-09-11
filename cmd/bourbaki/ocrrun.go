@@ -218,7 +218,15 @@ func expectFor(entry *corpus.Book, pmap *pagemap.Map, manifest render.Manifest, 
 			// definition. Anywhere else the page map cannot say, and asking for
 			// a head that a chapter opener does not print would fail one page
 			// per chapter.
-			value.HasHead = found.Confidence == pagemap.FromHead
+			//
+			// Except that head does not always mean read off this page. An
+			// erratum supplies the head an opener never printed, so that the
+			// fit has an anchor where the printing gives it none, and the map
+			// records that at confidence head like any other. The opener is
+			// then asked for the very line the erratum exists because it is
+			// missing. Every house suppresses the head on an opener, so the map
+			// settles it and the confidence does not.
+			value.HasHead = found.Confidence == pagemap.FromHead && !pmap.OpensChapter(page)
 		}
 	}
 	return value
