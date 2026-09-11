@@ -86,6 +86,12 @@ type Options struct {
 	// what it says there is that a span starting before this page is a span the
 	// page map guessed. See validate.
 	FrontMatterPDF int
+	// Restarts is the manifest's restarts: the pdf pages where the printed
+	// numbering goes back to the beginning because a new fascicule is bound
+	// there. A chapter whose span opens on one of these is a fascicule rather
+	// than a chapter, and two of the checks read differently for it. See
+	// validate.
+	Restarts []int
 }
 
 // Result is what one volume's contents yielded.

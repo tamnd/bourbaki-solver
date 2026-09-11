@@ -50,6 +50,20 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 	for _, sp := range pm.Chapters {
 		want[sp.Chapter] = sp
 	}
+	// A fascicule is not a chapter, and two of the checks below have to know
+	// which one they are looking at. The French Varietes is one scan holding
+	// two fascicules de resultats: the manifest declares the restart at pdf 96,
+	// the page map makes a nominal chapter of each run, and neither run is a
+	// chapter of anything. The mark is the span opening on a declared restart,
+	// which is what a fascicule is and what no chapter ever is.
+	restart := map[int]bool{}
+	for _, pdf := range opt.Restarts {
+		restart[pdf] = true
+	}
+	fascicule := func(sp pagemap.Span) bool { return restart[sp.FirstPDF] }
+	// sections is how many § the chapters so far have listed, which is what a
+	// fascicule's numbering carries on from. See the § check below.
+	sections := 0
 	if len(opt.Chapters) > 0 && len(r.Chapters) != len(opt.Chapters) {
 		add("", 0, "the contents lists %d chapters, the volume has %d",
 			len(r.Chapters), len(opt.Chapters))
@@ -93,7 +107,24 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 		// told which leaves are the note to the reader and the introduction, a
 		// span reaching back into them is the map filling in a boundary nothing
 		// gave it, exactly as a span reaching back to the cover is.
-		if c.Page != sp.FirstPage && sp.FirstPDF > 1 && sp.FirstPDF > opt.FrontMatterPDF {
+		//
+		// The third is a fascicule, which carries its own front matter the way
+		// a volume does. Fascicule 2 of the Varietes opens on printed page 6,
+		// prints its notations and conventions on 7, and heads its first § on
+		// 9, so the map and the contents are three pages apart and both are
+		// right. A chapter cannot be in that position, because the leaves in
+		// front of it belong to the chapter before; a fascicule's belong to the
+		// fascicule they open. What is still asked of a fascicule is that its
+		// contents does not start it before the fascicule itself starts, which
+		// is a misread digit either way round.
+		switch {
+		case sp.FirstPDF == 1 || sp.FirstPDF <= opt.FrontMatterPDF:
+		case fascicule(sp):
+			if c.Page < sp.FirstPage {
+				add(c.Numeral, 0, "the contents starts it at printed page %d, before the fascicule at %d",
+					c.Page, sp.FirstPage)
+			}
+		case c.Page != sp.FirstPage:
 			add(c.Numeral, 0, "the contents starts it at printed page %d, the page map at %d",
 				c.Page, sp.FirstPage)
 		}
@@ -146,6 +177,18 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 		// § are counted on their own, because the appendices that close
 		// chapters II, III and VIII are listed among them and carry their own
 		// numbering, or none at all.
+		//
+		// base is where this chapter's § numbering begins, one less than its
+		// first §. It is 0 everywhere but in a fascicule, which does not start
+		// over: the Varietes runs § 1 to § 7 in the fascicule bound first and
+		// § 8 to § 15 in the second, one numbering through the volume, and
+		// asking the second to open at § 1 reported all eight of its § as
+		// missing or doubled. What is asked of it instead is that it picks up
+		// where the fascicule before it left off, which is the same check.
+		base := 0
+		if fascicule(sp) {
+			base = sections
+		}
 		last, nsec, napp, exlast := 0, 0, 0, 0
 		for _, s := range c.Sections {
 			switch {
@@ -154,9 +197,9 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 				if napp > 0 {
 					add(c.Numeral, s.Number, "is listed after an appendix")
 				}
-				if s.Number != nsec {
-					add(c.Numeral, s.Number, "is the %d%s § listed, so a § is missing or doubled",
-						nsec, ordinal(nsec))
+				if s.Number != base+nsec {
+					add(c.Numeral, s.Number, "is listed where § %d should be, so a § is missing or doubled",
+						base+nsec)
 				}
 			case s.Number > 0:
 				napp++
@@ -263,6 +306,7 @@ func (r *Result) validate(pm *pagemap.Map, opt Options) []Problem {
 				nopdf(c.Numeral, 0, "the historical note's ", c.Historical.Page)
 			}
 		}
+		sections = base + nsec
 	}
 	return probs
 }
