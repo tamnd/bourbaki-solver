@@ -40,6 +40,7 @@ flags:
   -validate-tex  turn on M04, which is off by default because it is the slow one
   -report PATH   write the Markdown report here, relative to the corpus root
   -json PATH     write the machine form here, or - for standard output
+  -max-hard N    how many hard findings the corpus is allowed to carry
   -list          print the rules and exit
   -v             print the rules that passed as well as the ones that did not
 `
@@ -55,6 +56,7 @@ func runAudit(args []string) error {
 	validateTeX := fs.Bool("validate-tex", false, "turn on M04")
 	report := fs.String("report", "", "write the Markdown report here")
 	asJSON := fs.String("json", "", "write the machine form here, or - for stdout")
+	maxHard := fs.Int("max-hard", 0, "how many hard findings the corpus is allowed to carry")
 	list := fs.Bool("list", false, "print the rules and exit")
 	verbose := fs.Bool("v", false, "print the rules that passed too")
 	if _, err := parseFlags(fs, args); err != nil {
@@ -139,10 +141,21 @@ func runAudit(args []string) error {
 	ran := len(res.Outcomes) - len(res.Skipped())
 	fmt.Printf("audit: %d rules ran, %d could not, %d hard findings, %d soft\n",
 		ran, len(res.Skipped()), res.Hard(), res.Soft())
-	if hard := quality.Failures(res); len(hard) > 0 {
-		return fmt.Errorf("audit: %d hard findings in %s", res.Hard(), strings.Join(hard, ", "))
+	hard := quality.Failures(res)
+	if len(hard) == 0 {
+		return nil
 	}
-	return nil
+	// A ceiling is for the findings a corpus still being read is meant to have:
+	// a statement with no tag yet, a reference into a volume nobody has read.
+	// Zero, the default, is the rule as it was written. Anything else is a
+	// number somebody has written down and undertaken to bring down, and the
+	// list under it is reports/audit.md, which names every finding by file and
+	// line and is diffed separately, so the ceiling hides drift from nobody.
+	if n := res.Hard(); n <= *maxHard {
+		fmt.Printf("audit: %d hard findings, ceiling %d, in %s\n", n, *maxHard, strings.Join(hard, ", "))
+		return nil
+	}
+	return fmt.Errorf("audit: %d hard findings in %s", res.Hard(), strings.Join(hard, ", "))
 }
 
 // assembleAll runs the assembler over every book that has pages, and returns
