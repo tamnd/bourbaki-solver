@@ -68,6 +68,23 @@ func TestStructureFindsAGapInTheSections(t *testing.T) {
 	}
 }
 
+// Variétés différentielles et analytiques is printed in two fascicules and the
+// second is numbered § 8 to § 15, carrying on from the first rather than
+// starting over. The manifest wraps each fascicule in a nominal chapter, so
+// chapter 2 has no § 1 through § 7 and is not meant to. Counting the run from 1
+// called that seven lost files on a volume that was whole.
+func TestStructureLetsAChapterStartWhereThePrintingStartsIt(t *testing.T) {
+	v := sample()
+	for _, s := range v.Chapters[0].Sections {
+		s.Number += 7
+	}
+	a := &Audit{}
+	a.structure(v)
+	if c := find(t, a, "§§ of every chapter"); !c.OK {
+		t.Errorf("a chapter whose §§ begin at 8 was read as seven gaps: %v", c.Notes)
+	}
+}
+
 // The subsection gap is what caught the Vietnamese Algebra shipping a § with
 // two subsections both numbered 3, where the translator had put a number on a
 // heading that the English leaves unnumbered.

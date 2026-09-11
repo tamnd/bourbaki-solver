@@ -217,19 +217,31 @@ func (a *Audit) structure(v *Volume) {
 	// A § that is not there leaves a hole in the numbering, and a hole in the
 	// numbering is the shape a lost file makes. It is checked per chapter over
 	// the §§ alone, since an appendix is numbered in its own series.
+	//
+	// The run starts at the lowest § the chapter has and not at 1, because a
+	// chapter is not obliged to begin at 1. Variétés is printed in two
+	// fascicules, the second numbered § 8 to § 15 carrying on from the first,
+	// and the manifest wraps each in a nominal chapter of its own. Counting
+	// from 1 reported the second fascicule as seven lost files when it was
+	// whole. A hole is a number missing between two that are there, which is
+	// what a lost file leaves; a chapter that starts where the printing starts
+	// it leaves nothing.
 	var holes []string
 	for _, c := range v.Chapters {
 		seen := map[int]bool{}
-		high := 0
+		low, high := 0, 0
 		for _, s := range c.Sections {
 			if s.Kind == "" || s.Kind == "section" {
 				seen[s.Number] = true
 				if s.Number > high {
 					high = s.Number
 				}
+				if low == 0 || s.Number < low {
+					low = s.Number
+				}
 			}
 		}
-		for n := 1; n <= high; n++ {
+		for n := low; n <= high; n++ {
 			if !seen[n] {
 				holes = append(holes, fmt.Sprintf("chapter %s has no §%d and has a §%d", c.Numeral, n, high))
 			}
