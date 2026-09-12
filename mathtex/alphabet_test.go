@@ -18,9 +18,15 @@ func TestAlphabet(t *testing.T) {
 		{"a comma and a space inside the argument",
 			`of W into 𝓛(E_0, M) and 𝓛(M, E_0) are`,
 			`of W into $\mathscr{L}(E_0, M)$ and $\mathscr{L}(M, E_0)$ are`, 2},
-		{"the accent over the letter",
+		{"the accent over the letter is spelled as its command",
 			"The partition 𝔖̃ which it defines",
-			`The partition $\mathfrak{S}` + "̃" + `$ which it defines`, 1},
+			`The partition $\tilde{\mathfrak{S}}$ which it defines`, 1},
+		{"the accent over a letter already in the mathematics",
+			`soit $ℓ̄ = 0$ une forme`,
+			`soit $\bar{\ell} = 0$ une forme`, 1},
+		{"the accent comes before the subscript",
+			"la partition 𝔖̃_n de E",
+			`la partition $\tilde{\mathfrak{S}}_n$ de E`, 1},
 		{"a subscript and a superscript",
 			`the space 𝒞^r_b of functions`,
 			`the space $\mathscr{C}^r_b$ of functions`, 1},
@@ -108,6 +114,20 @@ func TestAlphabetRefusesTheWrongLetter(t *testing.T) {
 	}
 	if refused[0].Line != 1 {
 		t.Errorf("refused on line %d, want 1", refused[0].Line)
+	}
+}
+
+func TestAlphabetRefusesTheAccentItCannotSpell(t *testing.T) {
+	// U+0327, the cedilla, is a language's spelling and not a mathematical
+	// accent, so the letter under it is left as it stands rather than set with
+	// the accent hanging off the closing dollar.
+	in := "la partition 𝔖̧ de E"
+	got, n, refused := Alphabet(in)
+	if got != in || n != 0 {
+		t.Fatalf("Alphabet(%q) = %q, %d; want it untouched", in, got, n)
+	}
+	if len(refused) != 1 || refused[0].Rune != 0x0327 {
+		t.Fatalf("refused %+v, want one of U+0327", refused)
 	}
 }
 

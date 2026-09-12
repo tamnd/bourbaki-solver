@@ -67,22 +67,35 @@ func Alphabet(body string) (string, int, []Refusal) {
 			}
 			continue
 		}
+		// An accent that arrived as its own character has to be spelled as the
+		// command that sets it, wrapped around the letter. Carrying the raw
+		// codepoint into the span instead leaves a combining mark standing on
+		// its own in a maths font, which has no glyph for it and which KaTeX
+		// refuses outright.
+		tex, after, held := alphabetAccents(tex, rs, i+1, stop)
+		if held != 0 {
+			refused = append(refused, Refusal{Line: line, Rune: held,
+				Why: "an accent this repair cannot spell, so the letter " +
+					"under it is left as it stands", Span: lineAround(rs, i)})
+			continue
+		}
 		if inSpan(spans, i) {
 			// Already mathematics, so the delimiters are there and the argument
 			// needs no vouching: the glyph is simply spelled. A command that
 			// ends in a letter rather than a brace runs on into a letter after
 			// it, so one space keeps them apart.
-			if plainLetter(rune(tex[len(tex)-1])) && i+1 < stop && plainLetter(rs[i+1]) {
+			if plainLetter(rune(tex[len(tex)-1])) && after < stop && plainLetter(rs[after]) {
 				tex += " "
 			}
 			b.WriteString(string(rs[at:i]))
 			b.WriteString(tex)
-			at, n = i+1, n+1
+			at, n = after, n+1
+			i = after - 1
 			continue
 		}
-		end := alphabetArgument(rs, i+1, stop)
+		end := alphabetArgument(rs, after, stop)
 		b.WriteString(string(rs[at:i]))
-		b.WriteString("$" + tex + string(rs[i+1:end]) + "$")
+		b.WriteString("$" + tex + string(rs[after:end]) + "$")
 		at, n = end, n+1
 		i = end - 1
 	}
@@ -114,9 +127,6 @@ func AlphabetTeX(r rune) (string, bool) { return alphabetTeX(r) }
 // parenthesised group, then one subscript and one superscript, and stops at the
 // first thing it cannot vouch for.
 func alphabetArgument(rs []rune, i, stop int) int {
-	for i < stop && combining(rs[i]) {
-		i++
-	}
 	if i < stop && rs[i] == '(' {
 		if end, ok := plainGroup(rs, i, stop, '(', ')'); ok {
 			i = end
@@ -191,10 +201,52 @@ func plainLetter(r rune) bool {
 	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z'
 }
 
-// combining is an accent that sits over the letter before it. The reading
-// writes 𝔖̃ for \tilde{\mathfrak{S}} and the tilde arrives as its own character,
-// so it has to come inside the span or it is left standing over a dollar sign.
+// alphabetAccents wraps tex in the commands for the accents written after the
+// letter at i, and returns where they end. The reading writes 𝔖̃ for
+// \tilde{\mathfrak{S}}: the tilde arrives as its own character sitting over the
+// letter before it, and the only way it sets is as the command, because a
+// combining mark left standing in a maths font has no glyph there -- cmmi10
+// prints nothing for "303 -- and KaTeX refuses the span.
+//
+// An accent with no command to spell it is held back, and the rune held is
+// returned for the refusal to name. Marking the letter and leaving the accent
+// behind would put the accent over the closing dollar, which is worse than
+// leaving the pair alone.
+func alphabetAccents(tex string, rs []rune, i, stop int) (string, int, rune) {
+	for i < stop && combining(rs[i]) {
+		cmd, ok := accentTeX(rs[i])
+		if !ok {
+			return tex, i, rs[i]
+		}
+		tex = cmd + "{" + tex + "}"
+		i++
+	}
+	return tex, i, 0
+}
+
+// combining is an accent that sits over the letter before it.
 func combining(r rune) bool { return r >= 0x0300 && r <= 0x036F }
+
+// accentTeX is the command that sets one combining mark over its letter, and
+// whether there is one. Only the marks mathematics puts over a letter are here;
+// the rest of the block is a language's own spelling and has no business over a
+// display-face letter, so it is refused rather than guessed at.
+func accentTeX(r rune) (string, bool) {
+	cmd, ok := map[rune]string{
+		0x0300: `\grave`,
+		0x0301: `\acute`,
+		0x0302: `\hat`,
+		0x0303: `\tilde`,
+		0x0304: `\bar`,
+		0x0305: `\overline`,
+		0x0306: `\breve`,
+		0x0307: `\dot`,
+		0x0308: `\ddot`,
+		0x030A: `\mathring`,
+		0x030C: `\check`,
+	}[r]
+	return cmd, ok
+}
 
 // lineAround is the line a rune sits on, for a refusal to print.
 func lineAround(rs []rune, i int) string {
