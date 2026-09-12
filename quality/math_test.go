@@ -922,6 +922,41 @@ func TestM18ReadsTheOtherLanguage(t *testing.T) {
 	}
 }
 
+func TestM19(t *testing.T) {
+	// The three shapes the fault takes: the comma against a parenthesis, the
+	// comma inside the subscript braces, and the comma doubled where two
+	// indices in a row were lost (tamnd/bourbaki#419).
+	for _, body := range []string{
+		`an element $(x_1, x,, ..., x,) \in K$`,
+		`the ring $A[(X_i)_{i,}]$ of polynomials`,
+		`imply that $g(a,) = 0$`,
+	} {
+		got := run(t, m19, doc("content/en/alg/IV/01_s1_polynomials.md", body))
+		if len(got) != 1 {
+			t.Errorf("got %d findings for %q, want 1: %v", len(got), body, got)
+		}
+	}
+}
+
+// A comma that separates two things has something after it that does not close
+// a group, and a letter that is part of a word or of a command name is not an
+// index. The citation is the one the corpus sets inside mathematics, and its
+// comma belongs to the prose \text carries.
+func TestM19LeavesARealCommaAlone(t *testing.T) {
+	for _, body := range []string{
+		`$f(x, y)$ and $\{a, b\}$`,
+		`$x_1, \ldots, x_n$`,
+		`$(a,b)$`,
+		`$\sum_{i \in I} a_i, \text{ where } I$`,
+		`$\text{Diff. \& Anal. Man., R,}$`,
+		`$A_{n,m}$ and $x_{i,j}$`,
+	} {
+		if got := run(t, m19, doc("content/en/lie/I/01_s1_a.md", body)); len(got) != 0 {
+			t.Errorf("a real comma was reported for %q: %v", body, got)
+		}
+	}
+}
+
 func TestTwinKey(t *testing.T) {
 	for _, c := range []struct{ path, want string }{
 		{"content/en/alg/IV/01_s1_polynomials.md", "alg/IV/01"},

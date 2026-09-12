@@ -60,6 +60,9 @@ func init() {
 			Title: "no word of the prose is left inside the mathematics", Run: m17},
 		Check{ID: "M18", Group: Mathematics, Hard: true,
 			Title: "the index set in a direct sum is the capital I", Run: m18},
+		Check{ID: "M19", Group: Mathematics, Hard: true,
+			Title: "no index is left as a bare comma against a closing delimiter",
+			Run:   m19},
 	)
 }
 
@@ -1409,3 +1412,152 @@ var (
 	indexBad  = regexp.MustCompile(`((?:\\[A-Za-z]+\{[^{}]*\}|[A-Za-z])(?:_\{[^{}]*\}|_[A-Za-z0-9])?)\^\{\(([1l])\)\}`)
 	indexGood = regexp.MustCompile(`((?:\\[A-Za-z]+\{[^{}]*\}|[A-Za-z])(?:_\{[^{}]*\}|_[A-Za-z0-9])?)\^\{\(I\)\}`)
 )
+
+// M19. No index is left as a bare comma.
+//
+// A subscript the text layer cannot resolve comes back as a comma. The letter
+// it belonged to is still there, the comma sits where the index was, and the
+// group closes on top of it: $(x_1, x,, ..., x,)$ for $(x_1, x_2, ..., x_n)$,
+// $A[(X_i)_{i,}]$ for $A[(X_i)_{i \in I}]$, $g(a,) = 0$ for $g(\alpha_1) = 0$.
+// It is the commonest single fault in the volumes read from the poorer scans:
+// 190 occurrences over 80 pages of A IV-VII and AC I-VII alone
+// (tamnd/bourbaki#419).
+//
+// Nothing upstream sees it. The span parses, the comma is a legal token in
+// every position it lands in, and both printings of a page are read from the
+// same scan often enough that L01 agrees with itself. Only the shape gives it
+// away, and the shape is exact: a lone letter, a comma, and a delimiter that
+// closes immediately after it. A comma that really separates two things has
+// something that is not a closing delimiter after it, and a letter that is part
+// of a word or of a command name has a letter, a digit or a backslash before
+// it, so neither $f(x, y)$ nor $\ldots,)$ is reported.
+//
+// The comma inside \text is the prose's own and is not read here, which is what
+// keeps the one bibliographic citation the corpus sets inside mathematics --
+// $\text{Diff. \& Anal. Man., R,}$ in Lie I -- out of the report. \mathbf and
+// its family are not prose and are read: the comma of $\mathbf{SL}(n,\mathbf{R})$
+// has a backslash after it and not a delimiter, which is already the answer.
+//
+// Hard, and the corpus is at zero: every one of the 190 was repaired by hand
+// against the display formula that binds the index on the same page and against
+// the French printing of the same passage, which is a different scan of the
+// same mathematics and settles the cases the English page alone leaves open.
+func m19(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	report := func(path, body string, line func(int) int) {
+		spans, _ := Math(body)
+		for _, s := range spans {
+			if i := bareComma(s.Text); i >= 0 {
+				out = append(out, Finding{File: path, Line: line(s.Line),
+					Msg: fmt.Sprintf("%q is a lone letter with a comma against the delimiter that closes it, "+
+						"which is what a subscript the scan could not read looks like: %s",
+						s.Text[i-1:i+2], ellipsis(s.Text, 60))})
+			}
+		}
+	}
+	if c.Books != nil {
+		for _, b := range c.Books.Books {
+			for i, p := range c.Pages[b.ID] {
+				report(c.PagePaths[b.ID][i], p.Body, func(n int) int { return n })
+			}
+		}
+	}
+	for _, d := range c.Docs {
+		report(d.Path, d.Body, d.BodyLine)
+	}
+	return out, nil
+}
+
+// bareComma is the index of a comma in s that stands where a subscript was: a
+// single letter before it and a closing delimiter -- a bracket, a brace, a
+// parenthesis, or a second comma -- straight after. It returns -1 when there is
+// none. s is a math span without its delimiters.
+func bareComma(s string) int {
+	prose := proseRanges(s)
+	for i := 1; i+1 < len(s); i++ {
+		if s[i] != ',' {
+			continue
+		}
+		if !asciiLetter(s[i-1]) {
+			continue
+		}
+		if within(prose, i) {
+			continue
+		}
+		// The letter has to be alone. A letter inside a word, inside a command
+		// name, or after a digit is not an index that lost its subscript.
+		if i >= 2 {
+			if p := s[i-2]; asciiLetter(p) || p >= '0' && p <= '9' || p == '\\' {
+				continue
+			}
+		}
+		switch s[i+1] {
+		case ')', ']', '}', ',':
+			return i
+		}
+	}
+	return -1
+}
+
+func asciiLetter(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
+}
+
+// proseCommands are the commands of textArgs whose braced argument really is a
+// run of prose. \mathbf and \mathrm are not among them: they set a letter of
+// the mathematics upright, and a comma beside one of those is the formula's.
+var proseCommands = map[string]bool{
+	"text": true, "textit": true, "textbf": true, "textrm": true,
+	"textsf": true, "texttt": true, "textsc": true, "textup": true,
+	"textnormal": true, "textmd": true, "mbox": true, "hbox": true,
+	"emph": true, "intertext": true, "footnote": true,
+}
+
+// proseRanges are the byte ranges of s that a prose command sets, braces
+// included, in the order they appear.
+func proseRanges(s string) [][2]int {
+	var out [][2]int
+	for i := 0; i+1 < len(s); i++ {
+		if s[i] != '\\' {
+			continue
+		}
+		j := i + 1
+		for j < len(s) && asciiLetter(s[j]) {
+			j++
+		}
+		if !proseCommands[s[i+1:j]] {
+			continue
+		}
+		for j < len(s) && s[j] == ' ' {
+			j++
+		}
+		if j >= len(s) || s[j] != '{' {
+			continue
+		}
+		start := j
+		for depth := 0; j < len(s); j++ {
+			if s[j] == '{' {
+				depth++
+			} else if s[j] == '}' {
+				depth--
+				if depth == 0 {
+					j++
+					break
+				}
+			}
+		}
+		out = append(out, [2]int{start, j})
+		i = j - 1
+	}
+	return out
+}
+
+// within reports whether i falls in one of the ranges.
+func within(ranges [][2]int, i int) bool {
+	for _, r := range ranges {
+		if i >= r[0] && i < r[1] {
+			return true
+		}
+	}
+	return false
+}
