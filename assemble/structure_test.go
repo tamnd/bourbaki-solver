@@ -1627,7 +1627,10 @@ func TestItemStartDoesNotCutADisplayDelimiterInHalf(t *testing.T) {
 	if i < 0 {
 		t.Fatal("exercise 31 was not found")
 	}
-	if before := text[:i]; !strings.HasSuffix(before, "$$") {
+	// Trimmed, because that is what the exercise before is given: the marker
+	// opens a line and the break in front of it is whitespace either side of
+	// the cut. What has to survive is the pair of dollars.
+	if before := strings.TrimSpace(text[:i]); !strings.HasSuffix(before, "$$") {
 		t.Errorf("the exercise before ends %q, so its display no longer closes", first(before[len(before)-8:], 8))
 	}
 	if got := afterMarker(m[0], text[i+markerLen(m):]); !strings.HasPrefix(got, "If $ l_{m,n} $") {

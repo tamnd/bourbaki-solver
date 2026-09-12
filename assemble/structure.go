@@ -1311,6 +1311,33 @@ func onPage(e *corpus.Exercise, b block) {
 	e.Pages = spanning(e.Pages, b)
 }
 
+// lineStart is where exercise n begins when its marker opens a line of the
+// block but not the block itself, and the marker that opens it.
+//
+// The first line is skipped, because the block itself is read before this and
+// opening on it is the other case. The indent goes with the match for the same
+// reason it does in cutNextMember: what the caller slices off is a text that
+// opens on the marker, so the spaces in front of the marker belong to the
+// exercise before it.
+func lineStart(text string, n int) (int, []string) {
+	for at := 0; ; {
+		nl := strings.IndexByte(text[at:], '\n')
+		if nl < 0 {
+			return -1, nil
+		}
+		at += nl + 1
+		line := text[at:]
+		lead := len(line) - len(strings.TrimLeft(line, " \t"))
+		m := exNumRE.FindStringSubmatch(line[lead:])
+		if m == nil {
+			continue
+		}
+		if got, _ := strconv.Atoi(m[2]); got == n {
+			return at + lead, m
+		}
+	}
+}
+
 // inlineNumRE is the number of an exercise set inside a paragraph rather than
 // at the head of one. The book's marks come along with it, and by the time it
 // reaches here the asterisk that closes the passage before it has come along
@@ -1380,6 +1407,30 @@ func itemStart(text string, n int) (int, []string) {
 				return lead, m
 			}
 		}
+	}
+	// A line of its own is where an exercise begins, whether or not the line in
+	// front of it closed a sentence. The inline reading below asks for a full
+	// stop or a bracket and a display has neither: it closes on "$$" and what
+	// stands in front of that is the last letter of a formula. Exercise 7 of § 6
+	// of chapter IV of Algebre in French ends on
+	//
+	//	$$
+	//	\sum a_{\lambda_1 \ldots \lambda_n} = -1 + k \sum_{j=0}^{k/(n+1)} \frac{(-1)^j}{j!}
+	//	$$
+	//	8) On pose
+	//
+	// with no blank line anywhere in it, so the whole run is one block, the
+	// marker of exercise 8 stands after a brace, and the § stopped at seven of
+	// the twenty six exercises it prints.
+	//
+	// This asks for more than the inline reading and not less. The number still
+	// has to be the one the § is up to, and on top of that the marker has to be
+	// the first thing on its line. What sentenceEnd is there to keep out is a
+	// citation inside a sentence -- "(VIII, p. 210, Exercise 13)" -- and a
+	// citation is never the first thing on a line, because the readings wrap a
+	// paragraph onto one line and break only where the printing breaks.
+	if i, m := lineStart(text, n); i >= 0 {
+		return i, m
 	}
 	for off := 0; off < len(text); {
 		loc := inlineNumRE.FindStringSubmatchIndex(text[off:])
