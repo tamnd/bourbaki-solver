@@ -3,6 +3,8 @@ package quality
 import (
 	"strings"
 	"testing"
+
+	"github.com/tamnd/bourbaki-solver/corpus"
 )
 
 // The bodies here are written for the test. None of them is Bourbaki: the
@@ -676,6 +678,49 @@ func TestM15(t *testing.T) {
 	}
 	if got := run(t, m15, volumes...); len(got) != 0 {
 		t.Errorf("two volumes with one spelling each were reported: %v", got)
+	}
+
+	// The split the corpus actually has, tamnd/bourbaki#422: the round swash
+	// script against the gothic. The rule reported nothing here until it was
+	// taught the third face, because this corpus writes \mathcal zero times.
+	gothic := []Doc{
+		doc("content/en/top/01.md", `the filter $\mathfrak{F}$`),
+		doc("content/en/top/02.md", `the filter $\mathfrak{F}$ again`),
+		doc("content/en/top/03.md", `the filter $\mathscr{F}$ here`),
+	}
+	got = run(t, m15, gothic...)
+	if len(got) != 1 {
+		t.Fatalf("the gothic split gave %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].File != "content/en/top/03.md" {
+		t.Errorf("the finding is at %s, want content/en/top/03.md", got[0].At())
+	}
+	for _, want := range []string{`\mathscr{F}`, `\mathfrak{F}`} {
+		if !strings.Contains(got[0].Msg, want) {
+			t.Errorf("the finding does not name %s: %s", want, got[0].Msg)
+		}
+	}
+
+	// The source of truth is pages/, and the rule walked only content/ until
+	// now, so a page could hold the split and the audit stay green.
+	pages := &Corpus{
+		Books: &corpus.BooksManifest{Books: []corpus.Book{
+			{ID: "top-i-iv", Book: "top", Pages: 3}}},
+		Pages: map[string][]corpus.PageFile{"top-i-iv": {
+			{Body: `the filter $\mathfrak{F}$`},
+			{Body: `the filter $\mathfrak{F}$ again`},
+			{Body: `the filter $\mathscr{F}$ here`},
+		}},
+		PagePaths: map[string][]string{"top-i-iv": {
+			"pages/top-i-iv/0001.md", "pages/top-i-iv/0002.md", "pages/top-i-iv/0003.md",
+		}},
+	}
+	got, err := m15(pages)
+	if err != nil {
+		t.Fatalf("the rule returned an error: %v", err)
+	}
+	if len(got) != 1 || got[0].File != "pages/top-i-iv/0003.md" {
+		t.Fatalf("the pages split gave %v, want one finding on 0003", got)
 	}
 
 	// The brace is optional in TeX and the corpus writes it both ways.

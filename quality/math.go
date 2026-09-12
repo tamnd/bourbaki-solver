@@ -53,7 +53,7 @@ func init() {
 		Check{ID: "M14", Group: Mathematics, Hard: false,
 			Title: "no mathematics is left outside math mode", Run: m14},
 		Check{ID: "M15", Group: Mathematics, Hard: false,
-			Title: "one volume, one spelling for the script capitals", Run: m15},
+			Title: "one volume, one face for the display capitals", Run: m15},
 		Check{ID: "M16", Group: Mathematics, Hard: false,
 			Title: "no ring is named A and Lambda in the same file", Run: m16},
 		Check{ID: "M17", Group: Mathematics, Hard: true,
@@ -993,47 +993,57 @@ func lineAt(body string, n int) string {
 	return strings.TrimSpace(lines[n-1])
 }
 
-// scriptCommand finds the two commands that set a script capital, so that a
-// volume can be asked whether it uses one of them or both.
-var scriptCommand = regexp.MustCompile(`\\math(cal|scr)\s*\{?\s*([A-Za-z])`)
+// scriptCommand finds the commands that set a display capital, so that a volume
+// can be asked whether it uses one of them or several.
+var scriptCommand = regexp.MustCompile(`\\math(cal|scr|frak)\s*\{?\s*([A-Za-z])`)
 
-// M15. One volume, one spelling for the script capitals.
+// scriptFace is the command written out, for a finding to name.
+func scriptFace(cmd string) string { return `\math` + cmd }
+
+// M15. One volume, one face for the display capitals.
 //
-// \mathcal and \mathscr are the same letter and not the same glyph. The class
-// loads mathrsfs, so \mathscr is rsfs10, the swash script, and \mathcal is the
-// calligraphic of LMMathSymbols; a volume that writes \mathcal{T} on one page
-// and \mathscr{T} on the next prints the same symbol two different ways and a
-// reader has no way to know it is the same symbol.
+// \mathcal, \mathscr and \mathfrak are the same letter and not the same glyph.
+// The class loads mathrsfs, so \mathscr is rsfs10, the round swash script;
+// \mathcal is the calligraphic of LMMathSymbols; \mathfrak is EUFM, the gothic.
+// A volume that writes \mathfrak{F} on one page and \mathscr{F} on the next
+// prints the same symbol two different ways and a reader has no way to know it
+// is the same symbol.
 //
-// Nothing in the reading prompt says which of the two to write, so a model
-// choosing freely produces both, and the corpus census that opened
-// tamnd/bourbaki#392 found 22 of the 44 volumes split. This is the rule that
-// keeps the normalisation from being undone one re-read at a time.
+// Nothing in the reading prompt says which to write, so a model choosing freely
+// produces several, and the corpus census that opened tamnd/bourbaki#392 found
+// 22 of the 44 volumes split. This is the rule that keeps the normalisation
+// from being undone one re-read at a time.
+//
+// It reads the gothic because that is where the corpus actually splits. The
+// rule shipped comparing \mathcal against \mathscr, and this corpus writes
+// \mathcal zero times, so it reported nothing while 3648 occurrences sat on the
+// minority side of a \mathscr/\mathfrak split -- tamnd/bourbaki#422. A rule
+// that names two of the three faces is a rule that is green by construction.
+//
+// Pages and content alike, for the reason M16 gives: the source of truth is
+// pages/, and a fault repaired in content/ that was never repaired in the page
+// comes back at the next assemble.
 //
 // It is per letter and per volume, and soft. Per letter because a volume that
-// sets F as script and G as calligraphic is making a distinction this cannot
-// see; only the same letter spelled both ways is certainly one symbol printed
-// two ways. Per volume because that is the unit a reader holds. Soft because
-// the corpus is red on 22 volumes today and a rule that fails the build before
-// the work is done is a rule somebody turns off.
+// sets F gothic and G script is making a distinction this cannot see; only the
+// same letter set both ways is certainly one symbol printed two ways. Per
+// volume because that is the unit a reader holds. Soft because every finding
+// wants the printing looked at before it is changed -- the majority is not
+// evidence, and at least one volume above has the majority wrong.
 //
-// The minority spelling is what is reported, one finding a file, because that
-// is the shorter list and because the majority is the spelling the volume has
-// already settled on whether or not anybody decided it.
+// The minority face is what is reported, one finding a file, because that is
+// the shorter list and because the majority is the face the volume has already
+// settled on whether or not anybody decided it.
 func m15(c *Corpus) ([]Finding, error) {
 	type where struct {
-		doc  Doc
+		path string
 		line int
 	}
 	// volume, letter, command -> the places it is written
 	seen := map[string]map[string]map[string][]where{}
-	for _, d := range c.Docs {
-		vol := filepath.ToSlash(filepath.Dir(d.Path))
-		if n := strings.Split(vol, "/"); len(n) >= 3 {
-			vol = strings.Join(n[:3], "/")
-		}
-		for i, line := range strings.Split(d.Body, "\n") {
-			for _, m := range scriptCommand.FindAllStringSubmatch(line, -1) {
+	note := func(vol, path, body string, line func(int) int) {
+		for i, text := range strings.Split(body, "\n") {
+			for _, m := range scriptCommand.FindAllStringSubmatch(text, -1) {
 				cmd, letter := m[1], m[2]
 				if seen[vol] == nil {
 					seen[vol] = map[string]map[string][]where{}
@@ -1041,31 +1051,56 @@ func m15(c *Corpus) ([]Finding, error) {
 				if seen[vol][letter] == nil {
 					seen[vol][letter] = map[string][]where{}
 				}
-				seen[vol][letter][cmd] = append(seen[vol][letter][cmd], where{d, d.BodyLine(i + 1)})
+				seen[vol][letter][cmd] = append(seen[vol][letter][cmd],
+					where{path, line(i + 1)})
 			}
 		}
+	}
+	if c.Books != nil {
+		for _, b := range c.Books.Books {
+			for i, p := range c.Pages[b.ID] {
+				note("pages/"+b.ID, c.PagePaths[b.ID][i], p.Body,
+					func(n int) int { return n })
+			}
+		}
+	}
+	for _, d := range c.Docs {
+		vol := filepath.ToSlash(filepath.Dir(d.Path))
+		if n := strings.Split(vol, "/"); len(n) >= 3 {
+			vol = strings.Join(n[:3], "/")
+		}
+		note(vol, d.Path, d.Body, d.BodyLine)
 	}
 	var out []Finding
 	for _, vol := range sortedKeys(seen) {
 		for _, letter := range sortedKeys(seen[vol]) {
 			by := seen[vol][letter]
-			cal, scr := by["cal"], by["scr"]
-			if len(cal) == 0 || len(scr) == 0 {
+			if len(by) < 2 {
 				continue
 			}
-			few, many, fewCmd, manyCmd := cal, scr, `\mathcal`, `\mathscr`
-			if len(scr) < len(cal) {
-				few, many, fewCmd, manyCmd = scr, cal, `\mathscr`, `\mathcal`
+			// The face the volume writes most is the one it has settled on;
+			// everything else is the minority, however many faces there are.
+			best := ""
+			for _, cmd := range sortedKeys(by) {
+				if best == "" || len(by[cmd]) > len(by[best]) {
+					best = cmd
+				}
 			}
-			reported := map[string]bool{}
-			for _, w := range few {
-				if reported[w.doc.Path] {
+			for _, cmd := range sortedKeys(by) {
+				if cmd == best {
 					continue
 				}
-				reported[w.doc.Path] = true
-				out = append(out, Finding{File: w.doc.Path, Line: w.line,
-					Msg: fmt.Sprintf("%s{%s} here, and %s{%s} %d times in %s against %d of this one, so one symbol prints two ways",
-						fewCmd, letter, manyCmd, letter, len(many), vol, len(few))})
+				reported := map[string]bool{}
+				for _, w := range by[cmd] {
+					if reported[w.path] {
+						continue
+					}
+					reported[w.path] = true
+					out = append(out, Finding{File: w.path, Line: w.line,
+						Msg: fmt.Sprintf("%s{%s} here, and %s{%s} %d times in %s against %d of this one, so one symbol prints two ways",
+							scriptFace(cmd), letter, scriptFace(best), letter,
+							len(by[best]), vol, len(by[cmd]))})
+				}
 			}
 		}
 	}
