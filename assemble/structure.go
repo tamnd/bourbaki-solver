@@ -1323,7 +1323,34 @@ func onPage(e *corpus.Exercise, b block) {
 // of the exercise before, and what exNumRE is then handed opens on a space and
 // tells the caller there is no mark at all. Exercise 6 of § 6 of chapter IV of
 // Algebra, in French, is the case.
-var inlineNumRE = regexp.MustCompile(`[\s$*]\$?(?:\\?\*)?\s*(\d+)\)(?:\\?\*)?\$?\s*`)
+//
+// The pilcrow is taken here and not left to pilcrowBefore, because that one
+// reads what stands in front of the match and so only ever sees a pilcrow the
+// printing set a space after. A book that sets it tight against the number
+// writes "¶19)", and the only thing in front of that is the line break ending
+// the sentence before, so the pattern had to reach the number across a mark it
+// had no place for and found nothing at all. § 6 of chapter X of Algebre in
+// French is the case: exercises 19 to 28 were printed "¶19)", "¶ 20)", "¶ 21)"
+// and so on, the spaced ones were only ever looked for after the tight one had
+// opened the exercise they belong to, and all ten of them went into the body of
+// exercise 18, which came out at 24204 characters.
+var inlineNumRE = regexp.MustCompile(`[\s$*]\$?(?:\\?\*)?\s*` + inlineMarks + `(\d+)\)(?:\\?\*)?\$?\s*`)
+
+// inlineMarks are the marks exNumRE reads in front of an exercise number,
+// written with nothing between them and the number.
+//
+// They are matched and not consumed: what they buy is that the number is found
+// at all, and the caller then hands the whole of it, marks and number together,
+// back to exNumRE, which is the one reading that says what the marks mean. The
+// star is already in front of this and is not repeated.
+//
+// The two guards that hold the bare number hold these as well, and they are the
+// guards that matter: the number has to be the one the § is up to, and a
+// sentence has to end in front of it. Neither is loosened here. "(cf. § 4)" and
+// "(AC, VI, § 3, no 6)" are the shapes a section sign turns up in mid sentence,
+// and shortened throws the first out on the "cf." and the second never closes
+// on a bracket after the number.
+const inlineMarks = `(?:(?:\\P|\\S|¶|†|§)[ \t]*)*`
 
 // itemStart is where exercise n begins in a block, and the marker that opens
 // it, or -1 when the block does not begin it.

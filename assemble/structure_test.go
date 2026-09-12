@@ -414,6 +414,57 @@ func TestItemStartOnRunTogetherExercises(t *testing.T) {
 	}
 }
 
+// A mark set tight against the number, with no space between the two, opens an
+// exercise inside a paragraph as a spaced one does.
+//
+// § 1 and § 6 of chapter X of Algebre in French are the case. The printing sets
+// a pilcrow on most of the later exercises of both, the reading puts some of
+// them as "¶19)" and some as "¶ 20)", and only the spaced form was ever found:
+// the tight one had nothing in front of it but the line break closing the
+// sentence before, which is the byte the pattern had to start from, so the mark
+// stood between the pattern and the number with no place to go. The first tight
+// mark in a § therefore stopped the count, and every exercise printed after it,
+// spaced or not, went into the body of the one before. § 1 lost twelve of its
+// twenty nine exercises that way and § 6 lost eleven of its.
+//
+// The dagger is here because that is how the reading writes a pilcrow it did
+// not recognise, and marksOf already reads it as one.
+func TestItemStartTakesAMarkSetTightAgainstTheNumber(t *testing.T) {
+	const tail = "qui n’est pas projectif relativement à $\\mathbf{Z}$.\n"
+	for _, mark := range []string{"¶", "¶ ", "†", "† ", "\\P ", "§ "} {
+		text := tail + mark + "19) Soient $p$ un nombre premier, $G$ un $p$-groupe."
+		i, m := itemStart(text, 19)
+		if i < 0 {
+			t.Fatalf("exercise 19 marked %q was not found", mark)
+		}
+		if got := strings.TrimSpace(text[:i]); !strings.HasSuffix(got, "$\\mathbf{Z}$.") {
+			t.Errorf("%q left %q on the end of the exercise before", mark, first(got[len(got)-14:], 14))
+		}
+		if _, pilcrow := marksOf(m[1]); pilcrow == "" {
+			t.Errorf("the mark written %q was not read as a pilcrow: m[1] = %q", mark, m[1])
+		}
+		if got := strings.TrimSpace(text[i+markerLen(m):]); !strings.HasPrefix(got, "Soient $p$") {
+			t.Errorf("exercise 19 marked %q begins %q", mark, first(got, 20))
+		}
+	}
+}
+
+// The marks buy the number nothing else. A section sign inside a citation is
+// still a citation, and the two guards that throw it out are the ones that
+// throw out a bare number: the number has to be the one the § is up to, and a
+// sentence has to end in front of it.
+func TestItemStartIgnoresASectionSignInACitation(t *testing.T) {
+	for _, text := range []string{
+		"Soit $A$ un anneau de valuation discrète (cf. § 4) et $m$ son idéal maximal.",
+		"Soit $A$ un anneau de valuation discrète (AC, VI, § 4, no 6) et $m$ son idéal.",
+		"On a montré que $A$ est noethérien. ¶ 4) Soit $B$ une $A$-algèbre.",
+	} {
+		if i, _ := itemStart(text, 4); i >= 0 && !strings.Contains(text, "noethérien") {
+			t.Errorf("a citation opened exercise 4: %q", first(text[i:], 40))
+		}
+	}
+}
+
 // An exercise whose number is not at the head of the block still carries its
 // marks, and the star in front of it reads the same escaped as bare. Algebra
 // IV in French sets the sixth exercise of § 6 that way, on a page that opens a
