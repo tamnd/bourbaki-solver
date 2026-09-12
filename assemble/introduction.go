@@ -40,8 +40,8 @@ func Introduction(in corpus.Introduction, pages map[int]corpus.PageFile) (Piece,
 		if strings.TrimSpace(body) == "" {
 			continue
 		}
-		parts = append(parts, part{page: p, label: f.Meta.PageLabel, folio: folio,
-			method: f.Meta.Method, body: body})
+		parts = append(parts, part{page: p, pdf: f.Meta.PDFPage, label: f.Meta.PageLabel,
+			folio: folio, method: f.Meta.Method, body: body})
 	}
 	if len(parts) == 0 {
 		return Piece{}, fmt.Errorf("pdf pages %d to %d are empty", in.FirstPDFPage, in.LastPDFPage)
@@ -55,7 +55,7 @@ func Introduction(in corpus.Introduction, pages map[int]corpus.PageFile) (Piece,
 	p := Piece{
 		Body: body,
 		Runs: []Run{{
-			First: first.page, Last: last.page,
+			First: first.pdf, Last: last.pdf,
 			FirstLabel: first.label, LastLabel: last.label,
 			FirstFolio: first.folio, LastFolio: last.folio,
 		}},

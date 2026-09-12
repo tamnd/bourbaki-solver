@@ -717,9 +717,9 @@ func TestTakeNotesGoesByThePageAsWellAsTheMark(t *testing.T) {
 
 func TestCutExercises(t *testing.T) {
 	in := []block{
-		{text: "some prose", page: 20, last: 20},
-		{text: "### Exercises {#alg-viii-a2-exercises}", page: 20, last: 20},
-		{text: "1) Let A be a ring.", page: 20, last: 21},
+		{text: "some prose", page: 20, pdf: 20, last: 20},
+		{text: "### Exercises {#alg-viii-a2-exercises}", page: 20, pdf: 20, last: 20},
+		{text: "1) Let A be a ring.", page: 20, pdf: 20, last: 21},
 	}
 	got := cutExercises(in, 2, true, printings["en"])
 	if len(got) != 3 {

@@ -196,6 +196,16 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	if err != nil {
 		return nil, nil, sum, err
 	}
+	// The leaves the binder put in the wrong order are read where the printing
+	// sets them, and every pdf page the contents names is sent the same way. See
+	// transposed.go. A volume with none of them is untouched by all three calls.
+	order, err := boundOrder(*b)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+	pages = order.pages(pages)
+	*b = order.book(*b)
+	bt.Chapters = order.chapters(bt.Chapters)
 	if len(pages) == 0 {
 		return nil, nil, sum, fmt.Errorf("no pages in %s: run bourbaki extract run first", corpus.PagesDir(root, book))
 	}
@@ -376,7 +386,7 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 			if err := writeExercises(root, lang, p, files, &cx, tagOf, errataOf, used); err != nil {
 				return nil, nil, sum, err
 			}
-			f, err := sectionFile(root, *b, ch, p, lang, tagOf, errataOf, used)
+			f, err := sectionFile(root, *b, ch, p, lang, order, tagOf, errataOf, used)
 			if err != nil {
 				return nil, nil, sum, err
 			}
@@ -559,7 +569,7 @@ func errataApplied(root string, m *corpus.ErrataManifest, lang, book string,
 
 // sectionFile is one assembled piece as it goes to disk.
 func sectionFile(root string, b corpus.Book, ch corpus.Chapter, p assemble.Piece, lang string,
-	tagOf map[string]tags.Tag, errataOf map[string][]corpus.Erratum,
+	order bound, tagOf map[string]tags.Tag, errataOf map[string][]corpus.Erratum,
 	used map[string]bool) (corpus.SectionFile, error) {
 	m := corpus.SectionFrontMatter{
 		Book:          b.Book,
@@ -575,7 +585,7 @@ func sectionFile(root string, b corpus.Book, ch corpus.Chapter, p assemble.Piece
 		BookPages:     bookPages(p.Runs),
 		PDFPages:      pdfPages(p.Runs),
 		Extraction:    p.Extraction(),
-		Subsections:   p.Subsections,
+		Subsections:   order.subsections(p.Subsections),
 		Statements:    len(p.Statements),
 		Exercises:     len(p.Exercises),
 	}

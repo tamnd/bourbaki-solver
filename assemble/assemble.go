@@ -178,7 +178,7 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 		p := out[i]
 		for _, r := range runs[i] {
 			p.Runs = append(p.Runs, Run{
-				First: r[0].page, Last: r[len(r)-1].page,
+				First: r[0].pdf, Last: r[len(r)-1].pdf,
 				FirstLabel: r[0].label, LastLabel: r[len(r)-1].label,
 				FirstFolio: r[0].folio, LastFolio: r[len(r)-1].folio,
 			})
@@ -213,7 +213,7 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 		// extraction, and appending it to the section quietly would hide that.
 		if len(left) > 0 {
 			return nil, fmt.Errorf("chapter %s %s: pdf page %d defines the footnote %s and nothing marks it",
-				ch.Numeral, p.Name(), left[0].page, first(left[0].def, 40))
+				ch.Numeral, p.Name(), left[0].pdf, first(left[0].def, 40))
 		}
 		p.Body = unstraddle(body)
 		if err := p.Verify(); err != nil {
@@ -333,7 +333,7 @@ func marks(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) ([]Pie
 			// disagreeing with a contents entry that agreed already.
 			title = titleUnder(pages[page].Body, off)
 		}
-		if !sameTitle(title, s.Title) && !Differs(pages[page].Meta.Book, page) {
+		if !sameTitle(title, s.Title) && !Differs(pages[page].Meta.Book, pages[page].Meta.PDFPage) {
 			return nil, nil, fmt.Errorf("chapter %s %s: pdf page %d titles it %q, the table of contents calls it %q",
 				ch.Numeral, name(s), page, title, s.Title)
 		}
@@ -913,7 +913,16 @@ func chapterEnd(ch corpus.Chapter, pages map[int]corpus.PageFile, pr printing) i
 
 // part is the run of one page that belongs to one piece.
 type part struct {
+	// page is where the page stands in the printing, and pdf is the leaf of
+	// the file it was read off. The two differ only in a volume whose leaves
+	// were bound out of order, where the caller has re-keyed the pages by
+	// printing position so that counting up through them walks the book.
+	//
+	// Everything that counts or orders pages uses page, because the printing
+	// is the order the text is in. Everything that names a page to a reader
+	// uses pdf, because a citation has to land on the leaf that carries it.
 	page      int
+	pdf       int
 	label     string
 	folio     int
 	method    corpus.PageMethod
@@ -955,8 +964,8 @@ func slice(pages map[int]corpus.PageFile, from, to span, pr printing) ([]part, e
 		if strings.TrimSpace(body) == "" {
 			continue
 		}
-		out = append(out, part{page: p, label: f.Meta.PageLabel, folio: f.Meta.Folio,
-			method: f.Meta.Method, body: body, continues: cont})
+		out = append(out, part{page: p, pdf: f.Meta.PDFPage, label: f.Meta.PageLabel,
+			folio: f.Meta.Folio, method: f.Meta.Method, body: body, continues: cont})
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("pdf pages %d to %d are empty", from.page, to.page)
@@ -1099,7 +1108,10 @@ func marksNote(text, def string) bool {
 // which page a paragraph came off.
 type block struct {
 	text string
+	// page is where in the printing the block starts, and pdf is the leaf it
+	// was read off. See part, which the two are carried down from.
 	page int
+	pdf  int
 	// last is the page the block ends on, which is page unless a paragraph
 	// broken by the end of a page was joined back up here. A footnote is
 	// printed at the foot of the page its mark is on, so telling the two apart
@@ -1148,7 +1160,7 @@ func join(parts []part, pr printing) ([]block, []note) {
 		body = markNotes(body, defs)
 		body, defs = renumber(body, defs, len(notes)+1)
 		for _, d := range defs {
-			notes = append(notes, note{def: d, page: p.page})
+			notes = append(notes, note{def: d, page: p.page, pdf: p.pdf})
 		}
 		bs := split(body)
 		if len(bs) == 0 {
@@ -1161,7 +1173,8 @@ func join(parts []part, pr printing) ([]block, []note) {
 			bs = bs[1:]
 		}
 		for _, b := range bs {
-			blocks = append(blocks, block{text: b, page: p.page, last: p.page, label: p.label, folio: p.folio})
+			blocks = append(blocks, block{text: b, page: p.page, pdf: p.pdf, last: p.page,
+				label: p.label, folio: p.folio})
 		}
 	}
 	return blocks, notes
@@ -1171,6 +1184,7 @@ func join(parts []part, pr printing) ([]block, []note) {
 type note struct {
 	def  string
 	page int
+	pdf  int
 }
 
 // takeNotes moves the footnotes belonging to this body out of defs and on to
@@ -1260,7 +1274,8 @@ func cutExercises(blocks []block, section int, appendix bool, pr printing) []blo
 			// Exercise 1 begins partway down the block, so what is in front of
 			// it is the last of the preamble and the rest is an exercise.
 			if head := strings.TrimSpace(b.text[:at]); head != "" {
-				out = append(out, block{text: head, page: b.page, last: b.last, label: b.label, folio: b.folio})
+				out = append(out, block{text: head, page: b.page, pdf: b.pdf, last: b.last,
+					label: b.label, folio: b.folio})
 			}
 			break
 		}
@@ -1270,7 +1285,7 @@ func cutExercises(blocks []block, section int, appendix bool, pr printing) []blo
 			name = fmt.Sprintf("Appendix %d", section)
 		}
 		return append(out, block{text: fmt.Sprintf("See the [exercises for %s](exercises/%s/).", name, dir),
-			page: b.page, label: b.label, folio: b.folio})
+			page: b.page, pdf: b.pdf, label: b.label, folio: b.folio})
 	}
 	return blocks
 }

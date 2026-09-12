@@ -12,7 +12,7 @@ import (
 func blocks(texts ...string) []block {
 	out := make([]block, 0, len(texts))
 	for _, t := range texts {
-		out = append(out, block{text: t, page: 42, label: "A VIII.7"})
+		out = append(out, block{text: t, page: 42, pdf: 42, label: "A VIII.7"})
 	}
 	return out
 }
@@ -1411,11 +1411,11 @@ func TestStatementsReadsAFrenchHeadWithTheItalicMarked(t *testing.T) {
 // from the one that was verified are a fault and are reported as one.
 func TestStatementsMarksANumberThePrintingGaveTwice(t *testing.T) {
 	in := []block{
-		{text: "### 7. Algèbre de Lie d’un groupe de Lie", page: 137, label: "LIE III.139"},
-		{text: "Définition 7. — Soient X une variété de classe $ C^r $, g une algèbre de Lie normable.", page: 137, label: "LIE III.139"},
-		{text: "### 12. Représentation adjointe", page: 151, label: "LIE III.153"},
-		{text: "DÉFINITION 7. — La représentation Ad de G dans L(G) s’appelle la représentation adjointe de G.", page: 151, label: "LIE III.153"},
-		{text: "Définition 8. — Soient G un groupe de Lie, M une variété de classe $ C^r $.", page: 160, label: "LIE III.162"},
+		{text: "### 7. Algèbre de Lie d’un groupe de Lie", page: 137, pdf: 137, label: "LIE III.139"},
+		{text: "Définition 7. — Soient X une variété de classe $ C^r $, g une algèbre de Lie normable.", page: 137, pdf: 137, label: "LIE III.139"},
+		{text: "### 12. Représentation adjointe", page: 151, pdf: 151, label: "LIE III.153"},
+		{text: "DÉFINITION 7. — La représentation Ad de G dans L(G) s’appelle la représentation adjointe de G.", page: 151, pdf: 151, label: "LIE III.153"},
+		{text: "Définition 8. — Soient G un groupe de Lie, M une variété de classe $ C^r $.", page: 160, pdf: 160, label: "LIE III.162"},
 	}
 	id := corpus.Ref{Book: "lie", Chapter: "III", Section: 3}
 	_, got, err := statements(in, id, printings["fr"])
@@ -1428,7 +1428,7 @@ func TestStatementsMarksANumberThePrintingGaveTwice(t *testing.T) {
 		"lie-iii-s3-def-8",
 	})
 
-	in[3].page, in[3].label = 152, "LIE III.154"
+	in[3].page, in[3].pdf, in[3].label = 152, 152, "LIE III.154"
 	if _, _, err := statements(in, id, printings["fr"]); err == nil {
 		t.Error("a collision on a page nobody verified was let through")
 	}
@@ -1444,10 +1444,10 @@ func TestStatementsTakesARepeatFromEitherPrinting(t *testing.T) {
 	want := []string{"evt-ii-s6-def-2", "evt-ii-s6-def-2-bis"}
 
 	english := []block{
-		{text: "### 2. Weak topologies", page: 79, label: "TVS II.42"},
-		{text: "DEFINITION 2. — Let F and G be two vector spaces put in duality by the bilinear form B.", page: 79, label: "TVS II.42"},
-		{text: "### 3. Polar sets and orthogonal subspaces", page: 81, label: "TVS II.44"},
-		{text: "Definition 2. — Let F and G be two (real) vector spaces in duality.", page: 81, label: "TVS II.44"},
+		{text: "### 2. Weak topologies", page: 79, pdf: 79, label: "TVS II.42"},
+		{text: "DEFINITION 2. — Let F and G be two vector spaces put in duality by the bilinear form B.", page: 79, pdf: 79, label: "TVS II.42"},
+		{text: "### 3. Polar sets and orthogonal subspaces", page: 81, pdf: 81, label: "TVS II.44"},
+		{text: "Definition 2. — Let F and G be two (real) vector spaces in duality.", page: 81, pdf: 81, label: "TVS II.44"},
 	}
 	_, got, err := statements(english, id, printings["en"])
 	if err != nil {
@@ -1456,10 +1456,10 @@ func TestStatementsTakesARepeatFromEitherPrinting(t *testing.T) {
 	same(t, labels(got), want)
 
 	french := []block{
-		{text: "### 2. Topologies faibles", page: 80, label: "EVT II.42"},
-		{text: "DÉFINITION 2. — Soient F et G deux espaces vectoriels mis en dualité par la forme bilinéaire B.", page: 80, label: "EVT II.42"},
-		{text: "### 3. Ensembles polaires et sous-espaces orthogonaux", page: 82, label: "EVT II.44"},
-		{text: "Définition 2. — Soient F et G deux espaces vectoriels en dualité.", page: 82, label: "EVT II.44"},
+		{text: "### 2. Topologies faibles", page: 80, pdf: 80, label: "EVT II.42"},
+		{text: "DÉFINITION 2. — Soient F et G deux espaces vectoriels mis en dualité par la forme bilinéaire B.", page: 80, pdf: 80, label: "EVT II.42"},
+		{text: "### 3. Ensembles polaires et sous-espaces orthogonaux", page: 82, pdf: 82, label: "EVT II.44"},
+		{text: "Définition 2. — Soient F et G deux espaces vectoriels en dualité.", page: 82, pdf: 82, label: "EVT II.44"},
 	}
 	_, got, err = statements(french, id, printings["fr"])
 	if err != nil {
@@ -1467,7 +1467,7 @@ func TestStatementsTakesARepeatFromEitherPrinting(t *testing.T) {
 	}
 	same(t, labels(got), want)
 
-	english[3].page, english[3].label = 83, "TVS II.46"
+	english[3].page, english[3].pdf, english[3].label = 83, 83, "TVS II.46"
 	if _, _, err := statements(english, id, printings["en"]); err == nil {
 		t.Error("a collision on a page nobody verified was let through")
 	}
@@ -1481,10 +1481,10 @@ func TestStatementsTakesARepeatFromEitherPrinting(t *testing.T) {
 func TestStatementsTakesTheCommutativeAlgebraRepeat(t *testing.T) {
 	id := corpus.Ref{Book: "ac", Chapter: "III", Section: 3}
 	in := []block{
-		{text: "### 1. Good filtrations", page: 215, label: "195"},
-		{text: "DEFINITION 1. Let $ A $ be a commutative ring and $ m $ an ideal of $ A $.", page: 216, label: "196"},
-		{text: "### 3. Zariski rings", page: 221, label: "201"},
-		{text: "DEFINITION 1. Let $ A $ be a topological ring.", page: 221, label: "201"},
+		{text: "### 1. Good filtrations", page: 215, pdf: 215, label: "195"},
+		{text: "DEFINITION 1. Let $ A $ be a commutative ring and $ m $ an ideal of $ A $.", page: 216, pdf: 216, label: "196"},
+		{text: "### 3. Zariski rings", page: 221, pdf: 221, label: "201"},
+		{text: "DEFINITION 1. Let $ A $ be a topological ring.", page: 221, pdf: 221, label: "201"},
 	}
 	_, got, err := statements(in, id, printings["en"])
 	if err != nil {
@@ -1492,7 +1492,7 @@ func TestStatementsTakesTheCommutativeAlgebraRepeat(t *testing.T) {
 	}
 	same(t, labels(got), []string{"ac-iii-s3-def-1", "ac-iii-s3-def-1-bis"})
 
-	in[3].page, in[3].label = 226, "206"
+	in[3].page, in[3].pdf, in[3].label = 226, 226, "206"
 	if _, _, err := statements(in, id, printings["en"]); err == nil {
 		t.Error("a collision on a page nobody verified was let through")
 	}

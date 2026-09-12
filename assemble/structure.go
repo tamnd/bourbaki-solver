@@ -258,23 +258,24 @@ func statements(blocks []block, id corpus.Ref, pr printing) ([]block, []corpus.S
 			return nil
 		}
 		label := r.Label()
-		if _, dup := seen[label]; dup && slices.Contains(repeats[label], b.page) {
+		if _, dup := seen[label]; dup && slices.Contains(repeats[label], b.pdf) {
 			r.Repeated = true
 			label = r.Label()
 		}
 		if first, dup := seen[label]; dup {
 			return fmt.Errorf("two statements are labelled %s, on pdf pages %d and %d",
-				label, first, b.page)
+				label, first, b.pdf)
 		}
-		seen[label] = b.page
-		s := corpus.Statement{Ref: r, PDFPage: b.page, Body: body}
+		seen[label] = b.pdf
+		s := corpus.Statement{Ref: r, PDFPage: b.pdf, Body: body}
 		if l, ok := corpus.ParsePageLabel(b.label); ok {
 			s.Page = l.Page
 		}
 		found = append(found, s)
-		out = append(out, block{text: heading(r, label, name, pr), page: b.page, last: b.last, label: b.label})
+		out = append(out, block{text: heading(r, label, name, pr), page: b.page, pdf: b.pdf,
+			last: b.last, label: b.label})
 		if body != "" {
-			out = append(out, block{text: body, page: b.page, last: b.last, label: b.label})
+			out = append(out, block{text: body, page: b.page, pdf: b.pdf, last: b.last, label: b.label})
 		}
 		return nil
 	})
@@ -1272,7 +1273,7 @@ func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 			star, pilcrow := marksOf(m[1])
 			e.Meta.Supplementary = star != ""
 			e.Meta.Starred = pilcrow != ""
-			e.Meta.PDFPage = b.page
+			e.Meta.PDFPage = b.pdf
 			e.Meta.BookPage = bookPage(b)
 			out = append(out, e)
 			text = afterMarker(m[0], text[i+markerLen(m):])
