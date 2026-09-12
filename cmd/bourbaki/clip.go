@@ -192,6 +192,14 @@ func clipCut(args []string) error {
 		targets = clip.FindPages(layout, query, pageBody(root, entry.ID))
 	}
 	if len(targets) == 0 {
+		// A line is picked out of what poppler read, so a volume poppler reads
+		// nothing in has no lines to pick and "no line matched" is a true
+		// sentence about the wrong subject. Say which it is: the query found
+		// nothing, or there was nothing for it to look at.
+		if !clip.HasText(layout) {
+			return fmt.Errorf("%s gives poppler no text to read: it is a scan, and its text layer, if it has one, is invisible OCR that pdftotext reads and the XML backend drops.\n"+
+				"\t-whole cuts pages out of it and does not need the text; -match and the line unit do", entry.ID)
+		}
 		return fmt.Errorf("no %s matched", unit)
 	}
 	if *dpi == 0 {

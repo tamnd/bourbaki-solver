@@ -144,6 +144,46 @@ func TestAPageWithNoInkIsNotCut(t *testing.T) {
 	}
 }
 
+// TestAScannedVolumeIsCutWholeRatherThanSkipped. Thirty eight of the forty
+// four volumes are scans and poppler's XML reports no text span on any page of
+// any of them, so a crop measured from the spans cannot be measured at all.
+// Skipping those pages took the clip route away from every volume worth
+// pointing it at.
+func TestAScannedVolumeIsCutWholeRatherThanSkipped(t *testing.T) {
+	layout := &pdfsrc.Layout{Pages: []pdfsrc.Page{{Number: 272, Width: 659, Height: 999}}}
+	if HasText(layout) {
+		t.Error("HasText() = true on a layout with no spans")
+	}
+	native := func(page int) (string, string) { return "Soit $\\mathfrak{S}$ un ensemble.", "E III.27" }
+	targets := FindPages(layout, Query{Pages: map[int]bool{272: true}}, native)
+	if len(targets) != 1 {
+		t.Fatalf("FindPages found %d pages, want 1", len(targets))
+	}
+	if want := (Box{Right: 659, Bottom: 999}); targets[0].Box != want {
+		t.Errorf("the box is %+v, want the whole leaf %+v", targets[0].Box, want)
+	}
+	if !targets[0].Whole() {
+		t.Error("the target is not a whole page")
+	}
+}
+
+// A volume poppler does read is cut to its ink as before, and says so.
+func TestAVolumeWithATextLayerIsStillCutToItsInk(t *testing.T) {
+	layout := &pdfsrc.Layout{Pages: []pdfsrc.Page{{Number: 112, Width: 659, Height: 999,
+		Spans: []pdfsrc.Span{{Left: 80, Top: 120, Width: 500, Height: 15, Text: "En rempla"}}}}}
+	if !HasText(layout) {
+		t.Error("HasText() = false on a layout with a span on it")
+	}
+	native := func(page int) (string, string) { return "En remplaçant", "TS III.98" }
+	targets := FindPages(layout, Query{Pages: map[int]bool{112: true}}, native)
+	if len(targets) != 1 {
+		t.Fatalf("FindPages found %d pages, want 1", len(targets))
+	}
+	if want := (Box{Left: 80, Top: 120, Right: 580, Bottom: 135}); targets[0].Box != want {
+		t.Errorf("the box is %+v, want the ink %+v", targets[0].Box, want)
+	}
+}
+
 // TestAWholePageTargetSaysSoWithoutTheIndexBesideIt. The read has to pick a
 // prompt and the audit has to pick a comparison, and both of them work from a
 // target rather than from a flag somebody remembered to pass twice.

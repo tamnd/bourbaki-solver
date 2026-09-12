@@ -63,6 +63,17 @@ func Find(layout *pdfsrc.Layout, query Query) []Target {
 // volumes is the page in the corpus: the body of it, and the running head and
 // folio the front matter keeps out of the body. A page it has nothing for is
 // skipped rather than compared against the empty string.
+//
+// A page poppler gives no spans for is cut whole rather than skipped. Thirty
+// eight of the forty four volumes are scans, and poppler's XML reports not one
+// text span on any page of any of them: their text is an invisible OCR layer,
+// which pdftotext reads and the XML backend drops. Skipping those pages meant
+// the clip route -- which exists to argue with the extractor about what the
+// printing says -- could not be pointed at any of the volumes that were
+// scanned, which is to say at the ones worth arguing with, and all it said was
+// "no page matched". The crop to the ink is an economy and not a requirement:
+// what the model is being asked to read is a picture of the page, and the whole
+// page is still that. The margins cost pixels; the skip cost the route.
 func FindPages(layout *pdfsrc.Layout, query Query, native func(page int) (body, head string)) []Target {
 	var out []Target
 	var seen int
@@ -84,7 +95,7 @@ func FindPages(layout *pdfsrc.Layout, query Query, native func(page int) (body, 
 		}
 		box, ok := BlockOf(page)
 		if !ok {
-			continue
+			box = WholeOf(page)
 		}
 		out = append(out, Target{
 			Page: page.Number, Line: WholePage, Name: PageName(page.Number),
@@ -109,6 +120,27 @@ func FindPages(layout *pdfsrc.Layout, query Query, native func(page int) (body, 
 // ink on the page, the prompt says what to do with them, and a box drawn to
 // exclude them would have to know where they are, which is the extractor's job
 // and not a crop's.
+// HasText says whether poppler read anything at all in a layout. It is the
+// difference between a query that selected nothing and a volume there was
+// nothing to select from, which the two look alike from the outside.
+func HasText(layout *pdfsrc.Layout) bool {
+	for _, page := range layout.Pages {
+		for _, span := range page.Spans {
+			if strings.TrimSpace(span.Text) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// WholeOf is the whole leaf, for a page whose ink cannot be measured because
+// poppler reports no text on it. It is what a scan gets: the paper as it was
+// laid out, margins and all.
+func WholeOf(page pdfsrc.Page) Box {
+	return Box{Right: page.Width, Bottom: page.Height}
+}
+
 func BlockOf(page pdfsrc.Page) (Box, bool) {
 	if len(page.Spans) == 0 {
 		return Box{}, false
