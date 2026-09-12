@@ -56,6 +56,8 @@ func init() {
 			Title: "one volume, one spelling for the script capitals", Run: m15},
 		Check{ID: "M16", Group: Mathematics, Hard: false,
 			Title: "no ring is named A and Lambda in the same file", Run: m16},
+		Check{ID: "M17", Group: Mathematics, Hard: true,
+			Title: "no word of the prose is left inside the mathematics", Run: m17},
 	)
 }
 
@@ -1156,4 +1158,157 @@ func m16(c *Corpus) ([]Finding, error) {
 		report(d.Path, d.Body, d.BodyLine)
 	}
 	return out, nil
+}
+
+// M17. No word of the prose is left inside the mathematics.
+//
+// The inverse of M14, and the one that was missing. A dollar placed one word
+// too early takes the word with it: content/vi/lie/III § 6 read
+// "$Gọi x \in X$ và $A$ là ..." where the English has "Let $x \in X$ and $A$
+// be ...", so Gọi went into the mathematics (tamnd/bourbaki#412). Nothing
+// upstream complains. A run of Vietnamese words parses perfectly well as a
+// product of one-letter variables, so M04 is silent, and L12 asks the opposite
+// question -- whether a word already inside the mathematics was translated.
+//
+// What gives it away is the font. TeX sets the span in cmmi10, which has no
+// glyph for a letter with a diacritic on it, and the word comes out of the
+// typesetter as a hole in the page. Until now the only thing that saw this was
+// the shelf's "every character reached the page" check, one repo away in
+// tamnd/bourbaki-book, and only for the volumes somebody happened to rebuild.
+// Two of these stopped vi/lie-i-iii from building.
+//
+// The test is that letter: anything in Latin-1 Supplement, Latin Extended-A
+// and -B, Latin Extended Additional -- where Vietnamese lives -- or a combining
+// mark. Mathematics does not use those. The three that look like letters and
+// are not are excepted: × and ÷ are operators sitting in the Latin-1 block, and
+// the dotless i and the micro sign are M03's, which reports them with the right
+// words.
+//
+// The text-mode arguments come out first, because \text{où l'on a} is a word of
+// prose inside the mathematics that is *correctly* inside the mathematics, and
+// so is \operatorname{ord} and the \begin{pmatrix} of a matrix. What is left
+// after mathProper has taken those out is the mathematics itself, and an
+// accented letter there is prose that should never have crossed the dollar.
+//
+// This sees only the words that carry a diacritic, so it is a lower bound: a
+// span reading "cho n la so nguyen" would pass. #412 proposes a second signal
+// for those -- a run of three or more single letters that spells a word of the
+// section's language -- which wants a dictionary and is not here. The half that
+// is here is exact, and every finding is a repair with one right answer.
+//
+// Hard, because of that. There is no reading of the printing in which a page
+// of Bourbaki wants a Vietnamese word set in cmmi10.
+func m17(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	report := func(path, body string, line func(int) int) {
+		spans, _ := Math(body)
+		for _, s := range spans {
+			for _, r := range mathProper(s.Text) {
+				if !proseLetter(r) {
+					continue
+				}
+				out = append(out, Finding{File: path, Line: line(s.Line),
+					Msg: fmt.Sprintf("the letter %q inside the mathematics, which is a word of the prose the dollar took with it: %s",
+						r, ellipsis(s.Text, 60))})
+				break
+			}
+		}
+	}
+	if c.Books != nil {
+		for _, b := range c.Books.Books {
+			for i, p := range c.Pages[b.ID] {
+				report(c.PagePaths[b.ID][i], p.Body, func(n int) int { return n })
+			}
+		}
+	}
+	for _, d := range c.Docs {
+		report(d.Path, d.Body, d.BodyLine)
+	}
+	return out, nil
+}
+
+// proseLetter reports whether r is a letter mathematics does not use, so that
+// finding one between a pair of dollars means a word crossed the delimiter.
+func proseLetter(r rune) bool {
+	switch {
+	// × and ÷ are operators that happen to live in the Latin-1 block, and the
+	// dotless i and the micro sign belong to M03, which has better words for
+	// them than this rule does.
+	case r == 0x00D7, r == 0x00F7, r == 0x00B5, r == 0x0131:
+		return false
+	case r >= 0x00C0 && r <= 0x00FF, // Latin-1 Supplement, the French accents
+		r >= 0x0100 && r <= 0x024F, // Latin Extended-A and -B
+		r >= 0x0300 && r <= 0x036F, // a combining mark on its own
+		r >= 0x1E00 && r <= 0x1EFF: // Latin Extended Additional, the Vietnamese
+		return true
+	}
+	return false
+}
+
+// The commands whose braced arguments are set in text, and the number of those
+// arguments. A word inside one of these is inside the mathematics on purpose.
+var textArgs = map[string]int{
+	"text": 1, "textit": 1, "textbf": 1, "textrm": 1, "textsf": 1,
+	"texttt": 1, "textsc": 1, "textup": 1, "textnormal": 1, "textmd": 1,
+	"mathrm": 1, "mathit": 1, "mathbf": 1, "mathsf": 1, "mathtt": 1,
+	"operatorname": 1, "mbox": 1, "hbox": 1, "emph": 1, "intertext": 1,
+	"footnote": 1, "tag": 1, "label": 1, "ref": 1, "begin": 1, "end": 1,
+	"textcolor": 2, "href": 2,
+}
+
+// mathProper returns s with the text-mode arguments taken out of it, so that
+// what is left is the mathematics and nothing else.
+func mathProper(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != '\\' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		j := i + 1
+		for j < len(s) && (s[j] >= 'a' && s[j] <= 'z' || s[j] >= 'A' && s[j] <= 'Z') {
+			j++
+		}
+		n, ok := textArgs[s[i+1:j]]
+		if !ok {
+			b.WriteString(s[i:j])
+			if j == i+1 && j < len(s) {
+				// An escaped character, \{ or \$ or \,. Take the one byte
+				// after the backslash so it is not read as a command.
+				b.WriteByte(s[j])
+				j++
+			}
+			i = j
+			continue
+		}
+		for k := 0; k < n; k++ {
+			for j < len(s) && (s[j] == ' ' || s[j] == '*') {
+				j++
+			}
+			if j < len(s) && s[j] == '[' {
+				for j < len(s) && s[j] != ']' {
+					j++
+				}
+				if j < len(s) {
+					j++
+				}
+			}
+			if j >= len(s) || s[j] != '{' {
+				break
+			}
+			for depth := 0; j < len(s); j++ {
+				if s[j] == '{' {
+					depth++
+				} else if s[j] == '}' {
+					if depth--; depth == 0 {
+						j++
+						break
+					}
+				}
+			}
+		}
+		i = j
+	}
+	return b.String()
 }

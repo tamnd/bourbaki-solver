@@ -761,3 +761,104 @@ func TestM16(t *testing.T) {
 		t.Errorf("a word ending in A was read as the ring: %v", got)
 	}
 }
+
+func TestM17(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			// The fault the rule was written for. The English reads
+			// "Let $x \in X$ and $A$ be ...", and the dollar was put one
+			// word too early (tamnd/bourbaki#412).
+			"a Vietnamese word the dollar took with it",
+			`$Gọi x \in X$ và $A$ là một tập hợp`,
+			"ọ",
+		},
+		{
+			// A word inside the mathematics on purpose. \text is set in the
+			// text face and its letters reach the page.
+			"a word inside \\text",
+			`we have $\Phi_p(X) \quad \text{với} \quad r \geq 0$ here`,
+			"",
+		},
+		{
+			"a word inside \\operatorname",
+			`the order $\operatorname{ord}_{\mathfrak{p}}(x)$ is one`,
+			"",
+		},
+		{
+			"a French accent inside a display",
+			"$$\nf(x) = y \\text{ où } x \\in E, \\text{ donné}\n$$",
+			"",
+		},
+		{
+			"a French word the display swallowed",
+			"$$\nf(x) = y \\quad où \\quad x \\in E\n$$",
+			"ù",
+		},
+		{
+			// The two letters of the Latin-1 block that are operators and
+			// not letters at all.
+			"a times sign",
+			`the product $E × F$ is one`,
+			"",
+		},
+		{
+			// M03's, and M03 says it better.
+			"the dotless i",
+			`the index $\alpha_ı$ runs`,
+			"",
+		},
+		{
+			"nothing wrong",
+			`we have $\lambda \in \Lambda$ here`,
+			"",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := run(t, m17, doc("a.md", c.body))
+			if c.want == "" {
+				if len(got) != 0 {
+					t.Fatalf("a clean body was reported: %v", got)
+				}
+				return
+			}
+			if len(got) != 1 {
+				t.Fatalf("got %d findings, want 1: %v", len(got), got)
+			}
+			if !strings.Contains(got[0].Msg, c.want) {
+				t.Errorf("the finding does not name %q: %s", c.want, got[0].Msg)
+			}
+		})
+	}
+}
+
+// One finding per span. A clause of eight Vietnamese words inside a pair of
+// dollars is one dollar in the wrong place and one thing to go and fix.
+func TestM17ReportsASpanOnce(t *testing.T) {
+	got := run(t, m17, doc("a.md", `$Gọi một tập hợp x$ here`))
+	if len(got) != 1 {
+		t.Errorf("got %d findings for one span, want 1: %v", len(got), got)
+	}
+}
+
+// The stripper has to balance braces, or a \text{} with a group inside it
+// hides the mathematics that follows and the rule goes blind.
+func TestM17StripsTextArgumentsAndNoMore(t *testing.T) {
+	for _, c := range []struct{ in, want string }{
+		{`\text{où l'on a} x + y`, ` x + y`},
+		{`\text{a \frac{1}{2} b} où`, ` où`},
+		{`\begin{pmatrix} a & b \end{pmatrix}`, ` a & b `},
+		{`\operatorname*{lim} \alpha`, ` \alpha`},
+		{`\href{http://é}{lé} x`, ` x`},
+		{`\lambda \in \Lambda`, `\lambda \in \Lambda`},
+		{`\$ \{ a \}`, `\$ \{ a \}`},
+	} {
+		if got := mathProper(c.in); got != c.want {
+			t.Errorf("mathProper(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
