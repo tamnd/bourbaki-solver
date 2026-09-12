@@ -58,6 +58,7 @@ commands:
   notin     put the stroke back on a relation sign that came back struck through
   prime     brace a primed base so the power after it is not a second power
   star      write the star that marks a forward-looking passage the corpus's way
+  dual      pull the base of a dual back inside the dollars its star sits in
   label     take the a), b), c) of an exercise back out of the mathematics
   elision   write the apostrophe of a French elision the way the corpus sets it
   smallcaps write the kind of a statement head in capitals, as the page sets it
@@ -86,7 +87,9 @@ through first or it will skip the file and say nothing about it. parens comes
 before math so that math reads the spans as they will be rather than as
 they are. notin runs after those, since it works inside the spans and wants them
 closed and whole. star runs there too and for the same reason from the other
-side, since it works everywhere the spans are not. label runs with them, since
+side, since it works everywhere the spans are not. dual runs after star, since
+star is what decides whether a base-less script is the forward-reference mark or
+the half of a dual this one puts back together. label runs with them, since
 it reads the spans to decide which of them are not mathematics at all. elision
 runs after those two
 as well, since it reads the prose and wants to know where the prose ends.
@@ -478,13 +481,52 @@ way when the span has no opening one to pair it with, which is how
 
 A span with a base is never touched, however it is written. $f_*$ and $K^*$ and
 $(g \circ f)_*$ are mathematics and stay mathematics. S$^*$ is a dual with its
-base stranded on the wrong side of the dollar, which is fix math's to move and
-not this command's, and the two separate cleanly: 6 of the 24 bare superscript
-stars in pages/ opened a line and were the mark, and 18 are glued to a letter or
-a bracket and are not.
+base stranded on the wrong side of the dollar, which is bourbaki fix dual's to
+move and not this command's, and the two separate cleanly: 6 of the 24 bare
+superscript stars in pages/ opened a line and were the mark, and 18 were glued
+to a letter or a bracket and are not.
 
 It runs over content/ as well as pages/, for fix parens' reason, and moves a
 translation on with its source the way fix notin does.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
+const fixDualUsage = `usage: bourbaki fix dual [flags]
+
+Pulls the base of a dual back into the mathematics that carries its star.
+
+Bourbaki sets the base of a dual upright -- S, A, E, G, D, one roman capital --
+and an upright capital is what a text layer reads as prose. So the page prints
+cl(S*) and the corpus holds cl(S$^*$), with the letter outside the mathematics
+and the star alone inside it, sitting on no base at all.
+
+It is the fault fix star deliberately leaves behind. That command takes out the
+base-less script where the prose leaves nothing for it to sit on, because there
+the star is Bourbaki's forward-reference mark; here the prose leaves a base, and
+the span is a dual, an adjoint or a conjugate that has been cut in two.
+
+Nothing reports it, which is why it is worth a command. The S renders in the
+body font and the star at the foot of a line of its own making, near enough to
+right that reading the page does not catch it. A translator asked to copy the
+formulae copies "^*", correctly, and the audit compares that against the
+English "^*" and finds them equal. As far as every rule that reads mathematics
+can see, there is no mathematics here to be wrong.
+
+The base is taken only where the prose leaves one letter and that letter stands
+on its own. QQ$^*$ and Tr(BA$^*$) leave two, and taking the nearer one would
+write a dual of Q and of A for what are duals of QQ and BA. A base that closes a
+bracket -- (($u$)$^*$), and (End(V))*$^*$ in Algebre I, a dual of a dual whose
+inner star was set as prose and whose outer one was set as mathematics -- is a
+decision about where the mathematics starts and not a rule, and is left for
+somebody to read. This moves one letter and one pair of delimiters, and never a
+character of prose or of mathematics.
+
+It runs over content/ as well as pages/, for fix prime's reason.
 
 Run bourbaki assemble afterwards, or the section files still hold the old text.
 
@@ -858,6 +900,8 @@ func runFix(args []string) error {
 		return fixPrime(args[1:])
 	case "star":
 		return fixStar(args[1:])
+	case "dual":
+		return fixDual(args[1:])
 	case "label":
 		return fixLabel(args[1:])
 	case "elision":
@@ -2397,6 +2441,58 @@ func fixPrime(args []string) error {
 		files, content, followed, verbed)
 	if changed > 0 && !*check {
 		fmt.Println("fix prime: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+func fixDual(args []string) error {
+	fs := flag.NewFlagSet("fix dual", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixDualUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if err := noArgs(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var pages, changed, bases int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n := textguard.StrandedBase(f.Body)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		bases += n
+		if *check {
+			fmt.Printf("%s  %d bases\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	files, content, followed, err := repairContent(root, *check, "bases", textguard.StrandedBase)
+	if err != nil {
+		return err
+	}
+
+	verb := "moved"
+	if *check {
+		verb = "would move"
+	}
+	fmt.Printf("fix dual: %d pages read, %s %d bases into the mathematics on %d of them\n",
+		pages, verb, bases, changed)
+	fmt.Printf("fix dual: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, verb)
+	if changed > 0 && !*check {
+		fmt.Println("fix dual: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }
