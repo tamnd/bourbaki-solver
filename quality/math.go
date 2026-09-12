@@ -58,6 +58,8 @@ func init() {
 			Title: "no ring is named A and Lambda in the same file", Run: m16},
 		Check{ID: "M17", Group: Mathematics, Hard: true,
 			Title: "no word of the prose is left inside the mathematics", Run: m17},
+		Check{ID: "M18", Group: Mathematics, Hard: true,
+			Title: "the index set in a direct sum is the capital I", Run: m18},
 	)
 }
 
@@ -1312,3 +1314,98 @@ func mathProper(s string) string {
 	}
 	return b.String()
 }
+
+// M18. The index set in a direct sum is the capital I.
+//
+// Bourbaki writes the index set as a capital I and the direct sum over it as
+// \mathbf{N}^{(I)}, A^{(I)}, \mathbf{Z}^{(I)}. In 122 places the corpus read
+// that I as a lowercase l or as the digit 1 (tamnd/bourbaki#413). Nothing
+// upstream complains, because ^{(1)} parses perfectly well -- it is the direct
+// sum over a one-element set, which is a different object -- and both languages
+// carry the misreading, often on the same sentence, so L01 is silent too.
+//
+// ^{(1)} is a good exponent and most of its uses in the corpus are real: the
+// derived series l^{(1)}, the commutator subgroup G^{(1)}, the Hilbert series
+// H^{(1)}, a sequence x_n^{(1)}, and the two complexes C^{(1)} and C^{(2)} of
+// AC X, whose index set really is {1, 2}. A blanket sweep finds 193 occurrences
+// in 22 volumes and takes all of those with it.
+//
+// So the question is asked per base and per section: does this section, or the
+// same section in another language, write ^{(I)} on this same base. That is
+// decidable, and the corpus decides it in one sentence more often than not.
+// A II § 11 sets \mathbf{Q}^{(I)} and then \mathbf{Q}^{(1)} eight words later
+// about the same group; AC X § 7 declares psi on B^{(I)} and then restates that
+// map twice on B^{(1)}. The other language is what settles the cases where the
+// section that carries the fault never writes the right form at all: the Remark
+// of A VII § 3 reads "every submodule of $A^{(1)}$ is isomorphic to a direct
+// sum", and the French page facing it has "tout sous-module de $A^{(I)}$ est
+// isomorphe à une somme directe $\bigoplus_{i \in I} a_i$", with the set in the
+// exponent and under the sum both. C^{(1)} of AC X is excluded by the same
+// gate and not by hand: nothing anywhere writes C^{(I)}.
+//
+// Hard. Every finding is one character and there is no reading of the printing
+// in which a section means both I and 1 by the same exponent on the same base.
+func m18(c *Corpus) ([]Finding, error) {
+	gate := map[string]map[string]bool{}
+	for _, d := range c.Docs {
+		k := twinKey(d.Path)
+		if k == "" {
+			continue
+		}
+		for _, m := range indexGood.FindAllStringSubmatch(d.Body, -1) {
+			if gate[k] == nil {
+				gate[k] = map[string]bool{}
+			}
+			gate[k][m[1]] = true
+		}
+	}
+	var out []Finding
+	for _, d := range c.Docs {
+		bases := gate[twinKey(d.Path)]
+		if bases == nil {
+			continue
+		}
+		for i, line := range strings.Split(d.Body, "\n") {
+			for _, m := range indexBad.FindAllStringSubmatch(line, -1) {
+				if !bases[m[1]] {
+					continue
+				}
+				read := "the digit 1"
+				if m[2] == "l" {
+					read = "a lowercase l"
+				}
+				out = append(out, Finding{File: d.Path, Line: d.BodyLine(i + 1),
+					Msg: fmt.Sprintf("%s^{(%s)} where this section writes %s^{(I)}: the index set read as %s",
+						m[1], m[2], m[1], read)})
+			}
+		}
+	}
+	return out, nil
+}
+
+// twinKey is a content path with the language taken off and the section's
+// title dropped, so that a section and the same section in another language
+// share a key: content/en/alg/IV/01_s1_polynomials.md and
+// content/fr/alg/IV/01_s1_polynomes.md are both alg/IV/01. An exercise has no
+// title to drop and keeps its number.
+func twinKey(path string) string {
+	p := strings.Split(path, "/")
+	if len(p) < 4 || p[0] != "content" {
+		return ""
+	}
+	p = p[2:]
+	last := len(p) - 1
+	name := strings.TrimSuffix(p[last], ".md")
+	if i := strings.Index(name, "_"); i > 0 {
+		name = name[:i]
+	}
+	p[last] = name
+	return strings.Join(p, "/")
+}
+
+// A base carrying a parenthesised exponent: \mathbf{N}^{(I)}, A^{(1)},
+// F_2^{(l)}, B_d^{(l)}.
+var (
+	indexBad  = regexp.MustCompile(`((?:\\[A-Za-z]+\{[^{}]*\}|[A-Za-z])(?:_\{[^{}]*\}|_[A-Za-z0-9])?)\^\{\(([1l])\)\}`)
+	indexGood = regexp.MustCompile(`((?:\\[A-Za-z]+\{[^{}]*\}|[A-Za-z])(?:_\{[^{}]*\}|_[A-Za-z0-9])?)\^\{\(I\)\}`)
+)

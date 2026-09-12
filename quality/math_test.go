@@ -862,3 +862,76 @@ func TestM17StripsTextArgumentsAndNoMore(t *testing.T) {
 		}
 	}
 }
+
+func TestM18(t *testing.T) {
+	// A II § 11 decides it inside one sentence: the same group is written both
+	// ways eight words apart (tamnd/bourbaki#413).
+	one := doc("content/fr/alg/II/11_s11_gradues.md",
+		`on peut supposer de la forme $\mathbf{Q}^{(I)}$; l'ensemble $\mathbf{Q}^{(1)}$ est totalement ordonné`)
+	got := run(t, m18, one)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0].Msg, "the digit 1") {
+		t.Errorf("the finding does not say what was read: %s", got[0].Msg)
+	}
+
+	// The lowercase l is the other reading of the same glyph.
+	l := doc("content/en/alg/IV/01_s1_polynomials.md",
+		`for $\nu \in \mathbf{N}^{(I)}$ and $\mu \in \mathbf{N}^{(l)}$`)
+	if got := run(t, m18, l); len(got) != 1 || !strings.Contains(got[0].Msg, "lowercase l") {
+		t.Errorf("the lowercase l came out as %v", got)
+	}
+}
+
+// The gate is per base. ^{(1)} is a good exponent and most of its uses are
+// real: AC X sets two complexes C^{(1)} and C^{(2)} whose index set is {1, 2},
+// and nothing anywhere writes C^{(I)}.
+func TestM18LeavesAnUngatedBaseAlone(t *testing.T) {
+	for _, body := range []string{
+		`$C_n = \sum (C^{(1)})_{p_1} \otimes (C^{(2)})_{p_2}$`,
+		`the derived series $l = l^{(0)} \supset l^{(1)} \supset b$`,
+		`the Hilbert series $H_{M,F}^{(1)}$ of the filtration`,
+		// The right form on a different base does not gate this one.
+		`$\mathbf{N}^{(I)}$ and the commutator subgroup $G^{(1)}$`,
+	} {
+		if got := run(t, m18, doc("content/en/ac/X/01_s1_a.md", body)); len(got) != 0 {
+			t.Errorf("an ungated base was reported for %q: %v", body, got)
+		}
+	}
+}
+
+// The twin section is the gate that reaches the sections which never write the
+// right form at all. The Remark of A VII § 3 says "every submodule of $A^{(1)}$
+// is isomorphic to a direct sum" and never writes A^{(I)}; the French facing
+// page has $A^{(I)}$ with the set under the sum as well.
+func TestM18ReadsTheOtherLanguage(t *testing.T) {
+	en := doc("content/en/alg/VII/03_s3_free_modules.md",
+		`every submodule of $A^{(1)}$ is isomorphic to a direct sum $\bigoplus a_i$`)
+	if got := run(t, m18, en); len(got) != 0 {
+		t.Fatalf("the English alone should not decide it: %v", got)
+	}
+	fr := doc("content/fr/alg/VII/03_s3_modules_libres.md",
+		`tout sous-module de $A^{(I)}$ est isomorphe à une somme directe $\bigoplus_{i \in I} a_i$`)
+	got := run(t, m18, en, fr)
+	if len(got) != 1 {
+		t.Fatalf("got %d findings with the twin, want 1: %v", len(got), got)
+	}
+	if got[0].File != en.Path {
+		t.Errorf("the finding is against %s, want the English", got[0].File)
+	}
+}
+
+func TestTwinKey(t *testing.T) {
+	for _, c := range []struct{ path, want string }{
+		{"content/en/alg/IV/01_s1_polynomials.md", "alg/IV/01"},
+		{"content/fr/alg/IV/01_s1_polynomes.md", "alg/IV/01"},
+		{"content/vi/alg/IV/01_s1_polynomials.md", "alg/IV/01"},
+		{"content/en/top/III/exercises/s6/10.md", "top/III/exercises/s6/10"},
+		{"pages/alg-iv-vii/0015.md", ""},
+	} {
+		if got := twinKey(c.path); got != c.want {
+			t.Errorf("twinKey(%q) = %q, want %q", c.path, got, c.want)
+		}
+	}
+}
