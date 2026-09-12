@@ -1036,9 +1036,28 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // would open exercise 2. The corpus has one page that writes a call that way
 // and it is cheaper to transcribe the page as it is printed than to teach the
 // pattern to tell an exponent from a note.
+//
+// The bracket is the last thing that is not always there. Page 212 of Topologie
+// generale chapitres 5 a 10 prints "¶ 10 a) Soient X un espace compact
+// métrique", with nothing after the 10, on a page that prints "¶ 9)", "¶ 11)"
+// and "¶ 12) a)" with a bracket each; page 42 of Integration I prints "¶ 13 a)
+// Let E be a fully lattice-ordered space" the same way. So the lettered part is
+// read as closing the number when no bracket does, and the number and the
+// letter carry the marker between them.
+//
+// It is the letter and its own bracket that make this safe to read. "25 A)" is
+// a label, "3 a." is a sentence, and a number with a word after it is a
+// measurement; none of the three matches. Thirteen lines of the corpus open
+// this way and every one of them is an exercise, in eight volumes and both
+// languages, and the rule that a marker counts only when it carries the number
+// the § is up to holds them down as it holds the rest. Each of them is an
+// exercise that was inside the one before it: exercise 9 of § 2 of Topology IX
+// in French was 28422 characters, because 10 and everything printed after it
+// was glued onto the end of it.
 var exNumRE = regexp.MustCompile(
 	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†|§)[ \t]*|[TQJΠ][ \t]+)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
-		`(?:\*\*)?(\d+)(?:\*\*)?[.)](?:\*\*|\^?\*?\$|(` + superscriptDigits + `*\s|[a-z]\)))`)
+		`(?:\*\*)?(\d+)(?:\*\*)?(?:[.)](?:\*\*|\^?\*?\$|(` + superscriptDigits + `*\s|[a-z]\)))` +
+		`|[ \t]+(\*?[a-z]\)))`)
 
 // superscriptDigits is the class a footnote call is set in when the page keeps
 // the type rather than writing a caret.
@@ -1174,10 +1193,15 @@ func runItem(text string) (num, marker, rest string, ok bool) {
 // whole of what matched: a lettered part is matched to prove the number opens
 // an item and then left where it stands, since it is the first line of the item
 // and not part of its number.
+// The part is matched by one group when the number closes on a bracket and by
+// another when it does not, and only one of the two is ever set, so both are
+// taken off.
 func markerLen(m []string) int {
 	n := len(m[0])
-	if len(m) > 3 && strings.TrimSpace(m[3]) != "" {
-		n -= len(m[3])
+	for _, part := range m[3:] {
+		if strings.TrimSpace(part) != "" {
+			n -= len(part)
+		}
 	}
 	return n
 }

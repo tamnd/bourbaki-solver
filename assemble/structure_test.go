@@ -1303,6 +1303,55 @@ func TestASectionSignInACitationOpensNothing(t *testing.T) {
 	}
 }
 
+// The bracket after the number is not always printed. Where a lettered part
+// follows, the number and the letter carry the marker between them, and these
+// are the shapes the thirteen lines of the corpus set that way are written in.
+func TestANumberFollowedByALetteredPartOpensAnExerciseWithoutABracket(t *testing.T) {
+	for _, s := range []struct {
+		line string
+		n    int
+	}{
+		{"¶ 10 a) Soient X un espace compact métrique, d la distance sur X.", 10},
+		{"¶ 24 a) In $\\mathbf{R}$, let $A$ (resp. $B$) be the set of numbers $x$", 24},
+		{"¶ 13 a) Let E be a fully lattice-ordered space.", 13},
+		{"§ 25 a) On a set $X$, the set of regular topologies", 25},
+		{"25 a) Pour qu’un A-module Q soit injectif, il suffit que", 25},
+		{"¶ 7 a) Soient A un anneau commutatif, m un idéal de A", 7},
+	} {
+		m := exNumRE.FindStringSubmatch(s.line)
+		if m == nil {
+			t.Errorf("exNumRE does not match %q", first(s.line, 40))
+			continue
+		}
+		if got, _ := strconv.Atoi(m[2]); got != s.n {
+			t.Errorf("exNumRE on %q read %q, want %d", first(s.line, 40), m[2], s.n)
+		}
+		// The lettered part is the first line of the exercise and not part of
+		// its number, so it is matched to prove the number opens an item and
+		// then left where the page set it.
+		if rest := s.line[markerLen(m):]; !strings.HasPrefix(rest, "a)") {
+			t.Errorf("exNumRE on %q left %q in the body, want it to open on the part",
+				first(s.line, 40), first(rest, 20))
+		}
+	}
+}
+
+// What keeps that off ordinary prose is the letter and its bracket. A capital
+// is a label rather than a part, a full stop after the letter is a sentence,
+// and a number with nothing but a word after it is a measurement.
+func TestANumberAndALetterOpenNothingOnTheirOwn(t *testing.T) {
+	for _, line := range []string{
+		"25 A) On a set $X$, the set of regular topologies",
+		"3 a. Let $X$ be a compact space.",
+		"2 applications of the lemma give the result.",
+		"13 a b) is not a lettered part at all",
+	} {
+		if exNumRE.MatchString(line) {
+			t.Errorf("%q was read as an exercise marker", line)
+		}
+	}
+}
+
 // The French printing sets Proposition, Théorème, Définition and Corollaire in
 // small capitals, and a reading of the page image does not always keep them.
 // 1584 heads across 18 French volumes have come back with the bold gone, and
