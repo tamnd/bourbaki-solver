@@ -606,6 +606,12 @@ func s06(c *Corpus) ([]Finding, error) {
 // something the book does. It is a page that never got read or a split that
 // came apart, and across three hundred exercises it is the one thing nobody
 // spots by eye.
+//
+// Not quite never: § 2 of chapter III of Algebra is printed 1, 2, 3 a) to e),
+// 5, in the English of 1998 and in the French of 2007 alike. A § that really is
+// printed with a hole in it says so in manifests/numbering.yaml, and the gaps it
+// declares are not reported here. Nothing else is let through, because the
+// declaration costs somebody reading the page and writing down what they saw.
 func s07(c *Corpus) ([]Finding, error) {
 	bySection := map[string][]int{}
 	where := map[string]string{}
@@ -618,15 +624,31 @@ func s07(c *Corpus) ([]Finding, error) {
 		bySection[key] = append(bySection[key], d.Exercise.Exercise)
 		where[key] = filepath.ToSlash(filepath.Dir(d.Path))
 	}
+	declared := map[string]map[int]bool{}
+	if c.Numbering != nil {
+		for _, s := range c.Numbering.Skipped {
+			ns := map[int]bool{}
+			for _, n := range s.Numbers {
+				ns[n] = true
+			}
+			declared[s.Key()] = ns
+		}
+	}
 	var out []Finding
 	for _, key := range sortedStrings(bySection) {
 		ns := bySection[key]
 		sort.Ints(ns)
-		if ns[0] != 1 {
+		if ns[0] != 1 && !declared[key][1] {
 			out = append(out, Finding{File: where[key],
 				Msg: fmt.Sprintf("the exercises start at %d rather than 1", ns[0])})
 		}
-		if gaps := corpus.Gaps(ns); len(gaps) > 0 {
+		var gaps []int
+		for _, n := range corpus.Gaps(ns) {
+			if !declared[key][n] {
+				gaps = append(gaps, n)
+			}
+		}
+		if len(gaps) > 0 {
 			out = append(out, Finding{File: where[key],
 				Msg: fmt.Sprintf("the exercises run %d to %d and %v are missing",
 					ns[0], ns[len(ns)-1], gaps)})

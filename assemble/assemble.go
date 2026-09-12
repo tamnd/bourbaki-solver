@@ -148,7 +148,14 @@ func (p Piece) Extraction() string {
 // and takes the bibliography, both indexes and the publisher's blurb on the
 // inside of the back cover with it. See backMatterPDF, which is where the number
 // comes from and where the volume that measured the damage is written down.
-func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile, stop int) ([]Piece, error) {
+//
+// skipped is manifests/numbering.yaml, the exercise numbers a § is printed
+// without, and is nil for a corpus that has none. The assembler asks the page
+// for the number it is up to and will not take a later one, because a number it
+// cannot find is nearly always a marker the reading lost; where the printing
+// itself has the hole, this is what says so. See corpus.NumberingManifest.
+func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile, stop int,
+	skipped *corpus.NumberingManifest) ([]Piece, error) {
 	pr, err := printingOf(lang)
 	if err != nil {
 		return nil, err
@@ -194,7 +201,7 @@ func Chapter(book, lang string, ch corpus.Chapter, pages map[int]corpus.PageFile
 				return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, p.Name(), err)
 			}
 			blocks, p.HasExercise = anchorExercises(blocks, id, pr)
-			if p.Exercises, err = exercises(blocks, pr); err != nil {
+			if p.Exercises, err = exercises(blocks, pr, skipped.Skips(id)); err != nil {
 				return nil, fmt.Errorf("chapter %s %s: %w", ch.Numeral, p.Name(), err)
 			}
 			for i := range p.Exercises {

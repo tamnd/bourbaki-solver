@@ -92,6 +92,7 @@ type Corpus struct {
 	Sections  *corpus.SectionsManifest
 	Exercises *corpus.ExercisesManifest
 	Editions  *corpus.EditionsManifest
+	Numbering *corpus.NumberingManifest
 
 	Tags  *tags.Set
 	Items map[string][]tags.Item // per language, in the order tags are handed out
@@ -161,6 +162,9 @@ func Load(opt Options) (*Corpus, error) {
 		return nil, err
 	}
 	if c.Editions, err = corpus.LoadEditions(c.Root); err != nil {
+		return nil, err
+	}
+	if c.Numbering, err = corpus.LoadNumbering(c.Root); err != nil {
 		return nil, err
 	}
 	if c.Tags, err = tags.Load(c.Root); err != nil {

@@ -1237,8 +1237,23 @@ func itemOpen(s string) bool { return exNumRE.MatchString(s) }
 // copying it into each of the nineteen files of the run would say it nineteen
 // times. A run whose exercises are all preamble is a run whose first marker was
 // misread, and Verify is what catches that.
-func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
+//
+// skip is the numbers the printing of this § sets no exercise against, from
+// manifests/numbering.yaml and empty for nearly every §. § 2 of chapter III of
+// Algebra runs 1, 2, 3 a) to e), 5, in the English of 1998 and in the French of
+// 2007 alike, and the search for a 4 that was never printed swallowed exercises
+// 5 to 26 into the body of 3 in both languages. The numbers are skipped and not
+// filled in: there is no exercise 4, and the files of the § go 03, 05, 06.
+func exercises(blocks []block, pr printing, skip []int) ([]corpus.Exercise, error) {
 	var out []corpus.Exercise
+	skipped := map[int]bool{}
+	for _, n := range skip {
+		skipped[n] = true
+	}
+	want := 1
+	for skipped[want] {
+		want++
+	}
 	in := false
 	for _, b := range blocks {
 		if strings.HasPrefix(b.text, pr.exercises) {
@@ -1255,7 +1270,7 @@ func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 		}
 		text := b.text
 		for text != "" {
-			i, m := itemStart(text, len(out)+1)
+			i, m := itemStart(text, want)
 			if i < 0 {
 				if len(out) == 0 {
 					break // the preamble, see preamble
@@ -1269,7 +1284,11 @@ func exercises(blocks []block, pr printing) ([]corpus.Exercise, error) {
 				onPage(&out[len(out)-1], b)
 			}
 			e := corpus.Exercise{Pages: spanning(nil, b)}
-			e.Meta.Exercise = len(out) + 1
+			e.Meta.Exercise = want
+			want++
+			for skipped[want] {
+				want++
+			}
 			star, pilcrow := marksOf(m[1])
 			e.Meta.Supplementary = star != ""
 			e.Meta.Starred = pilcrow != ""

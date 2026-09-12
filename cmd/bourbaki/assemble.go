@@ -229,6 +229,14 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 	errataOf := errata.Lookup(lang)
 	used := map[string]bool{}
 
+	// And the third: the exercise numbers a § is printed without, which the
+	// assembler needs before it reads a page rather than after, since the number
+	// it is looking for is what tells one exercise from the next.
+	skipped, err := corpus.LoadNumbering(root)
+	if err != nil {
+		return nil, nil, sum, err
+	}
+
 	// The manifests are read before anything is assembled, because a partial run
 	// has to carry a skipped chapter's committed entries through. They are read
 	// on a full run too and simply not used, which costs one file read and keeps
@@ -360,7 +368,7 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 		if back := backMatterPDF(*b); back > 0 {
 			stop = back - 1
 		}
-		pieces, err := assemble.Chapter(b.Book, lang, ch, pages, stop)
+		pieces, err := assemble.Chapter(b.Book, lang, ch, pages, stop, skipped)
 		if err != nil {
 			// A chapter read through whose structure still does not check out.
 			// Integration I to VI is the case: chapter I and chapter II are whole

@@ -623,7 +623,7 @@ func TestExercisesReadsTheMarks(t *testing.T) {
 		`$\P 2)$ Let K be a commutative field.`,
 		`$*3)$ Let G be a finite group.`,
 	)
-	got, err := exercises(in, printings["en"])
+	got, err := exercises(in, printings["en"], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -666,7 +666,7 @@ b) Show that the two C-module structures are distinct.\*
 b) Give an example of a commutative ring A and an ideal m of A.
 4) Let E be a right A-module and F a free left A-module.`,
 	)
-	got, err := exercises(in, printings["en"])
+	got, err := exercises(in, printings["en"], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,7 +695,7 @@ b) Give an example of a commutative ring A and an ideal m of A.
 // one over most of its runs and Algebra VIII prints none.
 func TestThePreambleIsNotPartOfExerciseOne(t *testing.T) {
 	in := blocks("### Exercises", "The notations are those of nos. 1, 2, 3 of § 4.", "1) Let A be a ring.")
-	got, err := exercises(in, printings["en"])
+	got, err := exercises(in, printings["en"], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -723,7 +723,7 @@ func TestThePreambleAndExerciseOneInOneBlock(t *testing.T) {
 		"Les conventions du § 4 restent valables, sauf mention contraire.\n"+
 			"1) Soient g une algèbre de Lie nilpotente, p le plus petit entier tel que $C^p g = 0$.\n"+
 			"2) Soit g un produit semi-direct d’une algèbre h de dimension 1.")
-	got, err := exercises(in, printings["en"])
+	got, err := exercises(in, printings["en"], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -887,7 +887,7 @@ func TestExercisesReadsTheFullStopTheoryOfSetsPrints(t *testing.T) {
 		`$\P 2.$ Let $A$ be a term.`,
 		`$*3.$ Let $R$ be a relation.`,
 	)
-	got, err := exercises(in, printings["en"])
+	got, err := exercises(in, printings["en"], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,7 +918,7 @@ func TestAParagraphOpeningOnANumberIsNotAnExercise(t *testing.T) {
 		"3. is the number of elements, and 2. of them are here.",
 		"2. Let $B$ be a set.",
 	)
-	got, err := exercises(in, printings["en"])
+	got, err := exercises(in, printings["en"], nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1825,5 +1825,61 @@ func TestAFootnoteCallAfterTheBracketStaysInTheBody(t *testing.T) {
 	// exercise, which is why the caret form is not taken.
 	if exNumRE.MatchString("2)^2 = 4 is not an exercise") {
 		t.Error("exNumRE took a squared bracket for a marker")
+	}
+}
+
+// A § whose printing skips a number is read with the hole in it, and the
+// exercises after the hole keep the numbers the printing gives them rather than
+// being pulled down to close it.
+func TestExercisesSkipsTheNumbersAPrintingDoesNotUse(t *testing.T) {
+	in := blocks(
+		"### Exercises",
+		"1) Let A be a ring. Show that A is simple.",
+		"2) Let K be a commutative field.",
+		"3) Let G be a finite group.",
+		"a) The first part. b) The second part.",
+		"5) Let E be a vector space.",
+		"6) Let M be a module.",
+	)
+	got, err := exercises(in, printings["en"], []int{4})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ns []int
+	for _, e := range got {
+		ns = append(ns, e.Meta.Exercise)
+	}
+	if want := []int{1, 2, 3, 5, 6}; !slices.Equal(ns, want) {
+		t.Fatalf("the exercises came out %v, want %v", ns, want)
+	}
+	if !strings.Contains(got[2].Body, "a) The first part") {
+		t.Errorf("the lettered parts left exercise 3: %q", first(got[2].Body, 60))
+	}
+	if strings.Contains(got[2].Body, "Let E be a vector space") {
+		t.Errorf("exercise 5 ran on into exercise 3: %q", first(got[2].Body, 80))
+	}
+}
+
+// Without the declaration the same pages come out as one exercise, which is the
+// run-on the manifest exists to stop. This is here so that the test above is
+// known to be testing something.
+func TestExercisesRunsOnWhereTheSkipIsNotDeclared(t *testing.T) {
+	in := blocks(
+		"### Exercises",
+		"1) Let A be a ring. Show that A is simple.",
+		"2) Let K be a commutative field.",
+		"3) Let G be a finite group.",
+		"5) Let E be a vector space.",
+		"6) Let M be a module.",
+	)
+	got, err := exercises(in, printings["en"], nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d exercises, want 3", len(got))
+	}
+	if !strings.Contains(got[2].Body, "Let M be a module") {
+		t.Errorf("exercises 5 and 6 did not run on into 3: %q", first(got[2].Body, 80))
 	}
 }
