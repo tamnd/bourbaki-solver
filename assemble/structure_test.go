@@ -414,6 +414,31 @@ func TestItemStartOnRunTogetherExercises(t *testing.T) {
 	}
 }
 
+// An exercise whose number is not at the head of the block still carries its
+// marks, and the star in front of it reads the same escaped as bare. Algebra
+// IV in French sets the sixth exercise of § 6 that way, on a page that opens a
+// starred passage of its own further up, so the two forms stand a few lines
+// apart in the one file.
+func TestItemStartTakesTheStarEscapedInsideAParagraph(t *testing.T) {
+	const tail = "montrer que $\\sum_{i=1}^n X_i^2 Y_i^2$ n\u2019est \u00e9gal \u00e0 aucun polyn\u00f4me.\n\n"
+	for _, mark := range []string{"*", "\\*"} {
+		text := tail + mark + " 6) Soit $n$ un entier $\\geqslant 1$."
+		i, m := itemStart(text, 6)
+		if i < 0 {
+			t.Fatalf("exercise 6 written %q was not found", mark)
+		}
+		if got := strings.TrimSpace(text[:i]); !strings.HasSuffix(got, "polyn\u00f4me.") {
+			t.Errorf("%q left %q on the end of the exercise before", mark, first(got[len(got)-12:], 12))
+		}
+		if star, _ := marksOf(m[1]); star == "" {
+			t.Errorf("the star written %q was not read as a mark: m[1] = %q", mark, m[1])
+		}
+		if got := strings.TrimSpace(text[i+markerLen(m):]); !strings.HasPrefix(got, "Soit $n$") {
+			t.Errorf("exercise 6 written %q begins %q", mark, first(got, 20))
+		}
+	}
+}
+
 // Theory of Sets sets the star that brackets a passage in small type outside
 // the mathematics, so it arrives as a bullet or as an escaped star, and it sets
 // the pilcrow before the star as well as after it.

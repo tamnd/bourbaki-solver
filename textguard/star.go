@@ -1,6 +1,7 @@
 package textguard
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/mathtex"
@@ -94,6 +95,9 @@ func bareStar(rs []rune, i int, math []bool) bool {
 // that this function and the rule that reads it cannot disagree about where the
 // mark can be.
 func Stars(text string) (string, int) {
+	// The spans first, since putting a mark back into the prose changes where
+	// the spans are and the rune walk below is indexed by the body it read.
+	text, scripts := ScriptStars(text)
 	math := inMath(text)
 	rs := []rune(text)
 	var b strings.Builder
@@ -107,7 +111,7 @@ func Stars(text string) (string, int) {
 		}
 		b.WriteRune(r)
 	}
-	return b.String(), n
+	return b.String(), n + scripts
 }
 
 // Ornaments is the same reading with nothing given back, for the audit. It hands
@@ -116,9 +120,11 @@ func Stars(text string) (string, int) {
 func Ornaments(text string) []Ornament {
 	math := inMath(text)
 	rs := []rune(text)
+	scripts := scriptStarLines(text)
 	var out []Ornament
 	at, line := 0, 1
 	for _, l := range strings.Split(text, "\n") {
+		found := false
 		for i, r := range []rune(l) {
 			name, bad := ornament[r]
 			if !bad || math[at+i] {
@@ -128,9 +134,33 @@ func Ornaments(text string) []Ornament {
 				name = "a bare asterisk"
 			}
 			out = append(out, Ornament{Line: line, Name: name, Text: l})
+			found = true
 			break
 		}
+		if !found && scripts[line] {
+			out = append(out, Ornament{Line: line,
+				Name: "a star hung on nothing inside the mathematics", Text: l})
+		}
 		at += len([]rune(l)) + 1
+		line++
+	}
+	return out
+}
+
+// scriptStarLines is the body lines ScriptStars would rewrite, by line number.
+// The rule that reads Ornaments and the command that repairs the text have to
+// agree about where the mark can be, and the cheapest way to be sure they do is
+// for the report to ask the repair.
+func scriptStarLines(text string) map[int]bool {
+	out := map[int]bool{}
+	if _, n := ScriptStars(text); n == 0 {
+		return out
+	}
+	line := 1
+	for _, l := range strings.Split(text, "\n") {
+		if _, n := ScriptStars(l); n > 0 {
+			out[line] = true
+		}
 		line++
 	}
 	return out
@@ -165,3 +195,185 @@ func inMath(text string) []bool {
 	}
 	return mark
 }
+
+// scriptStar is a math span whose whole content is a star hung on nothing: a
+// subscript or a superscript with no base, which is not something TeX has a
+// reading for. KaTeX sets it as a lone star on the subscript's baseline, close
+// enough to the printed mark that nothing looks wrong on the page.
+//
+// It is the same fault as the four ornaments and it hides in the one place
+// Stars was told not to look. A model that read the mark as a script put it
+// inside the dollars, and the span it made is the mark and nothing else:
+//
+//	$^*$(iv) G has a riemannian metric invariant under left and right translations.$_*$
+//
+// was one starred passage with both of its marks turned into scripts, and
+// pages/ens-i-iv/0146.md had the opening mark escaped and correct with the
+// closing one inside a span, on two adjacent lines.
+//
+// A trailing token is taken with it, because a model that swallowed the star
+// swallowed what the star was set against: the sentence's full stop, the
+// bracket that closed the parenthesis it ended, the number of the lemma being
+// cited. Those come back out, and a letter comes back out into a span of its
+// own, since "a subtorus of $G._*$" means the group G and not the letter G.
+var scriptStar = []struct {
+	content string // what the span holds, exactly
+	prose   string // what goes back outside it, before the mark
+}{
+	{content: "_*"},
+	{content: "._*", prose: "."},
+	{content: ".)_*", prose: ".)"},
+}
+
+// openingScriptStar is the same fault at the other end of the passage, and it
+// is the one that needs its surroundings read.
+//
+// A span holding ^* is the mark when it opens a line and is a dual or an
+// adjoint when it does not: S$^*$ is the dual of S with its base stranded in
+// the prose, which is bourbaki fix math's fault to repair and not this one's.
+// 6 of the 24 in pages/ opened a line and 18 are glued to a letter or a
+// bracket, so the two populations separate cleanly and neither rule need guess.
+const openingScriptStar = "^*"
+
+// footnoteBeforeStar is a footnote reference standing where a sentence ends,
+// which is the one superscript that can come between the full stop and the
+// mark. A number with no punctuation in front of it is an exponent.
+var footnoteBeforeStar = regexp.MustCompile(`[.)]\^\{\d+\}$`)
+
+// ScriptStars puts the corpus's star back wherever a model wrote it as a script
+// inside a math span, and returns the text and how many it put back.
+//
+// It is deliberately not part of the rune walk in Stars. That walk asks what a
+// single glyph means and answers by where it sits; this asks what a whole span
+// is, and the answer turns on the span having no mathematics in it at all. A
+// span with a base is left alone however it is written, so $f_*$ and $K^*$ and
+// $(g \circ f)_*$ are never touched, and the rule cannot reach a pushforward by
+// accident.
+func ScriptStars(text string) (string, int) {
+	spans, _ := mathtex.Split(text)
+	rs := []rune(text)
+	type edit struct {
+		from, to int // in runes, taking the delimiters with it
+		with     string
+	}
+	var edits []edit
+	for _, s := range spans {
+		if s.Display {
+			continue
+		}
+		from, to := s.Start-1, s.End+1
+		if from < 0 || to > len(rs) || rs[from] != '$' || rs[to-1] != '$' {
+			continue // a delimiter this is not equipped to reason about
+		}
+		before := ' '
+		if from > 0 {
+			before = rs[from-1]
+		}
+		if s.Text == openingScriptStar {
+			// Only where the prose leaves no base for it. Anything else is a
+			// dual whose base is on the wrong side of the dollar.
+			if before == ' ' || before == '\n' || before == '\t' {
+				edits = append(edits, edit{from, to, Star})
+			}
+			continue
+		}
+		if s.Text == "_*" && (isLetter(before) || isDigit(before)) {
+			// A base in the prose, which is fix math's to move. The corpus has
+			// none today -- every $_*$ in it follows a space, a full stop or a
+			// bracket -- and this is what keeps it that way if one arrives.
+			// The forms with punctuation in the span need no such guard: no
+			// reading of "domain$._*$" makes domain the base of anything.
+			continue
+		}
+		if e, ok := scriptStarEdit(s.Text, from, to); ok {
+			edits = append(edits, e)
+		}
+	}
+	if len(edits) == 0 {
+		return text, 0
+	}
+	var b strings.Builder
+	at := 0
+	for _, e := range edits {
+		b.WriteString(string(rs[at:e.from]))
+		b.WriteString(e.with)
+		at = e.to
+	}
+	b.WriteString(string(rs[at:]))
+	return b.String(), len(edits)
+}
+
+// scriptStarEdit reads one span and says what belongs in its place, or that it
+// is not this rule's business.
+func scriptStarEdit(text string, from, to int) (struct {
+	from, to int
+	with     string
+}, bool) {
+	var e struct {
+		from, to int
+		with     string
+	}
+	for _, c := range scriptStar {
+		if text == c.content {
+			e.from, e.to, e.with = from, to, c.prose+Star
+			return e, true
+		}
+	}
+	// Something glued in with the mark. What settles it is the tail: a full
+	// stop before the _* ends a sentence, and no subscript is written after a
+	// sentence ends, so the star is the mark and the head is what it was hung
+	// on. A run of digits is the number of a lemma or a no. and is prose;
+	// anything else was already being set as mathematics and stays that way.
+	rest, ok := strings.CutSuffix(text, "_*")
+	if !ok || rest == "" {
+		return e, false
+	}
+	// A footnote reference between the end of the sentence and the mark. The
+	// volume sets the number of the note in the mathematics either way round,
+	// "$X_{\\alpha}.^{10}$" and "le to $F.$)$^{10}$", so the one that has
+	// swallowed the mark keeps everything else it holds and gives back the
+	// mark alone. Chapter IX of Lie Groups cites its thirteenth note this way.
+	if footnoteBeforeStar.MatchString(rest) {
+		e.from, e.to, e.with = from, to, "$"+rest+"$"+Star
+		return e, true
+	}
+	// Peel the punctuation off the end of what is left. A full stop is always
+	// prose. A bracket is prose only when the span has no opening one to pair
+	// it with: $(p_1)_*$ and $\mathrm{Tor}_1^R(R/R_+, E)_*$ are pushforwards
+	// and close what they opened, while Commutative Algebra V writes
+	// "(considerer la fonction meromorphe $1/(\sin \pi z))_*$" with the
+	// bracket of the aside swept in along with the mark.
+	head, tail := rest, ""
+	for head != "" {
+		if h, ok := strings.CutSuffix(head, "."); ok {
+			head, tail = h, "."+tail
+			continue
+		}
+		if h, ok := strings.CutSuffix(head, ")"); ok && strings.Count(head, ")") > strings.Count(head, "(") {
+			head, tail = h, ")"+tail
+			continue
+		}
+		break
+	}
+	if tail == "" || head == "" {
+		return e, false
+	}
+	if allDigits(head) {
+		e.from, e.to, e.with = from, to, head+tail+Star
+		return e, true
+	}
+	e.from, e.to, e.with = from, to, "$"+head+"$"+tail+Star
+	return e, true
+}
+
+func allDigits(s string) bool {
+	for _, r := range s {
+		if !isDigit(r) {
+			return false
+		}
+	}
+	return s != ""
+}
+
+func isDigit(r rune) bool  { return r >= '0' && r <= '9' }
+func isLetter(r rune) bool { return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' }

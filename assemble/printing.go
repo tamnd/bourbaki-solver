@@ -179,7 +179,7 @@ var printings = map[string]printing{
 				`|\*\*(` + enKinds + `)(?: (\d+))?(?:\.\*\*|\*\* \([^)]*\)\.)\s+` +
 				`|\*\*(` + enCapKinds + `)(?: (\d+))?\.\*\*\s*` +
 				`|\*(` + enPlainKinds + `)(?: (\d+))?\.\*\s+` +
-				`|` + smallTypeSup + `(` + enPlainKinds + `)(?: (\d+))?\.?\s+)`),
+				`|` + smallTypeAny + `(` + enPlainKinds + `)(?: (\d+))?\.?\s+)`),
 		runHead: regexp.MustCompile(`^\*(` + enRunKinds + `)(?: [a-z][^*]*)?\*(?:\..*:)?\s*$`),
 		runLead: regexp.MustCompile(`^\*{0,2}(` + enRunKinds + `)\.\*{0,2}\s+\*{0,2}1\)`),
 		resume: regexp.MustCompile(`(?i)^(?:¶\s*)?[^.]{0,80}?\b(?:takes? up|comes? now|concludes?|` +
@@ -270,10 +270,19 @@ const smallType = `\$\*\$`
 // which Lie 7 to 9 does and Algebra VIII does not.
 const smallTypeSup = `\$\^\*\$`
 
-// smallTypeOpen is either of them at the front of a head, which is how the mark
+// smallTypeAny is the mark at the front of a head however the page spells it.
+// The two mathematical spellings are what a text layer produces; the escaped
+// bare star is what the page holds once bourbaki fix star has taken a base-less
+// script back out of the mathematics, which it has now done to every one of
+// them. A head that is read in one spelling and not in the others is a head the
+// corpus loses the day a page is repaired, and § 8 of chapter VIII of Lie
+// Groups lost its two Remarks exactly that way.
+const smallTypeAny = `(?:` + smallType + `|` + smallTypeSup + `|\\\*)`
+
+// smallTypeOpen is any of them at the front of a head, which is how the mark
 // is found again once the head has been read, so that it can be put back on the
 // body it belongs to.
-var smallTypeOpen = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup + `)`)
+var smallTypeOpen = regexp.MustCompile(`^` + smallTypeAny)
 
 // smallTypeMark is either of them or the escaped bare star, at the front of
 // whatever carries it.
@@ -285,7 +294,7 @@ var smallTypeOpen = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup +
 // emphasis, and all eight members of runs that open on the mark are spelled
 // that way. See closingMarks, which had to learn the same spelling for the same
 // reason.
-var smallTypeMark = regexp.MustCompile(`^(?:` + smallType + `|` + smallTypeSup + `|\\\*)`)
+var smallTypeMark = regexp.MustCompile(`^` + smallTypeAny)
 
 // headName is the name a printing gives a result, in parentheses between the
 // kind and the dash: "Theorem 1 (Wedderburn). —", "Théorème 2 (« lemme de
@@ -407,11 +416,14 @@ const enCapKinds = `DEFINITIONS?|PROPOSITIONS?|THEOREMS?|LEMMAS?|COROLLARY|COROL
 // The last branch is one of these opening a passage in small type, where the
 // period after the kind is the volume's to leave out and it leaves it out: page
 // 147 prints "*Remarks 1) Let P_1, ..., P_l be algebraically independent", with
-// the star superscript, the word in italic and nothing between it and the first
-// member of the run. The period is what the branch above leans on, so this one
-// leans on the star instead, and the star is a mark no sentence opens on. One
-// line of the volume is written this way, and left unread it costs the two
-// Remarks of § 8 and the three citations to them.
+// the star, the word in italic and nothing between it and the first member of
+// the run. The period is what the branch above leans on, so this one leans on
+// the star instead, and the star is a mark no sentence opens on. It is read in
+// all three spellings of the mark, because the page has been written in two of
+// them: the text layer set it as a superscript inside the mathematics and
+// bourbaki fix star has since taken it back out as \*. One line of the volume is
+// written this way, and left unread it costs the two Remarks of § 8 and the
+// three citations to them.
 const enPlainKinds = `Lemmas?|Remarks?|Examples?|Scholium`
 
 // enRunKinds are the kinds Theory of Sets gathers into a run under a head that

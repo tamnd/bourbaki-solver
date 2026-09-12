@@ -1273,7 +1273,14 @@ func onPage(e *corpus.Exercise, b block) {
 // reaches here the asterisk that closes the passage before it has come along
 // too: § 16 runs "are bijective.$*$ $15)*$a) Let A be a regular integral
 // domain".
-var inlineNumRE = regexp.MustCompile(`[\s$*]\$?\*?\s*(\d+)\)\*?\$?\s*`)
+//
+// The star is taken escaped or bare, as exNumRE takes it. A page that writes
+// the mark as \* and is not read that way here loses it twice over: the match
+// starts one byte late, so the backslash and the star are pushed onto the end
+// of the exercise before, and what exNumRE is then handed opens on a space and
+// tells the caller there is no mark at all. Exercise 6 of § 6 of chapter IV of
+// Algebra, in French, is the case.
+var inlineNumRE = regexp.MustCompile(`[\s$*]\$?(?:\\?\*)?\s*(\d+)\)(?:\\?\*)?\$?\s*`)
 
 // itemStart is where exercise n begins in a block, and the marker that opens
 // it, or -1 when the block does not begin it.

@@ -454,10 +454,34 @@ looks wrong, and the only thing lost is that a reader who wants the starred
 passages finds a quarter of them. It went through translation untouched, which
 is what a fault does when nothing catches it.
 
-It works outside the math spans only. U+2217 inside a span is the asterisk
-operator, a binary law or a dual, and belongs to bourbaki fix math, which turns
-it into the TeX that prints it. Outside a span there are no operators, so there
-the same glyph can be nothing but the mark.
+It reads a single glyph outside the math spans only. U+2217 inside a span is the
+asterisk operator, a binary law or a dual, and belongs to bourbaki fix math,
+which turns it into the TeX that prints it. Outside a span there are no
+operators, so there the same glyph can be nothing but the mark.
+
+There is one way the mark gets inside a span all the same, and that rule had a
+hole in it for as long as it was written that way: a model that read the mark as
+a script wrote $_*$ or $^*$, a subscript or a superscript hung on nothing, which
+is not something TeX has a reading for. KaTeX sets it as a lone star on the
+subscript's baseline, near enough the printed mark that the page looks right.
+35 of them were in pages/ and none was mathematics. So a span whose whole
+content is a base-less script is read here as well, and what the model swallowed
+with the mark comes back out: the sentence's full stop, the bracket that closed
+the parenthesis it ended, the number of the lemma cited. Anything that was
+already being set as mathematics goes back into a span of its own, since "a
+subtorus of $G._*$" means the group G and the sentence that ends on it.
+
+What settles which is which is the full stop. No subscript is written after a
+sentence ends, so a star that follows one is the mark; a bracket counts the same
+way when the span has no opening one to pair it with, which is how
+"$1/(\sin \pi z))_*$" is told from the pushforward $(p_1)_*$.
+
+A span with a base is never touched, however it is written. $f_*$ and $K^*$ and
+$(g \circ f)_*$ are mathematics and stay mathematics. S$^*$ is a dual with its
+base stranded on the wrong side of the dollar, which is fix math's to move and
+not this command's, and the two separate cleanly: 6 of the 24 bare superscript
+stars in pages/ opened a line and were the mark, and 18 are glued to a letter or
+a bracket and are not.
 
 It runs over content/ as well as pages/, for fix parens' reason, and moves a
 translation on with its source the way fix notin does.

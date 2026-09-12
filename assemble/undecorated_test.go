@@ -72,3 +72,18 @@ func TestStatesAResult(t *testing.T) {
 		t.Error("StatesAResult() on a language with no grammar should be false")
 	}
 }
+
+// The mark that opens a passage in small type reads the same in all three of
+// its spellings. A text layer writes it inside the mathematics, as $*$ or as
+// $^*$; bourbaki fix star takes a base-less script back out and leaves \*. The
+// one line of Lie 7 to 9 that opens a run of Remarks this way has been written
+// in two of the three, and the two Remarks of § 8 of chapter VIII go unread the
+// moment the grammar knows fewer spellings than the corpus holds.
+func TestAHeadOpeningInSmallTypeReadsInEverySpellingOfTheMark(t *testing.T) {
+	const rest = `Remarks 1) Let $P_1, . . . ,P_l$ be algebraically independent homogeneous elements of I.`
+	for _, mark := range []string{`$*$`, `$^*$`, `\*`} {
+		if !StatesAResult("en", mark+rest) {
+			t.Errorf("a run of Remarks opening on %s was not read as a head", mark)
+		}
+	}
+}
