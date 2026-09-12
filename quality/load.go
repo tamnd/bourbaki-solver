@@ -330,12 +330,31 @@ func readLang(root, lang string) ([]Doc, error) {
 	return out, nil
 }
 
-// readSources reads the source languages the caller left out of the run, so
-// that the file each translated_from names can be found even when the audit is
-// of one translation. Nothing here is audited; see Corpus.Sources.
+// readSources reads the languages the caller left out of the run that this run
+// still has to be able to look things up in, so that the file each
+// translated_from names can be found even when the audit is of one translation.
+// Nothing here is audited; see Corpus.Sources.
+//
+// Two sets of languages, and the second is not the first. The printings are the
+// source languages, en and fr, and they are wanted whatever the run is about.
+// The other set is whatever the files in hand say they came from, which for
+// content/vi is content/en and also content/en-mt: the exercises the French
+// printing has and the English does not are translated from the machine
+// English. en-mt is nobody's printing, so SourceLangs does not name it, and a
+// run over vi alone that stopped at SourceLangs reported 1895 committed files
+// as translations of a file that does not exist -- in every rule of the group,
+// since pairs seeds all of them from the same list. Auditing more of the corpus
+// then found fewer faults than auditing less of it, which is the shape of a
+// wrong answer rather than of a strict one.
 func (c *Corpus) readSources() error {
+	want := c.SourceLangs()
+	for _, d := range c.Docs {
+		if l := langOfPath(d.translatedFrom()); l != "" {
+			want[l] = true
+		}
+	}
 	var langs []string
-	for l := range c.SourceLangs() {
+	for l := range want {
 		if !hasLang(c.Langs, l) {
 			langs = append(langs, l)
 		}
@@ -350,6 +369,33 @@ func (c *Corpus) readSources() error {
 	}
 	sort.Slice(c.Sources, func(i, j int) bool { return c.Sources[i].Path < c.Sources[j].Path })
 	return nil
+}
+
+// translatedFrom is the path a file says it was translated from, whichever of
+// the two schemas carries it, and the empty string for a file that is not a
+// translation.
+func (d Doc) translatedFrom() string {
+	switch {
+	case d.Section != nil:
+		return d.Section.TranslatedFrom
+	case d.Exercise != nil:
+		return d.Exercise.TranslatedFrom
+	}
+	return ""
+}
+
+// langOfPath is the language of a content path, which is the directory under
+// content/. Anything that is not a content path has no language.
+func langOfPath(path string) string {
+	rest, ok := strings.CutPrefix(path, "content/")
+	if !ok {
+		return ""
+	}
+	lang, _, ok := strings.Cut(rest, "/")
+	if !ok {
+		return ""
+	}
+	return lang
 }
 
 func walkMarkdown(dir string, fn func(string) error) error {

@@ -675,6 +675,45 @@ func TestARunOverOneLanguageStillFindsTheEnglishItWasTranslatedFrom(t *testing.T
 	}
 }
 
+// The same, for a source that is nobody's printing. content/vi is translated
+// from content/en where the English volume has the text and from content/en-mt
+// where only the French one does, and en-mt is not a source language: no book
+// is printed in it. A run over vi that read only the printings took all 1895 of
+// those for translations of a file that does not exist.
+func TestARunOverOneLanguageStillFindsTheMachineEnglishItWasTranslatedFrom(t *testing.T) {
+	root := t.TempDir()
+	writeSection(t, root, "content/en-mt/ens/III/00_frontmatter.md", corpus.SectionFrontMatter{
+		Book: "ens", Lang: "en-mt", Section: 1,
+		TranslatedFrom: "content/fr/ens/III/00_frontmatter.md",
+	}, "Let $E$ be a set.")
+	writeSection(t, root, "content/vi/ens/III/00_frontmatter.md", corpus.SectionFrontMatter{
+		Book: "ens", Lang: "vi", Section: 1,
+		TranslatedFrom: "content/en-mt/ens/III/00_frontmatter.md",
+	}, "Cho $E$ là một tập hợp.")
+
+	c := &Corpus{Root: root, Books: &corpus.BooksManifest{}, Langs: []string{"vi"}}
+	docs, err := readDocs(root, c.Langs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Docs = docs
+	if err := c.readSources(); err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range c.Docs {
+		if d.Lang != "vi" {
+			t.Errorf("a run over vi loaded %s for auditing", d.Path)
+		}
+	}
+	ps, bad := c.pairs()
+	if len(bad) != 0 {
+		t.Fatalf("the pairing reported %v", bad)
+	}
+	if len(ps) != 1 || ps[0].en.Path != "content/en-mt/ens/III/00_frontmatter.md" {
+		t.Fatalf("got %d pairs, %v", len(ps), ps)
+	}
+}
+
 // Asking for every language reads each file once, and the pairing takes it from
 // the list the rules walk rather than from a second copy of the same bytes.
 func TestARunOverEveryLanguageReadsTheEnglishOnce(t *testing.T) {
