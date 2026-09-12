@@ -1657,3 +1657,70 @@ func TestAnIndentedMemberIsStillAMemberOfTheRun(t *testing.T) {
 		t.Errorf("the indent stayed on the member: %q", got[1].Body)
 	}
 }
+
+// The printing sets the first line of an exercise in from the margin and the
+// reading keeps the spaces. exNumRE is anchored, so before itemStart backed
+// over the indent the block was not the head of anything and the inline form
+// would not take it either, there being no sentence end in three spaces.
+// Exercise 6 of § 4 of chapter VI of Commutative Algebra in French is the case,
+// and the § came out with five exercises against the eleven on its pages.
+func TestItemStartBacksOverAnIndentedMarker(t *testing.T) {
+	for _, s := range []struct {
+		line string
+		n    int
+		at   int
+	}{
+		{"   ¶ 6) a) Soit $S$ un espace compact hyperstonien sans point isolé.", 6, 3},
+		{"   ¶ 7) Soient $G$ le groupe unimodulaire $\\mathbf{SL}(n, \\mathbf{R})$.", 7, 3},
+		{"\t12. Let $g$ be a nilpotent Lie algebra.", 12, 1},
+		{"¶ 6) a) Soit $S$ un espace compact hyperstonien sans point isolé.", 6, 0},
+	} {
+		i, m := itemStart(s.line, s.n)
+		if i != s.at {
+			t.Errorf("itemStart(%q, %d) = %d, want %d", first(s.line, 40), s.n, i, s.at)
+			continue
+		}
+		if got, _ := strconv.Atoi(m[2]); got != s.n {
+			t.Errorf("itemStart(%q, %d) read %q", first(s.line, 40), s.n, m[2])
+		}
+		if _, pilcrow := marksOf(m[1]); s.n != 12 && pilcrow == "" {
+			t.Errorf("marksOf(%q) found no pilcrow", m[1])
+		}
+	}
+	// The indent is not a licence to take any number. The § is up to 6 and the
+	// block opens on 8, so it belongs to the exercise before it.
+	if i, _ := itemStart("   ¶ 8) Soient $A$ un anneau local intègre.", 6); i >= 0 {
+		t.Error("itemStart took an indented 8 while the § was up to 6")
+	}
+}
+
+// The book hangs a footnote off the number of an exercise, and the call stood
+// between the bracket and the text where the pattern wanted a space. § 1 of
+// chapter IV of Lie Groups and Lie Algebras lost exercises 15 to 24 to one
+// superscript seven, and § 2 of chapter VI of Integration lost 19 to 24 to a
+// superscript three.
+func TestAFootnoteCallAfterTheBracketStaysInTheBody(t *testing.T) {
+	for _, s := range []struct {
+		line string
+		n    int
+		call string
+	}{
+		{"15)⁷ Let $A$ be a set and $\\mathscr{C}$ a subset of $\\mathfrak{P}(A)$.", 15, "⁷"},
+		{"19)³ Let $\\mu$ be a measure on $T$ such that $L^1(\\mu)$ is separable.", 19, "³"},
+	} {
+		i, m := itemStart(s.line, s.n)
+		if i != 0 {
+			t.Errorf("itemStart(%q, %d) = %d, want 0", first(s.line, 40), s.n, i)
+			continue
+		}
+		rest := s.line[markerLen(m):]
+		if !strings.HasPrefix(rest, s.call) {
+			t.Errorf("itemStart(%q) left %q, want it to open on %q", first(s.line, 40), first(rest, 20), s.call)
+		}
+	}
+	// An exponent written flat is not a footnote call and never was an
+	// exercise, which is why the caret form is not taken.
+	if exNumRE.MatchString("2)^2 = 4 is not an exercise") {
+		t.Error("exNumRE took a squared bracket for a marker")
+	}
+}

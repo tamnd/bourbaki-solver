@@ -1022,9 +1022,27 @@ func anchorExercises(blocks []block, id corpus.Ref, pr printing) ([]block, bool)
 // § 3 of chapter IV of Topological Vector Spaces opens on "**T 1**)" and came
 // out with two exercises against the eighteen on its pages, both of them
 // halves of a citation, because the run never found its first.
+//
+// A footnote call can stand between the bracket and the text, because the book
+// hangs the note off the number: "15)⁷ Let $A$ be a set" opens exercise 15 of
+// § 1 of chapter IV of Lie Groups and Lie Algebras, and the note says the
+// exercises it opens are unpublished and came from Tits. The call is taken into
+// the group the caller gives back, so it stays at the head of the body where
+// the page set it rather than being eaten with the marker: the definition is on
+// the same page and a call deleted is a note pointing at nothing.
+//
+// Only the superscript type is taken. A caret and a digit would be the same
+// call written flat, but it is also how an exponent is written, and "2)^2 = 4"
+// would open exercise 2. The corpus has one page that writes a call that way
+// and it is cheaper to transcribe the page as it is printed than to teach the
+// pattern to tell an exponent from a note.
 var exNumRE = regexp.MustCompile(
 	`^(?:\*\*)?((?:\$[ \t]*)?(?:(?:\\?\*|\\P|\\S|¶|†|§)[ \t]*|[TQJΠ][ \t]+)+(?:\$[ \t]*)?|(?:\$[ \t]*)?)` +
-		`(?:\*\*)?(\d+)(?:\*\*)?[.)](?:\*\*|\^?\*?\$|(\s|[a-z]\)))`)
+		`(?:\*\*)?(\d+)(?:\*\*)?[.)](?:\*\*|\^?\*?\$|(` + superscriptDigits + `*\s|[a-z]\)))`)
+
+// superscriptDigits is the class a footnote call is set in when the page keeps
+// the type rather than writing a caret.
+const superscriptDigits = `[⁰¹²³⁴⁵⁶⁷⁸⁹]`
 
 // marks are the star and the pilcrow a book can set in front of an exercise
 // number. The bold that extraction writes around the number of some of them is
@@ -1293,6 +1311,22 @@ func itemStart(text string, n int) (int, []string) {
 	if m := exNumRE.FindStringSubmatch(text); m != nil {
 		if got, _ := strconv.Atoi(m[2]); got == n {
 			return 0, m
+		}
+	}
+	// A block can open on its marker and still be indented. The printing sets
+	// the first line of an exercise in from the margin and the reading keeps
+	// the spaces, and exNumRE is anchored, so "   ¶ 6) a) Soit $S$" is not the
+	// head of a block as far as the pattern is concerned. It then falls to the
+	// inline form below, which wants a sentence end in front of the number and
+	// finds three spaces, so the exercise is appended to the one before and
+	// takes the rest of the § with it. Exercise 6 of § 4 of chapter VI of
+	// Commutative Algebra in French is the case and cost that § five exercises;
+	// 3508 markers in the corpus are set in from the margin this way.
+	if lead := len(text) - len(strings.TrimLeft(text, " \t")); lead > 0 {
+		if m := exNumRE.FindStringSubmatch(text[lead:]); m != nil {
+			if got, _ := strconv.Atoi(m[2]); got == n {
+				return lead, m
+			}
 		}
 	}
 	for off := 0; off < len(text); {
