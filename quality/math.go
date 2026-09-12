@@ -738,6 +738,15 @@ func m10(c *Corpus) ([]Finding, error) {
 // one of them without opening a PDF, and textguard.Normalise does the same as an
 // answer is written, so a finding here means either a page read before that
 // landed or a hand edit that put one back.
+//
+// One shape inside a span is read all the same, and it is the one shape that
+// cannot be mathematics: a span whose whole content is a star hung on nothing,
+// $_*$ or $^*$. A subscript with no base is not something TeX has a reading
+// for, so it is the mark and not an operator, and it is reported here under its
+// own name. 35 pages were written that way and none was caught, because KaTeX
+// sets a base-less script as a lone star on the subscript's baseline and the
+// page looked right. See textguard.ScriptStars, which this asks rather than
+// keeping a second opinion about where the mark can be.
 func m11(c *Corpus) ([]Finding, error) {
 	var out []Finding
 	for _, d := range c.Docs {
