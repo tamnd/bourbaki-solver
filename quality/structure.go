@@ -63,6 +63,9 @@ func init() {
 		Check{ID: "S14", Group: Structure, Hard: false,
 			Title: "every committed page passes the rules that gated its reading",
 			Run:   s14},
+		Check{ID: "S15", Group: Structure, Hard: false,
+			Title: "no note is left at the foot of a page with nothing pointing at it",
+			Run:   s15},
 	)
 }
 
@@ -1120,6 +1123,45 @@ func s14(c *Corpus) ([]Finding, error) {
 			}
 			out = append(out, Finding{File: at, Line: 1,
 				Msg: fmt.Sprintf("the reading would be refused today: %s", ocr.Reasons(problems))})
+		}
+	}
+	return out, nil
+}
+
+// S15. No note is left at the foot of a page with nothing pointing at it.
+//
+// S10 asks the other half of the question. A footnote is two things, a mark in
+// the sentence and a body at the foot, and S10 asks whether a body that is
+// pointed at carries the printing's mark as well as Markdown's. Nothing asked
+// whether it is pointed at at all.
+//
+// A reading that did not know it was reading a note writes it as the printing
+// sets it: the number, a space, the note. That is a paragraph to everything
+// downstream. It assembles into content/, gets translated with the rest of the
+// section, and prints in the middle of the running text as a paragraph opening
+// on a numeral, with the sentence it belongs to somewhere above and no way to
+// tell which one.
+//
+// It is soft because it is not repairable by rule. Where the mark stood in the
+// sentence is not in the page -- that is the whole of the fault -- so putting
+// it back means reading the printing, one note at a time. What the rule buys is
+// that the sixty are known and counted instead of printing as prose.
+//
+// Pages only. content/ carries the same notes and more, since both printings of
+// a volume hold them and the translators translated the orphan faithfully, but
+// a § file has no foot: its notes sit wherever the page boundary fell, and the
+// test that makes this precise -- a run at the bottom of a page -- means
+// nothing there. The repair belongs in the page in any case, and assembly
+// carries it down.
+func s15(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, b := range c.Books.Books {
+		for i, p := range c.Pages[b.ID] {
+			for _, o := range footnote.Orphans(p.Body) {
+				out = append(out, Finding{File: c.PagePaths[b.ID][i], Line: o.Line,
+					Msg: fmt.Sprintf("note %s is at the foot of the page and nothing on the page points at it: %s",
+						o.Digit, ellipsis(o.Text, 70))})
+			}
 		}
 	}
 	return out, nil
