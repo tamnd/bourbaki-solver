@@ -27,6 +27,7 @@ const tagsUsage = `usage: bourbaki tags <command> [arguments]
 
 commands:
   assign    give a tag to every statement and exercise that has none
+              -book ID         mint only for this volume, which has settled
   merge     move tags/new-tags into tags/tags, which makes them permanent
   retire    take a tag out of use for good, for a statement that has left
   migrate   rewrite a tag's label to the one tags/aliases says it became
@@ -81,9 +82,18 @@ func runTags(args []string) error {
 // Markdown so that a reader of the raw text can cite it. Assembly writes the
 // same bytes from the same lookup, which is what keeps assemble -check green
 // after an assignment.
+//
+// -book narrows what is minted to one volume. A tag is permanent, so a volume
+// is tagged once its pages have settled and not before, and the volumes settle
+// one at a time: minting for the whole corpus would hand permanent names to
+// pages that are still being read. Narrowing changes only which labels are
+// allocated. The writing stays whole, because the tag a label already has
+// belongs in every printing that prints that statement, and a French file left
+// without the tag its English twin carries is a diff assemble -check would find.
 func runTagsAssign(args []string) error {
 	fs := flag.NewFlagSet("tags assign", flag.ExitOnError)
 	dry := fs.Bool("dry-run", false, "print what would be allocated and write nothing")
+	book := fs.String("book", "", "only mint tags for the statements of this volume")
 	quiet := fs.Bool("q", false, "print only the totals")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
@@ -101,6 +111,14 @@ func runTagsAssign(args []string) error {
 		return err
 	}
 	langs := books.Printings()
+	var only *corpus.Book
+	if *book != "" {
+		b, ok := books.Get(*book)
+		if !ok {
+			return fmt.Errorf("no volume %q in manifests/books.yaml", *book)
+		}
+		only = b
+	}
 	// A label the corpus has twice in one printing is a mistake in assembly, and
 	// Assign stops on it. Across printings it is not a mistake but the point:
 	// Proposition 6 of § 1 is one statement whichever printing it is read in, so
@@ -113,8 +131,11 @@ func runTagsAssign(args []string) error {
 		if err != nil {
 			return err
 		}
-		total += len(items)
 		for _, it := range items {
+			if only != nil && !inVolume(it.Path, only) {
+				continue
+			}
+			total++
 			if seen[it.Label] {
 				continue
 			}
@@ -123,6 +144,9 @@ func runTagsAssign(args []string) error {
 		}
 	}
 	if total == 0 {
+		if only != nil {
+			return fmt.Errorf("no statement in %s: run bourbaki assemble -book %s first", only.ID, only.ID)
+		}
 		return fmt.Errorf("no statement in content/: run bourbaki assemble first")
 	}
 	made, err := set.Assign(labels)
@@ -134,9 +158,13 @@ func runTagsAssign(args []string) error {
 			fmt.Printf("%s %s\n", e.Tag, e.Label)
 		}
 	}
+	over := strings.Join(langs, " and ")
+	if only != nil {
+		over = only.ID
+	}
 	if *dry {
 		fmt.Printf("tags assign -dry-run: %d statements and exercises over %s, %d labels, %d would be allocated\n",
-			total, strings.Join(langs, " and "), len(labels), len(made))
+			total, over, len(labels), len(made))
 		return nil
 	}
 	if err := set.Save(root); err != nil {
@@ -151,11 +179,40 @@ func runTagsAssign(args []string) error {
 		n += w
 	}
 	fmt.Printf("tags assign: %d statements and exercises over %s, %d allocated to tags/new-tags, %d files rewritten\n",
-		total, strings.Join(langs, " and "), len(made), n)
+		total, over, len(made), n)
 	if len(made) > 0 {
 		fmt.Println("review tags/new-tags, then run bourbaki tags merge")
 	}
 	return nil
+}
+
+// inVolume is whether a walked item was printed in one volume.
+//
+// A volume is a printing of some chapters of a Book, so what identifies it in
+// content/ is the three directories at the head of the path: the language, the
+// Book, and a chapter the volume prints. A fascicule bound into the volume
+// counts, since it assembles under its letters where a chapter sits under its
+// numeral and it is read from the same printing.
+//
+// Walk descends into chapter directories only, so the note to the reader, the
+// introduction and the two indexes are not items here and do not have to be
+// argued about: they carry no statement heading and no tag.
+func inVolume(path string, v *corpus.Book) bool {
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 || parts[0] != "content" || parts[1] != v.Lang || parts[2] != v.Book {
+		return false
+	}
+	for _, ch := range v.Chapters {
+		if parts[3] == ch {
+			return true
+		}
+	}
+	for _, f := range v.Fascicules {
+		if parts[3] == f.Numeral {
+			return true
+		}
+	}
+	return false
 }
 
 // writeTags puts the tags into the corpus and returns how many files changed.
