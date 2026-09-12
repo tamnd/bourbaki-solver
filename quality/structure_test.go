@@ -333,3 +333,75 @@ func TestS14(t *testing.T) {
 		t.Errorf("an unread volume was reported: %v %v", got, err)
 	}
 }
+
+// s16Corpus is one volume whose pages carry the running heads handed over.
+func s16Corpus(heads ...string) *Corpus {
+	c := &Corpus{
+		Books:     &corpus.BooksManifest{Books: []corpus.Book{{ID: "ens"}}},
+		Pages:     map[string][]corpus.PageFile{},
+		PagePaths: map[string][]string{},
+	}
+	for i, h := range heads {
+		c.Pages["ens"] = append(c.Pages["ens"], corpus.PageFile{
+			Meta: corpus.PageFrontMatter{Book: "ens", PDFPage: 8 + i, RunningHead: h}})
+		c.PagePaths["ens"] = append(c.PagePaths["ens"], fmt.Sprintf("pages/ens/%04d.md", 8+i))
+	}
+	return c
+}
+
+// The longest head any of the 44 volumes prints, and the longest the corpus
+// holds in each of the two languages. A rule that reported these would be
+// saying something untrue about every page of Topology I.
+func TestS16LeavesTheLongestHeadThePrintingsHave(t *testing.T) {
+	c := s16Corpus(
+		"6. TOPOLOGICAL GROUPS WITH OPERATORS; TOPOLOGICAL RINGS, DIVISION RINGS AND FIELDS",
+		"INTEGRAL FORMULA FOR THE REMAINDER IN TAYLOR'S FORMULA; PRIMITIVES OF HIGHER ORDER",
+		"n° 4 SOUS-ALGÈBRES DE CARTAN ET ÉLÉMENTS RÉGULIERS D’UNE ALGÈBRE DE LIE 25",
+		"EXERCICES", "")
+	got, err := s16(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
+	}
+}
+
+// The fault: pages/ac-v-vii-fr/0076.md, which held the opening of Commutative
+// Algebra V § 2 exercise 13 where its running head belongs, so that the
+// exercise was in no content file at all.
+func TestS16ReportsAParagraphKeptAsAHead(t *testing.T) {
+	c := s16Corpus("EXERCICES", "¶ 13) a) Soient K un corps de caractéristique 0, "+
+		"n l’idéal de l’anneau de polynômes K[X, Y, Z] engendré par Y² — X² — X³. "+
+		"Montrer que n est premier, et que l’anneau intègre A = K[X, Y, Z]/n n’est "+
+		"pas intégralement clos.")
+	got, err := s16(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("reported %+v, want the one page that kept a paragraph", got)
+	}
+	if got[0].File != "pages/ens/0009.md" {
+		t.Errorf("named %q", got[0].File)
+	}
+	if !strings.Contains(got[0].Msg, "219 characters long") {
+		t.Errorf("said %q", got[0].Msg)
+	}
+}
+
+// Length is counted in characters and not in bytes. A French head of 89 runes
+// runs past 90 bytes on the accents alone, and counting bytes would report it.
+func TestS16CountsCharactersAndNotBytes(t *testing.T) {
+	head := strings.Repeat("é", 89)
+	if len(head) <= headLimit {
+		t.Fatalf("the fixture is %d bytes, which does not test what it says", len(head))
+	}
+	got, err := s16(s16Corpus(head))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
+	}
+}

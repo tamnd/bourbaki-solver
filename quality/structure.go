@@ -66,6 +66,9 @@ func init() {
 		Check{ID: "S15", Group: Structure, Hard: false,
 			Title: "no note is left at the foot of a page with nothing pointing at it",
 			Run:   s15},
+		Check{ID: "S16", Group: Structure, Hard: true,
+			Title: "no page keeps a paragraph of the book in its running head",
+			Run:   s16},
 	)
 }
 
@@ -1162,6 +1165,55 @@ func s15(c *Corpus) ([]Finding, error) {
 					Msg: fmt.Sprintf("note %s is at the foot of the page and nothing on the page points at it: %s",
 						o.Digit, ellipsis(o.Text, 70))})
 			}
+		}
+	}
+	return out, nil
+}
+
+// headLimit is the length past which a running head is not a running head.
+//
+// The printings top out at 82 characters over the 14006 pages that carry one,
+// and the longest is a § title set in capitals: "6. TOPOLOGICAL GROUPS WITH
+// OPERATORS; TOPOLOGICAL RINGS, DIVISION RINGS AND FIELDS". The median is 24.
+const headLimit = 90
+
+// S16. No page keeps a paragraph of the book in its running head.
+//
+// running_head holds the few words the printing repeats at the top of a page,
+// and nothing downstream reads it as text: assemble takes the body and leaves
+// the front matter behind. So a reading that put a paragraph of the book there
+// did not misfile it, it lost it. The words are in no content file, no
+// translation and no volume, and the only way to find out was to go looking.
+//
+// Going looking found 210 pages holding 97861 characters of Bourbaki, which is
+// tamnd/bourbaki#416. 194 of them began mid-sentence, 5 began on a PROPOSITION
+// or a THEOREM, and not one of them appeared anywhere in the body of its own
+// page. Among them was the opening of Commutative Algebra V § 2 exercise 13,
+// which is why that exercise was one of the missing markers of
+// tamnd/bourbaki#411: the marker was not damaged, the whole exercise was in the
+// front matter.
+//
+// The test is length and nothing else, because length is the part that admits
+// no argument. A value three times longer than the longest head any of the 44
+// volumes prints is not a head under any reading of the page. There is a band
+// below the limit -- a handful of values between 83 and 90 characters that are
+// plainly prose, "Si K' est plat sur K (AC, I, , n° 3, déf. 2), il résulte de
+// loc. cit. que le diagramme" among them -- that this deliberately does not
+// judge, because separating a short sentence from a long title needs the page
+// map's expectation and not a ruler. That finer question is the running head
+// rule that gates a reading, which S14 runs over what is committed.
+func s16(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	for _, b := range c.Books.Books {
+		for i, p := range c.Pages[b.ID] {
+			head := p.Meta.RunningHead
+			if len([]rune(head)) <= headLimit {
+				continue
+			}
+			out = append(out, Finding{File: c.PagePaths[b.ID][i], Line: 1,
+				Msg: fmt.Sprintf("the running head is %d characters long, so it is a paragraph of "+
+					"the book and not a head, and nothing downstream reads it: %s",
+					len([]rune(head)), ellipsis(head, 70))})
 		}
 	}
 	return out, nil
