@@ -134,6 +134,40 @@ func TestM03(t *testing.T) {
 			"nothing on it",
 		},
 		{
+			// A Unicode subscript where the reading should have written a TeX
+			// one. KaTeX takes it without complaint -- an unknown character is
+			// an ordinary atom -- and then cmmi10 has no glyph for it and
+			// nothing reaches the page. Integration V set the Lebesgue-Fubini
+			// theorem this way (tamnd/bourbaki#414).
+			"a subscript digit inside the mathematics",
+			`the integral $\int f(t₁, t₂)$ is one`,
+			"a Unicode script",
+		},
+		{
+			"a superscript inside the mathematics",
+			`the group $SO⁺(q)$ acts`,
+			"a Unicode script",
+		},
+		{
+			// The subscript letters Unicode left out of the block.
+			"a subscript letter from Phonetic Extensions",
+			`the tangent map $T₀kᵢ$ is one`,
+			"a Unicode script",
+		},
+		{
+			// In the prose the same characters are usually right: 1039 of the
+			// corpus's superscript ones are footnote markers, and E₆ is the name
+			// of a root system in a running head.
+			"a footnote marker in the prose",
+			"the order is 12.² The rest follows",
+			"",
+		},
+		{
+			"a root system named in the prose",
+			"the diagram of E₆ is one",
+			"",
+		},
+		{
 			"nothing wrong",
 			`we have $\lambda \in \Lambda$ here`,
 			"",

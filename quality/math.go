@@ -239,6 +239,25 @@ func strandedInMath(r rune) (string, bool) {
 	// and their neighbours are not letters at all, so they are named.
 	case r == 0x00B5, r == 0x2126, r == 0x0131:
 		return fmt.Sprintf("the letter %q where its TeX belongs", r), true
+	// A Unicode subscript or superscript inside a math span, which is a TeX
+	// script the reading never wrote: the Lebesgue-Fubini theorem of Integration
+	// V came through as "(t₁, t₂) \mapsto \int f(t₁, t₂, t₃)" with U+2081 and
+	// its neighbours standing for _1, _2, _3 (tamnd/bourbaki#414). KaTeX parses
+	// the span without complaint, because an unknown character is an ordinary
+	// atom, and then cmmi10 has no glyph at the code point and the character
+	// does not reach the page at all.
+	//
+	// Only inside the mathematics. The same characters in the prose are usually
+	// right -- 1039 of the corpus's superscript ones are footnote markers, E₆ is
+	// the name of a root system in a running head, and xixe siècle is a century.
+	//
+	// The last two cases are the subscript letters Unicode did not put in the
+	// block: U+1D62..U+1D6A in Phonetic Extensions, which gave Lie III its
+	// "(T₀kᵢ)(b)" for k_i, and U+2C7C in Latin Extended-D, which gave Algebra IX
+	// its "xᵢ \wedge xⱼ".
+	case r >= 0x2070 && r <= 0x209F, r == 0x00B2, r == 0x00B3, r == 0x00B9,
+		r >= 0x1D62 && r <= 0x1D6A, r == 0x2C7C:
+		return fmt.Sprintf("%q, a Unicode script where a TeX one belongs", r), true
 	case r >= 0x2190 && r <= 0x21FF, r >= 0x2200 && r <= 0x22FF,
 		r >= 0x27F0 && r <= 0x27FF, r >= 0x2A00 && r <= 0x2AFF:
 		return fmt.Sprintf("the operator %q where its TeX belongs", r), true
