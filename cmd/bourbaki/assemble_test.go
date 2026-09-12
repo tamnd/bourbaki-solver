@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -763,12 +764,41 @@ func TestWriteExercisesRefusesAGap(t *testing.T) {
 		p.Exercises = append(p.Exercises, e)
 	}
 	cx := corpus.ChapterExercises{Chapter: "VIII"}
-	err := writeExercises(t.TempDir(), "en", p, map[string][]byte{}, &cx, nil, nil, nil)
+	err := writeExercises(t.TempDir(), "en", p, map[string][]byte{}, &cx, nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("a § missing exercise 3 should be an error")
 	}
 	if !strings.Contains(err.Error(), "[3]") {
 		t.Errorf("the error does not say which is missing: %v", err)
+	}
+}
+
+// Never, except where a printing really does skip a number and somebody has
+// read it and said so in manifests/numbering.yaml. Then the § is written, and
+// the number it does not use is still recorded as carrying no file.
+func TestWriteExercisesAllowsADeclaredGap(t *testing.T) {
+	p := assemble.Piece{Section: corpus.Section{Number: 1}}
+	for _, n := range []int{1, 2, 4} {
+		e := corpus.Exercise{Body: "a body"}
+		e.Meta = corpus.ExerciseFrontMatter{Book: "alg", Chapter: "VIII", Section: 1, Exercise: n}
+		p.Exercises = append(p.Exercises, e)
+	}
+	cx := corpus.ChapterExercises{Chapter: "VIII"}
+	files := map[string][]byte{}
+	if err := writeExercises(t.TempDir(), "en", p, files, &cx, nil, nil, nil, []int{3}); err != nil {
+		t.Fatalf("a § the printing skips 3 in should be written: %v", err)
+	}
+	if len(files) != 3 {
+		t.Errorf("wrote %d files, want the 3 exercises the § has", len(files))
+	}
+	if len(cx.Section) != 1 {
+		t.Fatalf("recorded %d sections, want 1", len(cx.Section))
+	}
+	if got := cx.Section[0].Gaps; !slices.Equal(got, []int{3}) {
+		t.Errorf("the record says the gaps are %v, and no file carries 3", got)
+	}
+	if got := cx.Section[0].Count; got != 3 {
+		t.Errorf("the record counts %d exercises, want 3", got)
 	}
 }
 

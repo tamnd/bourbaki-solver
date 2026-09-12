@@ -391,7 +391,8 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 		cr := corpus.ChapterSections{Chapter: ch.Numeral, Title: ch.Title}
 		cx := corpus.ChapterExercises{Chapter: ch.Numeral, Title: ch.Title}
 		for _, p := range pieces {
-			if err := writeExercises(root, lang, p, files, &cx, tagOf, errataOf, used); err != nil {
+			skip := skipped.Skips(corpus.Ref{Book: b.Book, Chapter: ch.Numeral, Section: p.Number, Appendix: p.Appendix})
+			if err := writeExercises(root, lang, p, files, &cx, tagOf, errataOf, used, skip); err != nil {
 				return nil, nil, sum, err
 			}
 			f, err := sectionFile(root, *b, ch, p, lang, order, tagOf, errataOf, used)
@@ -473,9 +474,14 @@ func assembleBook(root, book, lang string, partial, verbose bool) (map[string][]
 // does; it is a page that never got read or a split that came apart, and
 // writing the manifest and carrying on would leave the corpus quietly short of
 // an exercise.
+//
+// Unless it is something the book does: skip is what manifests/numbering.yaml
+// says this § is printed without, and a gap it declares is not a gap anybody
+// has to go and find. The number still goes into the record — no file carries
+// it, and that is the truth about the § — but it does not stop the run.
 func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte,
 	cx *corpus.ChapterExercises, tagOf map[string]tags.Tag,
-	errataOf map[string][]corpus.Erratum, used map[string]bool) error {
+	errataOf map[string][]corpus.Erratum, used map[string]bool, skip []int) error {
 	if len(p.Exercises) == 0 {
 		return nil
 	}
@@ -510,9 +516,19 @@ func writeExercises(root, lang string, p assemble.Piece, files map[string][]byte
 	}
 	sx.First, sx.Last = nums[0], nums[len(nums)-1]
 	sx.Gaps = corpus.Gaps(nums)
-	if len(sx.Gaps) > 0 {
+	declared := map[int]bool{}
+	for _, n := range skip {
+		declared[n] = true
+	}
+	var unexplained []int
+	for _, n := range sx.Gaps {
+		if !declared[n] {
+			unexplained = append(unexplained, n)
+		}
+	}
+	if len(unexplained) > 0 {
 		return fmt.Errorf("%s %s: the exercises run %d to %d and %v are missing",
-			cx.Chapter, p.Name(), sx.First, sx.Last, sx.Gaps)
+			cx.Chapter, p.Name(), sx.First, sx.Last, unexplained)
 	}
 	cx.Total += len(p.Exercises)
 	cx.Section = append(cx.Section, sx)

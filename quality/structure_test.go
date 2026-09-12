@@ -405,3 +405,81 @@ func TestS16CountsCharactersAndNotBytes(t *testing.T) {
 		t.Errorf("reported %+v, want nothing", got)
 	}
 }
+
+// A § of exercises, one Doc each, with the lengths given.
+func s17Corpus(dir string, lengths ...int) *Corpus {
+	c := &Corpus{}
+	for i, n := range lengths {
+		m := corpus.ExerciseFrontMatter{Book: "lie", Chapter: "III", Section: 10, Exercise: i + 1}
+		c.Docs = append(c.Docs, Doc{
+			Path:     fmt.Sprintf("%s/%02d.md", dir, i+1),
+			Lang:     "en",
+			Kind:     KindExercise,
+			Exercise: &m,
+			Body:     strings.Repeat("x", n),
+		})
+	}
+	return c
+}
+
+// The fault: content/en/lie/III/exercises/s10/03.md, 64560 characters against
+// two neighbours of ordinary length, holding the historical note of chapter III
+// and its 42-entry bibliography. tamnd/bourbaki#411.
+func TestS17ReportsAFileThatHoldsTheRunAfterIt(t *testing.T) {
+	c := s17Corpus("content/en/lie/III/exercises/s10", 700, 900, 64560)
+	got, err := s17(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("reported %+v, want the one file that ran on", got)
+	}
+	if got[0].File != "content/en/lie/III/exercises/s10/03.md" {
+		t.Errorf("named %q", got[0].File)
+	}
+	if !strings.Contains(got[0].Msg, "64560 characters and the median of the § is 900") {
+		t.Errorf("said %q", got[0].Msg)
+	}
+}
+
+// A long exercise is not a run-on. Commutative Algebra VII § 2 exercise 22 is
+// 18626 characters and is one exercise, printed long; a § whose files are all
+// of that order says nothing is wrong with any of them.
+func TestS17LeavesASectionWhoseExercisesAreAllLong(t *testing.T) {
+	got, err := s17(s17Corpus("content/en/ac/VII/exercises/s2", 9000, 11000, 18626, 8000, 12000))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing", got)
+	}
+}
+
+// The floor. A § whose median is 90 characters says nothing useful about a file
+// of 900, and without a floor every short § in the corpus reports one.
+func TestS17LeavesASmallMultipleOfASmallMedian(t *testing.T) {
+	got, err := s17(s17Corpus("content/en/top/I/exercises/s1", 90, 95, 100, 900))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v, want nothing: 900 characters is an exercise", got)
+	}
+}
+
+// Characters and not bytes, so that a French § is held to the same length as an
+// English one rather than to a shorter one by its accents.
+func TestS17CountsCharactersAndNotBytes(t *testing.T) {
+	c := s17Corpus("content/fr/lie/III/exercises/s10", 700, 900, 4001)
+	for i := range c.Docs {
+		c.Docs[i].Lang = "fr"
+		c.Docs[i].Body = strings.Repeat("é", len([]rune(c.Docs[i].Body)))
+	}
+	got, err := s17(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Errorf("reported %+v: 4001 runes is 8002 bytes and neither is six times 900", got)
+	}
+}

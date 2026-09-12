@@ -69,6 +69,9 @@ func init() {
 		Check{ID: "S16", Group: Structure, Hard: true,
 			Title: "no page keeps a paragraph of the book in its running head",
 			Run:   s16},
+		Check{ID: "S17", Group: Structure, Hard: false,
+			Title: "no exercise file is many times the median length of its §",
+			Run:   s17},
 	)
 }
 
@@ -1239,4 +1242,86 @@ func s16(c *Corpus) ([]Finding, error) {
 		}
 	}
 	return out, nil
+}
+
+// S17. No exercise file is many times the median length of its §.
+//
+// An exercise of the Éléments is a paragraph or two. Over ten thousand exercise
+// files the median is about 650 characters and the 95th percentile about 2450,
+// and a file ten or twenty times its neighbours is not a long exercise. It is an
+// exercise followed by everything the assembler should have put in the files
+// after it: the marker that starts the next one was lost to a cut margin, or a
+// bold that swallowed a number, or a full stop the printing never set, and the
+// splitter read on. tamnd/bourbaki#411 is 49 of them, one holding an exercise
+// and then the whole historical note of its chapter, bibliography included.
+//
+// Nothing else was going to catch it. The § front matter records exercises: N,
+// and N was taken from the split rather than from the printing, so it agrees
+// with the wrong answer. S07 sees no gap, since the numbers that ran on were
+// never written down to be missing. S11 catches the half of it where one
+// printing ran on and the other did not, and says nothing where both did.
+//
+// The measure is the § 's own median and not a figure for the whole corpus,
+// because
+// the §§ differ: a § of Lie III exercises runs longer than a § of Topology I,
+// and holding both to one length would report the first and miss the second.
+// The floor is there because a § whose median is 90 characters says nothing
+// useful about a file of 900, and the multiple is six, which is well past the
+// spread of any § that was split correctly.
+//
+// Soft, and it stays soft. What it reports is a file to go and read against its
+// pages, and a few of them are the real thing -- Commutative Algebra VII § 2
+// exercise 22 is one exercise, printed long. A rule that costs somebody a
+// reading is not a rule that should stop a build.
+const (
+	outsizeMultiple = 6
+	outsizeFloor    = 4000
+)
+
+func s17(c *Corpus) ([]Finding, error) {
+	type file struct {
+		path string
+		n    int
+	}
+	bySection := map[string][]file{}
+	for _, d := range c.Docs {
+		if d.Kind != KindExercise || d.Exercise == nil {
+			continue
+		}
+		key := d.Lang + "/" + filepath.ToSlash(filepath.Dir(d.Path))
+		bySection[key] = append(bySection[key], file{d.Path, len([]rune(d.Body))})
+	}
+	var out []Finding
+	for _, key := range sortedStrings(bySection) {
+		files := bySection[key]
+		lens := make([]int, len(files))
+		for i, f := range files {
+			lens[i] = f.n
+		}
+		sort.Ints(lens)
+		med := median(lens)
+		if med == 0 {
+			continue
+		}
+		slices.SortFunc(files, func(a, b file) int { return strings.Compare(a.path, b.path) })
+		for _, f := range files {
+			if f.n <= outsizeFloor || f.n <= outsizeMultiple*med {
+				continue
+			}
+			out = append(out, Finding{File: f.path, Line: 1,
+				Msg: fmt.Sprintf("the file is %d characters and the median of the § is %d, "+
+					"which is what an exercise holding the run that follows it looks like",
+					f.n, med)})
+		}
+	}
+	return out, nil
+}
+
+// median of a sorted run, taking the lower of the two middles on an even count
+// so that the answer is always a length some file really has.
+func median(sorted []int) int {
+	if len(sorted) == 0 {
+		return 0
+	}
+	return sorted[(len(sorted)-1)/2]
 }
