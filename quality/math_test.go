@@ -654,3 +654,76 @@ func TestM15(t *testing.T) {
 		t.Fatalf("the braceless spelling was not matched: %v", got)
 	}
 }
+
+func TestM16(t *testing.T) {
+	// The shape from tamnd/bourbaki#395: one definition, one ring, two letters.
+	mixed := []Doc{
+		doc("content/fr/ac/X/09.md",
+			`Soit $A$ un anneau noethérien. On dit qu'un $\Lambda$-module $\Omega$ est`+"\n"+
+				`dualisant si, pour tout idéal maximal $m$ de $\Lambda$, …`),
+	}
+	got := run(t, m16, mixed...)
+	if len(got) != 1 {
+		t.Fatalf("gave %d findings, want 1: %v", len(got), got)
+	}
+	if got[0].Line != 1 {
+		t.Errorf("the finding is at line %d, want 1: %v", got[0].Line, got[0])
+	}
+	if !strings.Contains(got[0].Msg, `\Lambda`) {
+		t.Errorf("the finding does not name the letter: %s", got[0].Msg)
+	}
+
+	// The subscript of an operator that takes a ring is a ring, on both sides:
+	// prof_A(p; M) = dim_{Λ_p}(M_p) is the corollary that gave the issue away.
+	subscripts := []Doc{
+		doc("content/fr/ac/X/01.md", `on a $\mathrm{prof}_A(p; M) = \dim_{\Lambda_p}(M_p)$`),
+	}
+	if got := run(t, m16, subscripts...); len(got) != 1 {
+		t.Errorf("the two letters inside one equation were not reported: %v", got)
+	}
+
+	// Λ is a good letter. A file that uses it and never names a ring A is a
+	// file about an exterior algebra or an index set and is not this fault.
+	lambda := []Doc{
+		doc("content/en/alg/III/01.md", `the exterior algebra $\Lambda(L)$ and $\Lambda^n L$`),
+		doc("content/fr/ens/III/01.md", `une famille $(x_\lambda)_{\lambda \in \Lambda}$`),
+	}
+	if got := run(t, m16, lambda...); len(got) != 0 {
+		t.Errorf("an honest lambda was reported: %v", got)
+	}
+
+	// Two rings that really are two, as Lie VII § 1, Exercise 8 has them: Λ is
+	// a subring of U_(K) and A is the base ring. On this much of it nothing
+	// names A as a ring, so nothing says the two are the same one. The file it
+	// is taken from does name A a ring further down and the rule reports it,
+	// which is the false positive m16's comment admits to.
+	twoRings := []Doc{
+		doc("content/fr/lie/VII/exercises/s1/08.md",
+			`Soit $d$ un élément non nul de $A$, et soit $\Lambda$ un sous-anneau de `+
+				`$U_{(K)}$ tel que $U \subset \Lambda \subset d^{-1}U$.`),
+	}
+	if got := run(t, m16, twoRings...); len(got) != 0 {
+		t.Errorf("two rings that really are two were reported: %v", got)
+	}
+
+	// A ring named A without its dollars still names it. The Springer English
+	// writes "a finitely generated A-module" in the prose.
+	bare := []Doc{
+		doc("content/en/alg/VII/exercises/s4/09.md",
+			`let M be a finitely generated A-module of rank $n$, and let P be a `+
+				`finitely generated $\Lambda$-module of rank q.`),
+	}
+	if got := run(t, m16, bare...); len(got) != 1 {
+		t.Errorf("the bare A-module was not read as a ring: %v", got)
+	}
+
+	// A letter that happens to end a word is not the ring. Without the guard
+	// on the left, "Galois-module" or "gamma-module" would name one.
+	word := []Doc{
+		doc("content/en/alg/IV/01.md",
+			`the $\Lambda$-module of a Gamma-module`),
+	}
+	if got := run(t, m16, word...); len(got) != 0 {
+		t.Errorf("a word ending in A was read as the ring: %v", got)
+	}
+}

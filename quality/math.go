@@ -54,6 +54,8 @@ func init() {
 			Title: "no mathematics is left outside math mode", Run: m14},
 		Check{ID: "M15", Group: Mathematics, Hard: false,
 			Title: "one volume, one spelling for the script capitals", Run: m15},
+		Check{ID: "M16", Group: Mathematics, Hard: false,
+			Title: "no ring is named A and Lambda in the same file", Run: m16},
 	)
 }
 
@@ -1050,4 +1052,89 @@ func sortedKeys[V any](m map[string]V) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// A ring is named in one of three postures, and these are the two letters that
+// the printings of Commutative Algebra and Algebra set so alike that a reader
+// takes one for the other: the roman A of the text and the capital lambda.
+//
+// The postures are the ones that leave no doubt the letter is a ring: it
+// qualifies a module or an algebra, it is called a ring in so many words, or it
+// is the subscript of an operator that takes one -- Tor, Ext, Hom, and the
+// invariants of a module over a ring. A letter standing alone is not looked at,
+// because a letter standing alone is anything.
+var (
+	ringLambda = regexp.MustCompile(`\\Lambda\$?-(?:module|môđun|mô-đun|alg|Modul)` +
+		`|\\Lambda\$? (?:un anneau|une alg|a ring|an alg|là một vành|một vành)` +
+		`|(?:Tor|Ext|Hom|prof|dim|Spec|End|Ann|gr)[^$\\]{0,14}?_\{?\\Lambda`)
+	ringRoman = regexp.MustCompile(`(?:^|[^\pL\pN\\])\$?A\$?-(?:module|môđun|mô-đun|alg|Modul)` +
+		`|\$?A\$? (?:un anneau|une alg|a ring|an alg|là một vành|một vành)` +
+		`|(?:Tor|Ext|Hom|prof|dim|Spec|End|Ann|gr)[^$\\]{0,14}?_\{?A(?:[^\pL\pN]|$)`)
+)
+
+// M16. No ring is named A and Lambda in the same file.
+//
+// Commutative Algebra chapter X calls its noetherian ring A from the first page
+// to the last, and the corpus called it Λ 276 times
+// (tamnd/bourbaki#395). The two letters are one glyph apart in that
+// printing -- the roman A's crossbar is the whole of the difference, and on a
+// scan of it the crossbar is what goes -- so a reader that has read a page of
+// exterior algebra reads the next page's rings as lambdas.
+//
+// What gives it away is never the letter. It is that the misreading does not
+// hold for a whole sentence: a definition will say "Soit A un anneau" and then
+// ask about a Λ-module of it, and a corollary will write prof_A(p; M) =
+// dim_{Λ_p}(M_p) with both letters inside one equation. One ring, two names,
+// and no reading of the text in which that is what it says. That is the rule.
+//
+// Per file, and per file is the point: Λ is a good letter and 2304 of its uses
+// in the corpus are real -- the index set of a family in Theory of Sets, the
+// lattice of Lie III, 688 exterior powers, the exterior algebra functor applied
+// to a map, and the ring that really is called Λ in the Remark of AC I § 1,
+// where the printing sets it beside a roman A on the same page. A corpus-wide
+// ban would take all of those with it. What is asked here is narrower and is a
+// question about one file: does this file name its ring both ways.
+//
+// It is not free of false positives and cannot be. Exercise 8 of Lie VII § 1
+// puts a subring Λ of U_(K) into a chapter whose base ring is A, and the
+// printing means both letters; the rule reports it and the answer is that the
+// printing is right. One a corpus is the price of catching 276 in one chapter.
+//
+// Pages and content alike, which is not where most page rules stop. The reason
+// is that the fault outlives the repair: content/en-mt/ac/X was translated out
+// of the French before the French was fixed, and reseal moved its seal forward
+// because the words had not moved -- only the mathematics had. 269 lambdas of a
+// ring called A survived in the English that way, in files nothing else had
+// anything to say about.
+//
+// Soft, because every finding wants the printing looked at before it is
+// changed, and a rule that fails the build on a question that can only be
+// settled by reading a scan is a rule somebody turns off.
+func m16(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	report := func(path, body string, line func(int) int) {
+		if !ringLambda.MatchString(body) || !ringRoman.MatchString(body) {
+			return
+		}
+		for i, text := range strings.Split(body, "\n") {
+			m := ringLambda.FindString(text)
+			if m == "" {
+				continue
+			}
+			out = append(out, Finding{File: path, Line: line(i + 1),
+				Msg: fmt.Sprintf("%s here, and this file names its ring A elsewhere: one ring, two letters, and the printing sets only one of them",
+					strings.TrimSpace(m))})
+		}
+	}
+	if c.Books != nil {
+		for _, b := range c.Books.Books {
+			for i, p := range c.Pages[b.ID] {
+				report(c.PagePaths[b.ID][i], p.Body, func(n int) int { return n })
+			}
+		}
+	}
+	for _, d := range c.Docs {
+		report(d.Path, d.Body, d.BodyLine)
+	}
+	return out, nil
 }
