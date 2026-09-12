@@ -55,6 +55,7 @@ commands:
   padding   write an inline formula tight against its dollars, $K[[T]]$
   parens    put a bracket that belongs to the prose back outside the formula
   math      put the characters stranded outside their TeX back inside it
+  script    put a script or fraktur letter of the prose into its TeX and a span
   notin     put the stroke back on a relation sign that came back struck through
   prime     brace a primed base so the power after it is not a second power
   star      write the star that marks a forward-looking passage the corpus's way
@@ -890,6 +891,8 @@ func runFix(args []string) error {
 		return fixPadding(args[1:])
 	case "math":
 		return fixMath(args[1:])
+	case "script":
+		return fixScript(args[1:])
 	case "stray":
 		return fixStray(args[1:])
 	case "parens":
@@ -2349,6 +2352,113 @@ func fixMath(args []string) error {
 		files, content, followed, moved)
 	if changed > 0 && !*check {
 		fmt.Println("fix math: run bourbaki assemble to carry this into the section files")
+	}
+	return nil
+}
+
+const fixScriptUsage = `usage: bourbaki fix script [flags]
+
+Puts a script or a fraktur letter of the prose back into its TeX, with the
+delimiters that make it mathematics.
+
+The extractor meets a letter set in a display face it has no font table entry
+for and writes the Unicode codepoint that draws it: the script P of a power set
+comes back as U+1D4AB and the fraktur g of a Lie algebra as U+1D524. They land
+in the prose, because a run the extractor reads as prose is written as prose,
+and so no rule sees them. M03 reads inside the math spans. #377 looks for a
+backslash and there is no backslash here.
+
+The spelling is not a question the repair decides. The corpus writes \mathscr
+108584 times and \mathfrak 78814, and \mathcal and \mathbb not once, so a
+script letter is \mathscr and a fraktur letter is \mathfrak. The double-struck
+ones are \mathbf, which is M02's answer: Bourbaki sets Z, Q, R, C and N in bold
+and not in blackboard bold.
+
+The delimiters go on with the TeX, or the repair would trade this fault for
+#377's, and the letter's own argument comes inside them when it is plainly the
+letter's: $\mathscr{K}(G)$ and not $\mathscr{K}$(G). A parenthesis is taken only
+when it balances on the same line and holds nothing but the ASCII a formula is
+written with, so a subscript with a bare infinity in it stays outside rather
+than handing M03 a character stranded in the mathematics.
+
+Two letters are refused and printed for somebody to read the page: the
+double-struck F, which in this corpus is a misread \mathscr{B}, and the
+double-struck G, which is one half of an ultrafilter written two ways. Neither
+is a font question and a repair that mapped them by their block would write the
+wrong letter in a correct font.
+
+It runs over content/ as well as pages/, for fix math's reason.
+
+Run bourbaki assemble afterwards, or the section files still hold the old text.
+
+flags:
+  -book ID   only this volume, default every volume that has pages
+  -check     say what would change and change nothing
+`
+
+func fixScript(args []string) error {
+	fs := flag.NewFlagSet("fix script", flag.ExitOnError)
+	fs.Usage = func() { fmt.Fprint(os.Stderr, fixScriptUsage) }
+	book := fs.String("book", "", "only this volume")
+	check := fs.Bool("check", false, "change nothing")
+	if err := noArgs(fs, args); err != nil {
+		return err
+	}
+	root, books, err := corpusAndBooks()
+	if err != nil {
+		return err
+	}
+
+	var refused []mathtex.Refusal
+	var pages, changed, letters int
+	err = eachPage(root, books, *book, func(path string, f *corpus.PageFile) error {
+		pages++
+		body, n, ref := mathtex.Alphabet(f.Body)
+		for i := range ref {
+			ref[i].File = rel(root, path)
+		}
+		refused = append(refused, ref...)
+		if n == 0 || body == f.Body {
+			return nil
+		}
+		changed++
+		letters += n
+		if *check {
+			fmt.Printf("%s  %d letters\n", rel(root, path), n)
+			return nil
+		}
+		f.Body = body
+		return f.Write(path)
+	})
+	if err != nil {
+		return err
+	}
+
+	// The translations too, for fix math's reason: a page repaired above never
+	// reaches content/en-mt or content/vi, which are assembled from nothing.
+	files, content, followed, err := repairContent(root, *check, "letters",
+		func(s string) (string, int) { b, n, _ := mathtex.Alphabet(s); return b, n })
+	if err != nil {
+		return err
+	}
+
+	for _, r := range refused {
+		fmt.Fprintln(os.Stderr, "fix script: left alone, "+r.String())
+	}
+	verb := "repaired"
+	if *check {
+		verb = "would repair"
+	}
+	fmt.Printf("fix script: %d pages read, %s %d letters in %d of them, %d left alone\n",
+		pages, verb, letters, changed, len(refused))
+	moved := "moved"
+	if *check {
+		moved = "would move"
+	}
+	fmt.Printf("fix script: %d content files read, %d of them changed, %d translations %s on\n",
+		files, content, followed, moved)
+	if changed > 0 && !*check {
+		fmt.Println("fix script: run bourbaki assemble to carry this into the section files")
 	}
 	return nil
 }

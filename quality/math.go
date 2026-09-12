@@ -63,6 +63,9 @@ func init() {
 		Check{ID: "M19", Group: Mathematics, Hard: true,
 			Title: "no index is left as a bare comma against a closing delimiter",
 			Run:   m19},
+		Check{ID: "M20", Group: Mathematics, Hard: true,
+			Title: "no letter is left as a Mathematical Alphanumeric Symbols codepoint",
+			Run:   m20},
 	)
 }
 
@@ -1560,4 +1563,67 @@ func within(ranges [][2]int, i int) bool {
 		}
 	}
 	return false
+}
+
+// M20. No letter is left as a Mathematical Alphanumeric Symbols codepoint.
+//
+// The block is Unicode's answer to a typesetting question TeX had already
+// answered: it gives a codepoint to every letter in every display face, so that
+// 𝒫 and 𝔤 and ℝ can be written as characters rather than as commands. A
+// mathematics corpus does not want them. It wants \mathscr{P}, \mathfrak{g} and
+// \mathbf{R}, because the face is the author's and belongs in the markup, and
+// because a bare codepoint in the prose is outside the mathematics altogether:
+// no span holds it, so no rule of this file ever looked at it, and the run that
+// should have set it does not exist.
+//
+// They arrive from the reading. The extractor meets a letter in a face it has
+// no font table entry for and reaches for the codepoint that draws it, and
+// because a run it takes for prose is written as prose, the letter lands in the
+// prose. 624 of them over 145 files at the last count (tamnd/bourbaki#399), and
+// 25 more inside spans, where a bare ℓ is not TeX at all and the page will not
+// set.
+//
+// The whole block is reported and not only the script and fraktur part of it.
+// A bold italic x or a double-struck digit is the same fault in another face,
+// and the extractor has no business emitting any of them, so the rule does not
+// have to be revisited when a new volume is read from a new scan.
+//
+// Hard, and the corpus is at zero. bourbaki fix script did 260 of them, the
+// eleven the repair refused to guess at were settled against the printing, and
+// two of those turned out to be the wrong letter rather than the wrong font:
+// the ultrafilter of General Topology III, Sect. 4 is a gothic F that came back
+// as a double-struck G in the prose and a gothic S under the limit sign, and
+// Integration IX p. 47 returned one double-struck F for the gothic K of the
+// compact sets and the gothic B of the Borel tribe both.
+func m20(c *Corpus) ([]Finding, error) {
+	var out []Finding
+	report := func(path, body string, line func(int) int) {
+		n := 1
+		for _, r := range body {
+			if r == '\n' {
+				n++
+				continue
+			}
+			if !mathtex.InAlphabet(r) {
+				continue
+			}
+			msg := fmt.Sprintf("%q is a display face written as a codepoint, "+
+				"which is the reading's doing and not the author's", r)
+			if tex, ok := mathtex.AlphabetTeX(r); ok {
+				msg += fmt.Sprintf("; the corpus writes it %s", tex)
+			}
+			out = append(out, Finding{File: path, Line: line(n), Msg: msg})
+		}
+	}
+	if c.Books != nil {
+		for _, b := range c.Books.Books {
+			for i, p := range c.Pages[b.ID] {
+				report(c.PagePaths[b.ID][i], p.Body, func(n int) int { return n })
+			}
+		}
+	}
+	for _, d := range c.Docs {
+		report(d.Path, d.Body, d.BodyLine)
+	}
+	return out, nil
 }
