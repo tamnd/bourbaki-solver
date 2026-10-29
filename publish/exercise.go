@@ -49,9 +49,9 @@ func (e *Exercise) Number() int { return e.Meta.Exercise }
 func (e *Exercise) Name() string {
 	in := fmt.Sprintf("§ %d", e.Meta.Section)
 	if e.Meta.Appendix {
-		in = fmt.Sprintf("Appendix %d", e.Meta.Section)
+		in = fmt.Sprintf("%s %d", T(e.Lang, "appendix"), e.Meta.Section)
 	}
-	return fmt.Sprintf("Exercise %d, %s", e.Meta.Exercise, in)
+	return fmt.Sprintf("%s %d, %s", T(e.Lang, "exercise"), e.Meta.Exercise, in)
 }
 
 // loadExercises reads one language's exercises. The walk is the exercises
@@ -259,8 +259,8 @@ func (s *Site) exercisePage(ex *Exercise, canonical string) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<h1>%s</h1>\n", template.HTMLEscapeString(ex.Name()))
 	if ex.Meta.Tag != "" {
-		fmt.Fprintf(&b, "<p class=\"tagline\">Tag <code>%s</code>, permanent. "+
-			"Cite it as <code>[Bourbaki, Tag %s]</code>.</p>\n", ex.Meta.Tag, ex.Meta.Tag)
+		fmt.Fprintf(&b, "<p class=\"tagline\">%s</p>\n", fmt.Sprintf(T(ex.Lang, "x.tagline"),
+			"<code>"+ex.Meta.Tag+"</code>", "<code>[Bourbaki, Tag "+ex.Meta.Tag+"]</code>"))
 	}
 	fmt.Fprintf(&b, "<p class=\"where\">%s</p>\n", s.exerciseWhere(ex, sec))
 	if note := marks(ex); note != "" {
@@ -283,8 +283,8 @@ func (s *Site) exercisePage(ex *Exercise, canonical string) (string, error) {
 	s.solution(&b, ex)
 
 	if ex.Meta.Tag != "" {
-		s.list(&b, "Cited by", s.CitedBy[ex.Meta.Tag], s.from)
-		s.list(&b, "Cites", s.Cites[ex.Meta.Tag], s.to)
+		s.list(&b, ex.Lang, "x.citedby", s.CitedBy[ex.Meta.Tag], s.from)
+		s.list(&b, ex.Lang, "x.cites", s.Cites[ex.Meta.Tag], s.to)
 	}
 
 	langs := s.langLinks(ex.Lang, func(l string) string {
@@ -294,6 +294,7 @@ func (s *Site) exercisePage(ex *Exercise, canonical string) (string, error) {
 		return ""
 	})
 	return s.render(layout{Title: ex.Name(), Lang: ex.Lang, Canonical: canonical, Langs: langs,
+		Side: s.sideFor(ex.Lang, ex.Meta.Book), Here: "library",
 		Crumbs: s.exerciseCrumbs(ex, sec), Note: exerciseProvenance(ex), Content: template.HTML(b.String())})
 }
 
@@ -308,12 +309,13 @@ func (s *Site) exerciseIn(lang string, ex *Exercise) *Exercise {
 }
 
 func (s *Site) exerciseCrumbs(ex *Exercise, sec *Section) []crumb {
-	out := []crumb{{ex.Meta.Chapter, s.ChapterURL(ex.Lang, ex.Meta.Book, ex.Meta.Chapter)}}
-	if sec != nil {
-		out[0].Text = sec.Meta.BookTitle + ", Chapter " + ex.Meta.Chapter
-		out = append(out, crumb{heading(sec), s.SectionURL(sec)})
+	if sec == nil {
+		return []crumb{{T(ex.Lang, "library"), s.url(homeLang(ex.Lang))},
+			{chapterWord(ex.Lang, ex.Meta.Chapter), s.ChapterURL(ex.Lang, ex.Meta.Book, ex.Meta.Chapter)},
+			{T(ex.Lang, "exercises"), s.ExercisesURL(ex.Lang, ex.Meta.Book, ex.Meta.Chapter, ex.Dir)}}
 	}
-	return append(out, crumb{"Exercises",
+	out := append(s.sectionCrumbs(sec), crumb{short(sec), s.SectionURL(sec)})
+	return append(out, crumb{T(ex.Lang, "exercises"),
 		s.ExercisesURL(ex.Lang, ex.Meta.Book, ex.Meta.Chapter, ex.Dir)})
 }
 
@@ -324,6 +326,7 @@ func (s *Site) exerciseWhere(ex *Exercise, sec *Section) string {
 	if sec != nil {
 		book = sec.Meta.BookTitle
 	}
+	book = bookName(ex.Lang, ex.Meta.Book, book)
 	if p, ok := corpus.ParsePageLabel(ex.Meta.BookPage); ok {
 		return template.HTMLEscapeString(fmt.Sprintf("%s, %s, p. %d", book, ex.Meta.Chapter, p.Page))
 	}
@@ -384,9 +387,9 @@ func markWords(ex *Exercise) string {
 // point of building it now: M8 writes solutions and this template does not
 // change when it does.
 func (s *Site) solution(b *strings.Builder, ex *Exercise) {
-	b.WriteString("<details class=\"solution\">\n<summary>Solution</summary>\n")
+	fmt.Fprintf(b, "<details class=\"solution\">\n<summary>%s</summary>\n", T(ex.Lang, "x.solution"))
 	if ex.Solution == nil {
-		b.WriteString("<p class=\"none\">No solution has been written yet.</p>\n</details>\n")
+		fmt.Fprintf(b, "<p class=\"none\">%s</p>\n</details>\n", T(ex.Lang, "x.nosol"))
 		return
 	}
 	// The note is inside the disclosure and above the solution, so that it
@@ -465,13 +468,13 @@ func statusNote(status string) string {
 // exercise and not who wrote the solution.
 func exerciseProvenance(ex *Exercise) string {
 	if ex.Meta.TranslatedFrom == "" {
-		return "Transcribed from the printed volume. Not translated."
+		return T(ex.Lang, "p.printed")
 	}
-	note := "Machine translation of the English"
+	note := T(ex.Lang, "p.mt")
 	if ex.Meta.TranslationModel != "" {
-		note += ", by " + ex.Meta.TranslationModel
+		note += fmt.Sprintf(T(ex.Lang, "p.by"), ex.Meta.TranslationModel)
 	}
-	return note + ". Not checked by a person." + cutDown(ex.Meta.TranslationModel)
+	return note + T(ex.Lang, "p.unchecked") + cutDown(ex.Lang, ex.Meta.TranslationModel)
 }
 
 // exerciseList is the page at <§>/ex/.
@@ -479,8 +482,8 @@ func (s *Site) exerciseList(set *exerciseSet) (string, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "<h1>%s</h1>\n", template.HTMLEscapeString(set.title()))
 	if set.Section != nil {
-		fmt.Fprintf(&b, "<p class=\"where\">Bourbaki sets these at the end of <a href=%q>%s</a>.</p>\n",
-			s.SectionURL(set.Section), template.HTMLEscapeString(heading(set.Section)))
+		link := fmt.Sprintf("<a href=%q>%s</a>", s.SectionURL(set.Section), template.HTMLEscapeString(heading(set.Section)))
+		fmt.Fprintf(&b, "<p class=\"where\">%s</p>\n", fmt.Sprintf(T(set.Lang, "x.where"), link))
 	}
 	solved := 0
 	for _, ex := range set.Items {
@@ -490,15 +493,14 @@ func (s *Site) exerciseList(set *exerciseSet) (string, error) {
 	}
 	switch {
 	case solved == 0:
-		fmt.Fprintf(&b, "<p class=\"none\">%d exercises. No solution has been written for any of them yet.</p>\n",
-			len(set.Items))
+		fmt.Fprintf(&b, "<p class=\"none\">%s</p>\n", fmt.Sprintf(T(set.Lang, "x.none"), len(set.Items)))
 	default:
-		fmt.Fprintf(&b, "<p class=\"none\">%d exercises, %d of them with a solution. Every solution here is "+
-			"machine-written and machine-judged and is not Bourbaki's.</p>\n", len(set.Items), solved)
+		fmt.Fprintf(&b, "<p class=\"none\">%s</p>\n",
+			template.HTMLEscapeString(fmt.Sprintf(T(set.Lang, "x.some"), len(set.Items), solved)))
 	}
-	b.WriteString("<ul class=\"toc\">\n")
+	b.WriteString("<ul class=\"exlist\">\n")
 	for _, ex := range set.Items {
-		fmt.Fprintf(&b, "<li><a href=%q>Exercise %d</a>", s.ExerciseURL(ex), ex.Meta.Exercise)
+		fmt.Fprintf(&b, "<li><a href=%q>%s %d</a>", s.ExerciseURL(ex), T(ex.Lang, "exercise"), ex.Meta.Exercise)
 		if note := markWords(ex); note != "" {
 			fmt.Fprintf(&b, " <span class=\"count\">%s</span>", template.HTMLEscapeString(note))
 		}
@@ -515,25 +517,26 @@ func (s *Site) exerciseList(set *exerciseSet) (string, error) {
 		}
 		return s.ExercisesURL(l, set.Book, set.Chapter, set.Dir)
 	})
-	crumbs := []crumb{{set.Chapter, s.ChapterURL(set.Lang, set.Book, set.Chapter)}}
+	crumbs := []crumb{{T(set.Lang, "library"), s.url(homeLang(set.Lang))},
+		{chapterWord(set.Lang, set.Chapter), s.ChapterURL(set.Lang, set.Book, set.Chapter)}}
 	if set.Section != nil {
-		crumbs[0].Text = set.Section.Meta.BookTitle + ", Chapter " + set.Chapter
-		crumbs = append(crumbs, crumb{heading(set.Section), s.SectionURL(set.Section)})
+		crumbs = append(s.sectionCrumbs(set.Section), crumb{short(set.Section), s.SectionURL(set.Section)})
 	}
 	return s.render(layout{Title: set.title(), Lang: set.Lang, Langs: langs, Crumbs: crumbs,
+		Side: s.sideFor(set.Lang, set.Book), Here: "library", Wide: true,
 		Content: template.HTML(b.String())})
 }
 
 // title is how the list page names itself.
 func (set *exerciseSet) title() string {
 	if set.Section != nil {
-		return "Exercises for " + heading(set.Section)
+		return T(set.Lang, "exfor") + " " + heading(set.Section)
 	}
 	// The § is not held in this language and the exercises are, which happens
 	// while a translation is part way through. The name is built from the path
 	// rather than left blank.
 	if strings.HasPrefix(set.Dir, "a") {
-		return "Exercises for Appendix " + strings.TrimPrefix(set.Dir, "a")
+		return T(set.Lang, "exfor") + " " + T(set.Lang, "appendix") + " " + strings.TrimPrefix(set.Dir, "a")
 	}
-	return "Exercises for § " + strings.TrimPrefix(set.Dir, "s")
+	return T(set.Lang, "exfor") + " § " + strings.TrimPrefix(set.Dir, "s")
 }

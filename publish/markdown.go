@@ -100,7 +100,11 @@ func (r Renderer) unmask(s string, spans []mathtex.Span) (string, error) {
 	}
 	out := make([]string, len(spans))
 	for i, sp := range spans {
-		m, err := eng.Render(sp.Text, sp.Display)
+		render := eng.Render
+		if r.MathML {
+			render = eng.MathML
+		}
+		m, err := render(sp.Text, sp.Display)
 		if err != nil {
 			ref := Refusal{At: r.at(sp.Line), Span: sp.Text, Why: err.Error(), Display: sp.Display}
 			if r.OnRefusal == nil {
@@ -253,6 +257,14 @@ type Renderer struct {
 	// hundred and thirty five broken ones wait on a repair pass that needs the
 	// printed page open.
 	OnRefusal func(Refusal) string
+
+	// Lang is the language of the body, which is what decides whether a word
+	// spelled like a roman numeral is one when a heading printed in capitals is
+	// brought down to a sentence.
+	Lang string
+	// MathML sets the mathematics as MathML alone, for a host that cannot
+	// carry the size of KaTeX's positioned spans. See Site.MathML.
+	MathML bool
 }
 
 // HTML renders one body.
@@ -262,22 +274,177 @@ func (r Renderer) HTML(body string) (string, error) {
 		return "", err
 	}
 	var b strings.Builder
-	for _, block := range blocks(masked) {
-		if strings.HasPrefix(block, "#") {
+	bs := blocks(masked)
+	for i := 0; i < len(bs); i++ {
+		block := bs[i]
+		if !strings.HasPrefix(block, "#") {
+			b.WriteString(r.para(block))
+			continue
+		}
+		m := headingRE.FindStringSubmatch(block)
+		if m == nil || !strings.Contains(m[4], ".statement") {
 			b.WriteString(r.heading(block))
 			continue
 		}
-		// A paragraph that is nothing but a display is the display, not a
-		// paragraph with a display inside it. Wrapping it in <p> would put a
-		// block element inside an inline context and no browser agrees about
-		// what that means.
-		if placeholderRE.MatchString(block) && strings.TrimSpace(placeholderRE.ReplaceAllString(block, "")) == "" {
-			b.WriteString(r.inline(block) + "\n")
-			continue
+		// A statement is set as a card: its heading and the statement itself.
+		// What follows it up to the next heading is its proof, or for a
+		// definition, an example or a remark the rest of it.
+		kind := labelKind(m[3])
+		end := i + 1
+		for end < len(bs) && !strings.HasPrefix(bs[end], "#") {
+			end++
 		}
-		b.WriteString("<p>" + r.inline(strings.ReplaceAll(block, "\n", " ")) + "</p>\n")
+		body := bs[i+1 : end]
+		n := len(body)
+		if proves(kind) || kind == "definition" {
+			n = statementLen(body)
+		}
+		fmt.Fprintf(&b, "<div class=\"stmt k-%s\">\n%s", kind, r.heading(block))
+		for _, p := range body[:n] {
+			b.WriteString(r.para(strings.TrimSpace(trimItalic(p))))
+		}
+		b.WriteString("</div>\n")
+		switch {
+		case n == len(body):
+		case proves(kind):
+			b.WriteString("<div class=\"proof\">\n")
+			for _, p := range body[n:] {
+				b.WriteString(r.para(p))
+			}
+			b.WriteString("</div>\n")
+		default:
+			// What follows a definition is the text going on, not a proof.
+			for _, p := range body[n:] {
+				b.WriteString(r.para(p))
+			}
+		}
+		i = end - 1
 	}
 	return r.unmask(b.String(), spans)
+}
+
+// para is one block of prose, or a display formula standing alone.
+func (r Renderer) para(block string) string {
+	if placeholderRE.MatchString(block) && strings.TrimSpace(placeholderRE.ReplaceAllString(block, "")) == "" {
+		return r.inline(block) + "\n"
+	}
+	if items := listItems(block); items != nil {
+		var b strings.Builder
+		b.WriteString("<ul>\n")
+		for _, it := range items {
+			b.WriteString("<li>" + r.inline(it) + "</li>\n")
+		}
+		b.WriteString("</ul>\n")
+		return b.String()
+	}
+	return "<p>" + r.inline(strings.ReplaceAll(block, "\n", " ")) + "</p>\n"
+}
+
+var listRE = regexp.MustCompile(`^[-*] +\S`)
+
+// listItems reads a block every line of which opens with a bullet as a list.
+func listItems(block string) []string {
+	lines := strings.Split(block, "\n")
+	if len(lines) < 2 {
+		return nil
+	}
+	var out []string
+	for _, l := range lines {
+		if !listRE.MatchString(l) {
+			return nil
+		}
+		out = append(out, strings.TrimSpace(l[1:]))
+	}
+	return out
+}
+
+// labelKind is a statement's kind as its label names it: alg-i-s1-prop-2 is a
+// proposition. The label is the same in every language, which the heading is
+// not, so this is what colours the card.
+func labelKind(label string) string {
+	parts := strings.Split(label, "-")
+	for i := len(parts) - 1; i >= 0; i-- {
+		switch parts[i] {
+		case "def":
+			return "definition"
+		case "thm":
+			return "theorem"
+		case "prop":
+			return "proposition"
+		case "lem":
+			return "lemma"
+		case "cor":
+			return "corollary"
+		case "exa":
+			return "example"
+		case "rem", "sch":
+			return "remark"
+		}
+	}
+	return "other"
+}
+
+// proves is a kind whose statement is followed by a proof.
+func proves(kind string) bool {
+	switch kind {
+	case "theorem", "proposition", "lemma", "corollary":
+		return true
+	}
+	return false
+}
+
+// statementLen is how many blocks under a heading are the statement. The book
+// sets a statement in italic, which the corpus writes as a paragraph opened
+// with an asterisk, so the statement runs to the block that closes it. With no
+// marker it is the first paragraph and any display formula that belongs to it.
+func statementLen(body []string) int {
+	if len(body) == 0 {
+		return 0
+	}
+	first := strings.TrimSpace(body[0])
+	if strings.HasPrefix(first, "*") || strings.HasPrefix(first, "_") {
+		for k := 0; k < len(body) && k < 8; k++ {
+			t := strings.TrimSpace(body[k])
+			if (k > 0 || len(t) > 1) && (strings.HasSuffix(t, "*") || strings.HasSuffix(t, "_")) {
+				return k + 1
+			}
+		}
+		return 1
+	}
+	n := 1
+	for n < len(body) && isDisplay(body[n]) {
+		n++
+		// The sentence the formula sits inside goes on after it in lower case.
+		if n < len(body) && startsLower(body[n]) && len(body[n]) < 200 {
+			n++
+		}
+	}
+	return n
+}
+
+func isDisplay(block string) bool {
+	return placeholderRE.MatchString(block) && strings.TrimSpace(placeholderRE.ReplaceAllString(block, "")) == ""
+}
+
+func startsLower(s string) bool {
+	for _, r := range strings.TrimSpace(s) {
+		return r >= 'a' && r <= 'z'
+	}
+	return false
+}
+
+// trimItalic takes the italic marks off a statement's paragraph, since the card
+// sets the statement in italic itself.
+func trimItalic(p string) string {
+	t := strings.TrimSpace(p)
+	if strings.HasPrefix(t, "**") {
+		return p
+	}
+	t = strings.TrimPrefix(strings.TrimPrefix(t, "*"), "_")
+	if !strings.HasSuffix(t, "**") {
+		t = strings.TrimSuffix(strings.TrimSuffix(t, "*"), "_")
+	}
+	return t
 }
 
 // blocks cuts a masked body into headings and paragraphs. A heading is its own
@@ -324,7 +491,11 @@ func (r Renderer) heading(line string) string {
 	if strings.Contains(m[4], ".statement") {
 		attr += ` class="statement"`
 	}
-	text := r.inline(strings.TrimSpace(m[2]))
+	words := strings.TrimSpace(m[2])
+	if level <= 3 {
+		words = sentenceIn(r.Lang, words)
+	}
+	text := r.inline(words)
 	if tag := tagAttrRE.FindStringSubmatch(m[4]); tag != nil && r.Link != nil {
 		text += fmt.Sprintf(` <a class="tag" href=%q title="permanent tag">%s</a>`,
 			r.Link(tag[1]), tag[1])
@@ -334,7 +505,11 @@ func (r Renderer) heading(line string) string {
 
 var (
 	boldRE = regexp.MustCompile(`\*\*([^*]+)\*\*`)
-	linkRE = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
+	// italicRE is *text* or _text_, opened after a space or a bracket and with
+	// no space inside either mark. The mathematics is masked by now, so an
+	// underscore in x_1 is not in the text this sees.
+	italicRE = regexp.MustCompile(`(^|[\s(\[{“"'«])[*_]([^\s*_](?:[^*_]*?[^\s*_])?)[*_]`)
+	linkRE   = regexp.MustCompile(`\[([^\]]+)\]\(([^)\s]+)\)`)
 )
 
 // inline renders the inside of a paragraph or a heading.
@@ -348,6 +523,7 @@ var (
 func (r Renderer) inline(s string) string {
 	s = html.EscapeString(s)
 	s = boldRE.ReplaceAllString(s, "<strong>$1</strong>")
+	s = italicRE.ReplaceAllString(s, "$1<em>$2</em>")
 	s = linkRE.ReplaceAllStringFunc(s, func(m string) string {
 		p := linkRE.FindStringSubmatch(m)
 		// The URL is already escaped, since the whole line was escaped before

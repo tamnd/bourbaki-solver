@@ -1,0 +1,15 @@
+# The Worker that serves bourbaki.tamnd.com out of the R2 bucket a
+# `bourbaki publish -gzip` build is uploaded to.
+#
+# No workers.dev address and no preview address: the custom domain is the one
+# address the site has, so there is one place to look when it is wrong.
+name = "bourbaki-site"
+main = "worker.js"
+compatibility_date = "2026-10-01"
+workers_dev = false
+preview_urls = false
+routes = [{ pattern = "bourbaki.tamnd.com", custom_domain = true }]
+
+[[r2_buckets]]
+binding = "SITE"
+bucket_name = "bourbaki-site"

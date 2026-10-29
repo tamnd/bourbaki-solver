@@ -2,18 +2,21 @@ package publish
 
 import (
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"html/template"
 	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/katex"
+	"github.com/tamnd/bourbaki-solver/mathtex"
 	"github.com/tamnd/bourbaki-solver/quality"
 )
 
@@ -31,6 +34,12 @@ func (s *Site) Build(out string) ([]string, error) {
 		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 			return err
 		}
+		if s.Gzip && !strings.HasSuffix(rel, ".woff2") {
+			var err error
+			if body, err = gzipped(body); err != nil {
+				return err
+			}
+		}
 		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 			return err
 		}
@@ -40,11 +49,48 @@ func (s *Site) Build(out string) ([]string, error) {
 	if err := write("style.css", styleCSS); err != nil {
 		return nil, err
 	}
+	if err := write("site.js", siteJS); err != nil {
+		return nil, err
+	}
+	if err := write("robots.txt", "User-agent: *\nAllow: /\n"); err != nil {
+		return nil, err
+	}
+	// The page a host serves for an address nothing was written at.
+	missing, err := s.render(layout{Title: "Not found · Bourbaki", Lang: "en", Wide: true,
+		Content: template.HTML(fmt.Sprintf("<section class=\"hero\"><p class=\"eyebrow\">404</p>"+
+			"<h1 class=\"display\">Not found</h1><p class=\"lede\">Nothing is published at this address. "+
+			"A section may have moved when its chapter was read again; its permanent tag has not.</p>"+
+			"<p class=\"lede\"><a href=%q>Library</a> · <a href=%q>Search</a> · <a href=%q>Tags</a></p></section>",
+			s.url(), s.url("search"), s.url("tags")))})
+	if err != nil {
+		return nil, err
+	}
+	if err := write("404.html", missing); err != nil {
+		return nil, err
+	}
 	// KaTeX writes markup that means nothing without its stylesheet and its
 	// fonts, so they are part of the site rather than something a deployment
 	// step is trusted to remember. They go under katex/ with the stylesheet at
 	// the top of it, because the stylesheet asks for fonts/ relative to itself.
-	err := fs.WalkDir(katex.Assets(), ".", func(p string, d fs.DirEntry, err error) error {
+	// The text fonts go under fonts/, which is where style.css asks for them.
+	err = fs.WalkDir(fontFiles, "assets/fonts", func(p string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		b, err := fs.ReadFile(fontFiles, p)
+		if err != nil {
+			return err
+		}
+		return write(path.Join("fonts", path.Base(p)), string(b))
+	})
+	if err != nil {
+		return nil, err
+	}
+	err = fs.WalkDir(katex.Assets(), ".", func(p string, d fs.DirEntry, err error) error {
+		if s.MathML {
+			// MathML needs neither the KaTeX stylesheet nor its fonts.
+			return fs.SkipAll
+		}
 		if err != nil || d.IsDir() {
 			return err
 		}
@@ -64,6 +110,28 @@ func (s *Site) Build(out string) ([]string, error) {
 	}
 	if err := write("index.html", page); err != nil {
 		return nil, err
+	}
+
+	for _, lang := range s.Langs {
+		page, err := s.library(lang)
+		if err != nil {
+			return nil, err
+		}
+		if err := write(path.Join(lang, "index.html"), page); err != nil {
+			return nil, err
+		}
+		for _, sh := range s.books(lang) {
+			page, err := s.bookPage(sh)
+			if err != nil {
+				return nil, err
+			}
+			if err := write(path.Join(lang, sh.Book, "index.html"), page); err != nil {
+				return nil, err
+			}
+			if err := write(path.Join(lang, sh.Book, "nav.html"), s.nav(sh)); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	about, err := s.about()
@@ -92,8 +160,11 @@ func (s *Site) Build(out string) ([]string, error) {
 		return true
 	}
 
+	if err := s.warm(); err != nil {
+		return nil, err
+	}
 	for _, sec := range s.Sections {
-		rel := filepath.ToSlash(filepath.Join(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug, "index.html"))
+		rel := strings.TrimPrefix(s.SectionURL(sec), s.url()) + "index.html"
 		body, err := s.section(sec)
 		if !keep(rel, err) {
 			continue
@@ -104,6 +175,9 @@ func (s *Site) Build(out string) ([]string, error) {
 	}
 
 	for _, ch := range s.chapters() {
+		if ch.Chapter == "" {
+			continue // the Book's own page, written above
+		}
 		rel := filepath.ToSlash(filepath.Join(ch.Lang, ch.Book, ch.Chapter, "index.html"))
 		body, err := s.chapter(ch)
 		if !keep(rel, err) {
@@ -261,6 +335,7 @@ func (s *Site) renderer(sec *Section) Renderer {
 		r.Dir = s.ChapterURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)
 		r.Exercises = s.exerciseHref(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)
 		r.File, r.Line = sec.Path, sec.Head
+		r.Lang = sec.Lang
 		if r.Line == 0 {
 			r.Line = 1
 		}
@@ -268,6 +343,7 @@ func (s *Site) renderer(sec *Section) Renderer {
 	if s.AllowBrokenMath {
 		r.OnRefusal = s.marked
 	}
+	r.MathML = s.MathML
 	return r
 }
 
@@ -300,64 +376,6 @@ func delim(ref Refusal) string {
 	return "$" + ref.Span + "$"
 }
 
-type layout struct {
-	Title string
-	// Lang is what goes in the lang attribute of the document. It is the
-	// language of the text on the page and not of the site, which matters here
-	// more than on most sites: a screen reader that says a Vietnamese page in
-	// English pronunciation reads it as noise.
-	Lang   string
-	Home   string
-	Search string
-	About  string
-	CSS    string
-	KaTeX  string
-	// Canonical is set on a page that is a second copy of another one, which is
-	// what an exercise's tag URL is. Empty everywhere else.
-	Canonical string
-	Crumbs    []crumb
-	Content   template.HTML
-	Langs     []langLink
-	Note      string
-}
-
-type crumb struct {
-	Text string
-	URL  string
-}
-
-type langLink struct {
-	Lang  string
-	URL   string
-	Here  bool
-	Draft bool
-}
-
-func (s *Site) render(l layout) (string, error) {
-	l.Home = s.url()
-	l.Search = s.url("search")
-	// Every page links the about page, because every page of this site shows
-	// text a machine had a hand in and P07 is that such a page says so. The line
-	// at the foot says it for that page and the about page says it for the
-	// corpus, and a reader who lands on a tag page from somebody else's citation
-	// has to be one click from both.
-	l.About = s.url("about")
-	l.CSS = s.url() + "style.css"
-	// Every page of this site has mathematics on it, including the ones that
-	// only list statements, so the stylesheet is linked unconditionally rather
-	// than page by page. It is 25 KB and it is the same 25 KB every time, which
-	// the browser caches once for the whole site.
-	l.KaTeX = s.url() + "katex/katex.min.css"
-	if l.Lang == "" {
-		l.Lang = "en"
-	}
-	var b bytes.Buffer
-	if err := pageTmpl.Execute(&b, l); err != nil {
-		return "", err
-	}
-	return b.String(), nil
-}
-
 func (s *Site) section(sec *Section) (string, error) {
 	body, err := s.renderer(sec).HTML(sec.Body)
 	if err != nil {
@@ -369,14 +387,16 @@ func (s *Site) section(sec *Section) (string, error) {
 		}
 		return ""
 	})
+	prev, next := s.around(sec)
 	return s.render(layout{
-		Title: heading(sec),
-		Lang:  sec.Lang,
-		Crumbs: []crumb{
-			{sec.Meta.BookTitle + ", Chapter " + sec.Meta.Chapter,
-				s.ChapterURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter)},
-		},
+		Title:   navName(sec) + " · " + bookName(sec.Lang, sec.Meta.Book, sec.Meta.BookTitle),
+		Lang:    sec.Lang,
+		Crumbs:  s.sectionCrumbs(sec),
 		Langs:   langs,
+		Side:    s.sideFor(sec.Lang, sec.Meta.Book),
+		Here:    "library",
+		Prev:    prev,
+		Next:    next,
 		Note:    provenance(sec),
 		Content: template.HTML(body),
 	})
@@ -406,19 +426,20 @@ func (s *Site) sectionIn(lang string, sec *Section) *Section {
 // reader deciding whether to trust a sentence has more right to this than the
 // audit does.
 func provenance(sec *Section) string {
+	lang := sec.Lang
 	if sec.Meta.TranslatedFrom == "" {
 		// The French volume carries no edition in the books manifest, so the
 		// line says what is known and does not invent the rest.
 		if sec.Meta.SourceEdition == "" {
-			return "Transcribed from the printed volume. Not translated."
+			return T(lang, "p.printed")
 		}
-		return fmt.Sprintf("Transcribed from the printed edition, %s. Not translated.", sec.Meta.SourceEdition)
+		return fmt.Sprintf(T(lang, "p.edition"), sec.Meta.SourceEdition)
 	}
-	note := fmt.Sprintf("Machine translation of the English, by %s", sec.Meta.TranslationModel)
+	note := T(lang, "p.mt") + fmt.Sprintf(T(lang, "p.by"), sec.Meta.TranslationModel)
 	if sec.Meta.GlossaryVersion > 0 {
-		note += fmt.Sprintf(", against glossary version %d", sec.Meta.GlossaryVersion)
+		note += fmt.Sprintf(T(lang, "p.gloss"), sec.Meta.GlossaryVersion)
 	}
-	return note + ". Not checked by a person." + cutDown(sec.Meta.TranslationModel)
+	return note + T(lang, "p.unchecked") + cutDown(lang, sec.Meta.TranslationModel)
 }
 
 // cutDown is the extra sentence a page written by a smaller model carries.
@@ -429,49 +450,11 @@ func provenance(sec *Section) string {
 // than the audit does: nobody chose the model, the account was moved down
 // between one section and the next, and the only place that fact reaches
 // somebody reading the Vietnamese is here.
-func cutDown(model string) string {
+func cutDown(lang, model string) string {
 	if !quality.SmallModel(model) {
 		return ""
 	}
-	return " That model is a cut down version of the one the rest of this language was written by."
-}
-
-func (s *Site) chapter(k chapterKey) (string, error) {
-	var b strings.Builder
-	fmt.Fprintf(&b, "<h1>%s, Chapter %s</h1>\n<p class=\"subtitle\">%s</p>\n<ul class=\"toc\">\n",
-		template.HTMLEscapeString(k.BookTitle), template.HTMLEscapeString(k.Chapter),
-		template.HTMLEscapeString(k.Title))
-	for _, sec := range s.Sections {
-		if sec.Lang != k.Lang || sec.Meta.Book != k.Book || sec.Meta.Chapter != k.Chapter {
-			continue
-		}
-		fmt.Fprintf(&b, "<li><a href=%q>%s</a> <span class=\"count\">%d statements, ",
-			s.SectionURL(sec), template.HTMLEscapeString(heading(sec)), sec.Meta.Statements)
-		// The exercise count is a link where the exercises are held and plain
-		// text where they are not, so the contents page says which §§ a reader
-		// can actually go to the exercises of.
-		if s.hasExercises(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug) {
-			fmt.Fprintf(&b, "<a href=%q>%d exercises</a>",
-				s.ExercisesURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug), sec.Meta.Exercises)
-		} else {
-			fmt.Fprintf(&b, "%d exercises", sec.Meta.Exercises)
-		}
-		b.WriteString("</span></li>\n")
-	}
-	b.WriteString("</ul>\n")
-	// A language holds a chapter or it does not, and the switcher on a contents
-	// page was the one place that assumed every language holds every chapter.
-	// That is true of the corpus today, with one chapter in it, and it stops
-	// being true the first time a second chapter is transcribed in one language
-	// and not another.
-	langs := s.langLinks(k.Lang, func(lang string) string {
-		if !s.hasChapter(lang, k.Book, k.Chapter) {
-			return ""
-		}
-		return s.ChapterURL(lang, k.Book, k.Chapter)
-	})
-	return s.render(layout{Title: k.BookTitle + ", Chapter " + k.Chapter, Lang: k.Lang,
-		Langs: langs, Content: template.HTML(b.String())})
+	return T(lang, "p.cut")
 }
 
 // printed is where the book puts a statement, written the way the book writes
@@ -544,8 +527,8 @@ func (s *Site) tag(st *Statement) (string, error) {
 	r.Line += u.Heading.Line + 1
 
 	fmt.Fprintf(&b, "<h1>%s</h1>\n", template.HTMLEscapeString(u.Heading.Text))
-	fmt.Fprintf(&b, "<p class=\"tagline\">Tag <code>%s</code>, permanent. "+
-		"Cite it as <code>[Bourbaki, Tag %s]</code>.</p>\n", st.Tag, st.Tag)
+	fmt.Fprintf(&b, "<p class=\"tagline\">%s</p>\n", fmt.Sprintf(T(en.Lang, "x.tagline"),
+		"<code>"+st.Tag+"</code>", "<code>[Bourbaki, Tag "+st.Tag+"]</code>"))
 	fmt.Fprintf(&b, "<p class=\"where\">%s, <a href=%q>%s</a></p>\n",
 		template.HTMLEscapeString(printed(en, st)), s.SectionURL(en)+"#"+st.Label,
 		template.HTMLEscapeString(heading(en)))
@@ -554,12 +537,11 @@ func (s *Site) tag(st *Statement) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	b.WriteString(`<div class="statement-body">` + body + "</div>\n")
-	b.WriteString("<p class=\"caveat\">Bourbaki sets the proof directly after the statement, and the corpus " +
-		"does not separate them, so what is above is the statement and its proof together.</p>\n")
+	fmt.Fprintf(&b, "<div class=\"stmt k-%s\">%s</div>\n", labelKind(st.Label), body)
+	fmt.Fprintf(&b, "<p class=\"caveat\">%s</p>\n", T(en.Lang, "x.caveat"))
 
-	s.list(&b, "Cited by", s.CitedBy[st.Tag], s.from)
-	s.list(&b, "Cites", s.Cites[st.Tag], s.to)
+	s.list(&b, en.Lang, "x.citedby", s.CitedBy[st.Tag], s.from)
+	s.list(&b, en.Lang, "x.cites", s.Cites[st.Tag], s.to)
 
 	// Spec 12 §7: a tag is offered in a language only where a file in that
 	// language holds it. Vietnamese has two §§ of twenty seven, so it is on the
@@ -573,7 +555,8 @@ func (s *Site) tag(st *Statement) (string, error) {
 	// The corpus has 51 headings that read only "Corollary", so the title of the
 	// window and of a search result carries the § as well as the tag.
 	return s.render(layout{Title: fmt.Sprintf("%s, %s (%s)", u.Heading.Text, short(en), st.Tag),
-		Lang: lang, Langs: langs, Note: provenance(en), Content: template.HTML(b.String())})
+		Lang: lang, Langs: langs, Note: provenance(en), Side: s.sideFor(lang, en.Meta.Book), Here: "tags",
+		Crumbs: append(s.sectionCrumbs(en), crumb{short(en), s.SectionURL(en)}), Content: template.HTML(b.String())})
 }
 
 // row is one line of a reference list. Title is what a reader gets on hover and
@@ -631,9 +614,10 @@ func (s *Site) name(st *Statement) string {
 }
 
 // list writes one of the two reference blocks of a tag page.
-func (s *Site) list(b *strings.Builder, title string, edges []*Edge, of func(*Edge) row) {
+func (s *Site) list(b *strings.Builder, lang, key string, edges []*Edge, of func(*Edge) row) {
+	title := T(lang, key)
 	if len(edges) == 0 {
-		fmt.Fprintf(b, "<h2>%s</h2>\n<p class=\"none\">Nothing.</p>\n", title)
+		fmt.Fprintf(b, "<h2>%s</h2>\n<p class=\"none\">%s</p>\n", title, T(lang, "x.nothing"))
 		return
 	}
 	fmt.Fprintf(b, "<h2>%s</h2>\n<ul class=\"refs\">\n", title)
@@ -705,157 +689,49 @@ func (s *Site) tagTable() (string, error) {
 			e.Tag, label, missing(e.Label))
 	}
 	b.WriteString("</table>\n")
-	return s.render(layout{Title: "Tags", Content: template.HTML(b.String())})
+	return s.render(layout{Title: "Tags", Here: "tags", Wide: true, Content: template.HTML(b.String())})
 }
 
-func (s *Site) front() (string, error) {
-	var b strings.Builder
-	b.WriteString("<h1>Bourbaki, Éléments de mathématique</h1>\n")
-	b.WriteString("<p>A Markdown corpus of the <em>Éléments</em> with a permanent tag on every numbered " +
-		"statement, in the manner of the Stacks Project. This is a study project and it is not Bourbaki's " +
-		"and not Springer's.</p>\n")
-	b.WriteString("<h2>What is here</h2>\n<p>One chapter of one Book, and not the forty three volumes the " +
-		"library holds. The table is generated from the corpus and says what is actually in it.</p>\n")
-	b.WriteString("<table class=\"coverage\">\n<tr><th>language</th><th>sections</th><th>statements</th>" +
-		"<th>exercises</th><th></th></tr>\n")
-	for _, n := range s.numbers() {
-		note := n.made()
-		if s.Draft[n.Lang] {
-			note += ", below the coverage floor"
-		}
-		fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a> <span class=\"count\">%s</span></td>"+
-			"<td>%d</td><td>%d</td><td>%d</td><td>%s</td></tr>\n",
-			s.langHome(n.Lang), n.Lang, langName(n.Lang), n.Sections, n.Statements, n.Exercises, note)
-	}
-	b.WriteString("</table>\n")
-	// The floor is stated here because this table is the one place a language it
-	// applies to is offered at all. A reader who wants the two Vietnamese §§ can
-	// have them; what the floor stops is the rest of the site offering Vietnamese
-	// on twenty five pages that do not have it. The rule itself is on the about
-	// page, with the share of the English that each language actually holds.
-	if s.drafted() {
-		fmt.Fprintf(&b, "<p>A language holding under %d per cent of the English is linked here and is "+
-			"left out of the switcher on the pages themselves, because a switcher that offers a language "+
-			"and then has nothing to switch to is worse than one that does not offer it. <a href=%q>About</a> "+
-			"has the real share each language holds.</p>\n", int(coverageFloor*100), s.url("about"))
-	}
-	// The tag count is the tag file's and not the number of statements. 317 of
-	// the tags are on an exercise, so a front page that counted the statements
-	// and called them tags would be out by a third.
-	set, err := s.TagSet()
+// gzipped is body compressed, with no name and no time in the header, so that
+// the same page is the same bytes on every build and a sync uploads only what
+// changed.
+func gzipped(body string) (string, error) {
+	var b bytes.Buffer
+	z, err := gzip.NewWriterLevel(&b, gzip.BestCompression)
 	if err != nil {
 		return "", err
 	}
-	fmt.Fprintf(&b, "<p><a href=%q>All %d tags</a>, <a href=%q>search</a> over the statements and the "+
-		"exercises, and <a href=%q>about</a> for how the text got here and what a machine wrote. Of the "+
-		"%d references the chapter makes, %d do not resolve, and %d of the %d tagged statements are cited "+
-		"by nothing. Those are the numbers worth watching and the <a href=%q>reports</a> name every one "+
-		"of them.</p>\n",
-		s.url("tags"), len(set.Tags), s.url("search"), s.url("about"),
-		s.Edges, s.Unresolved, s.uncited(), len(s.Statements), s.url("reports"))
-	return s.render(layout{Title: "Bourbaki", Content: template.HTML(b.String())})
+	if _, err := z.Write([]byte(body)); err != nil {
+		return "", err
+	}
+	if err := z.Close(); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
 
-// langHome is where the front page sends a language. One chapter is held, so it
-// is that chapter; when there is more than one this becomes a contents page.
-func (s *Site) langHome(lang string) string {
-	for _, sec := range s.Sections {
-		if sec.Lang == lang {
-			return s.ChapterURL(lang, sec.Meta.Book, sec.Meta.Chapter)
+// warm sets every formula of the corpus on every core before a page is
+// written, so the pages, which are written one after another, find them set.
+func (s *Site) warm() error {
+	eng, err := mathEngine()
+	if err != nil {
+		return err
+	}
+	var spans []katex.Span
+	add := func(body string) {
+		found, _ := mathtex.Split(body)
+		for _, sp := range found {
+			spans = append(spans, katex.Span{TeX: sp.Text, Display: sp.Display, MathML: s.MathML})
 		}
 	}
-	return s.url()
+	for _, sec := range s.Sections {
+		add(sec.Body)
+	}
+	for _, ex := range s.Exercises {
+		add(ex.Body)
+		if ex.Solution != nil {
+			add(ex.Solution.Body)
+		}
+	}
+	return eng.Warm(spans, runtime.GOMAXPROCS(0))
 }
-
-var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
-<html lang="{{.Lang}}">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{{.Title}}</title>
-{{if .Canonical}}<link rel="canonical" href="{{.Canonical}}">
-{{end}}<link rel="stylesheet" href="{{.KaTeX}}">
-<link rel="stylesheet" href="{{.CSS}}">
-<body>
-<header>
-<span class="site"><a class="home" href="{{.Home}}">Bourbaki</a> <a href="{{.Search}}">Search</a> <a href="{{.About}}">About</a></span>
-{{if .Langs}}<nav class="langs">{{range .Langs}}{{if .Here}}<span class="here">{{.Lang}}</span>{{else if .Draft}}<a class="draft" href="{{.URL}}" title="below the coverage floor">{{.Lang}}</a>{{else}}<a href="{{.URL}}">{{.Lang}}</a>{{end}}{{end}}</nav>{{end}}
-</header>
-<main>
-{{if .Crumbs}}<nav class="crumbs">{{range $i, $c := .Crumbs}}{{if $i}}<span class="sep">›</span>{{end}}<a href="{{$c.URL}}">{{$c.Text}}</a>{{end}}</nav>
-{{end}}{{.Content}}
-</main>
-{{if .Note}}<footer class="note">{{.Note}}</footer>{{end}}
-</body>
-</html>
-`))
-
-const styleCSS = `:root { --ink: #111; --thin: #666; --rule: #ddd; }
-* { box-sizing: border-box; }
-body { margin: 0 auto; max-width: 44rem; padding: 1rem 1.2rem 4rem;
-  font: 16px/1.6 Georgia, "Times New Roman", serif; color: var(--ink); }
-header { display: flex; justify-content: space-between; align-items: baseline;
-  border-bottom: 1px solid var(--rule); padding-bottom: .4rem; margin-bottom: 1.6rem;
-  font-family: system-ui, sans-serif; font-size: .85rem; }
-a { color: #10389a; }
-h1 { font-size: 1.5rem; line-height: 1.3; }
-h2 { font-size: 1.15rem; margin-top: 2rem; }
-h3 { font-size: 1rem; }
-h4 { font-size: 1rem; margin-top: 1.6rem; }
-h4.statement { font-variant: small-caps; }
-.tag { font-family: ui-monospace, monospace; font-size: .8em; text-decoration: none;
-  border: 1px solid var(--rule); border-radius: 3px; padding: 0 .25em; }
-/* KaTeX sets the mathematics itself. What is left here is the one thing it
-   cannot know: a display wider than a phone has to scroll rather than push the
-   page sideways. */
-.math.display { margin: 1rem 0; overflow-x: auto; overflow-y: hidden; padding: .2rem 0; }
-.katex { font-size: 1.05em; }
-/* Only ever seen under -allow-broken-math, and loud on purpose: this is the
-   source of a formula that did not survive the text layer, and it must not be
-   mistaken for a formula somebody meant to write this way. */
-.broken { font-family: ui-monospace, monospace; font-size: .85em; color: #a11;
-  background: #fee; border: 1px solid #a11; border-radius: 3px; padding: 0 .2em; }
-.site a { margin-right: .7rem; }
-.langs a, .langs .here { margin-left: .5rem; }
-.langs .here { font-weight: bold; }
-.langs .draft { opacity: .55; }
-.crumbs { font-family: system-ui, sans-serif; font-size: .8rem; margin-bottom: 1rem; }
-/* The separator is its own element rather than a ::before on the link, so that
-   it is not underlined with the link and is not part of what a click hits. */
-.crumbs .sep { color: var(--thin); margin: 0 .4em; }
-.tagline, .where, .caveat, .note, .subtitle, .marks { color: var(--thin); font-size: .88rem; }
-/* The solution is behind a disclosure and nothing here opens it. A reader who
-   wants to think about the exercise first should not have the answer on the
-   screen, and a reader who wants the answer is one click away. */
-details.solution { border: 1px solid var(--rule); border-radius: 3px; padding: .6rem .8rem; margin: 2rem 0; }
-details.solution summary { cursor: pointer; font-family: system-ui, sans-serif; font-size: .9rem; }
-details.solution[open] summary { border-bottom: 1px solid var(--rule); padding-bottom: .4rem; margin-bottom: .6rem; }
-.warn { font-size: .85rem; color: #a11; }
-.caveat, .note { border-top: 1px solid var(--rule); padding-top: .6rem; margin-top: 2rem; }
-.statement-body { border-left: 3px solid var(--rule); padding-left: 1rem; }
-ul.refs, ul.toc { padding-left: 1.2rem; }
-ul.toc li { margin: .3rem 0; }
-.count, .out, .none { color: var(--thin); font-size: .85rem; }
-/* Search is the one page with a script on it, and the one page with a form. */
-#f { display: flex; gap: .5rem; margin: 1.5rem 0 1rem; font-family: system-ui, sans-serif; }
-#q { flex: 1; font: inherit; padding: .4rem .6rem; border: 1px solid var(--rule); border-radius: 3px; }
-#lang, #f button { font: inherit; padding: .4rem .6rem; border: 1px solid var(--rule);
-  border-radius: 3px; background: #fff; }
-ol.results { padding-left: 1.4rem; }
-ol.results li { margin: 1rem 0; }
-.snippet { margin: .2rem 0 0; font-size: .9rem; color: var(--thin); }
-table { border-collapse: collapse; width: 100%; font-size: .9rem; }
-/* The language cell is a code and the name of the language and the two are one
-   thing, so they do not break across two lines while the rest of the row is
-   one. */
-.coverage td:first-child { white-space: nowrap; }
-/* A report table is words on the left and counts on the right, and a count that
-   is not right aligned is a column nobody can compare down. */
-table.report .num { text-align: right; white-space: nowrap; }
-table.report td:first-child { white-space: nowrap; }
-/* The parts of a multi-part solution. The part letter and its status are short
-   and fixed, and the reason is a sentence, so the sentence gets the width. */
-table.parts { margin-bottom: 1rem; }
-table.parts td:first-child, table.parts td:nth-child(2) { white-space: nowrap; width: 1%; }
-th, td { text-align: left; padding: .25rem .5rem; border-bottom: 1px solid var(--rule); }
-code { font-family: ui-monospace, monospace; font-size: .9em; }
-`

@@ -68,6 +68,17 @@ type Site struct {
 	// Marked is not quiet, and it is what makes the other twenty thousand
 	// formulae reviewable while the broken ones wait on the printed page.
 	AllowBrokenMath bool
+
+	// Gzip writes every file but a font gzipped, under the name it is served
+	// at, for a host that stores the compressed bytes and serves them with
+	// Content-Encoding: gzip, as the Worker in deploy/ does.
+	Gzip bool
+	// MathML writes the mathematics as MathML, which the browser sets itself
+	// in the math font shipped under fonts/, instead of KaTeX's positioned
+	// spans over MathML. It is a third of the bytes, which is what lets the
+	// whole corpus under the 1 GB GitHub Pages will serve; the spans are the
+	// better set of the two and are what the Worker in deploy/ serves.
+	MathML bool
 	// Broken is what that produced, in the order it was found.
 	Broken []Refusal
 	// Unreadable is every page whose body the build could not render, in the
@@ -82,6 +93,8 @@ type Site struct {
 	// that fails still leaves a site to look at. The caller is what turns a
 	// non-empty list into a non-zero exit.
 	Unreadable []Unreadable
+
+	shelf map[string]*shelf
 }
 
 // An Unreadable is one page the build could not set, and why.
@@ -305,6 +318,8 @@ func slug(m corpus.SectionFrontMatter) string {
 		return "front"
 	case "historical":
 		return "historical-note"
+	case "introduction", "reader", "notation", "terminology":
+		return slugFromPath(m.Source + "_" + m.Kind)
 	}
 	if m.Appendix {
 		return fmt.Sprintf("a%d", m.Section)
@@ -416,37 +431,6 @@ func (s *Site) floor() error {
 		s.Draft[lang] = float64(count[lang]) < coverageFloor*float64(count["en"])
 	}
 	return nil
-}
-
-// langLinks is the switcher for one page. here is the language of the page, and
-// at answers "where is this same thing in that language", empty when that
-// language does not have it.
-//
-// Every page builds its switcher through this, because the rule it applies is
-// the same everywhere and it is easy to get subtly wrong page by page: offer a
-// language only where it holds the thing the reader is looking at, and keep the
-// languages under the coverage floor out unless somebody asked for them. The
-// language of the page itself is always in the list, even when it is a draft and
-// even when nothing else is, since a reader who has landed on a Vietnamese page
-// should be told the page is Vietnamese.
-func (s *Site) langLinks(here string, at func(lang string) string) []langLink {
-	var out []langLink
-	for _, lang := range s.Langs {
-		if lang != here && s.Draft[lang] && !s.Drafts {
-			continue
-		}
-		url := at(lang)
-		if url == "" {
-			continue
-		}
-		out = append(out, langLink{Lang: lang, URL: url, Here: lang == here, Draft: s.Draft[lang]})
-	}
-	// One entry is the page saying what it already says in its lang attribute, so
-	// there is nothing to switch to and the switcher is not written at all.
-	if len(out) < 2 {
-		return nil
-	}
-	return out
 }
 
 // graph loads the reference graph and turns it into the two lists a tag page

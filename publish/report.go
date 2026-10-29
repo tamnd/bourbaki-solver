@@ -100,7 +100,7 @@ func (s *Site) reportIndex(rs []reportFile) (string, error) {
 			s.report(nil).inline(r.Intro))
 	}
 	b.WriteString("</ul>\n")
-	return s.render(layout{Title: "Reports", Content: template.HTML(b.String())})
+	return s.render(layout{Title: "Reports", Here: "reports", Wide: true, Content: template.HTML(b.String())})
 }
 
 func (s *Site) reportPage(r reportFile, at map[string]string) (string, error) {

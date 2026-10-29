@@ -64,23 +64,18 @@ func Assets() fs.FS {
 // safe to use from several goroutines: goja is not, and the lock is what makes
 // up the difference.
 type Renderer struct {
-	mu    sync.Mutex
-	vm    *goja.Runtime
-	call  goja.Callable
-	cache map[string]string
+	mu     sync.Mutex
+	engine *engine
+	cache  map[string]string
 }
 
 // New loads KaTeX into a fresh engine.
 func New() (*Renderer, error) {
-	vm := goja.New()
-	if _, err := vm.RunString(script); err != nil {
-		return nil, fmt.Errorf("loading katex %s: %w", Version, err)
+	e, err := newEngine()
+	if err != nil {
+		return nil, err
 	}
-	fn, ok := goja.AssertFunction(vm.Get("katex").ToObject(vm).Get("renderToString"))
-	if !ok {
-		return nil, fmt.Errorf("katex %s has no renderToString", Version)
-	}
-	return &Renderer{vm: vm, call: fn, cache: map[string]string{}}, nil
+	return &Renderer{engine: e, cache: map[string]string{}}, nil
 }
 
 // Render returns the HTML for one span of TeX.
@@ -124,7 +119,35 @@ func (r *Renderer) render(tex string, display bool, output string) (string, erro
 		return html, nil
 	}
 
-	opts := r.vm.NewObject()
+	html, err := r.engine.set(tex, display, output)
+	if err != nil {
+		return "", err
+	}
+	r.cache[key] = html
+	return html, nil
+}
+
+// engine is one JavaScript runtime with KaTeX loaded, which is not safe for
+// two goroutines at once.
+type engine struct {
+	vm   *goja.Runtime
+	call goja.Callable
+}
+
+func newEngine() (*engine, error) {
+	vm := goja.New()
+	if _, err := vm.RunString(script); err != nil {
+		return nil, fmt.Errorf("loading katex %s: %w", Version, err)
+	}
+	fn, ok := goja.AssertFunction(vm.Get("katex").ToObject(vm).Get("renderToString"))
+	if !ok {
+		return nil, fmt.Errorf("katex %s has no renderToString", Version)
+	}
+	return &engine{vm: vm, call: fn}, nil
+}
+
+func (e *engine) set(tex string, display bool, output string) (string, error) {
+	opts := e.vm.NewObject()
 	opts.Set("displayMode", display)
 	if output != "" {
 		opts.Set("output", output)
@@ -143,16 +166,92 @@ func (r *Renderer) render(tex string, display bool, output string) (string, erro
 	// the answer was to write the sign in the Markdown rather than to teach the
 	// renderer a command the corpus should not be emitting. Extraction writes
 	// U+2621 now and this stays empty.
-	opts.Set("macros", r.vm.NewObject())
+	opts.Set("macros", e.vm.NewObject())
 	opts.Set("strict", false)
 
-	v, err := r.call(goja.Undefined(), r.vm.ToValue(tex), opts)
+	v, err := e.call(goja.Undefined(), e.vm.ToValue(tex), opts)
 	if err != nil {
 		return "", errors.New(clean(err.Error()))
 	}
-	html := v.String()
-	r.cache[key] = html
-	return html, nil
+	return v.String(), nil
+}
+
+// A Span is one formula to set, for Warm.
+type Span struct {
+	TeX     string
+	Display bool
+	// MathML asks for the MathML half alone, the way MathML does.
+	MathML bool
+}
+
+func (sp Span) output() string {
+	if sp.MathML {
+		return "mathml"
+	}
+	return ""
+}
+
+// Warm sets every span on n engines at once and keeps the answers, so that a
+// build which then renders its pages one after another finds every formula
+// already set. One engine is one core, and a corpus of tens of thousands of
+// formulae is most of a build on one core. A span KaTeX refuses is left out,
+// and the Render that asks for it later gets the refusal from the engine, the
+// same way as without Warm. The answers are the bytes Render would have given:
+// the same script answers the same TeX the same way in any engine.
+func (r *Renderer) Warm(spans []Span, n int) error {
+	seen := map[string]bool{}
+	var todo []Span
+	r.mu.Lock()
+	for _, sp := range spans {
+		key := sp.output() + "\x00" + sp.TeX
+		if sp.Display {
+			key = sp.output() + "\x00$$" + sp.TeX
+		}
+		if _, ok := r.cache[key]; !ok && !seen[key] {
+			seen[key] = true
+			todo = append(todo, sp)
+		}
+	}
+	r.mu.Unlock()
+	if n < 1 {
+		n = 1
+	}
+	n = min(n, len(todo))
+	engines := make([]*engine, n)
+	for i := range engines {
+		e, err := newEngine()
+		if err != nil {
+			return err
+		}
+		engines[i] = e
+	}
+	next := make(chan Span)
+	var wg sync.WaitGroup
+	for _, e := range engines {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for sp := range next {
+				html, err := e.set(sp.TeX, sp.Display, sp.output())
+				if err != nil {
+					continue
+				}
+				key := sp.output() + "\x00" + sp.TeX
+				if sp.Display {
+					key = sp.output() + "\x00$$" + sp.TeX
+				}
+				r.mu.Lock()
+				r.cache[key] = html
+				r.mu.Unlock()
+			}
+		}()
+	}
+	for _, sp := range todo {
+		next <- sp
+	}
+	close(next)
+	wg.Wait()
+	return nil
 }
 
 // clean takes the engine's position off the end of a KaTeX error. The position

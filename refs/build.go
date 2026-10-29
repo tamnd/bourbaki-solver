@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 )
@@ -76,10 +78,43 @@ func Build(root, lang string) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Reading the citations out of a file is most of the cost of a build, all
+	// of it in one regular expression, and a file's reading depends on nothing
+	// but the file and the index, which nothing writes to by now. So the files
+	// are read on every core into a result apiece and put together in the order
+	// of the files, which is the result one reading after another would give.
+	parts := make([]*Result, len(files))
+	errs := make([]error, len(files))
+	next := make(chan int)
+	var wg sync.WaitGroup
+	for range runtime.GOMAXPROCS(0) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				part := &Result{Counts: map[string]int{}, Forms: map[Form]int{}}
+				errs[i] = part.file(ix, root, files[i])
+				parts[i] = part
+			}
+		}()
+	}
+	for i := range files {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
 	res := &Result{Counts: map[string]int{}, Forms: map[Form]int{}, Index: ix}
-	for _, path := range files {
-		if err := res.file(ix, root, path); err != nil {
-			return nil, err
+	for i, part := range parts {
+		if errs[i] != nil {
+			return nil, errs[i]
+		}
+		res.Edges = append(res.Edges, part.Edges...)
+		res.Unresolved = append(res.Unresolved, part.Unresolved...)
+		for k, n := range part.Counts {
+			res.Counts[k] += n
+		}
+		for k, n := range part.Forms {
+			res.Forms[k] += n
 		}
 	}
 	sort.SliceStable(res.Edges, func(i, j int) bool {

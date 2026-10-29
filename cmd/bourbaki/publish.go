@@ -5,9 +5,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime/pprof"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/publish"
@@ -41,6 +43,12 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
                        pages themselves. Never set by the deploy.
   -allow-broken-math   mark the formulae KaTeX refuses instead of stopping, for
                        looking at the site locally. Never set by the deploy.
+  -mathml             write the mathematics as MathML set by the browser in the
+                       shipped math font, not KaTeX's positioned spans. A third
+                       of the size, for a host with a size cap: GitHub Pages.
+  -gzip               write every file but a font gzipped, under its own name,
+                       for a host that serves the stored bytes with
+                       Content-Encoding: gzip. The Worker in deploy/ is one.
   -max-broken          the most refused formulae a build may carry before this
                        exits 1. It marks them rather than stopping at the first,
                        so one run names all of them. This is the pull request
@@ -67,9 +75,32 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 	check := fs.Bool("check", false, "build in memory and write nothing")
 	drafts := fs.Bool("drafts", false, "offer the languages under the coverage floor in the switcher")
 	allowBroken := fs.Bool("allow-broken-math", false, "mark refused formulae instead of stopping")
+	mathml := fs.Bool("mathml", false, "write MathML set by the browser instead of KaTeX's spans")
+	gz := fs.Bool("gzip", false, "write every file but a font gzipped, for the Worker in deploy/")
 	maxBroken := fs.String("max-broken", "", "the most refused formulae this build may carry")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
+	}
+	// BOURBAKI_CPUPROFILE names a file to write a CPU profile of the build to,
+	// for finding out where a slow build spends its time.
+	if p := os.Getenv("BOURBAKI_CPUPROFILE"); p != "" {
+		f, err := os.Create(p)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			return err
+		}
+		defer pprof.StopCPUProfile()
+		// BOURBAKI_CPUPROFILE_SECS stops it early, for a build too long to wait out.
+		if n, _ := strconv.Atoi(os.Getenv("BOURBAKI_CPUPROFILE_SECS")); n > 0 {
+			time.AfterFunc(time.Duration(n)*time.Second, func() {
+				pprof.StopCPUProfile()
+				f.Close()
+				fmt.Fprintln(os.Stderr, "publish: cpu profile written to", p)
+			})
+		}
 	}
 	ceiling, err := parseCeilings(*maxBroken)
 	if err != nil {
@@ -94,6 +125,8 @@ Run bourbaki audit -only P04 for the whole list of them in one go.
 	// corpus that has two hundred of them, so the ceiling marks and counts.
 	site.AllowBrokenMath = *allowBroken || ceiling.set()
 	site.Drafts = *drafts
+	site.Gzip = *gz
+	site.MathML = *mathml
 
 	langs := map[string]int{}
 	exs := map[string]int{}

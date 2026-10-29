@@ -213,7 +213,7 @@ func (s *Site) about() (string, error) {
 		}
 		fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a> <span class=\"count\">%s</span></td>"+
 			"<td>%d</td><td>%d</td><td>%d</td><td>%s</td><td>%s</td></tr>\n",
-			s.langHome(n.Lang), n.Lang, langName(n.Lang), n.Sections, n.Statements, n.Exercises, share, note)
+			s.url(n.Lang), n.Lang, langName(n.Lang), n.Sections, n.Statements, n.Exercises, share, note)
 	}
 	b.WriteString("</table>\n")
 	if s.drafted() {
@@ -264,7 +264,7 @@ func (s *Site) about() (string, error) {
 		"they are not for commercial use. No source PDF is in either repository or served from this site. " +
 		"The tooling that builds all of it is separate and is under the MIT licence.</p>\n")
 
-	return s.render(layout{Title: "About", Content: template.HTML(b.String())})
+	return s.render(layout{Title: "About", Here: "about", Content: template.HTML(b.String())})
 }
 
 // extraction is the paragraph on how the text got out of the book, with the

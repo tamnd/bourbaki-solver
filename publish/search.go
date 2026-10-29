@@ -132,25 +132,41 @@ func prose(s string) string {
 // searchPage is /search/. It is the one page of the site with a script on it,
 // and the script does one thing: fetch an index and filter it.
 func (s *Site) searchPage() (string, error) {
+	// One page serves every language, so the page carries the words of each
+	// and the script says them in the language being searched. Without a
+	// script the page is in English, which is the noscript reader's lot anyway.
+	words := map[string]map[string]string{}
+	for _, lang := range s.Langs {
+		w := map[string]string{"title": T(lang, "search")}
+		for k, v := range uiText[uiLang(lang)] {
+			if strings.HasPrefix(k, "s.") {
+				w[k[2:]] = v
+			}
+		}
+		words[lang] = w
+	}
+	js, err := json.Marshal(words)
+	if err != nil {
+		return "", err
+	}
 	var b strings.Builder
-	b.WriteString("<h1>Search</h1>\n")
+	b.WriteString("<h1 id=\"title\">Search</h1>\n")
 	fmt.Fprintf(&b, "<form id=\"f\" action=%q method=\"get\">\n", s.url("search"))
-	b.WriteString("<input id=\"q\" name=\"q\" type=\"search\" autofocus placeholder=\"a word, or a tag\">\n")
+	fmt.Fprintf(&b, "<input id=\"q\" name=\"q\" type=\"search\" autofocus placeholder=%q>\n", T("en", "s.ph"))
 	b.WriteString("<select id=\"lang\" name=\"lang\">\n")
 	for _, lang := range s.Langs {
 		note := ""
 		if s.Draft[lang] {
-			note = " (partial)"
+			note = " (" + T(lang, "s.partial") + ")"
 		}
-		fmt.Fprintf(&b, "<option value=%q>%s%s</option>\n", lang, lang, note)
+		fmt.Fprintf(&b, "<option value=%q>%s%s</option>\n", lang, native(lang), note)
 	}
-	b.WriteString("</select>\n<button type=\"submit\">Search</button>\n</form>\n")
-	b.WriteString("<p id=\"status\" class=\"none\">Searching runs in the browser over an index of the " +
-		"statements and the exercises. Nothing is sent anywhere.</p>\n")
+	fmt.Fprintf(&b, "</select>\n<button id=\"go\" type=\"submit\">%s</button>\n</form>\n", T("en", "s.go"))
+	fmt.Fprintf(&b, "<p id=\"status\" class=\"none\">%s</p>\n", T("en", "s.intro"))
 	b.WriteString("<noscript><p class=\"warn\">This page is the one part of the site that needs a script. " +
 		"Everything else, the statements, the tags and the exercises, is plain HTML and works without one.</p></noscript>\n")
 	b.WriteString("<ol id=\"r\" class=\"results\"></ol>\n")
-	fmt.Fprintf(&b, "<script>\nconst BASE = %q;\n%s</script>\n", s.url("search"), searchJS)
+	fmt.Fprintf(&b, "<script>\nconst BASE = %q;\nconst WORDS = %s;\n%s</script>\n", s.url("search"), js, searchJS)
 	return s.render(layout{Title: "Search", Content: template.HTML(b.String())})
 }
 
@@ -164,16 +180,31 @@ const cache = {};
 let timer = null;
 
 // The query is in the URL so a search can be linked to, which is what somebody
-// does with a search that found the thing they will want again.
+// does with a search that found the thing they will want again. With no
+// language in it, the reader's browser says which one they read.
 const params = new URLSearchParams(location.search);
+const offered = Array.from(sel.options, o => o.value);
 if (params.get('q')) q.value = params.get('q');
-if (params.get('lang')) sel.value = params.get('lang');
+if (offered.includes(params.get('lang'))) sel.value = params.get('lang');
+else {
+  const want = (navigator.languages || []).map(l => l.toLowerCase().split('-')[0]).find(l => offered.includes(l));
+  if (want) sel.value = want;
+}
+
+function t(k, n) { return ((WORDS[sel.value] || {})[k] || WORDS.en[k] || '').replace('{n}', n); }
+
+function say() {
+  document.getElementById('title').textContent = t('title');
+  document.getElementById('go').textContent = t('go');
+  q.placeholder = t('ph');
+  document.documentElement.lang = sel.value;
+}
 
 async function index(lang) {
   if (cache[lang]) return cache[lang];
-  status.textContent = 'Loading the ' + lang + ' index.';
+  status.textContent = t('loading');
   const res = await fetch(BASE + lang + '.json');
-  if (!res.ok) { status.textContent = 'The ' + lang + ' index did not load.'; return []; }
+  if (!res.ok) { status.textContent = t('failed'); return []; }
   cache[lang] = await res.json();
   return cache[lang];
 }
@@ -213,7 +244,42 @@ function snippet(text, ts) {
   for (const t of ts) { const i = low.indexOf(t); if (i >= 0 && (at < 0 || i < at)) at = i; }
   if (at < 0) at = 0;
   const from = Math.max(0, at - 60);
-  return (from > 0 ? '…' : '') + text.slice(from, from + 260) + (text.length > from + 260 ? '…' : '');
+  return (from > 0 ? '…' : '') + tex(text.slice(from, from + 260)) + (text.length > from + 260 ? '…' : '');
+}
+
+// The index keeps the mathematics as TeX so that it can be searched, and a
+// snippet is read, so the common commands are shown as the characters they set.
+// What is not in the table loses its backslash and nothing else.
+const SYM = {
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', varepsilon: 'ε', zeta: 'ζ', eta: 'η',
+  theta: 'θ', vartheta: 'ϑ', iota: 'ι', kappa: 'κ', lambda: 'λ', mu: 'μ', nu: 'ν', xi: 'ξ', pi: 'π',
+  rho: 'ρ', sigma: 'σ', tau: 'τ', upsilon: 'υ', phi: 'φ', varphi: 'φ', chi: 'χ', psi: 'ψ', omega: 'ω',
+  Gamma: 'Γ', Delta: 'Δ', Theta: 'Θ', Lambda: 'Λ', Xi: 'Ξ', Pi: 'Π', Sigma: 'Σ', Phi: 'Φ', Psi: 'Ψ',
+  Omega: 'Ω', in: '∈', notin: '∉', ni: '∋', subset: '⊂', supset: '⊃', subseteq: '⊆', supseteq: '⊇',
+  cap: '∩', cup: '∪', bigcap: '⋂', bigcup: '⋃', to: '→', rightarrow: '→', leftarrow: '←',
+  mapsto: '↦', Rightarrow: '⇒', Leftrightarrow: '⇔', iff: '⇔', implies: '⇒', times: '×', cdot: '·',
+  circ: '∘', otimes: '⊗', oplus: '⊕', bigotimes: '⨂', bigoplus: '⨁', leq: '≤', le: '≤', geq: '≥',
+  ge: '≥', neq: '≠', ne: '≠', sim: '∼', simeq: '≃', cong: '≅', approx: '≈', equiv: '≡', infty: '∞',
+  sum: '∑', prod: '∏', int: '∫', partial: '∂', nabla: '∇', forall: '∀', exists: '∃', neg: '¬',
+  wedge: '∧', vee: '∨', emptyset: '∅', varnothing: '∅', setminus: '∖', pm: '±', mid: '|',
+  ldots: '…', cdots: '⋯', dots: '…', star: '⋆', ast: '∗', langle: '⟨', rangle: '⟩', ell: 'ℓ',
+  prime: '′', perp: '⊥', lbrace: '{', rbrace: '}',
+};
+const BB = { C: 'ℂ', H: 'ℍ', N: 'ℕ', P: 'ℙ', Q: 'ℚ', R: 'ℝ', Z: 'ℤ' };
+const FRAK = { C: 'ℭ', H: 'ℌ', I: 'ℑ', R: 'ℜ', Z: 'ℨ' };
+function alpha(s, base, holes) {
+  return s.replace(/[A-Za-z]/g, c => holes[c] || String.fromCodePoint(base + (c <= 'Z' ? c.charCodeAt(0) - 65 : c.charCodeAt(0) - 71)));
+}
+function tex(s) {
+  return s
+    .replace(/\\mathbb\{([A-Za-z]+)\}/g, (_, x) => alpha(x, 0x1D538, BB))
+    .replace(/\\mathfrak\{([A-Za-z]+)\}/g, (_, x) => alpha(x, 0x1D504, FRAK))
+    .replace(/\\(?:left|right|big|Big|bigg|Bigg|math(?:rm|bf|it|sf|tt|cal|scr)|operatorname|text(?:rm|it|bf)?|boldsymbol|rm|bf|it|displaystyle)(?![A-Za-z])/g, '')
+    .replace(/\\[,;:!]|\\q?quad(?![A-Za-z])/g, ' ')
+    .replace(/\\([A-Za-z]+)/g, (_, c) => SYM[c] || (c === 'footnote' ? '' : c))
+    .replace(/\\([{}|_%&#$])/g, '$1')
+    .replace(/[{}]/g, '')
+    .replace(/ {2,}/g, ' ');
 }
 
 function escape(s) {
@@ -221,16 +287,16 @@ function escape(s) {
 }
 
 async function run() {
+  say();
   const text = q.value.trim();
   results.innerHTML = '';
-  if (!text) { status.textContent = 'Type a word, or a tag such as 00QO.'; return; }
+  if (!text) { status.textContent = t('hint'); return; }
   const ts = terms(text);
   const entries = await index(sel.value);
   const hits = [];
   for (const e of entries) { const n = score(e, ts); if (n > 0) hits.push([n, e]); }
   hits.sort((a, b) => b[0] - a[0] || a[1].l.localeCompare(b[1].l));
-  status.textContent = hits.length + (hits.length === 1 ? ' result' : ' results') +
-    (hits.length > 50 ? ', the first 50 shown' : '') + '.';
+  status.textContent = hits.length === 1 ? t('one') : t(hits.length > 50 ? 'first' : 'many', hits.length);
   for (const [, e] of hits.slice(0, 50)) {
     const li = document.createElement('li');
     li.innerHTML = '<a href="' + e.u + '">' + escape(e.h) + '</a>' +
@@ -247,5 +313,6 @@ sel.addEventListener('change', run);
 // The form works without a script as a link back to this page with the query in
 // it, and with one it should not reload the page to do the same search again.
 document.getElementById('f').addEventListener('submit', e => { e.preventDefault(); run(); });
-if (q.value) run(); else status.textContent = 'Type a word, or a tag such as 00QO.';
+say();
+if (q.value) run(); else status.textContent = t('intro');
 `

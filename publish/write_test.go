@@ -557,7 +557,7 @@ func TestSearchIsLinkedFromEveryPageAndSaysItNeedsAScript(t *testing.T) {
 	s := testSite(t)
 	for _, rel := range []string{"index.html", "en/alg/VIII/s14/index.html", "tag/00GJ/index.html",
 		"en/alg/VIII/s14/ex/8/index.html", "tags/index.html"} {
-		if got := s.mustPage(t, rel); !strings.Contains(got, `<a href="/search/">Search</a>`) {
+		if got := s.mustPage(t, rel); !strings.Contains(got, `action="/search/"`) {
 			t.Errorf("%s does not link the search page:\n%s", rel, got)
 		}
 	}
@@ -568,11 +568,12 @@ func TestSearchIsLinkedFromEveryPageAndSaysItNeedsAScript(t *testing.T) {
 	if !strings.Contains(got, `<script>`) || !strings.Contains(got, `const BASE = "/search/";`) {
 		t.Errorf("the search page does not know where its indexes are:\n%s", got)
 	}
-	// And nowhere else. Everything the site is for is plain HTML.
+	// Everywhere else the script is an enhancement: the page is whole without
+	// it, and it carries no script of its own.
 	for _, rel := range []string{"en/alg/VIII/s14/index.html", "tag/00GJ/index.html",
 		"en/alg/VIII/s14/ex/8/index.html"} {
-		if strings.Contains(s.mustPage(t, rel), "<script") {
-			t.Errorf("%s carries a script", rel)
+		if strings.Contains(s.mustPage(t, rel), "<script>\nconst") {
+			t.Errorf("%s carries a script of its own", rel)
 		}
 	}
 }
@@ -629,7 +630,7 @@ func TestALanguageUnderTheFloorIsNotOfferedUnlessAskedFor(t *testing.T) {
 	// Built and reachable, which is the other half of the rule: the floor keeps
 	// a language out of the navigation and does not keep it off the site.
 	vi := s.mustPage(t, "vi/alg/VIII/s14/index.html")
-	if !strings.Contains(vi, `<span class="here">vi</span>`) ||
+	if !strings.Contains(vi, `<span class="here" title="Tiếng Việt">vi</span>`) ||
 		!strings.Contains(vi, `href="/en/alg/VIII/s14/"`) {
 		t.Errorf("the page of a draft language does not say what it is or where the English is:\n%s", vi)
 	}
@@ -694,7 +695,8 @@ func TestTheFloorIsAShareOfTheEnglish(t *testing.T) {
 // finding. The reader of the page has more right to that than the audit does.
 func TestACutDownModelIsSaidOnThePage(t *testing.T) {
 	s := withDraft(t, testSite(t))
-	want := "cut down version"
+	// The pages are Vietnamese, so the sentence is too.
+	want := T("vi", "p.cut")
 	if got := s.mustPage(t, "vi/alg/VIII/s14/index.html"); !strings.Contains(got, want) {
 		t.Errorf("a section written by a small model does not say so:\n%s", got)
 	}
@@ -703,7 +705,7 @@ func TestACutDownModelIsSaidOnThePage(t *testing.T) {
 	}
 	// And not on the pages it is not true of, which is the whole chapter but two
 	// files.
-	if got := s.mustPage(t, "en/alg/VIII/s14/index.html"); strings.Contains(got, want) {
+	if got := s.mustPage(t, "en/alg/VIII/s14/index.html"); strings.Contains(got, T("en", "p.cut")) {
 		t.Errorf("a transcription is called a cut down translation:\n%s", got)
 	}
 }
@@ -756,7 +758,7 @@ func TestTheAboutPageCountsTheCorpusRatherThanClaimingIt(t *testing.T) {
 func TestALanguageUnderTheFloorIsListedOnAboutWithItsNumbers(t *testing.T) {
 	s := withDraft(t, testSite(t))
 	got := s.mustPage(t, "about/index.html")
-	if !strings.Contains(got, `<a href="/vi/alg/VIII/">vi</a>`) {
+	if !strings.Contains(got, `<a href="/vi/">vi</a>`) {
 		t.Errorf("a language under the floor is not linked from the about page:\n%s", got)
 	}
 	if !strings.Contains(got, "under the coverage floor") ||
@@ -843,7 +845,7 @@ func TestTheAboutPageIsLinkedFromEveryPage(t *testing.T) {
 	for _, rel := range []string{"index.html", "about/index.html", "search/index.html",
 		"tags/index.html", "en/alg/VIII/index.html", "en/alg/VIII/s14/index.html",
 		"tag/00GJ/index.html", "en/alg/VIII/s14/ex/8/index.html", "vi/alg/VIII/s14/index.html"} {
-		if got := s.mustPage(t, rel); !strings.Contains(got, `<a href="/about/">About</a>`) {
+		if got := s.mustPage(t, rel); !strings.Contains(got, `<a href="/about/"`) {
 			t.Errorf("%s does not link the about page:\n%s", rel, got)
 		}
 	}
@@ -860,4 +862,21 @@ func (s *Site) mustPage(t *testing.T, rel string) string {
 		t.Fatal(err)
 	}
 	return string(b)
+}
+
+// A MathML build writes the mathematics for the browser to set, and so carries
+// neither the KaTeX stylesheet nor the positioned spans that need it.
+func TestAMathMLBuildIsMathMLAlone(t *testing.T) {
+	s := testSite(t)
+	s.MathML = true
+	got := s.mustPage(t, "en/alg/VIII/s14/index.html")
+	if !strings.Contains(got, "<math") {
+		t.Error("a MathML build has no MathML in it")
+	}
+	if strings.Contains(got, "katex-html") || strings.Contains(got, "katex.min.css") {
+		t.Error("a MathML build carries KaTeX's spans or its stylesheet")
+	}
+	if !strings.Contains(got, `<body class="mathml"`) {
+		t.Error("a MathML build does not say so to the stylesheet")
+	}
 }
