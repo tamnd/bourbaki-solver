@@ -131,6 +131,20 @@ func (s *Site) Build(out string) ([]string, error) {
 			if err := write(path.Join(lang, sh.Book, "nav.html"), s.nav(sh)); err != nil {
 				return nil, err
 			}
+			ix, err := s.statementsPage(sh)
+			if err != nil {
+				return nil, err
+			}
+			if err := write(path.Join(lang, sh.Book, "statements", "index.html"), ix); err != nil {
+				return nil, err
+			}
+		}
+		cited, err := s.citedPage(lang)
+		if err != nil {
+			return nil, err
+		}
+		if err := write(path.Join(lang, "statements", "index.html"), cited); err != nil {
+			return nil, err
 		}
 	}
 
@@ -170,6 +184,11 @@ func (s *Site) Build(out string) ([]string, error) {
 			continue
 		}
 		if err := write(rel, body); err != nil {
+			return nil, err
+		}
+		// The Markdown the page was set from, beside it, which is what the copy
+		// button on a statement card reads its statement out of.
+		if err := write(strings.TrimSuffix(rel, "index.html")+"index.md", sec.Body); err != nil {
 			return nil, err
 		}
 	}
@@ -377,7 +396,10 @@ func delim(ref Refusal) string {
 }
 
 func (s *Site) section(sec *Section) (string, error) {
-	body, err := s.renderer(sec).HTML(sec.Body)
+	r := s.renderer(sec)
+	r.Section = sectionLabel(sec)
+	r.Xref = func(label string) string { return s.xref(sec, label) }
+	body, err := r.HTML(s.linked(sec))
 	if err != nil {
 		return "", err
 	}

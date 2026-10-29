@@ -53,6 +53,21 @@ type Site struct {
 	CitedBy map[string][]*Edge
 	Cites   map[string][]*Edge
 
+	// The same graph keyed by label rather than by tag. A tag is minted for a
+	// volume once it has settled and most volumes have none yet, while every
+	// statement has a label from the day it is read, so this is what the cards
+	// of a § page and the statement index are cross-linked through. uses is what
+	// a label cites, usedBy what cites it, and citeAt is every edge by the file
+	// its sentence stands in, which is what puts a link on the citation itself.
+	uses   map[string][]*Edge
+	usedBy map[string][]*Edge
+	citeAt map[string][]*Edge
+	// units is where a statement label sits, per language, tagged or not.
+	// secIn and exIn find a § and an exercise by label in one language.
+	units map[string]map[string]unitAt
+	secIn map[string]*Section
+	exIn  map[string]*Exercise
+
 	// Unresolved is how many references the graph could not follow, and Edges is
 	// how many it found. The about page publishes both rather than hiding the
 	// first, since a resolution rate is the one number that says what the
@@ -148,6 +163,14 @@ type Edge struct {
 	How       string
 	Book      string
 	Chapter   string
+	File      string
+	Line      int
+}
+
+// unitAt is one statement in one language: the § it is in and its unit there.
+type unitAt struct {
+	sec  *Section
+	unit Unit
 }
 
 // Load reads everything the site is built from. Nothing here opens a PDF or
@@ -164,7 +187,9 @@ func Load(root string) (*Site, error) { return LoadOnly(root, nil) }
 func LoadOnly(root string, only []string) (*Site, error) {
 	s := &Site{Root: root, byTag: map[string]*Statement{}, byLabel: map[string]*Section{},
 		byExTag: map[string]*Exercise{}, byExLabel: map[string]*Exercise{},
-		CitedBy: map[string][]*Edge{}, Cites: map[string][]*Edge{}, Draft: map[string]bool{}}
+		CitedBy: map[string][]*Edge{}, Cites: map[string][]*Edge{}, Draft: map[string]bool{},
+		uses: map[string][]*Edge{}, usedBy: map[string][]*Edge{}, citeAt: map[string][]*Edge{},
+		units: map[string]map[string]unitAt{}, secIn: map[string]*Section{}, exIn: map[string]*Exercise{}}
 
 	langs, err := languages(root)
 	if err != nil {
@@ -344,13 +369,30 @@ func (s *Site) Section(label string) *Section { return s.byLabel[label] }
 // index collects the statements across languages. The tag is the key, since it
 // is the one thing that is the same statement in every printing.
 func (s *Site) index() error {
+	if s.units == nil {
+		s.units, s.secIn, s.exIn = map[string]map[string]unitAt{}, map[string]*Section{}, map[string]*Exercise{}
+	}
+	if s.uses == nil {
+		s.uses, s.usedBy, s.citeAt = map[string][]*Edge{}, map[string][]*Edge{}, map[string][]*Edge{}
+	}
 	for _, sec := range s.Sections {
 		if l := sectionLabel(sec); l != "" {
 			if _, ok := s.byLabel[l]; !ok || sec.Lang == "en" {
 				s.byLabel[l] = sec
 			}
 		}
+		if l := sectionLabel(sec); l != "" {
+			s.secIn[sec.Lang+"\x00"+l] = sec
+		}
 		for _, u := range sec.Units {
+			if l := u.Heading.Label; l != "" {
+				if s.units[l] == nil {
+					s.units[l] = map[string]unitAt{}
+				}
+				if _, ok := s.units[l][sec.Lang]; !ok {
+					s.units[l][sec.Lang] = unitAt{sec, u}
+				}
+			}
 			if u.Heading.Tag == "" {
 				continue
 			}
@@ -372,6 +414,7 @@ func (s *Site) index() error {
 	// English for preference again, for the same reason: the label is what the
 	// reference graph is built in and the graph is built in English.
 	for _, ex := range s.Exercises {
+		s.exIn[ex.Lang+"\x00"+ex.Meta.Label] = ex
 		if _, ok := s.byExLabel[ex.Meta.Label]; !ok || ex.Lang == "en" {
 			s.byExLabel[ex.Meta.Label] = ex
 		}
@@ -463,7 +506,16 @@ func (s *Site) graph() error {
 			to = *e.To
 		}
 		edge := &Edge{FromTag: e.From, FromLabel: e.FromLabel, ToTag: to, ToLabel: e.ToLabel,
-			Raw: e.Raw, How: e.How, Book: e.Book, Chapter: e.Chapter}
+			Raw: e.Raw, How: e.How, Book: e.Book, Chapter: e.Chapter, File: e.File, Line: e.Line}
+		if e.File != "" {
+			s.citeAt[e.File] = append(s.citeAt[e.File], edge)
+		}
+		if e.FromLabel != "" && e.ToLabel != "" && e.How != refs.OutOfCorpus {
+			s.uses[e.FromLabel] = append(s.uses[e.FromLabel], edge)
+			if e.How != refs.BySection {
+				s.usedBy[e.ToLabel] = append(s.usedBy[e.ToLabel], edge)
+			}
+		}
 		if e.From != "" {
 			s.Cites[e.From] = append(s.Cites[e.From], edge)
 		}
@@ -477,7 +529,7 @@ func (s *Site) graph() error {
 	// that read the same are a repeat whatever the graph says they came from.
 	// A proof that names Proposition 2 twice is one dependency on the page and
 	// two edges in the graph, and both are right for what they are for.
-	for _, m := range []map[string][]*Edge{s.CitedBy, s.Cites} {
+	for _, m := range []map[string][]*Edge{s.CitedBy, s.Cites, s.usedBy} {
 		for _, list := range m {
 			sort.Slice(list, func(i, j int) bool {
 				a, b := list[i], list[j]
@@ -496,6 +548,25 @@ func (s *Site) graph() error {
 	}
 	for tag, list := range s.Cites {
 		s.Cites[tag] = dedupe(list, func(e *Edge) string { return e.ToLabel + "\x00" + e.Raw })
+	}
+	// A card names what it points at rather than quoting the sentence, so two
+	// citations of one statement are one row there.
+	for l, list := range s.uses {
+		// In the order the proof cites them, which is the order worth reading.
+		sort.SliceStable(list, func(i, j int) bool {
+			a, b := list[i], list[j]
+			if a.File != b.File {
+				return a.File < b.File
+			}
+			if a.Line != b.Line {
+				return a.Line < b.Line
+			}
+			return a.ToLabel < b.ToLabel
+		})
+		s.uses[l] = dedupe(list, func(e *Edge) string { return e.ToLabel })
+	}
+	for l, list := range s.usedBy {
+		s.usedBy[l] = dedupe(list, func(e *Edge) string { return e.FromLabel })
 	}
 	return nil
 }

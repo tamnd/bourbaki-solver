@@ -536,6 +536,8 @@ func (s *Site) library(lang string) (string, error) {
 		fmt.Fprintf(&b, "<p class=\"tombstone\">These are the Books and chapters printed only in French, in a %s. "+
 			"Not checked by a person.</p>\n", esc(T(lang, "mt")))
 	}
+	fmt.Fprintf(&b, "<p class=\"chips\"><a class=\"chip\" href=%q><b>%s →</b> %s</a></p>\n",
+		s.url(lang, "statements"), esc(T(lang, "ix.title")), esc(T(lang, "ix.most")))
 	b.WriteString("<ul class=\"cards books\">\n")
 	held := map[string]bool{}
 	for _, sh := range s.books(lang) {
@@ -602,10 +604,13 @@ func (s *Site) bookPage(sh *shelf) (string, error) {
 		fmt.Fprintf(&b, "<p class=\"lede\" lang=\"fr\">%s</p>", esc(info.Names["fr"]))
 	}
 	b.WriteString("</header>\n")
+	b.WriteString("<p class=\"chips\">")
 	if first := firstOf(sh); first != nil {
-		fmt.Fprintf(&b, "<p><a class=\"chip\" href=%q><b>%s →</b> %s</a></p>\n", s.SectionURL(first),
+		fmt.Fprintf(&b, "<a class=\"chip\" href=%q><b>%s →</b> %s</a> ", s.SectionURL(first),
 			esc(T(lang, "read")), esc(navName(first)))
 	}
+	fmt.Fprintf(&b, "<a class=\"chip\" href=%q><b>%s</b></a>", s.StatementsURL(lang, sh.Book), esc(T(lang, "ix.title")))
+	b.WriteString("</p>\n")
 	list := func(secs []*Section) {
 		b.WriteString("<ol>\n")
 		for _, sec := range secs {
@@ -753,7 +758,7 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!DOCTYPE html>
 <link rel="stylesheet" href="{{.CSS}}">
 <script defer src="{{.JS}}"></script>
 </head>
-<body{{if .MathML}} class="mathml"{{end}} data-ui="{{.UI}}" data-outline="{{index .T "onpage"}}" data-top="{{index .T "top"}}">
+<body{{if .MathML}} class="mathml"{{end}} data-ui="{{.UI}}" data-outline="{{index .T "onpage"}}" data-top="{{index .T "top"}}" data-copy="{{index .T "copy"}}" data-copied="{{index .T "copied"}}">
 <a class="skip" href="#main">{{index .T "skip"}}</a>
 <header class="topbar">
 {{if .Side}}<button class="icon-btn menu" type="button" data-toggle="side" aria-label="{{index .T "contents"}}">&#9776;</button>

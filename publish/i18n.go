@@ -21,7 +21,11 @@ type ui map[string]string
 
 var uiText = map[string]ui{
 	"en": {
-		"library": "Library", "search": "Search", "tags": "Tags", "reports": "Reports", "about": "About",
+		"copy": "Copy as Markdown", "copied": "Copied",
+		"ix.title": "Index of statements", "ix.lede": "The %d statements of %s, by chapter and §. Pick a kind, filter by a word, or put the most cited first.",
+		"ix.all": "All", "ix.filter": "Filter, e.g. compact", "ix.cited": "Most cited first", "ix.most": "Most cited statements",
+		"ix.all.lede": "Every Book's statements by kind, and the statements the rest of the treatise cites most. Each count is read off the cross-references Bourbaki writes into the prose.",
+		"library":     "Library", "search": "Search", "tags": "Tags", "reports": "Reports", "about": "About",
 		"skip": "Skip to the text", "find": "Search statements, exercises, tags",
 		"contents": "Contents", "onpage": "On this page", "top": "Back to top ↑",
 		"prev": "Previous", "next": "Next", "chapter": "Chapter", "book": "Book",
@@ -55,7 +59,11 @@ var uiText = map[string]ui{
 		"x.caveat":  "Bourbaki sets the proof directly after the statement, and the corpus does not separate them, so what is above is the statement and its proof together.",
 	},
 	"fr": {
-		"library": "Bibliothèque", "search": "Recherche", "tags": "Étiquettes", "reports": "Rapports", "about": "À propos",
+		"copy": "Copier en Markdown", "copied": "Copié",
+		"ix.title": "Index des énoncés", "ix.lede": "Les %d énoncés de %s, par chapitre et paragraphe. Choisissez un type, filtrez par un mot, ou mettez les plus cités en tête.",
+		"ix.all": "Tous", "ix.filter": "Filtrer, p. ex. compact", "ix.cited": "Les plus cités d’abord", "ix.most": "Énoncés les plus cités",
+		"ix.all.lede": "Les énoncés de chaque Livre par type, et ceux que le reste du traité cite le plus. Chaque nombre est lu dans les renvois que Bourbaki écrit dans le texte.",
+		"library":     "Bibliothèque", "search": "Recherche", "tags": "Étiquettes", "reports": "Rapports", "about": "À propos",
 		"skip": "Aller au texte", "find": "Chercher énoncés, exercices, étiquettes",
 		"contents": "Table des matières", "onpage": "Sur cette page", "top": "Haut de page ↑",
 		"prev": "Précédent", "next": "Suivant", "chapter": "Chapitre", "book": "Livre",
@@ -89,7 +97,11 @@ var uiText = map[string]ui{
 		"x.caveat":  "Bourbaki place la démonstration juste après l’énoncé, et le corpus ne les sépare pas : ce qui précède est l’énoncé avec sa démonstration.",
 	},
 	"vi": {
-		"library": "Thư viện", "search": "Tìm kiếm", "tags": "Nhãn", "reports": "Báo cáo", "about": "Giới thiệu",
+		"copy": "Sao chép Markdown", "copied": "Đã sao chép",
+		"ix.title": "Chỉ mục mệnh đề", "ix.lede": "%d mệnh đề của %s, theo chương và mục. Chọn một loại, lọc theo từ, hoặc xếp những mệnh đề được trích dẫn nhiều nhất lên đầu.",
+		"ix.all": "Tất cả", "ix.filter": "Lọc, ví dụ compact", "ix.cited": "Trích dẫn nhiều nhất trước", "ix.most": "Các mệnh đề được trích dẫn nhiều nhất",
+		"ix.all.lede": "Các mệnh đề của mỗi Quyển theo loại, và những mệnh đề được phần còn lại của bộ sách trích dẫn nhiều nhất. Mỗi con số được đọc từ các tham chiếu chéo Bourbaki viết trong văn bản.",
+		"library":     "Thư viện", "search": "Tìm kiếm", "tags": "Nhãn", "reports": "Báo cáo", "about": "Giới thiệu",
 		"skip": "Chuyển đến nội dung", "find": "Tìm mệnh đề, bài tập, nhãn",
 		"contents": "Mục lục", "onpage": "Trên trang này", "top": "Lên đầu trang ↑",
 		"prev": "Trước", "next": "Tiếp", "chapter": "Chương", "book": "Quyển",

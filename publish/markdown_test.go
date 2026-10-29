@@ -166,7 +166,7 @@ func TestAStatementHeadingLinksItsTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "<div class=\"stmt k-theorem\">\n" +
+	want := "<div class=\"stmt k-theorem\" data-label=\"alg-viii-s14-thm-1\">\n" +
 		`<h4 id="alg-viii-s14-thm-1" class="statement">Theorem 1 <a class="tag" href="/tag/00GJ/" title="permanent tag">00GJ</a></h4>` +
 		"\n</div>"
 	if strings.TrimSpace(got) != want {

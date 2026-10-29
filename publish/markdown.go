@@ -265,6 +265,12 @@ type Renderer struct {
 	// MathML sets the mathematics as MathML alone, for a host that cannot
 	// carry the size of KaTeX's positioned spans. See Site.MathML.
 	MathML bool
+	// Xref is the foot of a statement card, given its label: what it cites
+	// and what cites it. Nil leaves the cards bare.
+	Xref func(label string) string
+	// Section is the label of the § the body is, alg-i-s1, which a numbered
+	// subsection heading takes its anchor from: alg-i-s1-n3 for no. 3.
+	Section string
 }
 
 // HTML renders one body.
@@ -299,9 +305,16 @@ func (r Renderer) HTML(body string) (string, error) {
 		if proves(kind) || kind == "definition" {
 			n = statementLen(body)
 		}
-		fmt.Fprintf(&b, "<div class=\"stmt k-%s\">\n%s", kind, r.heading(block))
+		if m[3] != "" {
+			fmt.Fprintf(&b, "<div class=\"stmt k-%s\" data-label=\"%s\">\n%s", kind, html.EscapeString(m[3]), r.heading(block))
+		} else {
+			fmt.Fprintf(&b, "<div class=\"stmt k-%s\">\n%s", kind, r.heading(block))
+		}
 		for _, p := range body[:n] {
 			b.WriteString(r.para(strings.TrimSpace(trimItalic(p))))
+		}
+		if r.Xref != nil && m[3] != "" {
+			b.WriteString(r.Xref(m[3]))
 		}
 		b.WriteString("</div>\n")
 		switch {
@@ -487,6 +500,10 @@ func (r Renderer) heading(line string) string {
 	var attr string
 	if m[3] != "" {
 		attr = fmt.Sprintf(` id=%q`, m[3])
+	} else if level == 3 {
+		if id := subsecID(r.Section, m[2]); id != "" {
+			attr = fmt.Sprintf(` id=%q`, id)
+		}
 	}
 	if strings.Contains(m[4], ".statement") {
 		attr += ` class="statement"`
@@ -531,6 +548,11 @@ func (r Renderer) inline(s string) string {
 		// Escaping it twice would turn the & of a query string into &amp;amp;,
 		// and %q would escape a backslash in it the way Go writes a string
 		// literal, which is not what a browser reads.
+		// A link to a place on a page is a citation the graph resolved, and
+		// it is set as one: quietly, so that the prose still reads as prose.
+		if strings.Contains(p[2], "#") {
+			return fmt.Sprintf(`<a class="ref" href="%s">%s</a>`, r.href(p[2]), p[1])
+		}
 		return fmt.Sprintf(`<a href="%s">%s</a>`, r.href(p[2]), p[1])
 	})
 	return s

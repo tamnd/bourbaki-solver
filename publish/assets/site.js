@@ -63,41 +63,61 @@
     }
   });
 
-  // The page's own outline: its headings and its statements, in order.
+  // The page's own outline: its headings, and under each numbered subsection
+  // the statements it holds, in the order the page has them.
   var outline = document.querySelector(".outline");
   var doc = document.querySelector(".doc");
-  var heads = [];
   if (outline && doc) {
-    doc.querySelectorAll(".doc > h2[id], .doc > h3[id], .doc > h2, .stmt > :is(h2, h3, h4, h5, h6):first-child").forEach(function (h) {
-      if (heads.indexOf(h) >= 0) return;
+    var items = [];
+    doc.querySelectorAll(".doc > h2, .doc > h3, .stmt > :is(h2, h3, h4, h5, h6):first-child").forEach(function (h) {
       var box = h.closest(".stmt");
       var target = box || h;
       if (!target.id) {
         if (h.id) { target.id = h.id; h.removeAttribute("id"); }
-        else target.id = "s-" + heads.length;
+        else target.id = "s-" + items.length;
       }
-      heads.push(h);
+      items.push({ h: h, box: box, target: target });
     });
-    if (heads.length >= 2) {
-      var ol = document.createElement("ol");
-      heads.forEach(function (h) {
-        var box = h.closest(".stmt");
+    if (items.length >= 2) {
+      var ol = document.createElement("ol"), group = null;
+      items.forEach(function (it) {
         var li = document.createElement("li");
-        if (box || h.tagName === "H3") li.className = "sub";
         var a = document.createElement("a");
-        a.href = "#" + (box || h).id;
-        if (box) {
+        a.href = "#" + it.target.id;
+        var text = label(it.h);
+        if (it.box) {
           var dot = document.createElement("span");
           dot.className = "dot";
-          dot.style.setProperty("--k", getComputedStyle(box).getPropertyValue("--k"));
+          dot.style.setProperty("--k", getComputedStyle(it.box).getPropertyValue("--k"));
           a.appendChild(dot);
+        } else if (it.h.tagName === "H3") {
+          var m = /^(\d+)\.\s*(.*)$/.exec(text);
+          if (m) {
+            var n = document.createElement("span");
+            n.className = "n";
+            n.textContent = m[1] + ".";
+            a.appendChild(n);
+            text = m[2];
+          }
         }
         var t = document.createElement("span");
-        t.textContent = label(h);
+        t.textContent = text;
         a.appendChild(t);
         li.appendChild(a);
-        ol.appendChild(li);
+        if (it.box) {
+          if (!group) li.className = "sub";
+          (group || ol).appendChild(li);
+        } else if (it.h.tagName === "H3") {
+          li.className = "grp";
+          group = document.createElement("ol");
+          li.appendChild(group);
+          ol.appendChild(li);
+        } else {
+          group = null;
+          ol.appendChild(li);
+        }
       });
+      ol.querySelectorAll("ol:empty").forEach(function (e) { e.remove(); });
       var title = document.createElement("h2");
       title.textContent = document.body.dataset.outline || "On this page";
       outline.appendChild(title);
@@ -112,7 +132,7 @@
   }
   function label(h) {
     var c = h.cloneNode(true);
-    c.querySelectorAll(".tag, .katex-mathml").forEach(function (n) { n.remove(); });
+    c.querySelectorAll(".tag, .katex-mathml, .copy").forEach(function (n) { n.remove(); });
     var t = c.textContent.replace(/\s+/g, " ").trim();
     return t.length > 60 ? t.slice(0, 58) + "…" : t;
   }
@@ -125,8 +145,11 @@
       for (var k = 0; k < targets.length; k++) if (targets[k] && targets[k].getBoundingClientRect().top + window.scrollY <= y) i = k;
       if (i === on) return;
       if (on >= 0) links[on].classList.remove("on");
+      ol.querySelectorAll("li.here").forEach(function (g) { g.classList.remove("here"); });
       if (i >= 0) {
         links[i].classList.add("on");
+        var g = links[i].closest("li.grp");
+        if (g) g.classList.add("here");
         var o = outline.getBoundingClientRect(), r = links[i].getBoundingClientRect();
         if (r.top < o.top || r.bottom > o.bottom) outline.scrollTop += r.top - o.top - o.height / 2;
       }
@@ -139,6 +162,107 @@
       requestAnimationFrame(function () { queued = false; update(); });
     }, { passive: true });
     update();
+  }
+
+  // Copy as Markdown, on every statement card of a § page. The page's Markdown
+  // is beside it as index.md, fetched once on the first copy, and the statement
+  // is cut out of it at its heading: the same text the page was set from, with
+  // the formulae as TeX, and a line saying where it came from.
+  var md = null;
+  function source() {
+    if (!md) {
+      var u = location.pathname.replace(/[^/]*$/, "") + "index.md";
+      md = fetch(u, { credentials: "same-origin" }).then(function (r) { return r.ok ? r.text() : Promise.reject(r.status); });
+      md.catch(function () { md = null; });
+    }
+    return md;
+  }
+  function cut(text, id) {
+    var lines = text.split("\n"), start = -1, end = lines.length, head = /^#{1,6}\s/;
+    for (var i = 0; i < lines.length; i++) {
+      if (head.test(lines[i]) && lines[i].indexOf("{#" + id) >= 0) { start = i; break; }
+    }
+    if (start < 0) return null;
+    for (var j = start + 1; j < lines.length; j++) if (head.test(lines[j])) { end = j; break; }
+    var tag = (/\btag=([0-9A-Z]{4})\b/.exec(lines[start]) || [])[1];
+    var title = lines[start].replace(/\s*\{#[^}]*\}\s*$/, "");
+    var body = lines.slice(start + 1, end).join("\n").replace(/^\s+|\s+$/g, "");
+    var where = location.origin + location.pathname + "#" + id;
+    var cite = "Bourbaki, " + document.title.replace(/\s+·\s+Bourbaki\s*$/, "").replace(/\s+·\s+/g, ", ") + (tag ? ", Tag " + tag : "");
+    return title + "\n\n" + body + "\n\n— " + cite + ". <" + where + ">\n";
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise(function (ok, fail) {
+      var t = document.createElement("textarea");
+      t.value = text; t.style.position = "fixed"; t.style.opacity = "0";
+      document.body.appendChild(t); t.select();
+      try { document.execCommand("copy") ? ok() : fail(); } catch (e) { fail(e); }
+      t.remove();
+    });
+  }
+  var copyIcon = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="5" y="5" width="8.5" height="8.5" rx="1"/><path d="M3 10.5V3.5A1 1 0 0 1 4 2.5h6.5"/></svg>';
+  document.querySelectorAll(".doc .stmt[data-label]").forEach(function (box) {
+    var b = document.createElement("button");
+    b.type = "button";
+    b.className = "copy";
+    var words = document.body.dataset.copy || "Copy as Markdown";
+    b.title = words;
+    b.setAttribute("aria-label", words);
+    b.innerHTML = copyIcon + "<span>Markdown</span>";
+    b.addEventListener("click", function () {
+      source().then(function (text) {
+        var out = cut(text, box.dataset.label);
+        if (!out) return Promise.reject("not found");
+        return copyText(out);
+      }).then(function () {
+        b.classList.add("done");
+        b.lastChild.textContent = document.body.dataset.copied || "Copied";
+        setTimeout(function () { b.classList.remove("done"); b.lastChild.textContent = "Markdown"; }, 1600);
+      }).catch(function () {});
+    });
+    box.appendChild(b);
+  });
+
+  // The statement index: a kind, words to filter by, and the most cited first.
+  var ix = document.querySelector("[data-ix]");
+  if (ix) {
+    var rows = Array.prototype.slice.call(document.querySelectorAll(".ix .ix-list li"));
+    var homes = rows.map(function (li) { return li.parentNode; });
+    var kind = "", q = ix.querySelector(".ix-q"), sortBox = ix.querySelector("[data-sort]");
+    var flat = document.createElement("ul");
+    flat.className = "ix-list ix-flat";
+    flat.hidden = true;
+    document.querySelector(".ix").appendChild(flat);
+    var apply = function () {
+      var words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+      rows.forEach(function (li) {
+        var hay = li.textContent.toLowerCase();
+        li.hidden = !((!kind || li.dataset.k === kind) && words.every(function (w) { return hay.indexOf(w) >= 0; }));
+      });
+      var sorted = sortBox && sortBox.checked;
+      document.querySelectorAll(".ix-sec").forEach(function (sec) { sec.hidden = sorted || !sec.querySelector("li:not([hidden])"); });
+      document.querySelectorAll(".ix-ch").forEach(function (c) { c.hidden = sorted || !c.querySelector(".ix-sec:not([hidden])"); });
+    };
+    var order = function () {
+      if (sortBox.checked) {
+        rows.slice().sort(function (a, b) { return (+b.dataset.n) - (+a.dataset.n); }).forEach(function (li) { flat.appendChild(li); });
+        flat.hidden = false;
+      } else {
+        rows.forEach(function (li, i) { homes[i].appendChild(li); });
+        flat.hidden = true;
+      }
+      apply();
+    };
+    ix.querySelectorAll("[data-k]").forEach(function (c) {
+      c.addEventListener("click", function () {
+        kind = c.dataset.k;
+        ix.querySelectorAll("[data-k]").forEach(function (o) { o.classList.toggle("on", o === c); });
+        apply();
+      });
+    });
+    q.addEventListener("input", apply);
+    if (sortBox) sortBox.addEventListener("change", order);
   }
 
   // A preview of what a reference points at, on hover, so that a reader can
