@@ -225,6 +225,16 @@
   });
 
   // The statement index: a kind, words to filter by, and the most cited first.
+  // The tag lookup goes straight to the tag's page: a tag is four characters
+  // and its URL is the only thing it needs to resolve to.
+  document.querySelectorAll("[data-taggo]").forEach(function (f) {
+    f.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var t = f.elements.t.value.trim().toUpperCase();
+      if (/^[0-9A-Z]{4}$/.test(t)) location.href = f.getAttribute("action") + t + "/";
+    });
+  });
+
   var ix = document.querySelector("[data-ix]");
   if (ix) {
     var rows = Array.prototype.slice.call(document.querySelectorAll(".ix .ix-list li"));

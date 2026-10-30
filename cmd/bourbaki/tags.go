@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -170,9 +171,39 @@ func runTagsAssign(args []string) error {
 	if err := set.Save(root); err != nil {
 		return err
 	}
+	before, err := sectionHashes(root, langs)
+	if err != nil {
+		return err
+	}
 	n := 0
 	for _, lang := range langs {
-		w, err := writeTags(root, lang, set.Lookup())
+		w, err := writeTags(root, lang, set.Lookup(), nil)
+		if err != nil {
+			return err
+		}
+		n += w
+	}
+	// A translation carries the tag of the printing it translates (T07), so it
+	// is written too. A tag changes the body and so the content_sha256 of the
+	// printing, and a translation that was current before the tag went in is
+	// still current after it: its source hash moves with the printing's, or
+	// every translation of a newly tagged volume would be reported stale.
+	after, err := sectionHashes(root, langs)
+	if err != nil {
+		return err
+	}
+	moved := map[string][2]string{}
+	for path, old := range before {
+		if now := after[path]; now != old {
+			moved[path] = [2]string{old, now}
+		}
+	}
+	trans, err := translations(root, langs)
+	if err != nil {
+		return err
+	}
+	for _, lang := range trans {
+		w, err := writeTags(root, lang, set.Lookup(), moved)
 		if err != nil {
 			return err
 		}
@@ -221,7 +252,11 @@ func inVolume(path string, v *corpus.Book) bool {
 // front matter. Both go back through the same writer the rest of the corpus
 // uses, so content_sha256 is recomputed and a translation made from the old
 // text is correctly reported stale.
-func writeTags(root, lang string, tagOf map[string]tags.Tag) (int, error) {
+//
+// moved maps a printing, by its path under root, to its content_sha256 before
+// and after the tags went in; a translation whose source hash is the old one is
+// moved to the new one.
+func writeTags(root, lang string, tagOf map[string]tags.Tag, moved map[string][2]string) (int, error) {
 	paths, err := contentFiles(root, lang)
 	if err != nil {
 		return 0, err
@@ -244,6 +279,9 @@ func writeTags(root, lang string, tagOf map[string]tags.Tag) (int, error) {
 				return 0, err
 			}
 			f.Body = tags.Apply(f.Body, tagOf)
+			if h, ok := moved[f.Meta.TranslatedFrom]; ok && f.Meta.SourceSHA256 == h[0] {
+				f.Meta.SourceSHA256 = h[1]
+			}
 			if out, err = f.Bytes(); err != nil {
 				return 0, err
 			}
@@ -261,6 +299,49 @@ func writeTags(root, lang string, tagOf map[string]tags.Tag) (int, error) {
 		n++
 	}
 	return n, nil
+}
+
+// sectionHashes is the content_sha256 each section of the printings records,
+// keyed by its path under root the way translated_from names it.
+func sectionHashes(root string, langs []string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, lang := range langs {
+		paths, err := contentFiles(root, lang)
+		if err != nil {
+			return nil, err
+		}
+		for _, path := range paths {
+			if isExercise(path) {
+				continue
+			}
+			f, err := corpus.ReadFile[corpus.SectionFrontMatter](path)
+			if err != nil {
+				return nil, err
+			}
+			r, err := filepath.Rel(root, path)
+			if err != nil {
+				return nil, err
+			}
+			out[filepath.ToSlash(r)] = f.Meta.ContentSHA256
+		}
+	}
+	return out, nil
+}
+
+// translations is every language under content/ that is not a printing. The
+// solutions are not a language and carry no statement headings.
+func translations(root string, printings []string) ([]string, error) {
+	ents, err := os.ReadDir(filepath.Join(root, "content"))
+	if err != nil {
+		return nil, err
+	}
+	var out []string
+	for _, e := range ents {
+		if e.IsDir() && e.Name() != "solutions" && !slices.Contains(printings, e.Name()) {
+			out = append(out, e.Name())
+		}
+	}
+	return out, nil
 }
 
 func contentFiles(root, lang string) ([]string, error) {

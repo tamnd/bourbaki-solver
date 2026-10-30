@@ -18,6 +18,7 @@ import (
 	"github.com/tamnd/bourbaki-solver/katex"
 	"github.com/tamnd/bourbaki-solver/mathtex"
 	"github.com/tamnd/bourbaki-solver/quality"
+	tagset "github.com/tamnd/bourbaki-solver/tags"
 )
 
 // Build writes the whole site under out and returns the paths it wrote,
@@ -292,6 +293,21 @@ func (s *Site) Build(out string) ([]string, error) {
 	}
 	if err := write("tags/index.html", table); err != nil {
 		return nil, err
+	}
+	entries, _, err := s.Tags()
+	if err != nil {
+		return nil, err
+	}
+	tbs, secOf, chapName := s.tagBooks(entries)
+	for _, tb := range tbs {
+		rel := path.Join("tags", tb.ID, "index.html")
+		body, err := s.tagBookPage(tb, secOf, chapName)
+		if !keep(rel, err) {
+			continue
+		}
+		if err := write(rel, body); err != nil {
+			return nil, err
+		}
 	}
 
 	// One index per language, fetched by the search page and by nothing else.
@@ -684,34 +700,239 @@ func missing(label string) string {
 	return "not in this corpus"
 }
 
+// tagKey is one § of one Book, whichever printing it is read in, which is what
+// the tags of a Book are grouped under.
+type tagKey struct {
+	Book, Chapter string
+	App           bool
+	N             int
+}
+
+// tagRow is one tag on the page of its Book.
+type tagRow struct {
+	Tag, Label, Kind, Name string
+	Key                    tagKey
+	Out                    bool
+}
+
+// tagBook is a Book's tags, by § in the order the Book prints them.
+type tagBook struct {
+	ID         string
+	Keys       []tagKey
+	Rows       map[tagKey][]tagRow
+	Statements int
+	Exercises  int
+	Missing    int
+}
+
+// tagBooks puts every tag under the Book and the § it names. The order of the
+// §§ is the French printing's, which is the whole of the Éléments, with what
+// only another language holds after it; a chapter is named the English way
+// where the English has it.
+func (s *Site) tagBooks(entries []tagset.Entry) ([]*tagBook, map[tagKey]*Section, map[string]string) {
+	order := map[tagKey]int{}
+	secOf := map[tagKey]*Section{}
+	chapName := map[string]string{}
+	langs := append([]string{"fr", "en"}, s.Langs...)
+	for _, lang := range langs {
+		for _, sh := range s.books(lang) {
+			for _, c := range sh.Chaps {
+				if _, ok := chapName[sh.Book+"/"+c.Name]; !ok || lang == "en" {
+					chapName[sh.Book+"/"+c.Name] = chapLabel(lang, c)
+				}
+				for _, sec := range c.Sections {
+					k := tagKey{sh.Book, sec.Meta.Chapter, sec.Meta.Appendix, sec.Meta.Section}
+					if _, ok := order[k]; !ok {
+						order[k] = len(order)
+					}
+					if secOf[k] == nil || lang == "en" {
+						secOf[k] = sec
+					}
+				}
+			}
+		}
+	}
+	books := map[string]*tagBook{}
+	for _, e := range entries {
+		r := tagRow{Tag: string(e.Tag), Label: e.Label}
+		switch st, ex := s.Tag(r.Tag), s.ExerciseTag(r.Tag); {
+		case st != nil:
+			r.Kind = labelKind(st.Label)
+			for _, l := range langs {
+				if sec := st.Sections[l]; sec != nil {
+					r.Name = st.Units[l].Heading.Text
+					r.Key = tagKey{sec.Meta.Book, sec.Meta.Chapter, sec.Meta.Appendix, sec.Meta.Section}
+					break
+				}
+			}
+		case ex != nil:
+			r.Kind = "exercise"
+			r.Name = ex.Name()
+			r.Key = tagKey{ex.Meta.Book, ex.Meta.Chapter, ex.Meta.Appendix, ex.Meta.Section}
+		default:
+			r.Kind, r.Name, r.Out = labelKind(e.Label), e.Label, true
+			if ref, err := corpus.ParseLabel(e.Label); err == nil && ref.Kind == corpus.KindExercise {
+				r.Kind = "exercise"
+			}
+			r.Key.Book, _, _ = strings.Cut(e.Label, "-")
+		}
+		tb := books[r.Key.Book]
+		if tb == nil {
+			tb = &tagBook{ID: r.Key.Book, Rows: map[tagKey][]tagRow{}}
+			books[r.Key.Book] = tb
+		}
+		if _, ok := tb.Rows[r.Key]; !ok {
+			tb.Keys = append(tb.Keys, r.Key)
+		}
+		tb.Rows[r.Key] = append(tb.Rows[r.Key], r)
+		switch {
+		case r.Out:
+			tb.Missing++
+		case r.Kind == "exercise":
+			tb.Exercises++
+		default:
+			tb.Statements++
+		}
+	}
+	var out []*tagBook
+	add := func(tb *tagBook) {
+		sort.SliceStable(tb.Keys, func(i, j int) bool {
+			oi, iok := order[tb.Keys[i]]
+			oj, jok := order[tb.Keys[j]]
+			if iok != jok {
+				return iok
+			}
+			return oi < oj
+		})
+		out = append(out, tb)
+	}
+	for _, b := range bookList {
+		if tb := books[b.ID]; tb != nil {
+			add(tb)
+			delete(books, b.ID)
+		}
+	}
+	var rest []string
+	for id := range books {
+		rest = append(rest, id)
+	}
+	sort.Strings(rest)
+	for _, id := range rest {
+		add(books[id])
+	}
+	return out, secOf, chapName
+}
+
+// TagsURL is the tags of one Book, or the list of Books with no argument.
+func (s *Site) TagsURL(book ...string) string { return s.url(append([]string{"tags"}, book...)...) }
+
+// tagLookup is the box that takes a reader from a tag they were given to its
+// page, which is the one thing a tag is for.
+func (s *Site) tagLookup(b *strings.Builder) {
+	fmt.Fprintf(b, "<form class=\"tag-go\" data-taggo action=%q><input name=\"t\" placeholder=\"0AZ1\" maxlength=\"4\" "+
+		"autocomplete=\"off\" spellcheck=\"false\" aria-label=\"Tag\" pattern=\"[0-9A-Za-z]{4}\" required>"+
+		"<button type=\"submit\">Go to tag</button></form>\n", s.url("tag"))
+}
+
+// tagTable is /tags/: what a tag is, the box that looks one up, and every Book
+// with how many of its statements and exercises have one.
 func (s *Site) tagTable() (string, error) {
 	entries, retired, err := s.Tags()
 	if err != nil {
 		return "", err
 	}
+	books, _, _ := s.tagBooks(entries)
 	var b strings.Builder
-	fmt.Fprintf(&b, "<h1>Tags</h1>\n<p>%d tags, %d retired. A tag is assigned once and never reused, "+
-		"so a citation of one stays good across every renumbering of the text.</p>\n",
+	fmt.Fprintf(&b, "<header class=\"doc-head\"><p class=\"eyebrow\">Bourbaki</p><h1>Tags</h1><p class=\"lede\">%d tags, %d retired. "+
+		"Every definition, theorem, proposition, lemma, corollary, remark, example and exercise has a tag of four characters. "+
+		"A tag is assigned once and never reused, so a citation of one, <code>[Bourbaki, Tag 0AZ1]</code>, stays good across every renumbering of the text.</p></header>\n",
 		len(entries), len(retired))
-	b.WriteString("<table class=\"tags\">\n<tr><th>tag</th><th>statement</th></tr>\n")
-	for _, e := range entries {
-		label := template.HTMLEscapeString(e.Label)
-		// A statement and an exercise both have a tag page, and the row is the
-		// same row either way: the promise a tag makes is that the URL resolves,
-		// not that what it resolves to is a theorem.
-		if s.Tag(string(e.Tag)) != nil || s.ExerciseTag(string(e.Tag)) != nil {
-			fmt.Fprintf(&b, "<tr><td><a href=%q>%s</a></td><td>%s</td></tr>\n",
-				s.TagURL(string(e.Tag)), e.Tag, label)
+	s.tagLookup(&b)
+	b.WriteString("<table class=\"ix-books tag-books\"><thead><tr><th>Book</th><th>Statements</th><th>Exercises</th><th></th></tr></thead><tbody>\n")
+	for _, tb := range books {
+		fmt.Fprintf(&b, "<tr><th><a href=%q>%s</a></th><td>%d</td><td>%d</td><td>", s.TagsURL(tb.ID), esc(bookName("en", tb.ID, tb.ID)), tb.Statements, tb.Exercises)
+		for _, l := range []string{"en", "fr"} {
+			if s.shelfOf(l, tb.ID) != nil {
+				fmt.Fprintf(&b, "<a href=%q>%s</a> ", s.StatementsURL(l, tb.ID), esc(T(l, "ix.title")))
+				break
+			}
+		}
+		b.WriteString("</td></tr>\n")
+	}
+	b.WriteString("</tbody></table>\n")
+	return s.render(layout{Title: "Tags", Here: "tags", Wide: true, Content: template.HTML(b.String())})
+}
+
+// tagBookPage is /tags/<book>/: every tag of one Book under its chapter and §,
+// with the chips and the filter of the statement index.
+func (s *Site) tagBookPage(tb *tagBook, secOf map[tagKey]*Section, chapName map[string]string) (string, error) {
+	var b strings.Builder
+	name := bookName("en", tb.ID, tb.ID)
+	fmt.Fprintf(&b, "<header class=\"doc-head\"><p class=\"eyebrow\"><a href=%q>Tags</a></p><h1>%s</h1>", s.TagsURL(), esc(name))
+	fmt.Fprintf(&b, "<p class=\"lede\">The tags of %d statements and %d exercises, by chapter and §. Each tag is the permanent address of what it names.</p></header>\n",
+		tb.Statements, tb.Exercises)
+	s.tagLookup(&b)
+	count := map[string]int{}
+	total := 0
+	for _, rs := range tb.Rows {
+		for _, r := range rs {
+			count[r.Kind]++
+			total++
+		}
+	}
+	b.WriteString("<div class=\"ix-tools\" data-ix>\n")
+	fmt.Fprintf(&b, "<button type=\"button\" class=\"chip on\" data-k=\"\">All <span class=\"x\">%d</span></button>\n", total)
+	for _, k := range append(kinds, "exercise") {
+		if count[k] == 0 {
 			continue
 		}
-		// A tag with no page is printed and marked rather than left out, since a
-		// tag table that quietly holds back a third of the tags is worse than no
-		// table.
-		fmt.Fprintf(&b, "<tr><td>%s</td><td>%s <span class=\"out\">%s</span></td></tr>\n",
-			e.Tag, label, missing(e.Label))
+		n := kindName("en", k)
+		if k == "exercise" {
+			n = "Exercises"
+		}
+		fmt.Fprintf(&b, "<button type=\"button\" class=\"chip k-%s\" data-k=\"%s\"><span class=\"dot\"></span>%s <span class=\"x\">%d</span></button>\n",
+			k, k, esc(n), count[k])
 	}
-	b.WriteString("</table>\n")
-	return s.render(layout{Title: "Tags", Here: "tags", Wide: true, Content: template.HTML(b.String())})
+	b.WriteString("<input type=\"search\" class=\"ix-q\" placeholder=\"Filter by tag, name or label\" aria-label=\"Filter\">\n</div>\n<div class=\"ix\">\n")
+	open := ""
+	for _, k := range tb.Keys {
+		if k.Chapter != open {
+			if open != "" {
+				b.WriteString("</section>\n")
+			}
+			open = k.Chapter
+			title := chapName[tb.ID+"/"+k.Chapter]
+			if title == "" {
+				title = "Chapter " + k.Chapter
+			}
+			if k.Chapter == "" {
+				title = "Not in this corpus"
+			}
+			fmt.Fprintf(&b, "<section class=\"ix-ch\"><h2 id=\"ch-%s\">%s</h2>\n", esc(k.Chapter), esc(title))
+		}
+		b.WriteString("<div class=\"ix-sec\">")
+		if sec := secOf[k]; sec != nil {
+			fmt.Fprintf(&b, "<h3><a href=%q>%s</a></h3>", s.SectionURL(sec), esc(navName(sec)))
+		}
+		b.WriteString("\n<ul class=\"ix-list\">\n")
+		for _, r := range tb.Rows[k] {
+			if r.Out {
+				fmt.Fprintf(&b, "<li class=\"k-%s\" data-k=\"%s\"><span class=\"dot\"></span><b>%s</b> <span class=\"where\">%s</span> <span class=\"tag\">%s</span></li>\n",
+					r.Kind, r.Kind, esc(r.Name), esc(missing(r.Label)), r.Tag)
+				continue
+			}
+			fmt.Fprintf(&b, "<li class=\"k-%s\" data-k=\"%s\"><a href=%q><span class=\"dot\"></span><b>%s</b></a> <span class=\"where\">%s</span> <a class=\"tag\" href=%q>%s</a></li>\n",
+				r.Kind, r.Kind, s.TagURL(r.Tag), esc(r.Name), esc(r.Label), s.TagURL(r.Tag), r.Tag)
+		}
+		b.WriteString("</ul></div>\n")
+	}
+	if open != "" {
+		b.WriteString("</section>\n")
+	}
+	b.WriteString("</div>\n")
+	return s.render(layout{Title: "Tags · " + name, Here: "tags", Wide: true,
+		Crumbs:  []crumb{{"Tags", s.TagsURL()}},
+		Content: template.HTML(b.String())})
 }
 
 // gzipped is body compressed, with no name and no time in the header, so that
