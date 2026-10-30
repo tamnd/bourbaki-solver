@@ -796,3 +796,13 @@ func TestAMathMLBuildIsMathMLAlone(t *testing.T) {
 		t.Error("a MathML build does not say so to the stylesheet")
 	}
 }
+
+// A page with only its heading lists the chapter instead of standing empty.
+func TestHeadingsOnly(t *testing.T) {
+	if !headingsOnly("<h2 id=\"x\">CHƯƠNG I <em>Mô tả</em></h2>\n") {
+		t.Error("a page of one heading is not seen as empty")
+	}
+	if headingsOnly("<h2>I</h2>\n<p>Text.</p>") {
+		t.Error("a page with prose is seen as empty")
+	}
+}

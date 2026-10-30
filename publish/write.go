@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -418,6 +419,13 @@ func (s *Site) section(sec *Section) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// A page with nothing but its heading, the opening page of a chapter in
+	// most Books, would be a dead end; it lists what the chapter holds instead.
+	if headingsOnly(body) {
+		if c := s.chapterOf(sec); c != nil && len(c.Sections) > 1 {
+			body += fmt.Sprintf("<h2>%s</h2>\n", esc(T(sec.Lang, "contents"))) + s.toc(sec.Lang, c.Sections, sec)
+		}
+	}
 	langs := s.langLinks(sec.Lang, func(lang string) string {
 		if other := s.sectionIn(lang, sec); other != nil {
 			return s.SectionURL(other)
@@ -437,6 +445,16 @@ func (s *Site) section(sec *Section) (string, error) {
 		Note:    provenance(sec),
 		Content: template.HTML(body),
 	})
+}
+
+var (
+	headingRe = regexp.MustCompile(`(?s)<h[1-6][^>]*>.*?</h[1-6]>`)
+	tagRe     = regexp.MustCompile(`<[^>]*>`)
+)
+
+// headingsOnly says whether rendered HTML holds no text outside its headings.
+func headingsOnly(body string) bool {
+	return strings.TrimSpace(tagRe.ReplaceAllString(headingRe.ReplaceAllString(body, ""), "")) == ""
 }
 
 // hasChapter says whether a language holds any of a chapter.

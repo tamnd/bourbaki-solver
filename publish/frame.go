@@ -689,19 +689,7 @@ func (s *Site) chapter(k chapterKey) (string, error) {
 	fmt.Fprintf(&b, "<header class=\"doc-head\"><p class=\"eyebrow\"><a href=%q>%s</a> · %s</p><h1>%s</h1></header>\n",
 		s.BookURL(lang, k.Book), esc(bookName(lang, k.Book, k.BookTitle)), esc(chapterWord(lang, k.Chapter)),
 		esc(orWord(lang, c)))
-	b.WriteString("<ul class=\"toc\">\n")
-	for _, sec := range c.Sections {
-		fmt.Fprintf(&b, "<li><a href=%q>%s</a> <span class=\"count\">%d %s",
-			s.SectionURL(sec), esc(navName(sec)), sec.Meta.Statements, esc(T(lang, "statements")))
-		if s.hasExercises(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug) {
-			fmt.Fprintf(&b, " · <a href=%q>%d %s</a>",
-				s.ExercisesURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug), sec.Meta.Exercises, esc(T(lang, "exercisesN")))
-		} else if sec.Meta.Exercises > 0 {
-			fmt.Fprintf(&b, " · %d %s", sec.Meta.Exercises, esc(T(lang, "exercisesN")))
-		}
-		b.WriteString("</span></li>\n")
-	}
-	b.WriteString("</ul>\n")
+	b.WriteString(s.toc(lang, c.Sections, nil))
 	langs := s.langLinks(lang, func(l string) string {
 		if !s.hasChapter(l, k.Book, k.Chapter) {
 			return ""
@@ -717,6 +705,42 @@ func (s *Site) chapter(k chapterKey) (string, error) {
 		Crumbs: []crumb{{T(lang, "library"), s.url(homeLang(lang))},
 			{bookName(lang, k.Book, k.BookTitle), s.BookURL(lang, k.Book)}},
 		Content: template.HTML(b.String())})
+}
+
+// toc lists the sections of a chapter with their counts, leaving out skip.
+func (s *Site) toc(lang string, secs []*Section, skip *Section) string {
+	var b strings.Builder
+	b.WriteString("<ul class=\"toc\">\n")
+	for _, sec := range secs {
+		if sec == skip {
+			continue
+		}
+		fmt.Fprintf(&b, "<li><a href=%q>%s</a> <span class=\"count\">%d %s",
+			s.SectionURL(sec), esc(navName(sec)), sec.Meta.Statements, esc(T(lang, "statements")))
+		if s.hasExercises(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug) {
+			fmt.Fprintf(&b, " · <a href=%q>%d %s</a>",
+				s.ExercisesURL(sec.Lang, sec.Meta.Book, sec.Meta.Chapter, sec.Slug), sec.Meta.Exercises, esc(T(lang, "exercisesN")))
+		} else if sec.Meta.Exercises > 0 {
+			fmt.Fprintf(&b, " · %d %s", sec.Meta.Exercises, esc(T(lang, "exercisesN")))
+		}
+		b.WriteString("</span></li>\n")
+	}
+	b.WriteString("</ul>\n")
+	return b.String()
+}
+
+// chapterOf is the chapter a section sits in, as the navigation holds it.
+func (s *Site) chapterOf(sec *Section) *chap {
+	if sh := s.shelfOf(sec.Lang, sec.Meta.Book); sh != nil {
+		for _, c := range sh.Chaps {
+			for _, x := range c.Sections {
+				if x == sec {
+					return c
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // sectionCrumbs is the trail above a § or an exercise.
