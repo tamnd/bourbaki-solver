@@ -435,13 +435,8 @@ func parts(b *strings.Builder, list []corpus.Part) {
 
 // solutionNote is the standing note every solution carries.
 func solutionNote(sol *Solution) string {
-	who := "a machine"
-	if sol.Meta.Model != "" {
-		who = sol.Meta.Model
-	}
-	note := fmt.Sprintf("This solution was written by %s and judged by a machine. "+
-		"It is not Bourbaki's and it has not been checked by a person.", who)
-	return note + statusNote(sol.Meta.Status)
+	return "This solution is not Bourbaki's. It was written and checked with the help of software " +
+		"and has not been reviewed by a person." + statusNote(sol.Meta.Status)
 }
 
 // statusNote is the sentence a status is worth to a reader.
@@ -453,28 +448,24 @@ func solutionNote(sol *Solution) string {
 func statusNote(status string) string {
 	switch status {
 	case corpus.StatusPartial:
-		return " Some parts of it passed that judgement and others did not. The table below says which."
+		return " Some parts of it passed that check and others did not. The table below says which."
 	case corpus.StatusUnverified:
-		return " It did not pass that judgement, and it is printed so that the failure is visible rather than hidden."
+		return " It did not pass that check, and it is shown anyway so that you can see where it falls short."
 	case corpus.StatusBlocked:
-		return " It turns on a result of a Book this corpus does not hold, so it could not be carried through."
+		return " It depends on a result from a Book not yet on this site, so it could not be finished."
 	case corpus.StatusOpen:
-		return " The exercise asks for exploration rather than a proof, so there is nothing here for a judge to pass."
+		return " The exercise asks for exploration rather than a proof, so there is nothing here to check."
 	}
 	return ""
 }
 
-// exerciseProvenance is the footer line, which says who wrote the text of the
-// exercise and not who wrote the solution.
+// exerciseProvenance is the footer line, which says where the text of the
+// exercise comes from and not who wrote the solution.
 func exerciseProvenance(ex *Exercise) string {
 	if ex.Meta.TranslatedFrom == "" {
 		return T(ex.Lang, "p.printed")
 	}
-	note := T(ex.Lang, "p.mt")
-	if ex.Meta.TranslationModel != "" {
-		note += fmt.Sprintf(T(ex.Lang, "p.by"), ex.Meta.TranslationModel)
-	}
-	return note + T(ex.Lang, "p.unchecked") + cutDown(ex.Lang, ex.Meta.TranslationModel)
+	return T(ex.Lang, "p.mt") + T(ex.Lang, "p.unchecked")
 }
 
 // exerciseList is the page at <§>/ex/.

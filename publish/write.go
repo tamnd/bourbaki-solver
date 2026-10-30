@@ -17,7 +17,6 @@ import (
 	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/katex"
 	"github.com/tamnd/bourbaki-solver/mathtex"
-	"github.com/tamnd/bourbaki-solver/quality"
 	tagset "github.com/tamnd/bourbaki-solver/tags"
 )
 
@@ -398,7 +397,7 @@ func (s *Site) marked(ref Refusal) string {
 	// and the browser would print the escapes, so the attribute is escaped as
 	// HTML and not as Go.
 	return fmt.Sprintf(`<%s class="%s" title="%s">%s</%s>`, el, class,
-		template.HTMLEscapeString("this formula is broken in the corpus and could not be set: "+ref.Why),
+		template.HTMLEscapeString("this formula could not be typeset: "+ref.Why),
 		template.HTMLEscapeString(delim(ref)), el)
 }
 
@@ -460,9 +459,7 @@ func (s *Site) sectionIn(lang string, sec *Section) *Section {
 	return nil
 }
 
-// provenance is the line every page carries saying who wrote the text on it. A
-// reader deciding whether to trust a sentence has more right to this than the
-// audit does.
+// provenance is the line every page carries saying where its text comes from.
 func provenance(sec *Section) string {
 	lang := sec.Lang
 	if sec.Meta.TranslatedFrom == "" {
@@ -473,26 +470,7 @@ func provenance(sec *Section) string {
 		}
 		return fmt.Sprintf(T(lang, "p.edition"), sec.Meta.SourceEdition)
 	}
-	note := T(lang, "p.mt") + fmt.Sprintf(T(lang, "p.by"), sec.Meta.TranslationModel)
-	if sec.Meta.GlossaryVersion > 0 {
-		note += fmt.Sprintf(T(lang, "p.gloss"), sec.Meta.GlossaryVersion)
-	}
-	return note + T(lang, "p.unchecked") + cutDown(lang, sec.Meta.TranslationModel)
-}
-
-// cutDown is the extra sentence a page written by a smaller model carries.
-//
-// The rule is quality.SmallModel, which is L08's rule, because two answers to
-// "is this a cut down model" is one answer too many. The audit knows this and
-// records it as a soft finding, and the reader of the page has more right to it
-// than the audit does: nobody chose the model, the account was moved down
-// between one section and the next, and the only place that fact reaches
-// somebody reading the Vietnamese is here.
-func cutDown(lang, model string) string {
-	if !quality.SmallModel(model) {
-		return ""
-	}
-	return T(lang, "p.cut")
+	return T(lang, "p.mt") + T(lang, "p.unchecked")
 }
 
 // printed is where the book puts a statement, written the way the book writes
@@ -684,7 +662,7 @@ func (s *Site) list(b *strings.Builder, lang, key string, edges []*Edge, of func
 // volume and stays visible.
 func note(e *Edge, label string) string {
 	if e.Book != "" {
-		return template.HTMLEscapeString("not in this corpus: " + e.Book + " " + e.Chapter)
+		return template.HTMLEscapeString("not yet on this site: " + e.Book + " " + e.Chapter)
 	}
 	return missing(label)
 }
@@ -695,9 +673,9 @@ func note(e *Edge, label string) string {
 // different work.
 func missing(label string) string {
 	if ref, err := corpus.ParseLabel(label); err == nil && ref.Kind == corpus.KindExercise {
-		return "an exercise the corpus does not hold"
+		return "an exercise not yet on this site"
 	}
-	return "not in this corpus"
+	return "not yet on this site"
 }
 
 // tagKey is one § of one Book, whichever printing it is read in, which is what
@@ -906,7 +884,7 @@ func (s *Site) tagBookPage(tb *tagBook, secOf map[tagKey]*Section, chapName map[
 				title = "Chapter " + k.Chapter
 			}
 			if k.Chapter == "" {
-				title = "Not in this corpus"
+				title = "Not yet on this site"
 			}
 			fmt.Fprintf(&b, "<section class=\"ix-ch\"><h2 id=\"ch-%s\">%s</h2>\n", esc(k.Chapter), esc(title))
 		}

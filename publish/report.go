@@ -86,9 +86,9 @@ func titleAndIntro(md string) (string, string) {
 func (s *Site) reportIndex(rs []reportFile) (string, error) {
 	var b strings.Builder
 	b.WriteString("<h1>Reports</h1>\n")
-	b.WriteString("<p>Generated out of the corpus by the tools and committed to it, so that each one is " +
-		"regenerated and diffed on every change and none of them can quietly go stale. They are the part " +
-		"of this that says what is wrong with it.</p>\n")
+	b.WriteString("<p>These lists are regenerated from the text every time it changes. They are where the " +
+		"known gaps are kept: references that do not lead anywhere yet, statements without a page " +
+		"number, and the like.</p>\n")
 	if len(rs) == 0 {
 		b.WriteString("<p class=\"none\">This clone holds no report. They are written by " +
 			"<code>bourbaki refs build</code> and <code>bourbaki audit</code>.</p>\n")

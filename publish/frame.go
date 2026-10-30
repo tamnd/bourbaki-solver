@@ -495,9 +495,9 @@ func (s *Site) front() (string, error) {
 		b.WriteString("</span></div></li>\n")
 	}
 	b.WriteString("</ul>\n")
-	fmt.Fprintf(&b, "<p class=\"subtitle\">%s Of %d cross-references found, %d do not resolve. "+
+	fmt.Fprintf(&b, "<p class=\"subtitle\">%s "+
 		"<a href=%q>About</a> · <a href=%q>Tags</a> · <a href=%q>Reports</a></p>\n",
-		esc(T("en", "personal")), s.Edges, s.Unresolved, s.url("about"), s.url("tags"), s.url("reports"))
+		esc(T("en", "personal")), s.url("about"), s.url("tags"), s.url("reports"))
 	langs := s.langLinks("", func(l string) string { return s.url(l) })
 	return s.render(layout{Title: "Bourbaki · Éléments de mathématique", Lang: "fr", UI: "en", Wide: true,
 		Here: "home", Langs: langs, Content: template.HTML(b.String())})
@@ -533,8 +533,8 @@ func (s *Site) library(lang string) (string, error) {
 		"<p class=\"lede\">%s</p></header>\n", esc(T(lang, "library")), esc(native(lang)),
 		esc(T(lang, "books")), esc(T(lang, "tagline")))
 	if lang == "en-mt" {
-		fmt.Fprintf(&b, "<p class=\"tombstone\">These are the Books and chapters printed only in French, in a %s. "+
-			"Not checked by a person.</p>\n", esc(T(lang, "mt")))
+		fmt.Fprintf(&b, "<p class=\"tombstone\">These Books and chapters were only ever printed in French. The English "+
+			"here is %s with machine help and has not yet been reviewed by a person.</p>\n", esc(T(lang, "mt")))
 	}
 	fmt.Fprintf(&b, "<p class=\"chips\"><a class=\"chip\" href=%q><b>%s →</b> %s</a></p>\n",
 		s.url(lang, "statements"), esc(T(lang, "ix.title")), esc(T(lang, "ix.most")))
