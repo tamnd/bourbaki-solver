@@ -27,6 +27,8 @@ var kindNames = map[string]map[string]string{
 		"corollary": "Corollaires", "example": "Exemples", "remark": "Remarques", "other": "Autres"},
 	"vi": {"definition": "Định nghĩa", "theorem": "Định lý", "proposition": "Mệnh đề", "lemma": "Bổ đề",
 		"corollary": "Hệ quả", "example": "Ví dụ", "remark": "Nhận xét", "other": "Khác"},
+	"zh": {"definition": "定义", "theorem": "定理", "proposition": "命题", "lemma": "引理",
+		"corollary": "推论", "example": "例", "remark": "注", "other": "其他"},
 }
 
 func kindName(lang, kind string) string { return kindNames[uiLang(lang)][kind] }

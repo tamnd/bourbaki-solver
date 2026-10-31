@@ -162,7 +162,7 @@ func homeLang(lang string) string {
 // displayOrder is the order languages are offered in: the original first,
 // then the printed translation, then the rest, and the machine English last.
 func (s *Site) displayOrder() []string {
-	rank := map[string]int{"fr": 0, "en": 1, "vi": 2, "en-mt": 9}
+	rank := map[string]int{"fr": 0, "en": 1, "vi": 2, "zh": 3, "ja": 4, "en-mt": 9}
 	out := append([]string(nil), s.Langs...)
 	sort.SliceStable(out, func(i, j int) bool {
 		ri, ok := rank[out[i]]
