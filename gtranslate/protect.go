@@ -23,6 +23,7 @@ type Masked struct {
 	Text  string
 	keep  []string
 	pins  map[int]bool // tokens that stand for a word of prose and not for markup
+	cites map[int]bool // tokens that stand for a citation address
 	upper map[int]bool // pin tokens whose word opened a sentence
 }
 
@@ -44,11 +45,17 @@ var markup = []*regexp.Regexp{
 	regexp.MustCompile(`\]\([^)\s]*\)`),             // link targets, with the bracket that closes the text
 	regexp.MustCompile(`\{[#.][^}\n]*\}`),           // pandoc attributes
 	regexp.MustCompile(`(?m)^\s*(?:[-*_]\s*){3,}$`), // rules
-	// Citation addresses stay as the English writes them in every language.
-	regexp.MustCompile(`\b[IVXLC]+,\s*§§?\s*\d+(?:\s*,\s*[Nn]o\.\s*\d+)?|§§?\s*\d+(?:\s*,\s*[Nn]o\.\s*\d+)?|\b[Nn]o\.\s*\d+|\bp\.\s*\d+|\bcf\.`),
+	citation,
+	// The roman numeral that labels a paragraph, "**I. Localization.**":
+	// Google reads a lone I as the pronoun and gives back "我。".
+	regexp.MustCompile(`(?m)(?:^|\*\*)[IVXLC]+\.`),
 	// Labels written as plain text, alg-ii-s1-def-1 and the like.
 	regexp.MustCompile(`\b[a-z]{2,4}-[ivxlc0-9]+-[a-z0-9-]+\b`),
 }
+
+// citation is a citation address, which stays as the English writes it in
+// every language.
+var citation = regexp.MustCompile(`\b[IVXLC]+,\s*§§?\s*\d+(?:\s*,?\s*[Nn]o\.\s*\d+)?|§§?\s*\d+(?:\s*,?\s*[Nn]o\.\s*\d+)?|\b[Nn]o\.\s*\d+|\bp\.\s*\d+|\bcf\.`)
 
 // Mask takes the mathematics, the markup and the pinned terms out of body.
 //
@@ -57,7 +64,7 @@ var markup = []*regexp.Regexp{
 // off without it: Google leaves an "a" in front of a token it cannot read as a
 // noun, and that "a" comes back untranslated.
 func Mask(body string, pins []Pin, articles bool) Masked {
-	m := Masked{pins: map[int]bool{}, upper: map[int]bool{}}
+	m := Masked{pins: map[int]bool{}, upper: map[int]bool{}, cites: map[int]bool{}}
 	put := func(s string) string {
 		m.keep = append(m.keep, s)
 		return Token(len(m.keep) - 1)
@@ -88,7 +95,15 @@ func Mask(body string, pins []Pin, articles bool) Masked {
 	}
 
 	for _, re := range markup {
-		body = re.ReplaceAllStringFunc(body, put)
+		f := put
+		if re == citation {
+			f = func(s string) string {
+				t := put(s)
+				m.cites[len(m.keep)-1] = true
+				return t
+			}
+		}
+		body = re.ReplaceAllStringFunc(body, f)
 	}
 
 	if articles {
@@ -222,6 +237,11 @@ func (m Masked) Unmask(answer string) (string, error) {
 			// beside it. The space goes back where a letter touches it.
 			return "\x00" + s + "\x01"
 		}
+		if m.cites[n] {
+			// Google glues a token to what is in front of it, and "推论2§ 1" or
+			// "§ 2no. 5" is no longer read as a citation by anyone.
+			return "\x02" + s
+		}
 		return s
 	})
 	if bad != nil {
@@ -276,6 +296,11 @@ func respaceWords(s string) string {
 			case cjk(last) && cjk(next):
 				i = len(s) - len(rest)
 			case !cjk(last) && !cjk(next) && i < len(s) && (unicode.IsLetter(next) || unicode.IsDigit(next)) && rest == s[i:]:
+				b.WriteByte(' ')
+			}
+		case 2:
+			i++
+			if prev, _ := utf8.DecodeLastRuneInString(b.String()); prev < utf8.RuneSelf && (unicode.IsLetter(prev) || unicode.IsDigit(prev)) {
 				b.WriteByte(' ')
 			}
 		default:

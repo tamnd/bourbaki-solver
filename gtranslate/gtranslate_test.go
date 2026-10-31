@@ -254,3 +254,20 @@ func TestAnArticleOpeningAnEmphasisIsDropped(t *testing.T) {
 		t.Errorf("an article dropped going into a language that has them: %q", got)
 	}
 }
+
+func TestAGluedCitationIsSpacedApart(t *testing.T) {
+	m := Mask("Corollary 2 of § 1, no. 4 and Chapter II, § 2 no. 5.", nil, true)
+	got, err := m.Unmask("推论2⟦0⟧和章⟦1⟧。")
+	if err != nil || got != "推论2 § 1, no. 4和章II, § 2 no. 5。" {
+		t.Errorf("got %q %v", got, err)
+	}
+}
+
+func TestAWideHeadingAndARomanLabelComeBack(t *testing.T) {
+	if got := tidy("## Introduction\n", "＃＃ 介绍\n"); got != "## 介绍\n" {
+		t.Errorf("got %q", got)
+	}
+	if m := Mask("**I. Localization.** Let", nil, true); strings.Contains(m.Text, "I.") {
+		t.Errorf("the roman label went to Google: %s", m.Text)
+	}
+}

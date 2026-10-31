@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/tamnd/bourbaki-solver/glossary"
 )
@@ -16,7 +17,7 @@ import (
 // what is masked, what is pinned, what is corrected afterwards. It goes into
 // the prompt hash a draft records, so a change here restales the drafts it
 // would have written differently and nothing else.
-const Version = "gtranslate-4"
+const Version = "gtranslate-5"
 
 // PromptSHA256 is what a Google draft records as its prompt_sha256. A model
 // run has its own and so counts every draft stale, which is the point.
@@ -153,6 +154,7 @@ var (
 	spacedBold = regexp.MustCompile(`\*\*[ \t]+([^*\n]+?)[ \t]+\*\*`)
 	spacedLink = regexp.MustCompile(`[ \t]+\]\(`)
 	spacedHead = regexp.MustCompile(`(?m)^(#{1,6})([^#\s])`)
+	wideHead   = regexp.MustCompile(`(?m)^＃{1,6}`)
 )
 
 // tidy undoes what Google does to Markdown it does not know is Markdown. Each
@@ -165,6 +167,10 @@ func tidy(src, out string) string {
 	if !spacedLink.MatchString(src) {
 		out = spacedLink.ReplaceAllString(out, "](")
 	}
+	// Chinese Google writes a heading's number signs full width, "＃＃ 介绍".
+	out = wideHead.ReplaceAllStringFunc(out, func(h string) string {
+		return strings.Repeat("#", utf8.RuneCountInString(h))
+	})
 	if !spacedHead.MatchString(src) {
 		out = spacedHead.ReplaceAllString(out, "$1 $2")
 	}

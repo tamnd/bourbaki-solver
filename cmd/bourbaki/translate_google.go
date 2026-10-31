@@ -33,8 +33,12 @@ var hardRules = map[string]bool{
 	translate.RuleBibliography: true,
 }
 
-// ruleMathOrder is a math finding that only says the formulas moved.
-const ruleMathOrder = "math order"
+// ruleMathOrder is a math finding that only says the formulas moved, and
+// ruleReferenceOrder the same of the citations.
+const (
+	ruleMathOrder      = "math order"
+	ruleReferenceOrder = "reference order"
+)
 
 // reordered demotes the audit's math-in-order finding when the draft has
 // exactly the source's formulas, each as many times. Unmask has already made
@@ -42,13 +46,18 @@ const ruleMathOrder = "math order"
 // language that puts its clauses in another order: Chinese writes "for f in E,
 // the map (f, x) ↦ f(x)" the other way round, and refusing it would refuse
 // every page of Chinese.
+//
+// A citation finding that only says the order changed is demoted the same way:
+// the audit says it only when nothing is missing and nothing added, and
+// Chinese puts "of § 1" in front of the corollary it qualifies.
 func reordered(src, out string, problems []translate.Problem) []translate.Problem {
-	if !sameSpans(src, out) {
-		return problems
-	}
+	same := sameSpans(src, out)
 	for i, p := range problems {
-		if p.Rule == translate.RuleMath && strings.HasPrefix(p.Msg, "math span ") {
+		switch {
+		case same && p.Rule == translate.RuleMath && strings.HasPrefix(p.Msg, "math span "):
 			problems[i].Rule = ruleMathOrder
+		case p.Rule == translate.RuleReference && strings.HasPrefix(p.Msg, "cites the same things"):
+			problems[i].Rule = ruleReferenceOrder
 		}
 	}
 	return problems
