@@ -5,6 +5,7 @@ import (
 	"html/template"
 	"strings"
 
+	"github.com/tamnd/bourbaki-solver/corpus"
 	"github.com/tamnd/bourbaki-solver/quality"
 )
 
@@ -31,6 +32,7 @@ type langNumbers struct {
 	Statements int
 	Exercises  int
 	Translated bool
+	Rough      int // sections that are still a Google Translate draft
 }
 
 // numbers counts what this build loaded, once, for the front page and /about/.
@@ -48,6 +50,9 @@ func (s *Site) numbers() []langNumbers {
 		n.Statements += sec.Meta.Statements
 		if sec.Meta.TranslatedFrom != "" {
 			n.Translated = true
+		}
+		if sec.Meta.TranslationQuality == corpus.QualityLow {
+			n.Rough++
 		}
 	}
 	for _, ex := range s.Exercises {
@@ -77,6 +82,16 @@ func (n langNumbers) made() string {
 	return "transcribed from the printed volumes"
 }
 
+// rough says some page of this build is a Google Translate draft.
+func (s *Site) rough() bool {
+	for _, n := range s.numbers() {
+		if n.Rough > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Site) about() (string, error) {
 	var b strings.Builder
 	b.WriteString("<h1>About</h1>\n")
@@ -92,6 +107,9 @@ func (s *Site) about() (string, error) {
 		"<th>exercises</th><th></th></tr>\n")
 	for _, n := range s.numbers() {
 		note := n.made()
+		if n.Rough > 0 {
+			note += fmt.Sprintf("; %d sections are still a rough Google Translate draft", n.Rough)
+		}
 		if s.Draft[n.Lang] {
 			note += "; only partly done so far"
 		}
@@ -131,6 +149,13 @@ func (s *Site) about() (string, error) {
 		"can come out wrong and a statement can be cut in the wrong place. When something matters, check "+
 		"it against the printed volume, and if you find an error, please <a href=%q>report it</a>.</p>\n",
 		corpusRepo+"/issues")
+	if s.rough() {
+		b.WriteString("<p>Some pages are rough drafts made with Google Translate, so that a section can be " +
+			"read in a language before a careful translation of it exists. Each one says so in a box at the " +
+			"top. The mathematics, the references and the technical terms are kept out of Google's hands and " +
+			"put back afterwards, but the sentences around them can read badly or say the wrong thing. These " +
+			"drafts are being replaced one by one.</p>\n")
+	}
 
 	b.WriteString("<h2>Copyright</h2>\n")
 	fmt.Fprintf(&b, "<p><em>Éléments de mathématique</em> is copyright N. Bourbaki and its publishers, "+

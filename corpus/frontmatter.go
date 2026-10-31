@@ -72,8 +72,12 @@ type SectionFrontMatter struct {
 
 	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
-	TranslationRun   string `yaml:"translation_run,omitempty"`
-	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
+	// TranslationQuality is "low" on a draft written by Google Translate. It
+	// is a placeholder for a proper translation: the pages carry a warning, and
+	// an ordinary translate run counts the file stale and replaces it.
+	TranslationQuality string `yaml:"translation_quality,omitempty"`
+	TranslationRun     string `yaml:"translation_run,omitempty"`
+	GlossaryVersion    int    `yaml:"glossary_version,omitempty"`
 	// GlossaryTerms is the digest of the terminology this section was shown,
 	// which is the glossary rows its English mentions and not the whole file.
 	// It is what staleness is decided on, because glossary_version moves for
@@ -143,10 +147,14 @@ type ExerciseFrontMatter struct {
 
 	SourceSHA256     string `yaml:"source_content_sha256,omitempty"`
 	TranslationModel string `yaml:"translation_model,omitempty"`
-	TranslationRun   string `yaml:"translation_run,omitempty"`
-	GlossaryVersion  int    `yaml:"glossary_version,omitempty"`
-	GlossaryTerms    string `yaml:"glossary_terms_sha256,omitempty"`
-	PromptSHA256     string `yaml:"prompt_sha256,omitempty"`
+	// TranslationQuality is "low" on a draft written by Google Translate. It
+	// is a placeholder for a proper translation: the pages carry a warning, and
+	// an ordinary translate run counts the file stale and replaces it.
+	TranslationQuality string `yaml:"translation_quality,omitempty"`
+	TranslationRun     string `yaml:"translation_run,omitempty"`
+	GlossaryVersion    int    `yaml:"glossary_version,omitempty"`
+	GlossaryTerms      string `yaml:"glossary_terms_sha256,omitempty"`
+	PromptSHA256       string `yaml:"prompt_sha256,omitempty"`
 }
 
 // Erratum is a place where the printed page is wrong and the corpus keeps the
@@ -578,3 +586,9 @@ func SolutionPath(root, lang, label string) (string, error) {
 		strings.ToUpper(r.Chapter), ExerciseDir(r.Section, r.Appendix),
 		fmt.Sprintf("%02d.md", r.Number)), nil
 }
+
+// QualityLow is the translation_quality of a Google Translate draft.
+const QualityLow = "low"
+
+// GoogleModel is the translation_model a Google Translate draft records.
+const GoogleModel = "google-translate"

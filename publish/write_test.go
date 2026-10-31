@@ -335,6 +335,19 @@ func TestEveryPageSaysWhoWroteIt(t *testing.T) {
 	if got := provenance(&tr); got != want {
 		t.Errorf("a translated page says\n%s\nwant\n%s", got, want)
 	}
+
+	tr.Meta.TranslationModel = corpus.GoogleModel
+	tr.Meta.TranslationQuality = corpus.QualityLow
+	if got := provenance(&tr); !strings.Contains(got, "Google Translate, low quality") {
+		t.Errorf("a Google draft does not say so: %s", got)
+	}
+	page, err := s.section(&tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(page, `<p class="draft"`) {
+		t.Error("a Google draft has no warning at the top of the page")
+	}
 }
 
 // The mathematics is rendered here, so the fonts it is set in have to be part

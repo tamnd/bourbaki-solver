@@ -467,6 +467,7 @@ ul.toc li, ul.refs li { padding: .5rem .8rem; background: var(--surface); }
 .count, .out, .none { font-size: .88rem; }
 .where, .tagline, .subtitle, .marks { font-size: .92rem; }
 .warn { color: var(--warn); font-size: .88rem; }
+.draft { margin: 0 0 1.5rem; padding: .7rem 1rem; border-left: 3px solid #c58a00; background: color-mix(in srgb, #c58a00 10%, var(--surface)); font: .85rem/1.5 var(--sans); }
 .note { clear: both; margin-top: 3rem; padding: 1rem 1.2rem; background: var(--surface); font: .8rem/1.55 var(--sans); color: var(--muted); }
 .note::before { content: attr(data-label); display: block; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; font-size: .66rem; margin-bottom: .25rem; }
 .tombstone { background: var(--warn-soft); border-left: 3px solid var(--warn); padding: .9rem 1.2rem; margin: 1.5rem 0; }

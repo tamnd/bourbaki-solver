@@ -100,6 +100,13 @@ about a fifth of the words.
   -within DUR    stop the whole run after this long, whatever it is in the
                  middle of, and report what was written. Unset by default
   -queue PATH    the work list, default $BOURBAKI_WORK/queue
+  -engine NAME   model, the default, asks the fleet; google drafts with Google
+                 Translate instead. A Google draft is marked translation_quality:
+                 low, its pages carry a warning, and it never replaces a model's
+                 translation. A model run counts every Google draft stale and
+                 replaces it, so the drafts are filled in first and put right
+                 later. -force, -limit, -stale, -within, -book, -chapter and
+                 -file apply; the fleet flags do not
 
 There is one subcommand, bourbaki translate roundtrip, which takes a sample of
 the translations already written, has each one put back into English by a model
@@ -235,6 +242,7 @@ func runTranslate(args []string) error {
 	deadline := fs.Duration("deadline", chunkDeadline, "the longest one ask of one chunk may take")
 	within := fs.Duration("within", 0, "stop the whole run after this long and report what was written")
 	queueRoot := fs.String("queue", defaultQueueRoot(), "queue directory")
+	engine := fs.String("engine", "model", "model, the fleet, or google, a low quality draft from Google Translate")
 	if _, err := parseFlags(fs, args); err != nil {
 		return err
 	}
@@ -303,6 +311,13 @@ func runTranslate(args []string) error {
 	// this one will render three ways too unless the row is fixed first.
 	if *checkGlossary {
 		return checkGlossaryOnDisk(root, *lang, *book, *chapter, *file, *all)
+	}
+	switch *engine {
+	case "model":
+	case "google":
+		return runGoogle(root, g, *from, *lang, tree, *book, *chapter, *file, *limit, *force, *stale, *within)
+	default:
+		return fmt.Errorf("-engine is %q, and it is model or google", *engine)
 	}
 	promptHash, err := prompt.TranslateSHA256(*from, *lang)
 	if err != nil {
@@ -474,6 +489,10 @@ func writeTranslation(root, from, lang, tree, run, promptHash string, version in
 		out.SourceLang, out.TranslationMethod = provenance(from)
 		out.SourceSHA256 = corpus.ContentSHA256(j.body)
 		out.TranslationModel = model
+		out.TranslationQuality = ""
+		if model == corpus.GoogleModel {
+			out.TranslationMethod, out.TranslationQuality = "google", corpus.QualityLow
+		}
 		out.TranslationRun = run
 		out.GlossaryVersion = version
 		out.GlossaryTerms = j.terms
@@ -488,6 +507,10 @@ func writeTranslation(root, from, lang, tree, run, promptHash string, version in
 		out.SourceSHA256 = j.meta.ContentSHA256
 		out.ContentSHA256 = corpus.ContentSHA256(body)
 		out.TranslationModel = model
+		out.TranslationQuality = ""
+		if model == corpus.GoogleModel {
+			out.TranslationMethod, out.TranslationQuality = "google", corpus.QualityLow
+		}
 		out.TranslationRun = run
 		out.GlossaryVersion = version
 		out.GlossaryTerms = j.terms
@@ -729,6 +752,8 @@ func current(root, lang, source string, en corpus.SectionFrontMatter, version in
 	switch {
 	case err != nil:
 		return false, "there is no translation"
+	case f.Meta.TranslationQuality == corpus.QualityLow && f.Meta.PromptSHA256 != promptHash:
+		return false, "it is a Google Translate draft waiting for a proper translation"
 	case f.Meta.TranslatedFrom != source:
 		return false, "it was made from " + f.Meta.TranslatedFrom
 	case f.Meta.SourceSHA256 != en.ContentSHA256:
@@ -791,6 +816,8 @@ func currentExercise(root, lang, source string, en corpus.ExerciseFrontMatter, b
 	switch {
 	case err != nil:
 		return false, "there is no translation"
+	case f.Meta.TranslationQuality == corpus.QualityLow && f.Meta.PromptSHA256 != promptHash:
+		return false, "it is a Google Translate draft waiting for a proper translation"
 	case f.Meta.TranslatedFrom != source:
 		return false, "it was made from " + f.Meta.TranslatedFrom
 	case f.Meta.SourceSHA256 != corpus.ContentSHA256(body):

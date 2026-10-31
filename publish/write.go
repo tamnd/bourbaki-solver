@@ -426,6 +426,9 @@ func (s *Site) section(sec *Section) (string, error) {
 			body += fmt.Sprintf("<h2>%s</h2>\n", esc(T(sec.Lang, "contents"))) + s.toc(sec.Lang, c.Sections, sec)
 		}
 	}
+	if sec.Meta.TranslationQuality == corpus.QualityLow {
+		body = draftBanner(sec.Lang) + body
+	}
 	langs := s.langLinks(sec.Lang, func(lang string) string {
 		if other := s.sectionIn(lang, sec); other != nil {
 			return s.SectionURL(other)
@@ -477,6 +480,13 @@ func (s *Site) sectionIn(lang string, sec *Section) *Section {
 	return nil
 }
 
+// draftBanner is the warning at the top of a page whose text is a Google
+// Translate draft. The footer says it too, but a reader who stops at the
+// first wrong sentence never gets to the footer.
+func draftBanner(lang string) string {
+	return fmt.Sprintf("<p class=\"draft\" role=\"note\">%s</p>\n", esc(T(lang, "p.gt")))
+}
+
 // provenance is the line every page carries saying where its text comes from.
 func provenance(sec *Section) string {
 	lang := sec.Lang
@@ -487,6 +497,9 @@ func provenance(sec *Section) string {
 			return T(lang, "p.printed")
 		}
 		return fmt.Sprintf(T(lang, "p.edition"), sec.Meta.SourceEdition)
+	}
+	if sec.Meta.TranslationQuality == corpus.QualityLow {
+		return T(lang, "p.gt")
 	}
 	return T(lang, "p.mt") + T(lang, "p.unchecked")
 }

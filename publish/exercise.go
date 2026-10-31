@@ -279,6 +279,9 @@ func (s *Site) exercisePage(ex *Exercise, canonical string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if ex.Meta.TranslationQuality == corpus.QualityLow {
+		b.WriteString(draftBanner(ex.Lang))
+	}
 	b.WriteString(`<div class="statement-body">` + body + "</div>\n")
 	s.solution(&b, ex)
 
@@ -464,6 +467,9 @@ func statusNote(status string) string {
 func exerciseProvenance(ex *Exercise) string {
 	if ex.Meta.TranslatedFrom == "" {
 		return T(ex.Lang, "p.printed")
+	}
+	if ex.Meta.TranslationQuality == corpus.QualityLow {
+		return T(ex.Lang, "p.gt")
 	}
 	return T(ex.Lang, "p.mt") + T(ex.Lang, "p.unchecked")
 }

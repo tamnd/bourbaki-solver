@@ -921,6 +921,12 @@ func opensAWord(body string, i int) bool {
 		return true
 	}
 	r, _ := utf8.DecodeLastRuneInString(body[:i])
+	// Chinese and Japanese put no space between words, so a citation sits
+	// straight after a character, "从no. 6开始", and a Han or kana character
+	// never runs on into a Latin word the way "tập" does.
+	if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Hangul) {
+		return true
+	}
 	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 }
 

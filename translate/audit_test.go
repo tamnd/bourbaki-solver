@@ -791,6 +791,8 @@ func TestACitationHasToStartAWord(t *testing.T) {
 		{"a number sign on its own", "xem no. 4", 1},
 		{"a chapter after a Vietnamese word", "Chương IV, § 2", 2},
 		{"a digit in front of a page", "3p. 20", 0},
+		{"a number sign straight after Chinese", "立即从no. 6开始", 1},
+		{"a section straight after Japanese", "これはI, § 4による", 2},
 	} {
 		if got := len(refs(c.body)); got != c.want {
 			t.Errorf("%s: refs(%q) found %d, want %d: %v", c.name, c.body, got, c.want, refs(c.body))
