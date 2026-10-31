@@ -277,3 +277,9 @@ func TestAWideHeadingAndARomanLabelComeBack(t *testing.T) {
 		t.Errorf("a word was masked: %s", m.Text)
 	}
 }
+
+func TestACitationInEmphasisIsKept(t *testing.T) {
+	if m := Mask("by definition (VI, p. *17*) that", nil, true); strings.Contains(m.Text, "17") {
+		t.Errorf("the page number went to Google: %s", m.Text)
+	}
+}

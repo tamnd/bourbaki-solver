@@ -57,7 +57,10 @@ var markup = []*regexp.Regexp{
 
 // citation is a citation address, which stays as the English writes it in
 // every language.
-var citation = regexp.MustCompile(`\b[IVXLC]+,\s*§§?\s*\d+(?:\s*,?\s*[Nn]o\.\s*\d+)?|§§?\s*\d+(?:\s*,?\s*[Nn]o\.\s*\d+)?|\b[Nn]o\.\s*\d+|\bp\.\s*\d+|\bcf\.`)
+//
+// The number is matched in emphasis too, "VI, p. *17*", which the OCR left in
+// places: unmasked, Google moves the asterisks and gives back "p. 1".
+var citation = regexp.MustCompile(`\b[IVXLC]+,\s*§§?\s*\d+(?:\s*,?\s*[Nn]o\.\s*\d+)?|§§?\s*\d+(?:\s*,?\s*[Nn]o\.\s*\d+)?|\b[Nn]o\.\s*(?:\*\d+\*|\d+)|\bp\.\s*(?:\*\d+\*|\d+)|\bcf\.`)
 
 // Mask takes the mathematics, the markup and the pinned terms out of body.
 //
