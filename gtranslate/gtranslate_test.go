@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -267,7 +268,12 @@ func TestAWideHeadingAndARomanLabelComeBack(t *testing.T) {
 	if got := tidy("## Introduction\n", "＃＃ 介绍\n"); got != "## 介绍\n" {
 		t.Errorf("got %q", got)
 	}
-	if m := Mask("**I. Localization.** Let", nil, true); strings.Contains(m.Text, "I.") {
-		t.Errorf("the roman label went to Google: %s", m.Text)
+	for _, src := range []string{"**I. Localization.** Let", "Chapter I (*)", "Let I be a set.", "(Vol. II, p. 640)"} {
+		if m := Mask(src, nil, true); regexp.MustCompile(`\b[IV]+\b`).MatchString(m.Text) {
+			t.Errorf("a roman numeral went to Google: %s", m.Text)
+		}
+	}
+	if m := Mask("It is Clear. Vanishing.", nil, true); m.Text != "It is Clear. Vanishing." {
+		t.Errorf("a word was masked: %s", m.Text)
 	}
 }

@@ -46,9 +46,11 @@ var markup = []*regexp.Regexp{
 	regexp.MustCompile(`\{[#.][^}\n]*\}`),           // pandoc attributes
 	regexp.MustCompile(`(?m)^\s*(?:[-*_]\s*){3,}$`), // rules
 	citation,
-	// The roman numeral that labels a paragraph, "**I. Localization.**":
-	// Google reads a lone I as the pronoun and gives back "我。".
-	regexp.MustCompile(`(?m)(?:^|\*\*)[IVXLC]+\.`),
+	// A roman numeral standing as a word: "Chapter I", "Appendix I", the
+	// label of "**I. Localization.**", and the set the English writes without
+	// dollars in "let I be a set". Google reads a lone I as the pronoun and
+	// gives back 我.
+	regexp.MustCompile(`\b[IVXLC]+\b`),
 	// Labels written as plain text, alg-ii-s1-def-1 and the like.
 	regexp.MustCompile(`\b[a-z]{2,4}-[ivxlc0-9]+-[a-z0-9-]+\b`),
 }

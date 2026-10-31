@@ -17,7 +17,7 @@ import (
 // what is masked, what is pinned, what is corrected afterwards. It goes into
 // the prompt hash a draft records, so a change here restales the drafts it
 // would have written differently and nothing else.
-const Version = "gtranslate-5"
+const Version = "gtranslate-6"
 
 // PromptSHA256 is what a Google draft records as its prompt_sha256. A model
 // run has its own and so counts every draft stale, which is the point.
