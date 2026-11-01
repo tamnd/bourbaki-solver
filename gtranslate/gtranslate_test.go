@@ -283,3 +283,24 @@ func TestACitationInEmphasisIsKept(t *testing.T) {
 		t.Errorf("the page number went to Google: %s", m.Text)
 	}
 }
+
+func TestAFootnoteMarkerStaysAtTheFrontOfItsLine(t *testing.T) {
+	m := Mask("Text.\n[^1]: The meaning will be clear.\n[^2]: See no. 3.", nil, true)
+	if strings.Contains(m.Text, "\n⟦") {
+		t.Fatalf("a footnote marker went to Google: %q", m.Text)
+	}
+	lines := strings.Split(m.Text, "\n")
+	answer := "文字。\n含义将会清楚。\n见" + strings.TrimPrefix(lines[2], "See ")
+	got, err := m.Unmask(answer)
+	if err != nil || !strings.Contains(got, "\n[^1]: 含义将会清楚。\n[^2]: 见") {
+		t.Errorf("got %q %v", got, err)
+	}
+}
+
+func TestALinkIsTranslatedWhole(t *testing.T) {
+	d := Drafter{Client: fake(t), Glossary: &glossary.Glossary{}, Source: "en", Target: "zh"}
+	got, _, err := d.Draft(context.Background(), "See [exercises of $x$](exercises/s1/) here.")
+	if err != nil || got != "SEE [EXERCISES OF $x$](exercises/s1/) HERE." {
+		t.Errorf("got %q %v", got, err)
+	}
+}

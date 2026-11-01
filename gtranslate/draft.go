@@ -17,7 +17,7 @@ import (
 // what is masked, what is pinned, what is corrected afterwards. It goes into
 // the prompt hash a draft records, so a change here restales the drafts it
 // would have written differently and nothing else.
-const Version = "gtranslate-7"
+const Version = "gtranslate-8"
 
 // PromptSHA256 is what a Google draft records as its prompt_sha256. A model
 // run has its own and so counts every draft stale, which is the point.
@@ -130,9 +130,34 @@ func (d Drafter) sentences(ctx context.Context, block string, pins []Pin) (strin
 	return b.String(), left, nil
 }
 
+// linkRE is a Markdown link, its text and its target.
+var linkRE = regexp.MustCompile(`(!?)\[([^\]\n]+)\]\(([^)\s]*)\)`)
+
 func (d Drafter) once(ctx context.Context, body string, pins []Pin) (string, error) {
 	if strings.TrimSpace(body) == "" {
 		return body, nil
+	}
+	// A link's text is translated on its own and the link then kept whole.
+	// Google reads the bracket that opens it as prose and moves it, and
+	// "[Exercises § 1](exercises/s1/)" came back as "§ 1](exercises/s1/)参见[习题".
+	var lerr error
+	body = linkRE.ReplaceAllStringFunc(body, func(l string) string {
+		sub := linkRE.FindStringSubmatch(l)
+		if lerr != nil || strings.HasPrefix(sub[2], "^") {
+			return l
+		}
+		text, err := d.once(ctx, sub[2], pins)
+		if errors.Is(err, ErrLost) {
+			return l
+		}
+		if err != nil {
+			lerr = err
+			return l
+		}
+		return sub[1] + "[" + strings.TrimSpace(text) + "](" + sub[3] + ")"
+	})
+	if lerr != nil {
+		return "", lerr
 	}
 	m := Mask(body, pins, d.Source == "en" && articleless[d.Target])
 	// Nothing left to translate: a display formula on its own, a label.

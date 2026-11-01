@@ -24,6 +24,9 @@ type Masked struct {
 	keep  []string
 	pins  map[int]bool // tokens that stand for a word of prose and not for markup
 	cites map[int]bool // tokens that stand for a citation address
+	// lead is the token taken off the front of a line, by line: a footnote's
+	// "[^1]:", which Google moves into the middle of its sentence.
+	lead  map[int]string
 	upper map[int]bool // pin tokens whose word opened a sentence
 }
 
@@ -41,6 +44,7 @@ var markup = []*regexp.Regexp{
 	regexp.MustCompile("`[^`\n]+`"),                 // inline code
 	regexp.MustCompile(`<!--(?s:.*?)-->`),           // comments
 	regexp.MustCompile(`</?[A-Za-z][^>\n]*>`),       // html tags
+	regexp.MustCompile(`!?\[[^\]\n]*\]\([^)\s]*\)`), // whole links, whose text the Drafter has translated already
 	regexp.MustCompile(`\[\^[^\]\s]+\]:?`),          // footnote markers and definitions
 	regexp.MustCompile(`\]\([^)\s]*\)`),             // link targets, with the bracket that closes the text
 	regexp.MustCompile(`\{[#.][^}\n]*\}`),           // pandoc attributes
@@ -117,8 +121,50 @@ func Mask(body string, pins []Pin, articles bool) Masked {
 		body = emphasisArticle.ReplaceAllString(body, "$1")
 	}
 	body = m.pin(body, pins, articles, put)
-	m.Text = body
+	m.Text = m.unlead(body)
 	return m
+}
+
+var leadRE = regexp.MustCompile(`^⟦(\d+)⟧[ \t]*`)
+
+// unlead takes a footnote definition's marker off the front of each line it
+// opens, for Unmask to put back on the same line.
+func (m *Masked) unlead(body string) string {
+	lines := strings.Split(body, "\n")
+	for i, l := range lines {
+		sub := leadRE.FindStringSubmatch(l)
+		if sub == nil {
+			continue
+		}
+		var n int
+		fmt.Sscanf(sub[1], "%d", &n)
+		if !strings.HasPrefix(m.keep[n], "[^") || !strings.HasSuffix(m.keep[n], "]:") {
+			continue
+		}
+		if m.lead == nil {
+			m.lead = map[int]string{}
+		}
+		m.lead[i] = Token(n) + " "
+		lines[i] = l[len(sub[0]):]
+	}
+	return strings.Join(lines, "\n")
+}
+
+// relead puts back what unlead took off, and fails when Google did not give
+// back as many lines as it was sent, since then there is no saying which line
+// a marker belongs to.
+func (m Masked) relead(answer string) (string, error) {
+	if len(m.lead) == 0 {
+		return answer, nil
+	}
+	lines := strings.Split(answer, "\n")
+	if want := strings.Count(m.Text, "\n") + 1; len(lines) != want {
+		return "", fmt.Errorf("the answer has %d lines and the footnotes were sent on %d", len(lines), want)
+	}
+	for i, t := range m.lead {
+		lines[i] = t + strings.TrimLeft(lines[i], " \t")
+	}
+	return strings.Join(lines, "\n"), nil
 }
 
 var emphasisArticle = regexp.MustCompile(`((?:^|[\s(])(?:\*{1,2}|_))(?:[Aa]n?|[Tt]he)\s+`)
@@ -222,9 +268,13 @@ func sentenceStart(before string) bool {
 // doubled a token, because a lost token is a lost formula and there is no
 // putting that back from the answer alone.
 func (m Masked) Unmask(answer string) (string, error) {
+	answer, err := m.relead(answer)
+	if err != nil {
+		return "", err
+	}
 	seen := make([]int, len(m.keep))
 	var bad error
-	out := tokenRE.ReplaceAllStringFunc(answer, func(t string) string {
+	expand := func(t string) string {
 		sub := tokenRE.FindStringSubmatch(t)
 		var n int
 		fmt.Sscanf(sub[1], "%d", &n)
@@ -248,7 +298,13 @@ func (m Masked) Unmask(answer string) (string, error) {
 			return "\x02" + s
 		}
 		return s
-	})
+	}
+	out := tokenRE.ReplaceAllStringFunc(answer, expand)
+	// A link was masked whole after the formulas in its text, so its token
+	// holds theirs.
+	for i := 0; i < 2 && tokenRE.MatchString(out); i++ {
+		out = tokenRE.ReplaceAllStringFunc(out, expand)
+	}
 	if bad != nil {
 		return "", bad
 	}
