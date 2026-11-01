@@ -202,8 +202,9 @@ func (m *Masked) pin(body string, pins []Pin, articles bool, put func(string) st
 			continue
 		}
 		word := body[loc[2]:loc[3]]
-		rendering := to[strings.ToLower(strings.Join(strings.Fields(word), " "))]
-		if rendering == "" {
+		key := strings.ToLower(strings.Join(strings.Fields(word), " "))
+		rendering := to[key]
+		if rendering == "" || notANoun(body[:start], body[end:], key) {
 			continue
 		}
 		before := body[at:start]
@@ -227,6 +228,38 @@ func (m *Masked) pin(body string, pins []Pin, articles bool, put func(string) st
 	}
 	b.WriteString(body[at:])
 	return b.String()
+}
+
+var (
+	lastWord  = regexp.MustCompile(`([A-Za-z]+)[ \t]+$`)
+	firstWord = regexp.MustCompile(`^[ \t]+([A-Za-z]+)`)
+)
+
+// verbal are the words in front of which a noun of the glossary is a verb:
+// "we note", "let us remark", "first note".
+var verbal = map[string]bool{
+	"we": true, "us": true, "to": true, "first": true, "also": true, "will": true, "shall": true,
+	"can": true, "may": true, "must": true, "should": true, "now": true, "then": true, "finally": true,
+}
+
+// notANoun says the term at hand is not the noun the glossary renders: "for
+// example" is an adverb and "note that" a verb, and pinned as the noun they
+// came back as 假设例 and 首先注.
+func notANoun(before, after, key string) bool {
+	prev, next := "", ""
+	if m := lastWord.FindStringSubmatch(before); m != nil {
+		prev = strings.ToLower(m[1])
+	}
+	if m := firstWord.FindStringSubmatch(after); m != nil {
+		next = strings.ToLower(m[1])
+	}
+	switch key {
+	case "example", "instance":
+		return prev == "for"
+	case "note", "remark", "notice", "observe", "show", "prove":
+		return next == "that" || verbal[prev]
+	}
+	return false
 }
 
 // edge says the match is a whole word: no letter on either side of it.

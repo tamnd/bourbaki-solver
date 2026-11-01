@@ -331,3 +331,15 @@ func TestAHeadingNumberIsKept(t *testing.T) {
 		t.Errorf("got %q %v", got, err)
 	}
 }
+
+func TestAnIdiomIsNotPinnedAsTheNoun(t *testing.T) {
+	pins := []Pin{{"example", "例"}, {"note", "注"}}
+	for _, src := range []string{"suppose for example that", "first note that", "we note the", "Note that"} {
+		if m := Mask(src, pins, true); strings.Contains(m.Text, "⟦") {
+			t.Errorf("pinned in %q: %s", src, m.Text)
+		}
+	}
+	if m := Mask("see the example and the note.", pins, true); strings.Count(m.Text, "⟦") != 2 {
+		t.Errorf("the nouns were not pinned: %s", m.Text)
+	}
+}
