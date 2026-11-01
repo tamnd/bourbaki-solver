@@ -25,7 +25,8 @@ type Masked struct {
 	pins  map[int]bool // tokens that stand for a word of prose and not for markup
 	cites map[int]bool // tokens that stand for a citation address
 	// lead is the token taken off the front of a line, by line: a footnote's
-	// "[^1]:", which Google moves into the middle of its sentence.
+	// "[^1]:" or a heading's "### 1.", which Google moves into the middle of
+	// its sentence.
 	lead  map[int]string
 	upper map[int]bool // pin tokens whose word opened a sentence
 }
@@ -130,8 +131,8 @@ func Mask(body string, pins []Pin, articles bool) Masked {
 
 var leadRE = regexp.MustCompile(`^⟦(\d+)⟧[ \t]*`)
 
-// unlead takes a footnote definition's marker off the front of each line it
-// opens, for Unmask to put back on the same line.
+// unlead takes a footnote definition's marker or a heading's number off the
+// front of each line it opens, for Unmask to put back on the same line.
 func (m *Masked) unlead(body string) string {
 	lines := strings.Split(body, "\n")
 	for i, l := range lines {
@@ -141,7 +142,8 @@ func (m *Masked) unlead(body string) string {
 		}
 		var n int
 		fmt.Sscanf(sub[1], "%d", &n)
-		if !strings.HasPrefix(m.keep[n], "[^") || !strings.HasSuffix(m.keep[n], "]:") {
+		footnote := strings.HasPrefix(m.keep[n], "[^") && strings.HasSuffix(m.keep[n], "]:")
+		if !footnote && !strings.HasPrefix(m.keep[n], "#") {
 			continue
 		}
 		if m.lead == nil {

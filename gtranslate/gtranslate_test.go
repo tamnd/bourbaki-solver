@@ -320,7 +320,14 @@ func TestASentenceIsNotCutAfterAnAbbreviation(t *testing.T) {
 }
 
 func TestAHeadingNumberIsKept(t *testing.T) {
-	if m := Mask("### 1. THE CARDINAL OF A SET\n", nil, true); strings.Contains(m.Text, "1.") || !strings.Contains(m.Text, "CARDINAL") {
-		t.Errorf("got %q", m.Text)
+	m := Mask("## 6. FILTERS\n\n### 1. DEFINITION OF A FILTER\n", nil, true)
+	if strings.Contains(m.Text, "1.") || strings.Contains(m.Text, "⟦") || !strings.Contains(m.Text, "FILTER") {
+		t.Fatalf("got %q", m.Text)
+	}
+	// Google put the number in the middle of the line, "过滤器的 ### 1. 定义",
+	// which it now never sees.
+	got, err := m.Unmask("过滤器\n\n过滤器的定义\n")
+	if err != nil || got != "## 6. 过滤器\n\n### 1. 过滤器的定义\n" {
+		t.Errorf("got %q %v", got, err)
 	}
 }
