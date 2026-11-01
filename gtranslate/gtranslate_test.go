@@ -304,3 +304,23 @@ func TestALinkIsTranslatedWhole(t *testing.T) {
 		t.Errorf("got %q %v", got, err)
 	}
 }
+
+// The sentence fallback does not cut after an abbreviation.
+func TestASentenceIsNotCutAfterAnAbbreviation(t *testing.T) {
+	c := fake(t)
+	c.HTTP = &http.Client{Transport: doubler{c.HTTP.Transport, "⟦"}}
+	d := Drafter{Client: c, Glossary: &glossary.Glossary{}, Source: "en", Target: "zh"}
+	got, left, err := d.Draft(context.Background(), "By definition (VI, p. *17*) it is. Then the end.")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if left != 1 || !strings.HasPrefix(got, "By definition (VI, p. *17*) it is. THEN THE END.") {
+		t.Errorf("got %q, %d left", got, left)
+	}
+}
+
+func TestAHeadingNumberIsKept(t *testing.T) {
+	if m := Mask("### 1. THE CARDINAL OF A SET\n", nil, true); strings.Contains(m.Text, "1.") || !strings.Contains(m.Text, "CARDINAL") {
+		t.Errorf("got %q", m.Text)
+	}
+}

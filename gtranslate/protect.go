@@ -50,6 +50,9 @@ var markup = []*regexp.Regexp{
 	regexp.MustCompile(`\{[#.][^}\n]*\}`),           // pandoc attributes
 	regexp.MustCompile(`(?m)^\s*(?:[-*_]\s*){3,}$`), // rules
 	citation,
+	// The number of a numbered heading, "### 1. THE CARDINAL OF A SET", which
+	// Google drops.
+	regexp.MustCompile(`(?m)^#{1,6}[ \t]+\d+(?:\.\d+)*\.?`),
 	// A roman numeral standing as a word: "Chapter I", "Appendix I", the
 	// label of "**I. Localization.**", and the set the English writes without
 	// dollars in "let I be a set". Google reads a lone I as the pronoun and

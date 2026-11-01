@@ -17,7 +17,7 @@ import (
 // what is masked, what is pinned, what is corrected afterwards. It goes into
 // the prompt hash a draft records, so a change here restales the drafts it
 // would have written differently and nothing else.
-const Version = "gtranslate-8"
+const Version = "gtranslate-10"
 
 // PromptSHA256 is what a Google draft records as its prompt_sha256. A model
 // run has its own and so counts every draft stale, which is the point.
@@ -96,6 +96,16 @@ func (d Drafter) Draft(ctx context.Context, body string) (string, int, error) {
 // neither, so they are not cut.
 var sentenceEnd = regexp.MustCompile("([.;?!])[ \t]+([A-Z*\\[])")
 
+var abbrevBefore = regexp.MustCompile(`[A-Za-z]+\.$`)
+
+// abbreviations are the words the corpus abbreviates with a stop, which never
+// end a sentence.
+var abbreviations = map[string]bool{
+	"p": true, "pp": true, "no": true, "nos": true, "prop": true, "cor": true, "th": true,
+	"def": true, "lem": true, "rem": true, "ex": true, "cf": true, "vol": true, "chap": true,
+	"resp": true, "e.g": true, "i.e": true, "etc": true, "loc": true, "cit": true, "op": true, "ibid": true,
+}
+
 // sentences drafts a block one sentence at a time, and leaves a sentence Google
 // cannot give back whole in the source language.
 func (d Drafter) sentences(ctx context.Context, block string, pins []Pin) (string, int, error) {
@@ -105,6 +115,12 @@ func (d Drafter) sentences(ctx context.Context, block string, pins []Pin) (strin
 		// A stop inside a formula, "\text{resp. A}", is not the end of a
 		// sentence, and a cut there would send half a formula to Google.
 		if strings.Count(block[:loc[2]], "$")%2 == 1 {
+			continue
+		}
+		// Nor is the stop of an abbreviation: "VI, p. *17*" cut after the p.
+		// sends the page number to Google without its p., and it came back as
+		// "p. 1".
+		if w := abbrevBefore.FindString(block[:loc[3]]); w != "" && abbreviations[strings.ToLower(strings.TrimSuffix(w, "."))] {
 			continue
 		}
 		pieces = append(pieces, block[at:loc[3]])
