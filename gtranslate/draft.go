@@ -17,7 +17,7 @@ import (
 // what is masked, what is pinned, what is corrected afterwards. It goes into
 // the prompt hash a draft records, so a change here restales the drafts it
 // would have written differently and nothing else.
-const Version = "gtranslate-12"
+const Version = "gtranslate-13"
 
 // PromptSHA256 is what a Google draft records as its prompt_sha256. A model
 // run has its own and so counts every draft stale, which is the point.
@@ -62,6 +62,7 @@ var ErrLost = errors.New("google lost a protected piece")
 // sentence is a worse page than a translated one, and a page with a formula
 // missing is worse than both; the caller decides how many it will take.
 func (d Drafter) Draft(ctx context.Context, body string) (string, int, error) {
+	body = quietHeadings(body)
 	pins, loose := Terms(d.Glossary, d.Source, d.Target, body)
 	learned, err := d.Client.Learn(ctx, code(d.Source), code(d.Target), loose)
 	if err != nil {
@@ -89,6 +90,47 @@ func (d Drafter) Draft(ctx context.Context, body string) (string, int, error) {
 		return "", 0, err
 	}
 	return Fix(tidy(body, out), loose, learned), left, nil
+}
+
+var (
+	headingLine = regexp.MustCompile(`(?m)^(#{1,6}[ \t]+)([^\n]+)$`)
+	capsWord    = regexp.MustCompile(`[A-Za-z]+`)
+	romanWord   = regexp.MustCompile(`^[IVXLC]+$`)
+)
+
+// quietHeadings writes a heading the printing set in capitals in lower case
+// with a capital first letter. Japanese Google leaves a word in capitals as it
+// is, a name it does not know, and "### 1. DIAGRAMS" came back in English. A
+// roman numeral keeps its capitals, and so does a heading with a formula in
+// it, whose letters are not words.
+func quietHeadings(body string) string {
+	return headingLine.ReplaceAllStringFunc(body, func(line string) string {
+		sub := headingLine.FindStringSubmatch(line)
+		text := sub[2]
+		if strings.Contains(text, "$") || text != strings.ToUpper(text) || !capsWord.MatchString(text) {
+			return line
+		}
+		var b strings.Builder
+		at, first := 0, true
+		for _, loc := range capsWord.FindAllStringIndex(text, -1) {
+			gap, w := text[at:loc[0]], text[loc[0]:loc[1]]
+			first = first || strings.Contains(gap, ".")
+			b.WriteString(gap)
+			switch {
+			case romanWord.MatchString(w) && (len(w) > 1 || !first):
+			case len(w) == 1 && w != "A":
+			case first:
+				w = w[:1] + strings.ToLower(w[1:])
+			default:
+				w = strings.ToLower(w)
+			}
+			b.WriteString(w)
+			at, first = loc[1], false
+		}
+		b.WriteString(text[at:])
+		text = b.String()
+		return sub[1] + text
+	})
 }
 
 // sentenceEnd is the space after the stop that ends a sentence and the capital,

@@ -343,3 +343,19 @@ func TestAnIdiomIsNotPinnedAsTheNoun(t *testing.T) {
 		t.Errorf("the nouns were not pinned: %s", m.Text)
 	}
 }
+
+func TestAHeadingInCapitalsIsWrittenInLowerCase(t *testing.T) {
+	for in, want := range map[string]string{
+		"### 1. DIAGRAMS\n":                         "### 1. Diagrams\n",
+		"## 4. FLAT MODULES AND THE “TOR” FUNCTORS": "## 4. Flat modules and the “tor” functors",
+		"## APPENDIX II. MODULES OVER A RING":       "## Appendix II. Modules over a ring",
+		"### 2. THE GROUP $GL(n, K)$":               "### 2. THE GROUP $GL(n, K)$",
+		"### 3. Exact sequences":                    "### 3. Exact sequences",
+		"DIAGRAMS are not a heading":                "DIAGRAMS are not a heading",
+		"## 1. FILTERS ON A SET E":                  "## 1. Filters on a set E",
+	} {
+		if got := quietHeadings(in); got != want {
+			t.Errorf("%q: got %q", in, got)
+		}
+	}
+}
