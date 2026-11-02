@@ -359,3 +359,27 @@ func TestAHeadingInCapitalsIsWrittenInLowerCase(t *testing.T) {
 		}
 	}
 }
+
+func TestAHeadingThatIsOneTermIsStillRendered(t *testing.T) {
+	m := Mask("### 1. Diagrams\n", []Pin{{From: "diagram", To: "図式"}}, true)
+	if strings.TrimSpace(tokenRE.ReplaceAllString(m.Text, "")) != "" {
+		t.Fatalf("masked %q", m.Text)
+	}
+	got, err := m.Unmask(m.Text)
+	if err != nil || got != "### 1. 図式\n" {
+		t.Errorf("got %q %v", got, err)
+	}
+}
+
+func TestACorollaryIsANoun(t *testing.T) {
+	for _, w := range []string{"corollary", "theory", "coefficient", "quotient"} {
+		if !nounPhrase(w) {
+			t.Errorf("%s is not taken for a noun", w)
+		}
+	}
+	for _, w := range []string{"arbitrary", "commutative", "primary"} {
+		if nounPhrase(w) {
+			t.Errorf("%s is taken for a noun", w)
+		}
+	}
+}

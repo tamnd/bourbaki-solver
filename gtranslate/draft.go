@@ -17,7 +17,7 @@ import (
 // what is masked, what is pinned, what is corrected afterwards. It goes into
 // the prompt hash a draft records, so a change here restales the drafts it
 // would have written differently and nothing else.
-const Version = "gtranslate-13"
+const Version = "gtranslate-14"
 
 // PromptSHA256 is what a Google draft records as its prompt_sha256. A model
 // run has its own and so counts every draft stale, which is the point.
@@ -218,9 +218,15 @@ func (d Drafter) once(ctx context.Context, body string, pins []Pin) (string, err
 		return "", lerr
 	}
 	m := Mask(body, pins, d.Source == "en" && articleless[d.Target])
-	// Nothing left to translate: a display formula on its own, a label.
+	// Nothing left to translate: a display formula on its own, a label, or a
+	// heading that is one term of the glossary, which still has to be put in
+	// the target. Returning the body left "### 1. Diagrams" in English.
 	if strings.TrimSpace(tokenRE.ReplaceAllString(m.Text, "")) == "" {
-		return body, nil
+		back, err := m.Unmask(m.Text)
+		if err != nil {
+			return "", fmt.Errorf("%w: %v", ErrLost, err)
+		}
+		return back, nil
 	}
 	got, err := d.Client.Translate(ctx, code(d.Source), code(d.Target), m.Text)
 	if err != nil {

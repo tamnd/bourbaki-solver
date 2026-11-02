@@ -86,6 +86,16 @@ var openers = map[string]bool{
 
 var nounEndings = []string{"ment", "ness", "ity", "ism", "ion", "ure", "ance", "ence", "ing"}
 
+// nouns are the nouns of the glossary the adjective endings would take for
+// adjectives: "corollary" was left to Google, and Japanese Google writes a
+// corollary as 結果, a result.
+var nouns = map[string]bool{
+	"corollary": true, "coboundary": true, "theory": true, "coefficient": true,
+	"component": true, "determinant": true, "exponent": true, "interval": true,
+	"quotient": true, "commutant": true, "bicommutant": true, "radical": true,
+	"cardinal": true,
+}
+
 var adjectiveEndings = []string{
 	"ive", "ous", "al", "ic", "able", "ible", "ed", "ent", "ant", "ful",
 	"less", "ary", "ory", "ar", "ile", "ish", "ly", "wise",
@@ -104,6 +114,9 @@ func nounPhrase(en string) bool {
 	head := words[len(words)-1]
 	if prepositions[head] || adjectives[head] {
 		return false
+	}
+	if nouns[head] {
+		return true
 	}
 	for _, e := range nounEndings {
 		if strings.HasSuffix(head, e) {
