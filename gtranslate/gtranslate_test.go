@@ -383,3 +383,18 @@ func TestACorollaryIsANoun(t *testing.T) {
 		}
 	}
 }
+
+func TestATokenWithoutItsOpeningBracketIsTakenBack(t *testing.T) {
+	m := Mask("the zeros of $a$ and $b$.", nil, true)
+	if got, err := m.Unmask("⟦0⟧ の 1 ⟧ のゼロ。"); err != nil || got != "$a$ の $b$ のゼロ。" {
+		t.Errorf("spaced: got %q %v", got, err)
+	}
+	got, err := m.Unmask("⟦0⟧ の 1⟧ のゼロ。")
+	if err != nil || got != "$a$ の $b$ のゼロ。" {
+		t.Errorf("got %q %v", got, err)
+	}
+	// A token the answer holds whole is not put back a second time.
+	if _, err := m.Unmask("⟦0⟧ と ⟦1⟧ と 1⟧。"); err == nil {
+		t.Errorf("a doubled token was let through")
+	}
+}

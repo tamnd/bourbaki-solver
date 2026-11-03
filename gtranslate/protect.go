@@ -155,6 +155,33 @@ func (m *Masked) unlead(body string) string {
 	return strings.Join(lines, "\n")
 }
 
+// halfToken is a token Google gave back without its opening bracket.
+var halfToken = regexp.MustCompile(`(^|[^⟦\d\s]|\s)(\d+)[ \t]*⟧`)
+
+// rebracket puts back the opening bracket Japanese Google drops from a token
+// that follows a particle, "⟦3⟧ の 2⟧" for "⟦2⟧ of ⟦3⟧". Only a token the
+// answer does not already hold whole is put back, so a number that happens to
+// stand in front of a closing bracket is not taken for one.
+func (m Masked) rebracket(answer string) string {
+	if !strings.Contains(answer, "⟧") {
+		return answer
+	}
+	whole := map[string]bool{}
+	for _, t := range tokenRE.FindAllStringSubmatch(answer, -1) {
+		whole[t[1]] = true
+	}
+	return halfToken.ReplaceAllStringFunc(answer, func(h string) string {
+		sub := halfToken.FindStringSubmatch(h)
+		var n int
+		fmt.Sscanf(sub[2], "%d", &n)
+		if whole[sub[2]] || n >= len(m.keep) {
+			return h
+		}
+		whole[sub[2]] = true
+		return sub[1] + "⟦" + sub[2] + "⟧"
+	})
+}
+
 // relead puts back what unlead took off, and fails when Google did not give
 // back as many lines as it was sent, since then there is no saying which line
 // a marker belongs to.
@@ -306,6 +333,7 @@ func sentenceStart(before string) bool {
 // doubled a token, because a lost token is a lost formula and there is no
 // putting that back from the answer alone.
 func (m Masked) Unmask(answer string) (string, error) {
+	answer = m.rebracket(answer)
 	answer, err := m.relead(answer)
 	if err != nil {
 		return "", err
@@ -362,6 +390,11 @@ func (m Masked) Unmask(answer string) (string, error) {
 	}
 	if len(doubled) > 0 {
 		return "", fmt.Errorf("google repeated %d protected pieces: %s", len(doubled), strings.Join(doubled, ", "))
+	}
+	// What is left of a token Google broke, "1⟧" beside a whole ⟦1⟧, is a
+	// piece said twice too.
+	if strings.Count(out, "⟧") > strings.Count(strings.Join(m.keep, ""), "⟧") {
+		return "", fmt.Errorf("google left a broken token in the answer")
 	}
 	return respaceWords(out), nil
 }

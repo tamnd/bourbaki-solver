@@ -17,7 +17,7 @@ import (
 // what is masked, what is pinned, what is corrected afterwards. It goes into
 // the prompt hash a draft records, so a change here restales the drafts it
 // would have written differently and nothing else.
-const Version = "gtranslate-14"
+const Version = "gtranslate-15"
 
 // PromptSHA256 is what a Google draft records as its prompt_sha256. A model
 // run has its own and so counts every draft stale, which is the point.
@@ -173,6 +173,15 @@ func (d Drafter) sentences(ctx context.Context, block string, pins []Pin) (strin
 	left := 0
 	for i, s := range pieces {
 		got, err := d.once(ctx, s, pins)
+		// A long sentence of prose is where Google rephrases and drops a
+		// pinned term, and "in order to" or "point out" pinned as nouns are
+		// asking for it. The sentence is asked again with no term pinned: a
+		// term Google then renders its own way is a soft finding the audit
+		// leaves for the model run, and a sentence in the target with a loose
+		// term is a better draft than a sentence in English.
+		if errors.Is(err, ErrLost) && len(pins) > 0 {
+			got, err = d.once(ctx, s, nil)
+		}
 		if errors.Is(err, ErrLost) {
 			got, err = s, nil
 			left++
