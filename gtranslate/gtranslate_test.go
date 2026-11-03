@@ -398,3 +398,10 @@ func TestATokenWithoutItsOpeningBracketIsTakenBack(t *testing.T) {
 		t.Errorf("a doubled token was let through")
 	}
 }
+
+func TestABareOpeningBracketIsNotLetThrough(t *testing.T) {
+	m := Mask("the ring and the ring.", []Pin{{From: "ring", To: "環"}}, true)
+	if _, err := m.Unmask("⟦0⟧ と ⟦1⟧ と ⟦0⟧ の ⟦。"); err == nil {
+		t.Errorf("a bare bracket was let through")
+	}
+}

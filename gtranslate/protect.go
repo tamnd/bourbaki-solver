@@ -391,9 +391,11 @@ func (m Masked) Unmask(answer string) (string, error) {
 	if len(doubled) > 0 {
 		return "", fmt.Errorf("google repeated %d protected pieces: %s", len(doubled), strings.Join(doubled, ", "))
 	}
-	// What is left of a token Google broke, "1⟧" beside a whole ⟦1⟧, is a
-	// piece said twice too.
-	if strings.Count(out, "⟧") > strings.Count(strings.Join(m.keep, ""), "⟧") {
+	// What is left of a token Google broke, "1⟧" beside a whole ⟦1⟧ or a
+	// bare "⟦" where a pinned term said twice lost its number, is a piece
+	// said twice too.
+	kept := strings.Join(m.keep, "")
+	if strings.Count(out, "⟧") > strings.Count(kept, "⟧") || strings.Count(out, "⟦") > strings.Count(kept, "⟦") {
 		return "", fmt.Errorf("google left a broken token in the answer")
 	}
 	return respaceWords(out), nil
